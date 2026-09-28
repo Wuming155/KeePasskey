@@ -90,7 +90,8 @@ class EntryDetailViewModel @Inject constructor(
         extendedSettingsSource?.load() ?: ExtendedSettings()
     )
     private val isFavoriteFlow = MutableStateFlow(false)
-    private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
+    // ISSUE-P3-359 AC④：放宽 internal 供同包 publishDetailMessage 双写（见该文件 KDoc）
+    internal val userMessageFlow = MutableStateFlow<UiMessage?>(null)
 
     // 断点6 整改：详情页 TOTP 每秒倒计时（原为投影一次性值，进度环静止）
     private val totpRemainingSecondsFlow = MutableStateFlow(0)
@@ -136,7 +137,9 @@ class EntryDetailViewModel @Inject constructor(
         passwordCopyMessage = { uiState.value.passwordCopyMessage },
         liveTotpCode = { uiState.value.liveTotpCode },
         projectedTotpCode = { uiState.value.entry?.totpCode },
-        showMessage = { userMessageFlow.value = it }
+        showMessage = { publishDetailMessage(it) },
+        // ISSUE-P3-360 AC③a：复制时刻读节拍通道的实时剩余秒数（≤5s 发临期文案）
+        totpRemainingSeconds = { totpRemainingSecondsFlow.value }
     )
 
     /** ISSUE-P3-188：条目动作簇（克隆 / 删除 / 移动 / 图标 / 自动填充屏蔽）下沉至协作者。 */
@@ -151,7 +154,9 @@ class EntryDetailViewModel @Inject constructor(
         boundCustomIconId = { uiState.value.entry?.customIconId },
         onEntrySwitched = { setEntryId(it) },
         onEntryDeleted = { entryDeletedFlow.value = true },
-        showMessage = { userMessageFlow.value = it }
+        showMessage = { publishDetailMessage(it) },
+        // ISSUE-P3-357 + P3-359：软删除撤销消息带 onUndo（外壳宿主作用域执行，VM 随回退销毁也不失效）
+        showUndoable = { message, undo -> publishDetailMessage(message, onUndo = undo) }
     )
 
     private val revisionController = EntryDetailRevisionController(
@@ -162,7 +167,7 @@ class EntryDetailViewModel @Inject constructor(
         scope = viewModelScope,
         currentEntry = { uiState.value.entry },
         currentEntryId = { entryIdFlow.value },
-        showMessage = { userMessageFlow.value = it }
+        showMessage = { publishDetailMessage(it) }
     )
 
     /** 当前条目快照（供节拍读取；读 `uiState.value` 不会额外启动其上游）。 */
@@ -297,8 +302,9 @@ class EntryDetailViewModel @Inject constructor(
     }
 
     /**
-     * 复制受保护自定义字段（F2 整改，委托 [EntryDetailCopyCoordinator]）：
-     * 按需解密后写入受保护剪贴板，不再依赖条目投影中的明文（投影层受保护字段恒为空）。
+     * 复制自定义字段（受保护 + 非保护同通道，委托 [EntryDetailCopyCoordinator]）：
+     * 按需读取 CharArray 独占副本后写入受保护剪贴板，不依赖条目投影中的明文
+     * （投影层受保护字段恒为空）；ISSUE-P2-353 AC②：非保护字段此前只弹消息未写剪贴板，现同走本通道。
      */
     fun copyCustomField(fieldId: String, fieldKey: String) {
         copyCoordinator.copyCustomField(fieldId, fieldKey)
@@ -336,28 +342,22 @@ class EntryDetailViewModel @Inject constructor(
         )
         if (!allowed) {
             // fail-closed：确认缺失即不导出
-            userMessageFlow.value = UiMessage(R.string.detail_attachment_export_warn_title)
+            publishDetailMessage(UiMessage(R.string.detail_attachment_export_warn_title))
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            userMessageFlow.value = attachmentExporter.export(entryId, attachment, targetUri)
+            publishDetailMessage(attachmentExporter.export(entryId, attachment, targetUri))
         }
     }
 
     /**
      * ISSUE-P3-48：删除当前条目（单条入口，委托 [EntryDetailEntryActions]）。
-     * 成功置一次性 [entryDeleted] 供 Screen 回退导航，失败如实上浮。
+     * 成功置一次性 [entryDeleted] 供 Screen 回退导航（软删撤销消息见该类同批接线），失败如实上浮。
      */
-    fun deleteEntry() {
-        entryActions.deleteEntry()
-    }
+    fun deleteEntry() = entryActions.deleteEntry()
 
-    /**
-     * ISSUE-P3-51：把当前条目移动到目标分组（null = 根目录，委托 [EntryDetailEntryActions]）。
-     */
-    fun moveEntryToGroup(targetGroupId: String?) {
-        entryActions.moveEntryToGroup(targetGroupId)
-    }
+    /** ISSUE-P3-51：把当前条目移动到目标分组（null = 根目录，委托 [EntryDetailEntryActions]）。 */
+    fun moveEntryToGroup(targetGroupId: String?) = entryActions.moveEntryToGroup(targetGroupId)
 
     /**
      * ISSUE-P3-49：HOTP 取码（委托 [EntryDetailCopyCoordinator]）——推进计数器（**先落库成功**）
@@ -367,9 +367,7 @@ class EntryDetailViewModel @Inject constructor(
         copyCoordinator.advanceHotp()
     }
 
-    fun showMessage(message: UiMessage) {
-        userMessageFlow.value = message
-    }
+    fun showMessage(message: UiMessage) = publishDetailMessage(message)
 
     /**
      * 复制密码（委托 [EntryDetailCopyCoordinator]）：按需解密后写入受保护剪贴板

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.SecurePasswordField
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.HeroTitleStyle
@@ -127,6 +128,17 @@ internal fun UnlockQuickUnlockCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // ISSUE-P2-355 AC①：快速解锁卡错误槽位——失败文案不再因卡片无渲染点而静默
+            // （回落 STANDARD 由各失败路径负责；本槽位兜住「错误已置、模式仍为 QUICK」的一切窗口）
+            uiState.errorMessage?.let { message ->
+                Text(
+                    text = message.resolveText(),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             // ISSUE-P1-08 统一快速解锁：仅 Class 3 强生物识别经硬件密钥解封（锁屏凭据不再可解封）——
             // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
             Button(
@@ -190,12 +202,36 @@ internal fun UnlockStandardUnlockContent(
         onPasswordChanged = onPasswordChange,
         isError = uiState.errorMessage != null,
         supportingText = {
-            uiState.errorMessage?.let { message ->
+            // ISSUE-P2-355 AC②：锁定期倒计时由 throttleLockoutRemainingMs 状态直驱、每秒刷新——
+            // 一次性快照会随用户输入（onPasswordChangeSecure 清提示）消失，直驱行冲不掉；
+            // 下方 errorMessage 的锁定快照与此行同源，锁定期内不重复渲染
+            val lockoutMs = uiState.throttleLockoutRemainingMs
+            val countdownShown = lockoutMs > 0L
+            if (countdownShown) {
                 Text(
-                    text = message.resolveText(),
+                    text = lockoutUiMessage(lockoutMs).resolveText(),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
+            }
+            uiState.errorMessage?.let { message ->
+                if (!(countdownShown && message.isLockoutCountdown())) {
+                    Text(
+                        text = message.resolveText(),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（节流关闭 / 锁定态 / 已输入时为 null 不呈现）
+            if (uiState.errorMessage != null) {
+                uiState.throttleAttemptsRemaining?.let { remaining ->
+                    Text(
+                        text = stringResource(R.string.unlock_attempts_remaining, remaining),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
             uiState.infoMessage?.let { message ->
                 Text(
@@ -268,6 +304,18 @@ internal fun UnlockQuickUnlockCardPreview() {
                     hasDatabase = true,
                     unlockMode = UnlockMode.QUICK_UNLOCK,
                     openReadOnly = true
+                ),
+                onBiometricUnlock = {},
+                onSwitchMode = {},
+                onToggleReadOnly = {}
+            )
+            // ISSUE-P2-355 AC①：错误槽位新增后补该态预览——失败文案的间距/换行
+            // 此前在编译期与预览导出图里都不可见，只有真机肉眼能看见
+            UnlockQuickUnlockCard(
+                uiState = UnlockUiState().copy(
+                    hasDatabase = true,
+                    unlockMode = UnlockMode.QUICK_UNLOCK,
+                    errorMessage = UiMessage(R.string.sec_biometric_auth_failed)
                 ),
                 onBiometricUnlock = {},
                 onSwitchMode = {},

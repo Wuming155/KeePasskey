@@ -45,8 +45,15 @@ internal class ImportPersistRun(
     /**
      * 逐条落库。单条失败不中断整批（计入 [failed] 与警告），但协程取消必须原样上抛；
      * 每条用毕立即 [ImportedEntry.clear]（外层 `VaultImporter` 仍有全量兜底清零）。
+     *
+     * [onProgress]（ISSUE-P2-354 AC④）：每条处理完结（含失败条目）后回调
+     * `(已完成数, 本批总数)`。取消路径也会触发回调，但控制器按代际 / Parsing 状态
+     * 丢弃过期写入（见 `VaultImportController.publishParsing`），此处不自行判活。
      */
-    suspend fun run(entries: List<ImportedEntry>) {
+    suspend fun run(
+        entries: List<ImportedEntry>,
+        onProgress: (Int, Int) -> Unit = { _, _ -> }
+    ) {
         entries.forEachIndexed { index, entry ->
             try {
                 persistOne(index + 1, entry)
@@ -56,6 +63,7 @@ internal class ImportPersistRun(
                 recordFailure(index + 1, t)
             } finally {
                 entry.clear()
+                onProgress(index + 1, entries.size)
             }
         }
     }

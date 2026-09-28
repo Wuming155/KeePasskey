@@ -46,12 +46,15 @@ internal fun NavGraphBuilder.unlockRoute(
             onThemeToggle = toggleTheme,
             onUnlockSuccess = {
                 autoLockManager?.onUnlockSuccess()
+                // ISSUE-P3-359 AC③：launchSingleTop 按 route pattern 匹配栈顶，
+                // 连点解锁只入栈一条 VaultList（popUpTo 语义原样保留）
                 navController.navigate(Screen.VaultList.route) {
                     popUpTo(Screen.Unlock.route) { inclusive = true }
+                    launchSingleTop = true
                 }
             },
             onNavigateToDatabasePicker = {
-                navController.navigate(Screen.DatabasePicker.route)
+                navController.navigate(Screen.DatabasePicker.route) { launchSingleTop = true }
             }
         )
     }
@@ -98,29 +101,34 @@ internal fun NavGraphBuilder.vaultListRoute(
             currentTheme = themeMode,
             onThemeToggle = toggleTheme,
             onEntryClick = { entryId ->
-                navController.navigate(Screen.EntryDetail.createRoute(entryId))
+                // ISSUE-P3-359 AC③：全部下钻 navigate 补 launchSingleTop——
+                // 同参双击（同 route pattern 命中栈顶）只入栈一条，异参仍正常入栈
+                navController.navigate(Screen.EntryDetail.createRoute(entryId)) { launchSingleTop = true }
             },
             onAddEntryClick = { groupId ->
-                navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId))
+                navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId)) { launchSingleTop = true }
             },
             // ISSUE-P3-337：扫码导入通行密钥成功后打开该条目编辑页（路由只带 id）
             onNavigateToEntryEdit = { entryId ->
-                navController.navigate(Screen.EntryEdit.createRoute(entryId))
+                navController.navigate(Screen.EntryEdit.createRoute(entryId)) { launchSingleTop = true }
             },
             // ISSUE-P3-51：从模板新建——携带模板 id 进入编辑页，由状态层预填为**新条目**
             onAddFromTemplateClick = { groupId, templateId ->
-                navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId, templateId = templateId))
+                navController.navigate(Screen.EntryEdit.createRoute(groupId = groupId, templateId = templateId)) {
+                    launchSingleTop = true
+                }
             },
             onLockClick = {
                 // P3-23：锁定原因仅供 AutoLockManager 内部 debugLog 留痕（非用户可见），保留原样
                 autoLockManager?.triggerLock("用户手动点击锁定")
                 navController.navigate(Screen.Unlock.route) {
                     popUpTo(0) { inclusive = true }
+                    launchSingleTop = true
                 }
             },
             // H2 整改：冲突解决死路由接线——冲突横幅可直接进入冲突解决页
             onNavigateToConflictResolver = {
-                navController.navigate(Screen.ConflictResolver.route)
+                navController.navigate(Screen.ConflictResolver.route) { launchSingleTop = true }
             },
             // ISSUE-P3-17：showKillAppOption 真实消费点（详见 killAppAction 注释）
             onKillApp = killAppAction
@@ -141,7 +149,7 @@ internal fun NavGraphBuilder.authenticatorRoute(
     ) {
         AuthenticatorScreen(
             onEntryClick = { entryId ->
-                navController.navigate(Screen.EntryDetail.createRoute(entryId))
+                navController.navigate(Screen.EntryDetail.createRoute(entryId)) { launchSingleTop = true }
             }
         )
     }
@@ -187,7 +195,7 @@ internal fun NavGraphBuilder.entryDetailRoute(navController: NavHostController) 
             entryId = entryId,
             onBackClick = { navController.popBackStack() },
             onEditClick = { id ->
-                navController.navigate(Screen.EntryEdit.createRoute(id))
+                navController.navigate(Screen.EntryEdit.createRoute(id)) { launchSingleTop = true }
             }
         )
     }
@@ -243,15 +251,16 @@ internal fun NavGraphBuilder.settingsHomeRoute(
         popEnterTransition = motion.defaultPopEnterTransition
     ) {
         SettingsScreen(
-            onNavigateToDatabase = { navController.navigate(Screen.SettingsDatabase.route) },
-            onNavigateToSync = { navController.navigate(Screen.SettingsSync.route) },
-            onNavigateToAutofill = { navController.navigate(Screen.SettingsAutofill.route) },
-            onNavigateToSecurity = { navController.navigate(Screen.SettingsSecurity.route) },
-            onNavigateToTheme = { navController.navigate(Screen.SettingsTheme.route) },
-            onNavigateToHealth = { navController.navigate(Screen.SettingsHealth.route) },
-            onNavigateToTotp = { navController.navigate(Screen.SettingsTotp.route) },
-            onNavigateToDebug = { navController.navigate(Screen.SettingsDebug.route) },
-            onNavigateToAbout = { navController.navigate(Screen.SettingsAbout.route) },
+            // ISSUE-P3-359 AC③：二级设置页下钻全部补 launchSingleTop（双击设置项不叠页）
+            onNavigateToDatabase = { navController.navigate(Screen.SettingsDatabase.route) { launchSingleTop = true } },
+            onNavigateToSync = { navController.navigate(Screen.SettingsSync.route) { launchSingleTop = true } },
+            onNavigateToAutofill = { navController.navigate(Screen.SettingsAutofill.route) { launchSingleTop = true } },
+            onNavigateToSecurity = { navController.navigate(Screen.SettingsSecurity.route) { launchSingleTop = true } },
+            onNavigateToTheme = { navController.navigate(Screen.SettingsTheme.route) { launchSingleTop = true } },
+            onNavigateToHealth = { navController.navigate(Screen.SettingsHealth.route) { launchSingleTop = true } },
+            onNavigateToTotp = { navController.navigate(Screen.SettingsTotp.route) { launchSingleTop = true } },
+            onNavigateToDebug = { navController.navigate(Screen.SettingsDebug.route) { launchSingleTop = true } },
+            onNavigateToAbout = { navController.navigate(Screen.SettingsAbout.route) { launchSingleTop = true } },
             showBackButton = false
         )
     }

@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -29,22 +28,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
-import com.keepasskey.app.autofill.AutofillPackageNames
-import com.keepasskey.app.passkey.DomainMatcher
-import com.keepasskey.app.ui.components.AppIconSlot
-import com.keepasskey.app.ui.components.AppPickerDialog
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.components.PasswordStrengthBar
@@ -134,13 +129,27 @@ internal fun ColumnScope.EntryEditBasicInfoSection(
                     }
                 }
 
+                // ISSUE-P3-359 AC①②：Next 链首站；校验失败时 inline 错误 + 聚焦到该字段
+                val titleFocusRequester = remember { FocusRequester() }
+                LaunchedEffect(uiState.titleError) {
+                    if (uiState.titleError) titleFocusRequester.requestFocus()
+                }
+
                 OutlinedTextField(
                     value = uiState.title,
                     onValueChange = onTitleChange,
                     label = { Text(stringResource(R.string.edit_title_hint)) },
                     singleLine = true,
+                    isError = uiState.titleError,
+                    supportingText = if (uiState.titleError) {
+                        { Text(stringResource(R.string.edit_title_required)) }
+                    } else {
+                        null
+                    },
                     shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.weight(1f)
+                    keyboardOptions = entryEditNextKeyboardOptions,
+                    keyboardActions = rememberEntryEditNextKeyboardActions(),
+                    modifier = Modifier.weight(1f).focusRequester(titleFocusRequester)
                 )
             }
 
@@ -149,74 +158,6 @@ internal fun ColumnScope.EntryEditBasicInfoSection(
                 onUrlChange = onUrlChange
             )
         }
-    }
-}
-
-/**
- * 网址 / 应用绑定字段。
- *
- * TASK-139：条目「关联具体应用填充」的绑定形式是 `android://<包名>`（见 `DomainMatcher`
- * 的严格包名维度判据），此前只能靠用户手打 URL 猜格式。本字段右侧提供**应用选择器**入口：
- * 按应用名选定后直接写入绑定串，并把该应用图标回显为前置图标、应用名回显为辅助文案——
- * 用户不必知道、也不必拼写包名。
- *
- * 边界（如实声明）：选择器只列**有桌面入口**的应用；字段本身仍可手工编辑，
- * 因此无桌面入口的包名与 Web URL 的既有写法均不受影响。
- */
-@Composable
-private fun EntryUrlField(
-    url: String,
-    onUrlChange: (String) -> Unit
-) {
-    var showPicker by remember { mutableStateOf(false) }
-    val boundPackage = remember(url) { DomainMatcher.extractAndroidBoundPackage(url) }
-    val boundApp = rememberBoundAppOption(boundPackage)
-
-    OutlinedTextField(
-        value = url,
-        onValueChange = onUrlChange,
-        label = { Text(stringResource(R.string.edit_url_hint)) },
-        singleLine = true,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth(),
-        leadingIcon = boundApp?.let { app -> { AppIconSlot(app = app, size = 24.dp) } },
-        trailingIcon = {
-            IconButton(onClick = { showPicker = true }) {
-                Icon(
-                    imageVector = Icons.Default.Apps,
-                    contentDescription = stringResource(R.string.edit_app_binding_pick_cd)
-                )
-            }
-        }
-    )
-
-    if (boundApp != null) {
-        // 应用名可读 → 名称 + 包名；不可读（未安装 / 受包可见性限制）→ 只报包名并**如实**
-        // 说明名称不可读，避免退化成「同一串包名显示两遍」的噪声
-        val readable = boundApp.label != boundApp.packageName
-        Text(
-            text = if (readable) {
-                stringResource(R.string.edit_app_binding_bound, boundApp.label, boundApp.packageName)
-            } else {
-                stringResource(R.string.edit_app_binding_bound_unreadable, boundApp.packageName)
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-        )
-    }
-
-    if (showPicker) {
-        AppPickerDialog(
-            onPick = { app ->
-                showPicker = false
-                // 与凭据写入链记录的绑定形式一字不差（同一条判据消费，构造收敛于
-                // AutofillPackageNames.boundUrl）
-                onUrlChange(AutofillPackageNames.boundUrl(app.packageName))
-            },
-            onDismiss = { showPicker = false },
-            alreadySelected = boundPackage?.let { setOf(it) } ?: emptySet()
-        )
     }
 }
 
@@ -256,12 +197,15 @@ internal fun ColumnScope.EntryEditAccountSection(
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // ISSUE-P3-359 AC①：username → 下一个可聚焦字段（密码框）的 Next 链
             OutlinedTextField(
                 value = uiState.username,
                 onValueChange = onUsernameChange,
                 label = { Text(stringResource(R.string.edit_username_hint)) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
+                keyboardOptions = entryEditNextKeyboardOptions,
+                keyboardActions = rememberEntryEditNextKeyboardActions(),
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -271,6 +215,9 @@ internal fun ColumnScope.EntryEditAccountSection(
                 isPasswordVisible = uiState.isPasswordVisible,
                 initialPassword = loadedPassword,
                 initialKey = uiState.entryId ?: "new-entry",
+                // ISSUE-P3-359 AC①：Done → 收起键盘（默认 `{}` 会吞掉框架收键盘行为，
+                // 按完成键无反应）。不接保存：底栏/顶栏保存是既有交互语义，避免误提交
+                onDone = rememberEntryEditHideKeyboard(),
                 trailingIcon = {
                     Row {
                         IconButton(onClick = onTogglePasswordVisibility) {
@@ -375,12 +322,15 @@ internal fun ColumnScope.EntryEditNotesSection(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
+        // ISSUE-P3-359 AC①：备注为表单末端字段 → Done 收起键盘
         OutlinedTextField(
             value = notes,
             onValueChange = onNotesChange,
             label = { Text(stringResource(R.string.edit_notes_hint)) },
             minLines = 3,
             shape = MaterialTheme.shapes.medium,
+            keyboardOptions = entryEditDoneKeyboardOptions,
+            keyboardActions = rememberEntryEditDoneKeyboardActions(),
             modifier = Modifier.fillMaxWidth()
         )
     }

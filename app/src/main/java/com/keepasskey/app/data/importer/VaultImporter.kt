@@ -51,14 +51,19 @@ class VaultImporter @Inject constructor(
     /**
      * 落库 [batch]；[policy] 缺省为 [ImportConflictPolicy.SKIP_EXISTING]。
      *
+     * [onProgress]（ISSUE-P2-354 AC④）：逐条完成回调 `(已处理数, 本批总数)`，供导入对话框
+     * 呈现可量化进度；只在**每条落库完成**后触发一次，不携带任何条目内容（计数非敏感）。
+     * 回调运行在落库协程内，须自行做「状态是否仍可写」的判别（控制器按代际过滤）。
+     *
      * 无论成败，返回前本批次全部 [ImportedEntry] 的敏感数组都已清零。
      */
     suspend fun persist(
         batch: ImportBatch,
-        policy: ImportConflictPolicy = ImportConflictPolicy.SKIP_EXISTING
+        policy: ImportConflictPolicy = ImportConflictPolicy.SKIP_EXISTING,
+        onProgress: (Int, Int) -> Unit = { _, _ -> }
     ): KdbxResult<ImportOutcome> {
         return try {
-            withContext(Dispatchers.IO) { persistInternal(batch, policy) }
+            withContext(Dispatchers.IO) { persistInternal(batch, policy, onProgress) }
         } finally {
             // 擦除纪律：成功 / 失败 / 提前返回 / 协程取消，全路径清零
             batch.entries.forEach { it.clear() }
@@ -67,7 +72,8 @@ class VaultImporter @Inject constructor(
 
     private suspend fun persistInternal(
         batch: ImportBatch,
-        policy: ImportConflictPolicy
+        policy: ImportConflictPolicy,
+        onProgress: (Int, Int) -> Unit
     ): KdbxResult<ImportOutcome> {
         if (batch.entries.size > ImportLimits.MAX_ENTRIES_PER_IMPORT) {
             return ImportParseGuard.failure(ImportLimitExceededException(OVER_ENTRY_LIMIT), batch.entries)
@@ -85,7 +91,7 @@ class VaultImporter @Inject constructor(
             warnings = warnings
         )
         run.seed(repository.getEntries().first())
-        run.run(batch.entries)
+        run.run(batch.entries, onProgress)
         return buildResult(batch, run, warnings)
     }
 

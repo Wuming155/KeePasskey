@@ -186,11 +186,11 @@ internal class BiometricUnlockCoordinator(
      * 与 Android `BiometricPrompt` 回调解耦，使「成功 / 用户取消 / 单次比对未通过 / 系统错误」
      * 四条结果路径可在 JVM 单测中直接驱动（硬件与 Activity 依赖仅保留在 [unlockWithBiometric] 启动侧）。
      *
-     * 回退语义（ISSUE-P3-01 验收 3）：
+     * 回退语义（ISSUE-P3-01 验收 3 / ISSUE-P2-355 AC①）：
      * - 用户主动取消 → 清除提示并回落主密码输入框（不再自动重试）；
      * - 系统错误（含完整性风险态）→ 按错误码映射资源文案后回落主密码输入框；
-     * - 单次比对未通过（[BiometricResult.Failed]）→ 系统弹窗仍驻留等待重试，
-     *   故保留快速解锁界面，仅置失败提示（自动唤起机会已用尽，不会重复弹窗）。
+     * - 单次比对未通过（[BiometricResult.Failed]）→ 置失败提示并回落主密码输入框
+     *   （ISSUE-P2-355：原先仅置提示、滞留快速解锁模式，而卡片无错误槽位 ⇒ 全程静默）。
      */
     internal fun handleBiometricResult(
         result: BiometricResult,
@@ -213,9 +213,12 @@ internal class BiometricUnlockCoordinator(
                 fallbackToMasterPasswordMode()
             }
             is BiometricResult.Failed -> {
+                // ISSUE-P2-355 AC①：快速解锁比对失败不再静默——置失败提示并回落主密码模式
+                // （原实现在 QUICK 模式仅置 errorMessage，卡片无错误槽位 ⇒ 用户只见按钮复原）
                 uiState.update {
                     it.copy(isLoading = false, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
                 }
+                fallbackToMasterPasswordMode()
             }
         }
     }
@@ -232,7 +235,11 @@ internal class BiometricUnlockCoordinator(
         sealedCiphertext: ByteArray
     ) {
         if (authedCipher == null) {
-            uiState.update { it.copy(isLoading = false) }
+            // ISSUE-P2-355 AC①：授权 Cipher 缺失此前连消息都不设、也不回落 ⇒ 静默消失
+            uiState.update {
+                it.copy(isLoading = false, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
+            }
+            fallbackToMasterPasswordMode()
             return
         }
         scope.launch {
@@ -296,6 +303,7 @@ internal class BiometricUnlockCoordinator(
                     // 生物识别已授权且密文成功解密，却解库失败：
                     // 极可能是主密码已变更（或密钥文件因子更换）导致入库凭据陈旧（死循环态）。
                     // 清除陈旧凭据，下次主密码解锁将自动重新登记。
+                    // ISSUE-P2-355 AC①：同时回落主密码模式并渲染错误（原先滞留 QUICK ⇒ 静默）。
                     storage.clearCredential(dbId)
                     uiState.update {
                         it.copy(
@@ -304,6 +312,7 @@ internal class BiometricUnlockCoordinator(
                             errorMessage = UiMessage(R.string.unlock_error_invalid_password)
                         )
                     }
+                    fallbackToMasterPasswordMode()
                 }
             }
         } finally {

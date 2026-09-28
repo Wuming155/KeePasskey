@@ -295,6 +295,16 @@ fun UnlockContent(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知（UnlockViewModel.init 消费注册表后置位）
+                if (uiState.unsavedEditsDiscardedNotice) {
+                    Text(
+                        text = stringResource(R.string.unlock_unsaved_edits_discarded),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
                 // QuickUnlock 模式与完整解锁模式切换
                 if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) {
                     UnlockQuickUnlockCard(

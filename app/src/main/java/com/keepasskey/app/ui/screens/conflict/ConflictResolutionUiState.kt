@@ -19,6 +19,14 @@ enum class EntryResolutionMode {
     DUPLICATE_BOTH
 }
 
+/**
+ * ISSUE-P3-360 AC①：两侧修改时间的先后标注（仅用于「较新」徽标，非字段选择语义）。
+ */
+enum class ModifiedTimeSide {
+    LOCAL,
+    REMOTE
+}
+
 data class ConflictedField(
     // TASK-30 / ISSUE-P2-281：差异键（与 ConflictedEntryPair.modifiedFields 同一词汇表：
     // 标准字段键 / `custom:` 前缀自定义字段键 / 四个标量键），applyMerge 据此生成字段级合并决策
@@ -43,6 +51,8 @@ data class ConflictResolutionUiState(
     // H1 整改：两侧修改时间由真实冲突条目的 lastModificationTime 填充，空串表示尚未取得
     val localModifiedTime: String = "",
     val remoteModifiedTime: String = "",
+    // ISSUE-P3-360 AC①：哪一侧更新（VM 按 Instant 现场比较，不比格式化文案）；null = 无法判定
+    val newerSide: ModifiedTimeSide? = null,
     val entries: List<ConflictedEntryItem> = emptyList(),
     val isResolving: Boolean = false,
     val userMessage: UiMessage? = null

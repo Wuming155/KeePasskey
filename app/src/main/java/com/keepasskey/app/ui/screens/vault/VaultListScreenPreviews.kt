@@ -1,8 +1,6 @@
 package com.keepasskey.app.ui.screens.vault
 
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.tooling.preview.Preview
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 
@@ -20,6 +18,7 @@ internal fun VaultListContentPreview() {
     KeePasskeyTheme {
         VaultListContent(
             uiState = VaultListUiState().copy(
+                isLoading = false,
                 databaseName = "Preview Vault.kdbx",
                 currentGroups = com.keepasskey.app.ui.preview.PreviewGroups,
                 entries = com.keepasskey.app.ui.preview.PreviewEntries,
@@ -28,7 +27,6 @@ internal fun VaultListContentPreview() {
                 lastSyncTimeText = "预览同步时间 10:25",
                 decorations = com.keepasskey.app.ui.preview.PreviewDecorations
             ),
-            snackbarHostState = remember { SnackbarHostState() },
             onSearchQueryChange = {},
             onSortOptionSelect = {},
             onGroupClick = {},
@@ -72,10 +70,10 @@ internal fun VaultListSearchEmptyPreview() {
     KeePasskeyTheme {
         VaultListContent(
             uiState = VaultListUiState().copy(
+                isLoading = false,
                 databaseName = "Preview Vault.kdbx",
                 searchQuery = "login.example.com"
             ),
-            snackbarHostState = remember { SnackbarHostState() },
             onSearchQueryChange = {},
             onSortOptionSelect = {},
             onGroupClick = {},
@@ -112,11 +110,11 @@ internal fun VaultListSearchEmptyReadOnlyPreview() {
     KeePasskeyTheme {
         VaultListContent(
             uiState = VaultListUiState().copy(
+                isLoading = false,
                 databaseName = "Preview Vault.kdbx",
                 searchQuery = "login.example.com",
                 isReadOnly = true
             ),
-            snackbarHostState = remember { SnackbarHostState() },
             onSearchQueryChange = {},
             onSortOptionSelect = {},
             onGroupClick = {},

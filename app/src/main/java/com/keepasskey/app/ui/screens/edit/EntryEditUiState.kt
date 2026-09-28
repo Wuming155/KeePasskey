@@ -7,6 +7,14 @@ import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.VaultGroup
 
 /**
+ * 编辑页单次事件（ISSUE-P2-355 批次自 `EntryEditViewModel.kt` 同包平移，零行为变更——
+ * 该文件行数触及 tier1 红线，非职责相关声明一律外迁）
+ */
+sealed interface EntryEditEvent {
+    data object SaveSuccess : EntryEditEvent
+}
+
+/**
  * 凭据编辑/添加页面的不可变 UI 状态
  *
  * M1 整改（加解密审查 2026-09）：本状态类不再承载密码明文（String 不可变驻留 StateFlow 堆内存，
@@ -65,6 +73,24 @@ data class EntryEditUiState(
     val totpPrefillEpoch: Int = 0,
     // H4-只读整改：数据库以只读模式打开时禁用保存
     val isReadOnly: Boolean = false,
+    /**
+     * ISSUE-P2-354 AC①②：保存进行中（含 KDBX 落盘的整个保存期间）。
+     * `saveEntry` 入口按此守卫——并发第二次直接 return（双击不再产生重复条目），
+     * 两个保存按钮按此禁用并内嵌进度；成功/失败两条路径都回落为 false。
+     */
+    val isSaving: Boolean = false,
+    /**
+     * ISSUE-P3-359 AC②：标题必填校验的**字段级**错误位（保存被拒时置位、用户重新输入即清除）。
+     * 标题框据此渲染 `isError + supportingText`，与一次性 Snackbar 并存——
+     * 后者随时间消失，inline 错误常驻到问题被修复为止。
+     */
+    val titleError: Boolean = false,
+    /**
+     * ISSUE-P3-359 AC⑤：打开既有条目 / 模板的异步解密预填进行中。
+     * 载入期间编辑内容被遮罩禁输（见 `EntryEditContent` 的加载遮罩），载入完成
+     * `applyLoadedEntry` 覆盖表单时用户不可能已有键入 ⇒ 「载入不覆盖用户输入」。
+     */
+    val isLoading: Boolean = false,
     // 表单脏标记：发生任何未保存修改后为 true，驱动返回前的丢弃确认
     val isDirty: Boolean = false
 )

@@ -116,7 +116,9 @@ internal fun VaultImportSection(
     showDialog: Boolean,
     onDialogDismiss: () -> Unit,
     onFileSelected: (ImportSource, Uri) -> Unit,
-    onReportDismiss: () -> Unit
+    onReportDismiss: () -> Unit,
+    /** ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation；对话框「取消」按钮） */
+    onCancelImport: () -> Unit = {}
 ) {
     var pendingImportSource by remember { mutableStateOf<ImportSource?>(null) }
     val importFileLauncher = rememberLauncherForActivityResult(
@@ -138,7 +140,7 @@ internal fun VaultImportSection(
     }
 
     // 导入报告对话框：状态全来自控制器 StateFlow（Idle 时不渲染）
-    ImportReportDialog(state = state, onDismiss = onReportDismiss)
+    ImportReportDialog(state = state, onDismiss = onReportDismiss, onCancel = onCancelImport)
 }
 
 /** SAF 通配 MIME 过滤器（原三处内联展开，收敛为一个文件级常量） */

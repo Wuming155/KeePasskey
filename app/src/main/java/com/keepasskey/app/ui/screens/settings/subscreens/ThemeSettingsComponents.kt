@@ -3,7 +3,6 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,8 +34,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.AppThemePalette
 
 /**
@@ -114,7 +116,8 @@ internal fun ThemeSelectionCard(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .border(borderWidth, borderColor, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            // ISSUE-P3-358 AC④：单选卡改 selectable + Role.RadioButton（原裸 clickable 无选中语义）
+            .selectable(selected = isSelected, onClick = onClick, role = Role.RadioButton)
             .padding(vertical = 14.dp, horizontal = 8.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -165,7 +168,8 @@ internal fun ThemeSelectionCard(
                 Spacer(modifier = Modifier.height(4.dp))
                 Icon(
                     imageVector = Icons.Default.Check,
-                    contentDescription = "Selected",
+                    // ISSUE-P3-358 AC③：原硬编码 "Selected" 改资源（配合 selectable 的 selected 语义）
+                    contentDescription = stringResource(R.string.cd_selected),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(14.dp)
                 )
@@ -206,7 +210,8 @@ internal fun ThemePaletteItemCard(
                 else MaterialTheme.colorScheme.surface
             )
             .border(borderWidth, borderColor, RoundedCornerShape(14.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            // ISSUE-P3-358 AC④：调色盘条目同为单选卡，补 selected + Role.RadioButton 语义
+            .selectable(selected = isSelected, enabled = enabled, onClick = onClick, role = Role.RadioButton)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -273,13 +278,15 @@ internal fun ThemeRadioOptionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(cornerRadius.dp))
-            .clickable(onClick = onClick)
+            // ISSUE-P3-358 AC④：整行 selectable 承载点击与选中语义（同 VaultListDialogs 正例）
+            .selectable(selected = isSelected, onClick = onClick, role = Role.RadioButton)
             .padding(vertical = verticalPadding.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         RadioButton(
             selected = isSelected,
-            onClick = onClick
+            // 行已可点且携带选中语义，圈自身只展示状态（正例同口径），避免双重命中与重复播报
+            onClick = null
         )
         Spacer(modifier = Modifier.width(8.dp))
         Column {

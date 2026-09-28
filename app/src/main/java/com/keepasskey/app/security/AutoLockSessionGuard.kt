@@ -27,7 +27,9 @@ import javax.inject.Singleton
 class AutoLockSessionGuard @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val settingsRepository: SettingsRepository,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    // ISSUE-P2-355 AC③：全局脏表单注册表（Hilt 注入进程级单例；缺省新实例供 JVM 单测隔离）
+    private val unsavedEditRegistry: UnsavedEditRegistry = UnsavedEditRegistry()
 ) {
 
     private val _isLocked = MutableStateFlow(false)
@@ -85,6 +87,9 @@ class AutoLockSessionGuard @Inject constructor(
      * 锁库会销毁内存树与主密码缓存，跳过补存将使未落盘修改永久丢失（对齐 KP2A 锁库守卫语义）。
      */
     suspend fun triggerLock(reason: String = "安全锁定") {
+        // ISSUE-P2-355 AC③：锁定将经导航 popUpTo(0) 销毁编辑页——存在未保存编辑时先登记
+        // 「已丢弃」事实，解锁页消费后一次性告知，杜绝静默丢编辑（登记幂等，无脏态即空操作）
+        unsavedEditRegistry.markDirtyEditsDiscarded()
         val state = databaseSession.state.value
         if (state == DatabaseSession.SessionState.DIRTY) {
             val saveResult = databaseSession.save()

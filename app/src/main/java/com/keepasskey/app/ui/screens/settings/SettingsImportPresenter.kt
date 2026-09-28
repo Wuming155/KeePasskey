@@ -29,4 +29,9 @@ internal class SettingsImportPresenter(
     fun dismissReport() {
         controller?.reset()
     }
+
+    /** ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation；对话框「取消」按钮通道）。 */
+    fun cancel() {
+        controller?.cancelImport()
+    }
 }

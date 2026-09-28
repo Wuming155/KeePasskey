@@ -2,11 +2,13 @@ package com.keepasskey.app.ui.screens.edit
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,11 +38,13 @@ import com.keepasskey.app.ui.theme.CapsuleShape
  * 不出现「关对话框」这件事有两处真相的漂移面。
  */
 
-/** 顶栏：标题按 `entryId` 是否为空区分「编辑 / 新建」；只读会话禁用保存。 */
+/** 顶栏：标题按 `entryId` 是否为空区分「编辑 / 新建」；只读会话或保存进行中禁用保存。 */
 @Composable
 internal fun EntryEditTopBar(
     entryId: String?,
     isReadOnly: Boolean,
+    /** ISSUE-P2-354 AC①：保存进行中——按钮禁用并内嵌进度（无字面量默认值，调用方必须显式传） */
+    isSaving: Boolean,
     requestBack: () -> Unit,
     onSaveClick: () -> Unit
 ) {
@@ -60,11 +64,18 @@ internal fun EntryEditTopBar(
             }
         },
         actions = {
-            TextButton(onClick = onSaveClick, enabled = !isReadOnly) {
-                Text(
-                    text = stringResource(R.string.cd_save),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                )
+            TextButton(onClick = onSaveClick, enabled = !isReadOnly && !isSaving) {
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(SAVE_INNER_PROGRESS_SIZE.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.cd_save),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                }
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -74,21 +85,33 @@ internal fun EntryEditTopBar(
     )
 }
 
-/** 底部保存大按钮（H4-只读整改：只读会话禁用保存）。 */
+/** 底部保存大按钮（H4-只读整改：只读会话禁用保存；ISSUE-P2-354 AC①：保存中禁用并内嵌进度）。 */
 @Composable
-internal fun EntryEditSaveButton(isReadOnly: Boolean, onSaveClick: () -> Unit) {
+internal fun EntryEditSaveButton(
+    isReadOnly: Boolean,
+    /** ISSUE-P2-354 AC①：保存进行中——按钮禁用并内嵌进度（无字面量默认值，调用方必须显式传） */
+    isSaving: Boolean,
+    onSaveClick: () -> Unit
+) {
     Button(
         onClick = onSaveClick,
-        enabled = !isReadOnly,
+        enabled = !isReadOnly && !isSaving,
         modifier = Modifier
             .fillMaxWidth()
             .height(50.dp),
         shape = CapsuleShape
     ) {
-        Text(
-            text = stringResource(R.string.edit_save_btn),
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-        )
+        if (isSaving) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(SAVE_INNER_PROGRESS_SIZE.dp),
+                strokeWidth = 2.dp
+            )
+        } else {
+            Text(
+                text = stringResource(R.string.edit_save_btn),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+            )
+        }
     }
 }
 
@@ -166,3 +189,6 @@ internal fun EntryEditDiscardDialog(onDiscard: () -> Unit, onKeepEditing: () -> 
         }
     )
 }
+
+/** ISSUE-P2-354 AC①：保存按钮内嵌进度圈直径（dp） */
+private const val SAVE_INNER_PROGRESS_SIZE = 18

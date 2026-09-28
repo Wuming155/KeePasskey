@@ -3,8 +3,10 @@ package com.keepasskey.app.ui.screens.detail
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.app.data.repository.UserSettings
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.DomainMatcher
+import com.keepasskey.app.security.ClipboardClearPolicy
 import com.keepasskey.app.ui.model.EntryDecorations
 import com.keepasskey.app.ui.model.EntryDisplayPresenter
 import com.keepasskey.app.ui.model.UiMessage
@@ -201,7 +203,9 @@ internal class EntryDetailStateAssembler(
                     liveTotpCode = extras.liveTotpCode,
                     passwordStrengthBits = extras.strengthBits,
                     isReadOnly = vaultRepository.isSessionReadOnly(),
-                    passwordCopyMessage = buildPasswordCopyMessage(settings.clipboardTimeoutSeconds)
+                    // ISSUE-P3-360 AC③b：清空秒数收敛到 ClipboardClearPolicy 单一裁决
+                    // （autoClear 关闭 / 超时 ≤0 时如实给出 no_clear 文案，不再虚称会清空）
+                    passwordCopyMessage = buildPasswordCopyMessage(effectiveClipboardTimeoutSeconds(settings))
                 )
             }
             // ISSUE-P3-17：叠加遮掩初始态决策（偏好的「默认值」语义）与所属分组路径
@@ -242,6 +246,18 @@ internal class EntryDetailStateAssembler(
         else ->
             UiMessage(R.string.detail_password_copied_no_clear)
     }
+
+    /**
+     * ISSUE-P3-360 AC③b：有效清空秒数走 [ClipboardClearPolicy] 单一裁决
+     * （与真实调度、消息后缀同一函数）；不调度（关自动清空 / ≤0）时回 -1，
+     * 由 [buildPasswordCopyMessage] 如实落到 no_clear 文案。
+     */
+    private fun effectiveClipboardTimeoutSeconds(settings: UserSettings): Int =
+        ClipboardClearPolicy.resolveScheduledTimeoutSeconds(
+            customTimeoutSeconds = null,
+            autoClearClipboard = settings.autoClearClipboard,
+            settingsTimeoutSeconds = settings.clipboardTimeoutSeconds
+        ) ?: -1
 
     /**
      * `ISSUE-P3-188` §170：把「订阅期节拍启停 + `stateIn`」整条链自 `EntryDetailViewModel` 搬来。

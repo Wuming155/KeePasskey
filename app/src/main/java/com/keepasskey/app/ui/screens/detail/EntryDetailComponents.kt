@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.detail
 import android.content.res.Configuration
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +39,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.EntryIconContent
 import com.keepasskey.app.ui.components.PasskeyBadge
 import com.keepasskey.app.ui.components.getVaultIcon
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -67,14 +68,20 @@ internal fun SectionTitle(@StringRes textRes: Int, modifier: Modifier = Modifier
  *
  * ISSUE-P3-17：[groupPath] 非空时在 URL 下方展示条目所属分组完整路径
  * （仅 `showGroupInEntry` 开启时由状态层下发，UI 不做路径计算）。
+ *
+ * ISSUE-P2-353 AC③：URL 文本行可点击——与「打开网址」按钮共用 [rememberOpenUrlAction]
+ * （http(s) 呼起浏览器；失败 / 非 http(s) 回退复制并如实提示）。[onShowMessage] 缺省为
+ * null 时执行器回退 Toast，调用方签名无需变化。
  */
 @Composable
 internal fun EntryHeaderSection(
     entry: UiVaultEntry,
     icon: BitmapEntryIcon,
     urlText: String,
-    groupPath: String? = null
+    groupPath: String? = null,
+    onShowMessage: ((UiMessage) -> Unit)? = null
 ) {
+    val openUrl = rememberOpenUrlAction(onShowMessage)
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -115,7 +122,13 @@ internal fun EntryHeaderSection(
             Text(
                 text = urlText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                // ISSUE-P2-353 AC③：URL 文本行与「打开网址」按钮同一执行器；空文本不挂点击
+                modifier = if (urlText.isNotBlank()) {
+                    Modifier.clickable { openUrl(urlText) }
+                } else {
+                    Modifier
+                }
             )
             // ISSUE-P3-17：showGroupInEntry 开启时的所属分组路径
             if (groupPath != null) {
@@ -158,7 +171,9 @@ internal fun QuickActionRow(
     onCopyUsername: (String, String) -> Unit,
     onCopyPassword: (String) -> Unit
 ) {
-    val haptic = LocalHapticFeedback.current
+    val maybeHaptic = rememberMaybeHaptic()
+    // ISSUE-P2-353 AC③：真「打开网址」——http(s) 发 ACTION_VIEW，失败 / 非 http(s) 回退复制
+    val openUrl = rememberOpenUrlAction(onShowMessage)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -166,7 +181,7 @@ internal fun QuickActionRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         AssistChip(
-            onClick = { onShowMessage(UiMessage(R.string.detail_opening_browser)) },
+            onClick = { openUrl(entry.url) },
             label = { Text(stringResource(R.string.detail_btn_open_url)) },
             leadingIcon = {
                 Icon(
@@ -178,7 +193,7 @@ internal fun QuickActionRow(
         )
         AssistChip(
             onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                maybeHaptic(HapticFeedbackType.Confirm)
                 onCopyUsername(entry.title, entry.username)
             },
             label = { Text(stringResource(R.string.detail_btn_copy_user)) },
@@ -192,7 +207,7 @@ internal fun QuickActionRow(
         )
         AssistChip(
             onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                maybeHaptic(HapticFeedbackType.Confirm)
                 onCopyPassword(entry.title)
             },
             label = { Text(stringResource(R.string.detail_btn_copy_pwd)) },

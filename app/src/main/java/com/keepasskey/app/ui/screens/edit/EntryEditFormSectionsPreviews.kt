@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -143,7 +142,6 @@ internal fun EntryEditBoundAppSectionPreview() {
 @Composable
 internal fun EntryEditContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        val previewSnackbar = remember { SnackbarHostState() }
 
         EntryEditContent(
             uiState = com.keepasskey.app.ui.screens.edit.EntryEditUiState(
@@ -184,7 +182,6 @@ internal fun EntryEditContentPreview() {
             loadedTotpSecret = null,
             loadedProtectedFields = mapOf("preview-field-2" to "预览受保护字段值".toCharArray()),
             isDirty = true,
-            snackbarHostState = previewSnackbar,
             onBackClick = {},
             onSaveClick = {},
             onGroupChange = { _ -> },
@@ -219,5 +216,36 @@ internal fun EntryEditContentPreview() {
             onPickAttachmentFile = {},
             onScanTotpQr = {}
         )
+    }
+}
+
+/**
+ * `ISSUE-P3-359` AC② 退化态预览：标题必填校验的**字段级**错误呈现
+ * （`isError + supportingText` 常驻，与一次性 Snackbar 互补）。
+ * 此前该缺陷只能真机复现——错误态画出来才看得见描边色与辅助文案的对比度。
+ */
+@Preview(name = "编辑页标题校验错误态 - 浅色", showBackground = true)
+@Preview(name = "编辑页标题校验错误态 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun EntryEditTitleErrorStatePreview() {
+    KeePasskeyTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            EntryEditBasicInfoSection(
+                uiState = EntryEditUiState(
+                    entryId = "preview-title-error",
+                    iconName = "key",
+                    title = "",
+                    titleError = true
+                ),
+                customIconOptions = emptyList(),
+                onIconClick = { },
+                onTitleChange = { },
+                onUrlChange = { }
+            )
+        }
     }
 }

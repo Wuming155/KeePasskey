@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,6 +27,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -204,4 +206,115 @@ internal fun ConflictFieldChoiceRow(
             )
         }
     }
+}
+
+/**
+ * ISSUE-P3-360 AC①：两侧修改时间对照行——冲突数据已带 `localModifiedTime` / `remoteModifiedTime`
+ * 此前无任何消费点，用户看不到哪边更新；较新一侧附「较新」徽标（[newerSide] 由 VM 按 Instant 比较得出）。
+ */
+@Composable
+internal fun ConflictModifiedTimesRow(
+    localTime: String,
+    remoteTime: String,
+    newerSide: ModifiedTimeSide?
+) {
+    if (localTime.isBlank() && remoteTime.isBlank()) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        ConflictModifiedTimeCell(
+            text = stringResource(R.string.conflict_time_local_label, localTime),
+            isNewer = newerSide == ModifiedTimeSide.LOCAL,
+            modifier = Modifier.weight(1f)
+        )
+        ConflictModifiedTimeCell(
+            text = stringResource(R.string.conflict_time_remote_label, remoteTime),
+            isNewer = newerSide == ModifiedTimeSide.REMOTE,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/** 单侧时间格：较新一侧用主色容器底 + 「较新」徽标区分（无 Boolean 默认参，两态由调用方显式传入）。 */
+@Composable
+private fun ConflictModifiedTimeCell(
+    text: String,
+    isNewer: Boolean,
+    modifier: Modifier
+) {
+    Surface(
+        color = if (isNewer) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (isNewer) {
+                Text(
+                    text = stringResource(R.string.conflict_time_newer),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+/**
+ * ISSUE-P3-360 AC①：批量「全选本地 / 全选云端」与「合并并推送」此前一点即生效、
+ * 无确认与后果提示——三类动作统一在此映射为标题 / 后果文案 / 确认钮文案。
+ */
+internal enum class ConflictConfirmAction {
+    ALL_LOCAL,
+    ALL_REMOTE,
+    MERGE
+}
+
+/** 批量选择 / 合并推送前的确认对话框：正文指名覆盖范围与条目数（[conflictCount]）。 */
+@Composable
+internal fun ConflictActionConfirmDialog(
+    action: ConflictConfirmAction,
+    conflictCount: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val titleRes = when (action) {
+        ConflictConfirmAction.ALL_LOCAL -> R.string.conflict_confirm_all_local_title
+        ConflictConfirmAction.ALL_REMOTE -> R.string.conflict_confirm_all_remote_title
+        ConflictConfirmAction.MERGE -> R.string.conflict_confirm_merge_title
+    }
+    val messageRes = when (action) {
+        ConflictConfirmAction.ALL_LOCAL -> R.string.conflict_confirm_all_local_msg
+        ConflictConfirmAction.ALL_REMOTE -> R.string.conflict_confirm_all_remote_msg
+        ConflictConfirmAction.MERGE -> R.string.conflict_confirm_merge_msg
+    }
+    val confirmRes = when (action) {
+        ConflictConfirmAction.ALL_LOCAL -> R.string.conflict_keep_all_local
+        ConflictConfirmAction.ALL_REMOTE -> R.string.conflict_keep_all_remote
+        ConflictConfirmAction.MERGE -> R.string.conflict_btn_merge_push
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(titleRes)) },
+        text = { Text(stringResource(messageRes, conflictCount)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(confirmRes))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.btn_cancel))
+            }
+        }
+    )
 }

@@ -33,8 +33,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -44,7 +42,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,11 +55,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
-import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -86,10 +83,6 @@ fun DebugSettingsScreen(
     onClearExportFeedback: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
-    val logRefreshedMsg = stringResource(R.string.debug_log_refreshed)
-    val logClearedMsg = stringResource(R.string.debug_log_cleared)
     var showExportConfirmDialog by remember { mutableStateOf(false) }
 
     // 真实进程内调试日志快照（SyncCoordinator / Unlock 等运行时事件），不再使用硬编码演示数据
@@ -103,10 +96,10 @@ fun DebugSettingsScreen(
     }
 
     // 断点整改：导出结果（成功/失败）经 ViewModel 反馈流回到本页 Snackbar
+    // ISSUE-P3-359 AC④：导出反馈转发全局通道（外壳唯一宿主呈现），回执后一次性清位
     exportFeedback?.let { message ->
-        val text = message.resolveText()
-        LaunchedEffect(message, text) {
-            snackbarHostState.showSnackbar(text)
+        LaunchedEffect(message) {
+            AppSnackbarChannel.trySend(AppSnackbarEvent(message))
             onClearExportFeedback()
         }
     }
@@ -115,7 +108,6 @@ fun DebugSettingsScreen(
         titleRes = R.string.debug_title,
         onBackClick = onBackClick,
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -181,9 +173,8 @@ fun DebugSettingsScreen(
                     IconButton(
                         onClick = {
                             onRefreshLogs()
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar(logRefreshedMsg)
-                            }
+                            // ISSUE-P3-359 AC④：日志刷新提示直发全局通道
+                                AppSnackbarChannel.trySend(AppSnackbarEvent(UiMessage(R.string.debug_log_refreshed)))
                         },
                         modifier = Modifier.size(28.dp)
                     ) {
@@ -263,9 +254,8 @@ fun DebugSettingsScreen(
                         OutlinedButton(
                             onClick = {
                                 onClearLogs()
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(logClearedMsg)
-                                }
+                                // ISSUE-P3-359 AC④：日志清空提示直发全局通道
+                                    AppSnackbarChannel.trySend(AppSnackbarEvent(UiMessage(R.string.debug_log_cleared)))
                             },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()

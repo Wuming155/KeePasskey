@@ -8,6 +8,7 @@ import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.KdbxMerger
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -62,13 +63,21 @@ class ConflictResolutionViewModel @Inject constructor(
                     // 不再展示写死的演示时间戳（原为「今天 10:25/10:22」，会误导用户裁决）
                     val localNewest = conflicts.maxOfOrNull { it.localEntry.times.lastModificationTime }
                     val remoteNewest = conflicts.maxOfOrNull { it.remoteEntry.times.lastModificationTime }
+                    // ISSUE-P3-360 AC①：按 Instant 现场比较标注「较新」一侧（格式化文案不可比）
+                    val newerSide = when {
+                        localNewest == null || remoteNewest == null -> null
+                        localNewest > remoteNewest -> ModifiedTimeSide.LOCAL
+                        remoteNewest > localNewest -> ModifiedTimeSide.REMOTE
+                        else -> null
+                    }
                     _uiState.update {
                         it.copy(
                             entries = items,
                             localModifiedTime = localNewest?.let(::formatConflictTime).orEmpty()
                                 .ifEmpty { strings.get(R.string.conflict_time_unknown) },
                             remoteModifiedTime = remoteNewest?.let(::formatConflictTime).orEmpty()
-                                .ifEmpty { strings.get(R.string.conflict_time_unknown) }
+                                .ifEmpty { strings.get(R.string.conflict_time_unknown) },
+                            newerSide = newerSide
                         )
                     }
                 }
@@ -87,6 +96,38 @@ class ConflictResolutionViewModel @Inject constructor(
     }
 
     /**
+     * ISSUE-P3-360 AC①：敏感字段的安全差异线索——静态掩码两侧完全相同、无法区分差异，
+     * 改为「掩码 + 长度 + 字符形态（大写/小写/数字/符号）」。
+     *
+     * 安全裁决：**不做「揭示」开关**——冲突裁决无需明文即可完成，明文进 UiState 违反
+     * 敏感数据铁律（能用 Char 的地方绝不落到 String）。长度与形态统计经
+     * [ProtectedString.useChars] 在 CharArray 通道完成，不物化明文、不入日志。
+     *
+     * @param fallbackMask [value] 缺失 / 已清零时的回退掩码（保持既有降级形态）
+     */
+    private fun sensitiveValueHint(value: ProtectedString?, fallbackMaskRes: Int): String {
+        if (value == null || value.cleared) return strings.get(fallbackMaskRes)
+        return value.useChars { chars ->
+            if (chars.isEmpty()) {
+                strings.get(R.string.conflict_sensitive_hint_length_only, 0)
+            } else {
+                val categories = buildList {
+                    if (chars.any { it in 'A'..'Z' }) add(strings.get(R.string.conflict_sensitive_cat_upper))
+                    if (chars.any { it in 'a'..'z' }) add(strings.get(R.string.conflict_sensitive_cat_lower))
+                    if (chars.any { it in '0'..'9' }) add(strings.get(R.string.conflict_sensitive_cat_digit))
+                    if (chars.any { !it.isLetterOrDigit() }) add(strings.get(R.string.conflict_sensitive_cat_symbol))
+                }
+                val separator = strings.get(R.string.conflict_sensitive_cat_separator)
+                if (categories.isEmpty()) {
+                    strings.get(R.string.conflict_sensitive_hint_length_only, chars.size)
+                } else {
+                    strings.get(R.string.conflict_sensitive_hint, chars.size, categories.joinToString(separator))
+                }
+            }
+        }
+    }
+
+    /**
      * ISSUE-P2-281：把 `modifiedFields` 的一个差异键映射为可裁决的界面行
      * （键的词汇与合并器同表——标准字段键 / `custom:` 前缀自定义字段键 / 四个标量键）。
      * 敏感值（密码 / `isProtected` 的自定义字段）一律掩码，不物化明文。
@@ -101,8 +142,8 @@ class ConflictResolutionViewModel @Inject constructor(
             key == KdbxConstants.Fields.PASSWORD -> ConflictedField(
                 fieldKey = key,
                 fieldName = strings.get(R.string.conflict_field_password),
-                localValue = strings.get(R.string.conflict_mask_local),
-                remoteValue = strings.get(R.string.conflict_mask_remote),
+                localValue = sensitiveValueHint(local.fields[key], R.string.conflict_mask_local),
+                remoteValue = sensitiveValueHint(remote.fields[key], R.string.conflict_mask_remote),
                 isSensitive = true
             )
             key == KdbxConstants.Fields.TITLE || key == KdbxConstants.Fields.USER_NAME ||
@@ -128,8 +169,16 @@ class ConflictResolutionViewModel @Inject constructor(
                 ConflictedField(
                     fieldKey = key,
                     fieldName = customKey,
-                    localValue = if (sensitive) strings.get(R.string.conflict_mask_local) else lv?.readString().orEmpty(),
-                    remoteValue = if (sensitive) strings.get(R.string.conflict_mask_remote) else rv?.readString().orEmpty(),
+                    localValue = if (sensitive) {
+                        sensitiveValueHint(lv, R.string.conflict_mask_local)
+                    } else {
+                        lv?.readString().orEmpty()
+                    },
+                    remoteValue = if (sensitive) {
+                        sensitiveValueHint(rv, R.string.conflict_mask_remote)
+                    } else {
+                        rv?.readString().orEmpty()
+                    },
                     isSensitive = sensitive
                 )
             }

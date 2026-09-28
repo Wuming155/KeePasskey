@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
@@ -60,6 +59,8 @@ fun DatabaseSettingsScreen(
     importState: ImportUiState = ImportUiState.Idle,
     onImportFileSelected: (ImportSource, Uri) -> Unit = { _, _ -> },
     onImportReportDismiss: () -> Unit = {},
+    // ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation）
+    onImportCancel: () -> Unit = {},
     // ISSUE-P3-20：子库挂载（核心层 ChildDatabaseSessionManager 已落地，本屏为真实入口）。
     // 状态与动作全部上抬自 SettingsViewModel；本屏只维护 SAF 选择结果与表单开关，
     // 不含任何解密/挂载业务逻辑。
@@ -205,12 +206,14 @@ fun DatabaseSettingsScreen(
                 DatabaseIntegrityCard()
             }
 
-            // TASK-13 整改：导出/模板动作结果反馈（点击清除），真实动作的结果如实上浮
+            // TASK-13 整改：导出/模板动作结果反馈（点击清除），真实动作的结果如实上浮。
+            // ISSUE-P2-353 AC④：错误样式改读类型化 isError 字段——按文案 contains("失败")
+            // 判定在英文语言下会把失败条目渲染成成功样式。
             exportFeedback?.let { feedback ->
                 item {
                     DatabaseFeedbackItem(
                         message = feedback,
-                        isError = feedback.resolveText().contains("失败"),
+                        isError = feedback.isError,
                         onClick = onClearExportFeedback
                     )
                 }
@@ -315,7 +318,8 @@ fun DatabaseSettingsScreen(
         showDialog = showImportDialog,
         onDialogDismiss = { showImportDialog = false },
         onFileSelected = onImportFileSelected,
-        onReportDismiss = onImportReportDismiss
+        onReportDismiss = onImportReportDismiss,
+        onCancelImport = onImportCancel
     )
 }
 

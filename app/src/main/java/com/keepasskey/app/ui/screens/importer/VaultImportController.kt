@@ -22,10 +22,12 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -59,6 +61,18 @@ class VaultImportController @Inject constructor(
     /** 导入状态流（设置页直接 collect）。 */
     val uiState: StateFlow<ImportUiState> = mutableUiState.asStateFlow()
 
+    /** 进行中的导入作业（ISSUE-P2-354 AC④：取消通道持有它执行协程 cancellation）。 */
+    private var importJob: Job? = null
+
+    /**
+     * 导入代际（ISSUE-P2-354 AC④）：`startImport` / `cancelImport` 各自递增。
+     * 过期作业（被取消或已被新一轮替代）的**一切状态回写**——阶段、计数、终态——
+     * 一律按代际比对丢弃：否则取消后旧协程的迟到回调会污染新一轮的进度或复活已关闭的报告。
+     * 取消与启动都只发生在 UI 线程（`++` 无并发写），`@Volatile` 只为跨线程可见性。
+     */
+    @Volatile
+    private var generation = 0
+
     /**
      * 启动一次导入：由设置页在 SAF 选择器返回 [uri] 后调用。
      *
@@ -70,13 +84,47 @@ class VaultImportController @Inject constructor(
         policy: ImportConflictPolicy = ImportConflictPolicy.SKIP_EXISTING
     ) {
         if (mutableUiState.value is ImportUiState.Parsing) return
-        mutableUiState.value = ImportUiState.Parsing(source)
-        scope.launch { mutableUiState.value = runImport(source, uri, policy) }
+        val gen = ++generation
+        mutableUiState.value = ImportUiState.Parsing(source, stage = ImportStage.READING)
+        importJob = scope.launch {
+            val finalState = runImport(source, uri, policy, gen)
+            // 取消与完成可能竞态：代际已变（被取消 / 被新一轮替代）或状态已离开 Parsing 时不回写终态
+            if (gen == generation && mutableUiState.value is ImportUiState.Parsing) {
+                mutableUiState.value = finalState
+            }
+        }
+    }
+
+    /**
+     * 取消进行中的导入（ISSUE-P2-354 AC④：协程 cancellation 通道；导入对话框「取消」按钮）。
+     *
+     * 非 Parsing 态（空闲 / 报告已出）为 no-op。取消语义如实声明：**已落库条目保留**
+     * （`ImportPersistRun` 单条保存原子，不留半截文件），未完成部分不再写入；
+     * 文件字节与批次敏感数组由 `runImport` 的 `finally` 随取消路径清零。
+     * 代际先行递增，确保旧协程即使已越过挂起点也无法再回写任何状态。
+     */
+    fun cancelImport() {
+        if (mutableUiState.value !is ImportUiState.Parsing) return
+        generation++
+        importJob?.cancel()
+        importJob = null
+        mutableUiState.value = ImportUiState.Idle
     }
 
     /** 报告展示完毕/用户取消后回到空闲态。 */
     fun reset() {
         mutableUiState.value = ImportUiState.Idle
+    }
+
+    /**
+     * 仅当 [generation] 仍是当前代际且状态仍在 [ImportUiState.Parsing] 时，
+     * 把状态变换写回（阶段推进 / 落库计数）。过期作业与已取消导入的回调在此被丢弃。
+     */
+    private fun publishParsing(generation: Int, transform: (ImportUiState.Parsing) -> ImportUiState.Parsing) {
+        if (generation != this.generation) return
+        mutableUiState.update { current ->
+            if (current is ImportUiState.Parsing) transform(current) else current
+        }
     }
 
     /** [source] 对应解析器支持的扩展名（小写，不含点）；未注册时返回空集。 */
@@ -86,7 +134,8 @@ class VaultImportController @Inject constructor(
     private suspend fun runImport(
         source: ImportSource,
         uri: Uri,
-        policy: ImportConflictPolicy
+        policy: ImportConflictPolicy,
+        generation: Int
     ): ImportUiState {
         val importer = registry.find(source)
             ?: return ImportUiState.Failed(source, ImportFailureReason.SOURCE_UNAVAILABLE)
@@ -98,6 +147,8 @@ class VaultImportController @Inject constructor(
             is KdbxResult.Failure -> return ImportUiState.Failed(source, ImportFailureReason.classify(read.error))
             is KdbxResult.Success -> read.data
         }
+        // 阶段推进：读取完成 → 解析（READING 段已由 startImport 置好）
+        publishParsing(generation) { it.copy(stage = ImportStage.PARSING) }
         var batch: ImportBatch? = null
         return try {
             when (val parsed = importer.parse(bytes, fileName ?: EMPTY_FILE_NAME)) {
@@ -113,7 +164,19 @@ class VaultImportController @Inject constructor(
                 }
                 is KdbxResult.Success -> {
                     batch = parsed.data
-                    when (val persisted = vaultImporter.persist(parsed.data, policy)) {
+                    // 阶段推进：解析完成 → 落库（总数 = 本批条目数，计数经 onProgress 逐条推进）
+                    publishParsing(generation) {
+                        it.copy(stage = ImportStage.PERSISTING, processed = 0, total = parsed.data.entries.size)
+                    }
+                    when (val persisted = vaultImporter.persist(
+                        parsed.data,
+                        policy,
+                        onProgress = { done, total ->
+                            publishParsing(generation) { parsing ->
+                                parsing.copy(stage = ImportStage.PERSISTING, processed = done, total = total)
+                            }
+                        }
+                    )) {
                         is KdbxResult.Failure -> {
                             debugLog.warn(
                                 TAG,

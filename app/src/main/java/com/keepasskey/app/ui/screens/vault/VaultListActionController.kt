@@ -6,7 +6,7 @@ import com.keepasskey.app.data.repository.parseKdbxUuidOrNull
 import com.keepasskey.app.passkey.PasskeyImportDraft
 import com.keepasskey.app.passkey.PasskeyImportDraftHost
 import com.keepasskey.app.passkey.PasskeyImportFactory
-import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -29,8 +29,8 @@ import java.util.UUID
  * 1. **批量选择**：本类持有批量模式与选中集合两个 `StateFlow`（原先在 ViewModel 内），
  *    对外只读暴露供 UI 状态流 combine，写入口收敛为下列方法；
  * 2. **分组 / 条目写操作**：新建 / 重命名 / 改图标 / 删除分组、还原 / 彻底删除条目、清空回收站；
- * 3. **剪贴板复制**：密码走 CharArray 借用通道并用毕清零（ISSUE-P2-15），用户名走明文通道；
- *    TOTP 走受保护文本通道且**硬拒绝 HOTP**（ISSUE-P3-184，理由见 [copyTotpCode]）。
+ * 3. **剪贴板复制**：执行体下沉至 [VaultListClipboardCopy]（ISSUE-P2-353 AC①：只在实际写入
+ *    成功后才报成功），本类保留门面与 HOTP 第二道防线（ISSUE-P3-184，理由见 [copyTotpCode]）。
  *
  * 只读会话（H4）下 2 的写操作一律硬拒绝；`isReadOnly` / `currentGroupId` / `currentGroups` /
  * `currentEntryIds` 均以回调形式从 ViewModel 取当前快照，避免本类反向持有 ViewModel。
@@ -49,7 +49,7 @@ internal class VaultListActionController(
     private val repository: VaultRepository,
     private val scope: CoroutineScope,
     private val strings: StringsProvider,
-    private val clipboardSecurityManager: ClipboardSecurityManager?,
+    private val clipboardSecurityManager: ClipboardSecurityChannel?,
     private val host: VaultListActionHost
 ) {
     private val isReadOnly get() = host.isReadOnly
@@ -68,66 +68,49 @@ internal class VaultListActionController(
     val selectedEntryIds: StateFlow<Set<String>> = selectedEntryIdsFlow
 
     // ---------------------------------------------------------------------
-    // 剪贴板复制
+    // 剪贴板复制（ISSUE-P2-353 AC①：执行体下沉至 VaultListClipboardCopy——
+    // 只在剪贴板**实际写入成功**后才报成功，通道缺失 / 写入异常如实报失败）
     // ---------------------------------------------------------------------
 
-    fun copyPassword(entry: UiVaultEntry) {
-        // M1 整改：列表投影不携带密码明文，复制时按需单条解密
-        // ISSUE-P2-15：读取与写入全程走 CharArray 借用通道，不经不可擦 String 中转
-        scope.launch {
-            val chars = repository.getEntryPasswordChars(entry.id)
-            if (chars != null) {
-                try {
-                    clipboardSecurityManager?.copySensitiveChars(entry.title, chars)
-                } finally {
-                    chars.fill('0')
-                }
-            }
-            onMessage(UiMessage(R.string.vault_copy_password_done, listOf(entry.title)))
-        }
-    }
+    private val clipboardCopy = VaultListClipboardCopy(
+        repository = repository,
+        scope = scope,
+        clipboard = clipboardSecurityManager,
+        onMessage = { onMessage(it) }
+    )
 
-    fun copyUsername(entry: UiVaultEntry) {
-        if (entry.username.isNotBlank()) {
-            clipboardSecurityManager?.copyPlainText(entry.title, entry.username)
-            onMessage(UiMessage(R.string.vault_copy_username_done, listOf(entry.username)))
-        } else {
-            onMessage(UiMessage(R.string.vault_copy_username_missing))
-        }
-    }
+    fun copyPassword(entry: UiVaultEntry) = clipboardCopy.copyPassword(entry)
+
+    fun copyUsername(entry: UiVaultEntry) = clipboardCopy.copyUsername(entry)
 
     /**
      * ISSUE-P3-184：复制条目**当前 TOTP 验证码**——列表行徽标一次点击即可，无需进详情页。
      *
-     * 三条契约：
-     * 1. **HOTP 硬拒绝**（`entry.isHotp`）：HOTP 之码由持久化计数器决定，「复制而不推进」会让同一
-     *    计数器被重复使用，故只提供详情页的「取下一个码」（`advanceHotp`）而无复制入口；
-     *    调用侧亦按 `isHotp` 不渲染可点徽标，此处是第二道防线。
-     * 2. **取值走仓库按需通道**（ISSUE-P2-90：命中周期缓存时不触碰会话），仅在其不可用时
-     *    回退到列表投影的码，避免复制到过期值。
-     * 3. **失败不谎报**：无 TOTP / 计算失败一律经 [onMessage] 如实提示，不显示「已复制」。
+     * 契约一（**HOTP 硬拒绝**，`entry.isHotp`）留在本门面：HOTP 之码由持久化计数器决定，
+     * 「复制而不推进」会让同一计数器被重复用，故只提供详情页的「取下一个码」（`advanceHotp`）
+     * 而无复制入口；调用侧亦按 `isHotp` 不渲染可点徽标，此处是第二道防线。
+     * 取值、写入与「失败不谎报」（无 TOTP / 写入失败一律如实提示）由
+     * [VaultListClipboardCopy.copyTotpCode] 执行（ISSUE-P2-353 AC①）。
      */
     fun copyTotpCode(entry: UiVaultEntry) {
         if (entry.isHotp) return
-        scope.launch {
-            val code = repository.calculateEntryTotp(entry.id)?.code?.takeIf { it.isNotBlank() }
-                ?: entry.totpCode?.takeIf { it.isNotBlank() }
-            if (code == null) {
-                onMessage(UiMessage(R.string.vault_copy_totp_missing))
-                return@launch
-            }
-            clipboardSecurityManager?.copySensitiveText(entry.title, code)
-            onMessage(UiMessage(R.string.vault_copy_totp_done, listOf(entry.title)))
-        }
+        clipboardCopy.copyTotpCode(entry)
     }
 
     // ---------------------------------------------------------------------
     // 批量选择
     // ---------------------------------------------------------------------
 
+    /**
+     * 进入批量选择模式。
+     * ISSUE-P3-360 AC④a：[initialEntryId] 为空串表示**不预选**任何条目
+     * （溢出菜单「选择」入口；长按入口恒传真实条目 id）——空串不是合法条目 id，
+     * 故不会进入选中集合污染批量操作。
+     */
     fun startBatchMode(initialEntryId: String) {
         isBatchModeFlow.value = true
-        selectedEntryIdsFlow.value = setOf(initialEntryId)
+        selectedEntryIdsFlow.value =
+            if (initialEntryId.isEmpty()) emptySet() else setOf(initialEntryId)
     }
 
     fun toggleEntrySelection(entryId: String) {
@@ -166,17 +149,42 @@ internal class VaultListActionController(
         }
     }
 
+    /**
+     * ISSUE-P2-357 AC②：最近一次批量软删除的待撤销批次（条目 id）。删除成功时写入，
+     * 消息标记 [UiMessage.undoable]，Snackbar 的撤销动作经 [undoBatchDelete] 消费并置空——
+     * 过期批次不可再被触发（撤销出口只随该消息的 ActionPerformed 存在）。
+     */
+    private val pendingUndoIdsFlow = MutableStateFlow<List<String>?>(null)
+
     fun batchDeleteSelected() {
         val selected = selectedEntryIdsFlow.value
         if (selected.isEmpty()) return
         scope.launch {
             val result = repository.batchDeleteEntries(selected)
             if (result is KdbxResult.Success) {
-                onMessage(UiMessage(R.string.vault_batch_deleted, listOf(selected.size)))
+                pendingUndoIdsFlow.value = selected.toList()
+                onMessage(UiMessage(R.string.vault_batch_deleted, listOf(selected.size), undoable = true))
                 clearBatchSelection()
             } else {
                 onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
+        }
+    }
+
+    /**
+     * ISSUE-P2-357 AC②：撤销上一次批量软删除——把待撤销批次逐条经回收站恢复入口还原；
+     * 无待撤销批次（从未删除 / 已撤销过 / 非可撤销消息）时为空操作，不产生任何消息。
+     * 批量删除本身是软删除（移入回收站），故撤销可安全逆放；彻底删除无此通道。
+     */
+    fun undoBatchDelete() {
+        val ids = pendingUndoIdsFlow.value ?: return
+        pendingUndoIdsFlow.value = null
+        scope.launch {
+            var restored = 0
+            ids.forEach { id ->
+                if (repository.restoreEntry(id) is KdbxResult.Success) restored++
+            }
+            onMessage(UiMessage(R.string.vault_batch_restored, listOf(restored)))
         }
     }
 

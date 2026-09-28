@@ -1,7 +1,6 @@
 package com.keepasskey.app.ui.screens.detail
 
 import android.content.res.Configuration
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -44,11 +43,9 @@ internal fun EntryDetailContentPreview() {
                 allGroups = com.keepasskey.app.ui.preview.PreviewGroups
             )
         ).value
-        val previewSnackbar = remember { SnackbarHostState() }
 
         EntryDetailContent(
             uiState = previewUiState,
-            snackbarHostState = previewSnackbar,
             onBackClick = {},
             onEditClick = {},
             onToggleFavorite = {},

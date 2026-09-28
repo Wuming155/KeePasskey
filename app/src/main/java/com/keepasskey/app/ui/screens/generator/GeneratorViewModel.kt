@@ -50,7 +50,9 @@ class GeneratorViewModel @Inject constructor(
 
     fun setRandomLength(length: Int) {
         _uiState.update { it.copy(randomLength = length) }
-        generateNewPassword()
+        // ISSUE-P3-360 AC②：滑杆调节只更新参数并实时重生成（预览不回退），中间值不入 history——
+        // 此前拖一次滑杆即把每个中间态推进 history，一次拖动塞满 10 条
+        generateNewPassword(recordInHistory = false)
     }
 
     fun setUseUpper(enabled: Boolean) {
@@ -80,7 +82,8 @@ class GeneratorViewModel @Inject constructor(
 
     fun setWordCount(count: Int) {
         _uiState.update { it.copy(wordCount = count) }
-        generateNewPassword()
+        // ISSUE-P3-360 AC②：同 setRandomLength——词数滑杆同为滑杆调节，中间值不入 history
+        generateNewPassword(recordInHistory = false)
     }
 
     fun setSeparator(separator: String) {
@@ -144,14 +147,30 @@ class GeneratorViewModel @Inject constructor(
         secret.useChars { chars ->
             clipboardSecurityManager.copySensitiveChars(GENERATED_PASSWORD_CLIP_LABEL, chars)
         }
-        _uiState.update { it.copy(userMessage = UiMessage(R.string.generator_password_copied)) }
+        // ISSUE-P3-360 AC③b：生成器复制同为敏感通道——消息附「Ns 后自动清空」倒计时
+        // （秒数经 ClipboardSecurityChannel.scheduledClearSeconds 同源裁决；假通道缺省 null 即不附）
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    userMessage = UiMessage(
+                        resId = R.string.generator_password_copied,
+                        clipboardClearSeconds = clipboardSecurityManager.scheduledClearSeconds()
+                    )
+                )
+            }
+        }
     }
 
     fun clearUserMessage() {
         _uiState.update { it.copy(userMessage = null) }
     }
 
-    private fun generateNewPassword() {
+    /**
+     * @param recordInHistory 是否把被替换的当前值推进内存历史。
+     *   ISSUE-P3-360 AC②：滑杆调节（长度 / 词数）传 `false`——仍实时重生成保持预览，
+     *   但中间态不入 history；其余动作（模式切换 / 开关 / 重新生成等）保持既有入史语义。
+     */
+    private fun generateNewPassword(recordInHistory: Boolean = true) {
         val currentState = _uiState.value
         // ISSUE-P2-286：强度内核评估（CPU 热路径）与生成一并下沉 Dispatchers.Default（§3 规则 2）；
         // 熵读数收敛单一真相源：随机 / 掩码走 crypto 内核（calculateEntropy），
@@ -203,7 +222,7 @@ class GeneratorViewModel @Inject constructor(
             _uiState.update { current ->
                 val previous = current.currentPassword
                 val unchanged = previous.length > 0 && previous == newSecret
-                val historyWithPrevious = if (previous.length > 0 && !unchanged) {
+                val historyWithPrevious = if (recordInHistory && previous.length > 0 && !unchanged) {
                     listOf(previous) + current.history
                 } else {
                     current.history

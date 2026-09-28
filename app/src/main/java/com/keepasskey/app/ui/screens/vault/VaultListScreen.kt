@@ -13,8 +13,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
@@ -32,9 +30,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.keepasskey.app.ui.components.vaultLoadingSkeletonItems
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.edit.TotpScanDialog
 import com.keepasskey.app.ui.theme.AppThemeMode
 
@@ -63,11 +61,12 @@ fun VaultListScreen(
     viewModel: VaultListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // ISSUE-P2-356：搜索框显示态走未防抖通道（防抖只作用于过滤流，快速连打不回吞）
+    val searchQuery by viewModel.searchQueryDisplay.collectAsStateWithLifecycle()
     // ISSUE-P2-89：TOTP 的两条实时通道只在此处**取状态对象本身**（不读 .value），
     // 读取动作下沉到列表行内的徽标——故本页组合作用域不会因每秒 tick 而失效。
     val totpNowSecondsState = viewModel.totpNowSeconds.collectAsStateWithLifecycle()
     val totpLiveCodesState = viewModel.totpLiveCodes.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
 
     // 顶栏扫码对话框可见性（otpauth URI 解码后由 ViewModel 直接创建验证码条目）
     var showScanDialog by remember { mutableStateOf(false) }
@@ -78,34 +77,27 @@ fun VaultListScreen(
     // （ExtendedSettingsStore 只有同步快照 API，设置页改动返回本页即生效）
     LaunchedEffect(Unit) { viewModel.onScreenEntered() }
 
-    uiState.userMessage?.let { message ->
-        val text = message.resolveText()
-        LaunchedEffect(message, text) {
-            snackbarHostState.showSnackbar(text)
-            viewModel.clearUserMessage()
-        }
-    }
+    val batchGuide = rememberBatchSelectGuideStore() // ISSUE-P3-360 AC④b：首次长按进入批量的一次性引导（持久化标记，全生命周期仅一次；消费点在 onEntryLongClick）
+    // ISSUE-P3-359 AC④：消息发布已在 ViewModel 内直连全局通道（publishVaultMessage），
+    // 呈现由外壳唯一宿主 AppGlobalSnackbarHost 承担——本页不再持有 SnackbarHost / 屏级编排
 
-    // 优雅的返回键处理：
-    // 1. 处于批量选择模式时：取消批量选择
-    // 2. 搜索框有输入内容时：清空搜索
-    // 3. 处于子分组目录时：返回上一级目录
-    // 4. 处于根目录时：不拦截，交由系统默认退出/返回
+    // 优雅的返回键处理：批量选择 → 清空搜索 → 返回上一级 → 根目录交还系统。
+    // ISSUE-P2-356：清空判定读即时回显态，与输入框同拍（防抖值会漏判窗口期）。
     BackHandler(
         enabled = uiState.isBatchMode ||
-                uiState.searchQuery.isNotEmpty() ||
+                searchQuery.isNotEmpty() ||
                 uiState.currentGroupId != null
     ) {
         when {
             uiState.isBatchMode -> viewModel.clearBatchSelection()
-            uiState.searchQuery.isNotEmpty() -> viewModel.onSearchQueryChange("")
+            searchQuery.isNotEmpty() -> viewModel.onSearchQueryChange("")
             uiState.currentGroupId != null -> viewModel.navigateUp()
         }
     }
 
     VaultListContent(
         uiState = uiState,
-        snackbarHostState = snackbarHostState,
+        searchQuery = searchQuery,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onSortOptionSelect = viewModel::setSortOption,
         // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行
@@ -124,6 +116,7 @@ fun VaultListScreen(
         onEntryLongClick = { entryId ->
             if (!uiState.isBatchMode) {
                 viewModel.startBatchMode(entryId)
+                if (batchGuide.consumeFirstGuide()) publishBatchSelectGuide()
             } else {
                 viewModel.toggleEntrySelection(entryId)
             }
@@ -152,6 +145,7 @@ fun VaultListScreen(
         onClearBatch = viewModel::clearBatchSelection,
         onBatchDelete = viewModel::batchDeleteSelected,
         onBatchMove = viewModel::batchMoveSelected,
+        onSelectEntriesBatch = { viewModel.startBatchMode("") }, // ISSUE-P3-360 AC④a：溢出菜单「选择」项进入批量模式（空 id = 不预选任何条目）
         onKillApp = onKillApp,
         onScanClick = if (uiState.isReadOnly) null else ({ showScanDialog = true }),
         onAutoActivateSearchConsumed = viewModel::consumeAutoActivateSearch,
@@ -194,7 +188,8 @@ fun VaultListScreen(
 @Composable
 fun VaultListContent(
     uiState: VaultListUiState,
-    snackbarHostState: SnackbarHostState,
+    // ISSUE-P2-356：搜索框即时回显（未防抖）；缺省取过滤快照供预览 / 截图测试
+    searchQuery: String = uiState.searchQuery,
     onSearchQueryChange: (String) -> Unit,
     onSortOptionSelect: (VaultSortOption) -> Unit,
     // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行（预览与既有调用方可走缺省）
@@ -229,6 +224,7 @@ fun VaultListContent(
     onClearBatch: () -> Unit,
     onBatchDelete: () -> Unit,
     onBatchMove: (String?) -> Unit,
+    onSelectEntriesBatch: () -> Unit = {}, // ISSUE-P3-360 AC④a：溢出菜单「选择」项（进入批量模式，不预选任何条目）
     // ISSUE-P3-17：非空才呈现「彻底退出应用」入口（偏好开启且宿主可终止）
     onKillApp: (() -> Unit)? = null,
     /** 非空才在溢出菜单呈现「扫码」入口（otpauth → 创建验证码条目）；只读会话传 null 隐藏 */
@@ -246,7 +242,7 @@ fun VaultListContent(
     totpLiveCodes: State<Map<String, String>> = remember { mutableStateOf(emptyMap()) },
     modifier: Modifier = Modifier
 ) {
-    // ISSUE-P3-29：8 个对话框的可见性 / 目标对象由独立状态持有者承接（见 VaultListDialogHost.kt）
+    // ISSUE-P3-29：10 个对话框的可见性 / 目标对象由独立状态持有者承接（见 VaultListDialogHost.kt）
     val dialogs = rememberVaultListDialogController()
     val listState = rememberLazyListState()
     val pullRefreshState = rememberPullToRefreshState()
@@ -256,9 +252,8 @@ fun VaultListContent(
         ListDensityPresenter.specOf(uiState.listDensity)
     }
 
-    // ISSUE-P3-30：搜索态标记（仅用于「子库条目不参与搜索」的提示行；
-    // 子库分区本身的可见性判定在状态层完成，见 VaultListUiState.childEntrySectionVisible）
-    val isSearching = uiState.searchQuery.isNotBlank()
+    // ISSUE-P3-30：搜索态标记（仅用于「子库条目不参与搜索」提示行；子库分区可见性判定在状态层）
+    val isSearching = searchQuery.isNotBlank()
 
     // ISSUE-P3-261 AC⑧：列表内容层动效与主题 MotionScheme 同族——条目增删 / 重排不再瞬移。
     // ISSUE-P3-323 降档：fade fast→default（3800→1600，增删不再近瞬消）、placement
@@ -271,7 +266,6 @@ fun VaultListContent(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             if (uiState.isBatchMode) {
                 VaultListBatchModeTopBar(
@@ -279,11 +273,11 @@ fun VaultListContent(
                     onClearBatch = onClearBatch,
                     onSelectAllBatch = onSelectAllBatch,
                     onBatchMoveClick = { dialogs.showBatchMoveDialog = true },
-                    onBatchDelete = onBatchDelete
+                    onBatchDelete = { dialogs.showBatchDeleteConfirm = true } // ISSUE-P2-357 AC①：先确认再删
                 )
             } else {
                 VaultListSearchTopBar(
-                    searchQuery = uiState.searchQuery,
+                    searchQuery = searchQuery,
                     onSearchQueryChange = onSearchQueryChange,
                     isInsideRecycleBin = uiState.isInsideRecycleBin,
                     sortOption = uiState.sortOption,
@@ -294,7 +288,8 @@ fun VaultListContent(
                     autoActivateSearch = uiState.autoActivateSearch,
                     onAutoActivateSearchConsumed = onAutoActivateSearchConsumed,
                     onKillApp = onKillApp,
-                    onScanClick = onScanClick
+                    onScanClick = onScanClick,
+                    onSelectEntriesClick = onSelectEntriesBatch
                 )
             }
         },
@@ -335,12 +330,14 @@ fun VaultListContent(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (uiState.isLoading) vaultLoadingSkeletonItems() // ISSUE-P3-360 AC⑤：库列表首载骨架（真实投影落地前；空态判定已排除加载窗）
+
                 if (uiState.hasPendingConflict) {
                     item { PendingConflictBanner(onClick = onNavigateToConflictResolver) }
                 }
 
                 // 1. 面包屑路径导航
-                if (uiState.breadcrumbs.isNotEmpty() && uiState.searchQuery.isBlank()) {
+                if (uiState.breadcrumbs.isNotEmpty() && searchQuery.isBlank()) {
                     item {
                         VaultBreadcrumbBar(
                             breadcrumbs = uiState.breadcrumbs,
@@ -391,6 +388,7 @@ fun VaultListContent(
                 items(uiState.currentGroups, key = { "group_${it.id}" }) { group ->
                     KeePassGroupRow(
                         group = group,
+                        highlightQuery = uiState.searchQuery, // ISSUE-P3-360 AC④c：命中高亮取**已生效**的过滤词（防抖后），非输入回显
                         icon = uiState.groupIcons[group.id],
                         densitySpec = densitySpec,
                         onClick = { onGroupClick(group.id) },
@@ -411,6 +409,7 @@ fun VaultListContent(
                     val isSelected = entry.id in uiState.selectedEntryIds
                     UnifiedVaultEntryRow(
                         entry = entry,
+                        highlightQuery = uiState.searchQuery, // ISSUE-P3-360 AC④c：命中高亮取**已生效**的过滤词（防抖后），非输入回显
                         isRecycled = uiState.isInsideRecycleBin,
                         isBatchMode = uiState.isBatchMode,
                         isSelected = isSelected,
@@ -427,7 +426,7 @@ fun VaultListContent(
                         onCopyUsername = { onCopyUsername(entry) },
                         onCopyTotpCode = { onCopyTotp(entry) },
                         onRestore = { onRestoreEntry(entry.id) },
-                        onPurge = { onPurgeEntry(entry.id) },
+                        onPurge = { dialogs.purgeEntryToDelete = entry }, // ISSUE-P2-357 AC①：先确认再永久删除
                         // ISSUE-P3-02：状态层装配的图标投影与引用展开文案（UI 只做纯绘制）
                         decorations = uiState.decorations,
                         // ISSUE-P2-89：TOTP 实时值经窄状态下发，仅由徽标读取（本页不读其值）
@@ -466,9 +465,9 @@ fun VaultListContent(
                     }
                 }
 
-                // 7. 空状态（子库分区有内容时不算空）
-                if (uiState.currentGroups.isEmpty() && uiState.entries.isEmpty() && !uiState.childEntrySectionVisible) {
-                    item { VaultEmptyState(uiState.searchQuery.isNotBlank(), onCreateEntryFromSearch, onClearSearch) }
+                // 7. 空状态（子库分区有内容时不算空；首载骨架窗不呈现空态闪现）
+                if (!uiState.isLoading && uiState.currentGroups.isEmpty() && uiState.entries.isEmpty() && !uiState.childEntrySectionVisible) {
+                    item { VaultEmptyState(searchQuery.isNotBlank(), onCreateEntryFromSearch, onClearSearch) }
                 }
 
                 item { Spacer(modifier = Modifier.height(72.dp)) }
@@ -476,7 +475,7 @@ fun VaultListContent(
         }
     }
 
-    // ISSUE-P3-29：8 个对话框统一由 VaultListDialogHost 渲染（编排见该文件）
+    // ISSUE-P3-29：10 个对话框统一由 VaultListDialogHost 渲染（编排见该文件）
     VaultListDialogHost(
         controller = dialogs,
         uiState = uiState,
@@ -488,7 +487,7 @@ fun VaultListContent(
         onChangeGroupIcon = onChangeGroupIcon,
         onDeleteGroup = onDeleteGroup,
         onEmptyRecycleBin = onEmptyRecycleBin,
-        onBatchMove = onBatchMove
+        onBatchMove = onBatchMove, onBatchDelete = onBatchDelete, onPurgeEntry = onPurgeEntry
     )
 }
 

@@ -236,6 +236,14 @@ class UnlockThrottleManager @Inject constructor(
         get() = configProvider?.current ?: ThrottleConfig()
 
     /**
+     * ISSUE-P2-355 AC②：当前是否执行失败锁定。
+     * UI 仅在为 true 时呈现「剩余 N 次尝试」——节流被用户显式关闭时不存在锁定上限，
+     * 任何「剩余尝试」提示都是对用户的假承诺（失败计数在关闭态仍会累加，不可据其推算）。
+     */
+    val isLockoutEnforced: Boolean
+        get() = config.enabled
+
+    /**
      * 解锁前闸门：锁定期内返回 [ThrottleGate.Locked]（fail-closed），否则 [ThrottleGate.Allowed]。
      * 调用方拿到 Locked 时**必须拒绝解锁**，不得进入 KDF/解密流程。
      *

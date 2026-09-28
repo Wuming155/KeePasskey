@@ -12,11 +12,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.keepasskey.app.ui.components.EntryDetailLoadingSkeleton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -31,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,7 +39,6 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.model.resolveText
 
 /**
  * 有状态凭据详情页面（Route）
@@ -76,14 +76,9 @@ fun EntryDetailScreen(
             pendingExportAttachment = null
         }
     }
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    EntryDetailSnackbarEffect(
-        message = uiState.userMessage,
-        snackbarHostState = snackbarHostState,
-        onMessageShown = viewModel::clearUserMessage
-    )
-
+    // ISSUE-P3-359 AC④：消息发布已在 ViewModel 内直连全局通道（publishDetailMessage），
+    // 呈现由外壳唯一宿主 AppGlobalSnackbarHost 承担——本页不再持有 SnackbarHost / 屏级编排
+    // （§211 下沉件 EntryDetailSnackbarEffect 随迁移退役，其「一次性消费」语义由通道单次消费承接）
     EntryDetailContentHost(
         viewModel = viewModel,
         uiState = uiState,
@@ -94,10 +89,8 @@ fun EntryDetailScreen(
             pendingExportAttachment = att
             exportLauncher.launch(att.fileName)
         },
-        snackbarHostState = snackbarHostState,
         modifier = modifier
     )
-
     // ISSUE-P2-10 (ZT-15)：明文附件导出二次确认——取消分支不写盘（fail-closed），
     // 仅确认后才以 confirmed = true 委托 ViewModel 落盘并写审计。
     // ISSUE-P3-188 §169：对话框 UI 归位到 EntryDetailDialogHost.kt；三态与 SAF 空文档清理
@@ -135,7 +128,6 @@ fun EntryDetailScreen(
 @Composable
 fun EntryDetailContent(
     uiState: EntryDetailUiState,
-    snackbarHostState: SnackbarHostState,
     onBackClick: () -> Unit,
     onEditClick: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -174,7 +166,6 @@ fun EntryDetailContent(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             EntryDetailTopBar(
                 uiState = uiState,
@@ -189,7 +180,17 @@ fun EntryDetailContent(
             )
         }
     ) { innerPadding ->
-        if (entry == null) {
+        if (uiState.isLoading) {
+            // ISSUE-P3-359 AC⑤ / ISSUE-P3-360 AC⑤：解密 / 投影完成前渲染骨架占位（MotionScheme 淡入）——
+            // 不得把加载窗口误呈现为「未找到凭据」；读屏加载语义保留在 modifier 上
+            val loadingLabel = stringResource(R.string.edit_form_loading)
+            EntryDetailLoadingSkeleton(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .semantics { contentDescription = loadingLabel }
+            )
+        } else if (entry == null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -333,12 +334,10 @@ private fun EntryDetailContentHost(
     onBackClick: () -> Unit,
     onEditClick: (String) -> Unit,
     onExportAttachment: (UiAttachment) -> Unit,
-    snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier
 ) {
     EntryDetailContent(
         uiState = uiState,
-        snackbarHostState = snackbarHostState,
         onBackClick = onBackClick,
         onEditClick = { uiState.entry?.let { onEditClick(it.id) } },
         onToggleFavorite = viewModel::toggleFavorite,
@@ -399,22 +398,4 @@ private fun EntryDetailLifecycleEffects(
 
     // ISSUE-P3-17：进入详情页时刷新进阶显示偏好快照（遮掩默认值 / 所属分组开关）
     LaunchedEffect(Unit) { viewModel.onScreenEntered() }
-}
-
-/**
- * 一次性用户消息 → Snackbar 的消费编排（§211 自 [EntryDetailScreen] 下沉，逐字搬动、零行为变更）。
- */
-@Composable
-private fun EntryDetailSnackbarEffect(
-    message: UiMessage?,
-    snackbarHostState: SnackbarHostState,
-    onMessageShown: () -> Unit
-) {
-    message?.let {
-        val text = it.resolveText()
-        LaunchedEffect(it, text) {
-            snackbarHostState.showSnackbar(text)
-            onMessageShown()
-        }
-    }
 }

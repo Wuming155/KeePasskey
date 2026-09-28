@@ -68,7 +68,10 @@ class UnlockViewModel @Inject constructor(
     private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null,
     // ISSUE-P3-230 AC①：`content://` 库持久化读授权的查询通道。nullable 仅用于纯 JVM 单测；
     // 生产 DI 注入 @ApplicationContext（与 DatabasePickerViewModel / SettingsViewModel 同一既有范式）
-    @ApplicationContext private val appContext: Context? = null
+    @ApplicationContext private val appContext: Context? = null,
+    // ISSUE-P2-355 AC③：全局脏表单注册表（消费「锁定丢弃未保存编辑」一次性告知）。
+    // nullable 仅用于纯 JVM 单测；生产 DI 注入 @Singleton 真现实例
+    private val unsavedEditRegistry: com.keepasskey.app.security.UnsavedEditRegistry? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -128,6 +131,12 @@ class UnlockViewModel @Inject constructor(
     )
 
     init {
+        // ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知——读后复位，
+        // 同一实例只呈现一次，下次真丢弃（再次锁定且编辑页脏）才会重新登记
+        if (unsavedEditRegistry?.consumeDiscardNotice() == true) {
+            _uiState.update { it.copy(unsavedEditsDiscardedNotice = true) }
+        }
+
         viewModelScope.launch {
             vaultRepository.getDatabases().collect { databases ->
                 val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()

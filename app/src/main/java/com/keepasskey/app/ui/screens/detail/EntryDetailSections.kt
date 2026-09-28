@@ -55,6 +55,8 @@ internal fun CustomFieldsCard(
     entry: UiVaultEntry,
     onToggleCustomFieldVisibility: (String) -> Unit,
     onCopyCustomField: (String, String) -> Unit,
+    // ISSUE-P2-353 AC② 后本卡片不再自行发消息（复制反馈统一由协调器经同一通道上浮）；
+    // 参数保留以维持既有调用方 / 预览签名不变，勿据此再加本地成功提示
     onShowMessage: (UiMessage) -> Unit
 ) {
     BentoCard(
@@ -93,22 +95,21 @@ internal fun CustomFieldsCard(
                             IconButton(onClick = { onToggleCustomFieldVisibility(field.id) }) {
                                 Icon(
                                     imageVector = if (isVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = null,
+                                    // ISSUE-P3-358 AC②：自定义受保护字段显隐（原 null ⇒ TalkBack 播报「未加标签的按钮」）
+                                    contentDescription = stringResource(R.string.cd_toggle_password_visibility),
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
-                        // F2 整改：受保护字段复制经按需解密 + 受保护剪贴板，非保护字段保留原行为
-                        IconButton(onClick = {
-                            if (field.isProtected) {
-                                onCopyCustomField(field.id, field.key)
-                            } else {
-                                onShowMessage(UiMessage(R.string.detail_field_copied, listOf(field.key)))
-                            }
-                        }) {
+                        // ISSUE-P2-353 AC②：受保护与非保护字段统一走剪贴板通道——
+                        // 此前非保护分支只弹「已复制」却从未写入剪贴板（谎报成功）；
+                        // 协调器按字段键取值（两保护位同通道），取不到值 / 写入失败如实报错。
+                        // 复制结果由协调器经同一 showMessage 通道上浮，本卡片不再自行发成功消息。
+                        IconButton(onClick = { onCopyCustomField(field.id, field.key) }) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
-                                contentDescription = null,
+                                // ISSUE-P3-358 AC②：自定义字段复制（同上，补可播报描述）
+                                contentDescription = stringResource(R.string.cd_copy_password),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )

@@ -96,6 +96,9 @@ internal fun buildVaultListUiState(
     val content = projectVaultListContent(allGroups, allEntries, session)
     val activeDb = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
     return VaultListUiState(
+        // ISSUE-P3-360 AC⑤：首条真实投影即「已加载」——默认构造（initialValue）才是首载骨架态，
+        // 不显式置 false 会让列表永远停在骨架、真实内容永不出现
+        isLoading = false,
         searchQuery = session.filterParams.query,
         isSearchActive = session.filterParams.isSearchActive,
         sortOption = session.filterParams.sortOption,

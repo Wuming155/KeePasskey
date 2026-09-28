@@ -59,12 +59,17 @@ class VaultListViewModelTest {
 
     /**
      * 构造被测 ViewModel 并登记到 `MainDispatcherGuard`（teardown 统一取消其作用域，见 [tearDown]）。
+     * [clipboard]：ISSUE-P2-353 AC① 后成功消息依赖真实可写的剪贴板通道——缺省 null 用于
+     * 「通道缺失如实报失败」的负向用例，正向用例注入 [RecordingClipboardChannel]。
      */
-    private fun TestScope.newViewModel(repository: FakeVaultRepository): VaultListViewModel =
+    private fun TestScope.newViewModel(
+        repository: FakeVaultRepository,
+        clipboard: com.keepasskey.app.security.ClipboardSecurityChannel? = null
+    ): VaultListViewModel =
         VaultListViewModel(
             repository,
             FakeSettingsRepository(),
-            null,
+            clipboard,
             buildTestCoordinator(),
             displayDispatcher = UnconfinedTestDispatcher(testScheduler)
         ).also { MainDispatcherGuard.track(it) }
@@ -81,13 +86,22 @@ class VaultListViewModelTest {
     /**
      * 创建被测 ViewModel 并在后台订阅 uiState 以驱动 stateIn 的 WhileSubscribed 上游计算
      */
-    private fun TestScope.createSubscribedViewModel(): VaultListViewModel {
-        val viewModel = newViewModel(FakeVaultRepository())
+    private fun TestScope.createSubscribedViewModel(
+        repository: FakeVaultRepository = FakeVaultRepository(),
+        clipboard: com.keepasskey.app.security.ClipboardSecurityChannel? = null
+    ): VaultListViewModel {
+        val viewModel = newViewModel(repository, clipboard)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
         return viewModel
+    }
+
+    /** ISSUE-P2-353：为夹具条目 `2` 备好可读密码（Fake 的密码按需存储默认为空仓）。 */
+    private suspend fun seedPasswordOfEntry2(repository: FakeVaultRepository) {
+        val entry = repository.getEntries().first().find { it.id == "2" }!!
+        repository.saveEntry(entry, passwordChars = "unit-test-password".toCharArray())
     }
 
     /**
@@ -108,6 +122,55 @@ class VaultListViewModelTest {
             com.keepasskey.app.sync.SyncCredentialsStore(context, null),
             com.keepasskey.app.data.logger.DebugLogBuffer()
         )
+    }
+
+    /** ISSUE-P2-353：记录型剪贴板通道——只记录调用与内容，不触碰 Android 剪贴板（纯 JVM）。 */
+    private class RecordingClipboardChannel : com.keepasskey.app.security.ClipboardSecurityChannel {
+        var writeCount = 0
+            private set
+        var lastText: String? = null
+            private set
+
+        override fun copySensitiveText(
+            label: CharSequence,
+            text: CharSequence,
+            customTimeoutSeconds: Int?
+        ) {
+            writeCount++
+            lastText = text.toString()
+        }
+
+        override fun copySensitiveChars(
+            label: CharSequence,
+            chars: CharArray,
+            customTimeoutSeconds: Int?
+        ) {
+            writeCount++
+            lastText = String(chars)
+        }
+
+        override fun copyPlainText(label: CharSequence, text: CharSequence) {
+            writeCount++
+            lastText = text.toString()
+        }
+    }
+
+    /** ISSUE-P2-353：写入即抛异常的通道——驱动「异常按失败回报」分支。 */
+    private class ThrowingClipboardChannel : com.keepasskey.app.security.ClipboardSecurityChannel {
+        override fun copySensitiveText(
+            label: CharSequence,
+            text: CharSequence,
+            customTimeoutSeconds: Int?
+        ): Unit = error("clipboard unavailable")
+
+        override fun copySensitiveChars(
+            label: CharSequence,
+            chars: CharArray,
+            customTimeoutSeconds: Int?
+        ): Unit = error("clipboard unavailable")
+
+        override fun copyPlainText(label: CharSequence, text: CharSequence): Unit =
+            error("clipboard unavailable")
     }
 
     @Test
@@ -157,6 +220,76 @@ class VaultListViewModelTest {
         assertTrue(state.entries.any { it.id == "2" })
     }
 
+    /**
+     * ISSUE-P2-356 投影时序回归锁：显示态即时回显，防抖只作用于过滤流。
+     *
+     * 快速连打（击键间隔远小于 300ms）期间显示通道必须已跟到最新串——旧实现显示值取
+     * 自防抖后的 filterParams.query，受控 BasicTextField 被同步回旧值即「回吞」；
+     * 同时反向断言过滤流不得抢跑（否则等于把整页投影改回每字符全量重算）。
+     */
+    @Test
+    fun `快速连打显示态即时回显 防抖只作用于过滤流`() = runTest {
+        val viewModel = createSubscribedViewModel()
+
+        viewModel.onSearchQueryChange("g")
+        viewModel.onSearchQueryChange("gi")
+        viewModel.onSearchQueryChange("git")
+        testScheduler.runCurrent()
+
+        // 显示态：未推进虚拟时钟即须回显到最新串
+        assertEquals("git", viewModel.searchQueryDisplay.value)
+        // 过滤流：仍处防抖窗口内，整页状态的过滤关键词不得抢跑
+        assertEquals("", viewModel.uiState.value.searchQuery)
+
+        advanceTimeBy(SEARCH_DEBOUNCE_MS)
+        testScheduler.runCurrent()
+        assertEquals("git", viewModel.uiState.value.searchQuery)
+    }
+
+    /**
+     * ISSUE-P2-356 AC：清空立即生效——空串经 `debounce { }` 零超时旁路直达过滤流，
+     * 不等 300ms 窗口（退出搜索即还原全列表）。反向锁：去掉旁路本断言即红。
+     */
+    @Test
+    fun `清空搜索零延迟直达过滤流`() = runTest {
+        val viewModel = createSubscribedViewModel()
+
+        viewModel.onSearchQueryChange("github")
+        advanceTimeBy(SEARCH_DEBOUNCE_MS)
+        testScheduler.runCurrent()
+        assertEquals("github", viewModel.uiState.value.searchQuery)
+
+        viewModel.onSearchQueryChange("")
+        testScheduler.runCurrent()
+
+        assertEquals("", viewModel.searchQueryDisplay.value)
+        assertEquals("清空必须零延迟到达过滤流", "", viewModel.uiState.value.searchQuery)
+    }
+
+    /**
+     * ISSUE-P2-356：createEntryPrefill 语义保持——预填发布**即时输入值**
+     * （与显示态同源 searchQueryFlow），不因防抖窗口丢失用户最后敲入的关键词。
+     */
+    @Test
+    fun `搜索预填发布即时输入值不等防抖`() = runTest {
+        val host = com.keepasskey.app.ui.screens.edit.CreateEntryPrefillHost()
+        val viewModel = VaultListViewModel(
+            FakeVaultRepository(),
+            FakeSettingsRepository(),
+            null,
+            buildTestCoordinator(),
+            displayDispatcher = UnconfinedTestDispatcher(testScheduler),
+            createEntryPrefill = host
+        ).also { MainDispatcherGuard.track(it) }
+
+        viewModel.onSearchQueryChange("github")
+        // 未推进虚拟时钟（防抖未到期）即发布
+        viewModel.beginCreateEntryFromSearch()
+        testScheduler.runCurrent()
+
+        assertEquals("github", host.takeTitle())
+    }
+
     @Test
     fun `按名称升序排序`() = runTest {
         val viewModel = createSubscribedViewModel()
@@ -187,6 +320,63 @@ class VaultListViewModelTest {
         val entries = repository.getEntries().first()
         assertEquals("group_recycle_bin", entries.find { it.id == "2" }!!.groupId)
         assertEquals("group_recycle_bin", entries.find { it.id == "4" }!!.groupId)
+    }
+
+    /** ISSUE-P2-357 AC②：批量软删除的消息必须带撤销标记，撤销把整批条目移出回收站并回报还原数。 */
+    @Test
+    fun `批量软删除消息可撤销且撤销后整批条目回到回收站外`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+
+        viewModel.enterGroup("group_dev")
+        viewModel.startBatchMode("2")
+        viewModel.toggleEntrySelection("4")
+        viewModel.batchDeleteSelected()
+        testScheduler.runCurrent()
+
+        val deletedMessage = viewModel.uiState.value.userMessage
+        assertEquals(R.string.vault_batch_deleted, deletedMessage?.resId)
+        assertTrue(deletedMessage!!.undoable)
+        assertEquals("group_recycle_bin", repository.getEntries().first().find { it.id == "2" }!!.groupId)
+
+        viewModel.undoPendingSoftDelete()
+        testScheduler.runCurrent()
+
+        val entries = repository.getEntries().first()
+        assertNull(entries.find { it.id == "2" }!!.groupId)
+        assertNull(entries.find { it.id == "4" }!!.groupId)
+        assertEquals(R.string.vault_batch_restored, viewModel.uiState.value.userMessage?.resId)
+    }
+
+    /** ISSUE-P2-357 AC②：彻底删除不可逆、不得置入待撤销批次——再点撤销为空操作，消息保持不变。 */
+    @Test
+    fun `彻底删除不产生可撤销消息且撤销对它为空操作`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = newViewModel(repository)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+
+        viewModel.enterGroup("group_recycle_bin")
+        viewModel.purgeEntry("entry_recycled_1")
+        testScheduler.runCurrent()
+
+        val purgeMessage = viewModel.uiState.value.userMessage
+        assertEquals(R.string.vault_entry_purged, purgeMessage?.resId)
+        assertFalse(purgeMessage!!.undoable)
+
+        viewModel.undoPendingSoftDelete()
+        testScheduler.runCurrent()
+
+        assertEquals(
+            "无待撤销批次时撤销不得产出任何新消息（否则会覆盖彻底删除的如实反馈）",
+            R.string.vault_entry_purged,
+            viewModel.uiState.value.userMessage?.resId
+        )
+        assertNull(repository.getEntries().first().find { it.id == "entry_recycled_1" })
     }
 
     @Test
@@ -365,7 +555,12 @@ class VaultListViewModelTest {
 
     @Test
     fun `复制密码与复制用户名的消息资源`() = runTest {
-        val viewModel = createSubscribedViewModel()
+        // ISSUE-P2-353 AC①：成功消息只在剪贴板**实际写入成功**后发出——
+        // 正向夹具须同时备好可读密码与可用通道（旧行为在两者皆缺时也发成功，正是本缺陷）
+        val repository = FakeVaultRepository()
+        seedPasswordOfEntry2(repository)
+        val channel = RecordingClipboardChannel()
+        val viewModel = createSubscribedViewModel(repository, channel)
         viewModel.enterGroup("group_dev")
         testScheduler.runCurrent()
         val entry = viewModel.uiState.value.entries.find { it.id == "2" }!!
@@ -373,12 +568,81 @@ class VaultListViewModelTest {
         viewModel.copyPassword(entry)
         testScheduler.runCurrent()
         assertEquals(R.string.vault_copy_password_done, viewModel.uiState.value.userMessage?.resId)
+        assertEquals("密码须经剪贴板通道真实落值", "unit-test-password", channel.lastText)
         viewModel.clearUserMessage()
         testScheduler.runCurrent()
 
         viewModel.copyUsername(entry)
         testScheduler.runCurrent()
         assertEquals(R.string.vault_copy_username_done, viewModel.uiState.value.userMessage?.resId)
+        assertEquals("用户名须经剪贴板通道真实落值", entry.username, channel.lastText)
+    }
+
+    /** ISSUE-P2-353 AC①：通道缺失（DI 注入 null）时不得发「已复制」，如实报失败。 */
+    @Test
+    fun `剪贴板通道缺失时复制密码与用户名如实报失败`() = runTest {
+        val repository = FakeVaultRepository()
+        seedPasswordOfEntry2(repository)
+        val viewModel = createSubscribedViewModel(repository) // clipboard = null
+        viewModel.enterGroup("group_dev")
+        testScheduler.runCurrent()
+        val entry = viewModel.uiState.value.entries.find { it.id == "2" }!!
+
+        viewModel.copyPassword(entry)
+        testScheduler.runCurrent()
+        assertEquals(R.string.clipboard_copy_failed, viewModel.uiState.value.userMessage?.resId)
+        viewModel.clearUserMessage()
+        testScheduler.runCurrent()
+
+        viewModel.copyUsername(entry)
+        testScheduler.runCurrent()
+        assertEquals(R.string.clipboard_copy_failed, viewModel.uiState.value.userMessage?.resId)
+    }
+
+    /** ISSUE-P2-353 AC①：仓库取不到密码（chars == null）时同样不得报成功。 */
+    @Test
+    fun `读不到密码时复制密码如实报失败`() = runTest {
+        // 夹具条目 `2` 未 seed 密码 → getEntryPasswordChars 返回 null
+        val channel = RecordingClipboardChannel()
+        val viewModel = createSubscribedViewModel(FakeVaultRepository(), channel)
+        viewModel.enterGroup("group_dev")
+        testScheduler.runCurrent()
+        val entry = viewModel.uiState.value.entries.find { it.id == "2" }!!
+
+        viewModel.copyPassword(entry)
+        testScheduler.runCurrent()
+
+        assertEquals(R.string.clipboard_copy_failed, viewModel.uiState.value.userMessage?.resId)
+        assertEquals("取值失败时不得发生任何剪贴板写入", 0, channel.writeCount)
+    }
+
+    /** ISSUE-P2-353 AC①：写入通道抛异常时按失败回报，不得把异常当成功。 */
+    @Test
+    fun `剪贴板写入异常时复制用户名如实报失败`() = runTest {
+        val viewModel = createSubscribedViewModel(FakeVaultRepository(), ThrowingClipboardChannel())
+        viewModel.enterGroup("group_dev")
+        testScheduler.runCurrent()
+        val entry = viewModel.uiState.value.entries.find { it.id == "2" }!!
+
+        viewModel.copyUsername(entry)
+        testScheduler.runCurrent()
+
+        assertEquals(R.string.clipboard_copy_failed, viewModel.uiState.value.userMessage?.resId)
+    }
+
+    /** ISSUE-P2-353 AC①：无 TOTP 的条目仍走原有「缺失」文案（与通道失败区分开）。 */
+    @Test
+    fun `复制无验证码条目给出缺失提示而非通道失败`() = runTest {
+        val channel = RecordingClipboardChannel()
+        val viewModel = createSubscribedViewModel(FakeVaultRepository(), channel)
+        viewModel.enterGroup("group_dev")
+        testScheduler.runCurrent()
+        val noteEntry = viewModel.uiState.value.entries.find { it.id == "6" }!!
+
+        viewModel.copyTotpCode(noteEntry)
+        testScheduler.runCurrent()
+
+        assertEquals(R.string.vault_copy_totp_missing, viewModel.uiState.value.userMessage?.resId)
     }
 
     @Test

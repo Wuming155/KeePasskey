@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,32 +41,67 @@ import com.keepasskey.app.ui.theme.KeePasskeyTheme
  * - 全部文案经 `R.string.*` 引用（含警告编码 → 资源映射 [warningReasonRes]）。
  */
 @Composable
-fun ImportReportDialog(state: ImportUiState, onDismiss: () -> Unit) {
+fun ImportReportDialog(state: ImportUiState, onDismiss: () -> Unit, onCancel: () -> Unit = {}) {
     when (state) {
         ImportUiState.Idle -> Unit
-        is ImportUiState.Parsing -> ImportProgressDialog(state.source)
+        is ImportUiState.Parsing -> ImportProgressDialog(state, onCancel)
         is ImportUiState.Done -> ImportResultDialog(state.outcome, onDismiss)
         is ImportUiState.Failed -> ImportFailureDialog(state.reason.messageRes, onDismiss)
     }
 }
 
-/** 解析中：转圈 + 「正在解析 X 数据...」（复用既有资源，无新增文案）。 */
+/**
+ * 导入进行中：分阶段文案 + 落库计数进度 + 显式「取消」（ISSUE-P2-354 AC④）。
+ *
+ * 点击对话框外部仍不可关闭（`onDismissRequest = {}`）——导入是关键写操作，
+ * 关闭意图只能经取消按钮走协程 cancellation，杜绝「看起来关了、后台还在写库」。
+ */
 @Composable
-private fun ImportProgressDialog(source: ImportSource) {
+private fun ImportProgressDialog(state: ImportUiState.Parsing, onCancel: () -> Unit) {
     AlertDialog(
         onDismissRequest = {},
         title = { Text(stringResource(R.string.dbset_import_title)) },
         text = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(modifier = Modifier.size(PROGRESS_SIZE.dp))
-                Text(
-                    text = stringResource(R.string.dbset_import_preparing, importSourceLabel(source)),
-                    modifier = Modifier.padding(start = PROGRESS_GAP.dp)
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(IMPORT_PROGRESS_ROW_GAP.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(PROGRESS_SIZE.dp))
+                    Text(
+                        text = importStageText(state),
+                        modifier = Modifier.padding(start = PROGRESS_GAP.dp)
+                    )
+                }
+                val persistTotal = if (state.stage == ImportStage.PERSISTING) state.total else null
+                if (persistTotal != null && persistTotal > 0) {
+                    LinearProgressIndicator(
+                        progress = {
+                            (state.processed.toFloat() / persistTotal.toFloat()).coerceIn(0f, 1f)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         },
-        confirmButton = {}
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.btn_cancel)) }
+        }
     )
+}
+
+/** 阶段 → 文案（READING / PARSING 复用既有资源；PERSISTING 带可量化计数，新增中英成对）。 */
+@Composable
+private fun importStageText(state: ImportUiState.Parsing): String = when (state.stage) {
+    ImportStage.READING -> stringResource(R.string.import_progress_reading, importSourceLabel(state.source))
+    ImportStage.PARSING -> stringResource(R.string.dbset_import_preparing, importSourceLabel(state.source))
+    ImportStage.PERSISTING -> {
+        val total = state.total
+        if (total == null) {
+            // 防御回退：PERSISTING 恒在进入时带 total；缺失时用通用解析文案，不谎报计数
+            stringResource(R.string.dbset_import_preparing, importSourceLabel(state.source))
+        } else {
+            stringResource(R.string.import_progress_persisting, state.processed, total)
+        }
+    }
 }
 
 /** 导入完成：来源 + 计数 + 警告列表。 */
@@ -245,5 +281,7 @@ internal fun ImportOutcomeReportPreview() {
 
 private const val PROGRESS_SIZE = 20
 private const val PROGRESS_GAP = 12
+/** ISSUE-P2-354 AC④：进度对话框内「阶段行 ↔ 计数条」的行距 */
+private const val IMPORT_PROGRESS_ROW_GAP = 8
 private const val ROW_GAP = 6
 private const val WARNING_ITEM_GAP = 2

@@ -81,6 +81,7 @@ fun KeePassGroupRow(
     onDelete: () -> Unit,
     icon: BitmapEntryIcon? = null,
     densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
+    highlightQuery: String = "", // ISSUE-P3-360 AC④c：搜索命中高亮词
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -119,7 +120,7 @@ fun KeePassGroupRow(
             Spacer(modifier = Modifier.width(12.dp))
 
             Text(
-                text = group.name,
+                text = searchHighlight(group.name, highlightQuery),
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = densitySpec.titleFontSizeSp.sp

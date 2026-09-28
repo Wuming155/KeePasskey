@@ -60,6 +60,8 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             importState = importState,
             onImportFileSelected = settingsViewModel::startImport,
             onImportReportDismiss = settingsViewModel::dismissImportReport,
+            // ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation）
+            onImportCancel = settingsViewModel::cancelImport,
             // ISSUE-P3-20：子库挂载链路（真实挂载 / 凭据重录解锁 / 卸载）
             childDatabaseState = childDatabaseState,
             onMountChildDatabase = settingsViewModel::mountChildDatabase,
@@ -137,7 +139,10 @@ internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostControl
             onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
             onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill,
             onAutofillSessionGrantToggle = settingsViewModel::setAutofillSessionGrantEnabled,
-            onOpenPrivilegedBrowsers = { navController.navigate(Screen.SettingsPrivilegedBrowsers.route) },
+            // ISSUE-P3-359 AC③：三级设置页下钻同样补 launchSingleTop
+            onOpenPrivilegedBrowsers = {
+                navController.navigate(Screen.SettingsPrivilegedBrowsers.route) { launchSingleTop = true }
+            },
             blockedPackages = blockedPackages,
             onBlockAutofillPackage = settingsViewModel::blockAutofillPackage,
             onUnblockAutofillPackage = settingsViewModel::unblockAutofillPackage,

@@ -51,6 +51,9 @@ data class UnlockUiState(
     val throttleFailureCount: Int = 0,
     // 距锁定解除的剩余毫秒数（0 表示当前未锁定）
     val throttleLockoutRemainingMs: Long = 0L,
+    // ISSUE-P2-355 AC②：凭据失败后的「剩余 N 次尝试」呈现值。
+    // null = 不呈现（节流关闭 / 已锁定走倒计时 / 用户开始输入后清空）
+    val throttleAttemptsRemaining: Int? = null,
     // 递增令牌：失败/锁定后通知 SecurePasswordField 同步擦除显示态，
     // 与 ViewModel 内 passwordChars 无条件清零保持一致，杜绝「字段有点、VM 已空」的重试错配
     val clearPasswordFieldToken: Long = 0L,
@@ -59,5 +62,8 @@ data class UnlockUiState(
     val quickUnlockDowngradeConsentPending: Boolean = false,
     // ISSUE-P1-22：本机快速解锁封印为软件密钥（无硬件隔离）——
     // 解锁页常驻声明「不提供硬件级保护」的渲染依据
-    val quickUnlockDowngraded: Boolean = false
+    val quickUnlockDowngraded: Boolean = false,
+    // ISSUE-P2-355 AC③：上次锁定时丢弃了未保存编辑——解锁页一次性告知
+    // （UnlockViewModel.init 消费 UnsavedEditRegistry 后置位，随本页面生命周期呈现）
+    val unsavedEditsDiscardedNotice: Boolean = false
 )

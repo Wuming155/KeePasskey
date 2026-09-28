@@ -61,6 +61,8 @@ fun UnifiedVaultEntryRow(
     densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
     groupPath: String? = null,
     decorations: EntryDecorations = EntryDecorations.EMPTY,
+    /** ISSUE-P3-360 AC④c：搜索命中高亮词（已生效的过滤词；空串 = 不高亮）。 */
+    highlightQuery: String = "",
     /**
      * ISSUE-P2-89 / ISSUE-P3-158：TOTP **秒级刻度**（窄状态）。
      *
@@ -108,6 +110,7 @@ fun UnifiedVaultEntryRow(
                     isSelected = isSelected,
                     densitySpec = densitySpec,
                     groupPath = groupPath,
+                    highlightQuery = highlightQuery,
                     onCopyNumber = onCopyPassword
                 )
             }
@@ -119,7 +122,8 @@ fun UnifiedVaultEntryRow(
                     isBatchMode = isBatchMode,
                     isSelected = isSelected,
                     densitySpec = densitySpec,
-                    groupPath = groupPath
+                    groupPath = groupPath,
+                    highlightQuery = highlightQuery
                 )
             }
             else -> {
@@ -137,6 +141,7 @@ fun UnifiedVaultEntryRow(
                     densitySpec = densitySpec,
                     onCopyTotpCode = onCopyTotpCode,
                     groupPath = groupPath,
+                    highlightQuery = highlightQuery,
                     onCopyPassword = onCopyPassword,
                     onRestore = onRestore,
                     onPurge = onPurge,

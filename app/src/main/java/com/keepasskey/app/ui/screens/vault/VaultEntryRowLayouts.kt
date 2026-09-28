@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -36,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +48,7 @@ import com.keepasskey.app.ui.components.EntryIconContent
 import com.keepasskey.app.ui.components.PasskeyBadge
 import com.keepasskey.app.ui.components.TotpMiniGauge
 import com.keepasskey.app.ui.components.getVaultIcon
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.theme.LocalSecurityColors
@@ -120,6 +121,8 @@ internal fun StandardEntryLayout(
     showUrl: Boolean,
     densitySpec: ListDensitySpec,
     groupPath: String?,
+    /** ISSUE-P3-360 AC④c：搜索命中高亮词（已生效过滤词；空串不高亮） */
+    highlightQuery: String = "",
     onCopyPassword: () -> Unit,
     onRestore: () -> Unit,
     onPurge: () -> Unit,
@@ -136,7 +139,7 @@ internal fun StandardEntryLayout(
     /** ISSUE-P2-89：本周期实时验证码（`entryId → 验证码`，窄状态；缺省值供预览） */
     totpLiveCodes: State<Map<String, String>> = remember { mutableStateOf(emptyMap()) }
 ) {
-    val haptic = LocalHapticFeedback.current
+    val maybeHaptic = rememberMaybeHaptic()
     Row(
         modifier = Modifier.fillMaxWidth().padding(
             horizontal = densitySpec.rowHorizontalPaddingDp.dp,
@@ -180,7 +183,7 @@ internal fun StandardEntryLayout(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = entry.title,
+                    text = searchHighlight(entry.title, highlightQuery), // ISSUE-P3-360 AC④c：命中着色
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = densitySpec.titleFontSizeSp.sp
@@ -269,7 +272,7 @@ internal fun StandardEntryLayout(
             } else {
                 // 列表行仅保留核心「复制密码」，降低误触；用户名复制仍在详情页可用
                 IconButton(onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                    maybeHaptic(HapticFeedbackType.Confirm)
                     onCopyPassword()
                 }) {
                     Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.cd_copy_password), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
@@ -308,7 +311,9 @@ internal const val TOTP_PREVIEW_NOW_SECONDS = 0L
  * ISSUE-P3-184：徽标原本只是纯展示，`onCopyCode` 非空时整块徽标变为**可点**——
  * 一次点击即复制当前验证码（此前必须点行进详情、再滚到验证码卡片才能复制）。
  * 点击层加在徽标**内部**，故该小块区域的点击/长按不再冒泡到行（有意：徽标处点击语义是「复制」）。
- * 不额外增加内边距或背景，保持与既有截图基线逐像素一致；可发现性由 `onClickLabel` 承担
+ * ISSUE-P3-358 AC⑤：原可点区仅约 18–24dp，远低于 48dp 触控标准——现经 `defaultMinSize`
+ * 把热区提到最小 48dp（外层 size 方式，验证码文本与迷你环的图标几何不动，
+ * 与既有截图基线逐像素一致的意图仍成立）；可发现性由 `onClickLabel` 承担
  * （TalkBack 会播报「复制动态验证码」这一动作名）。
  */
 @Composable
@@ -333,6 +338,7 @@ private fun EntryTotpBadge(
         verticalAlignment = Alignment.CenterVertically,
         modifier = if (onCopyCode != null) {
             Modifier
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .clickable(onClickLabel = copyLabel, role = Role.Button, onClick = onCopyCode)
         } else {

@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.database
 
-import android.content.res.Configuration
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,14 +23,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -46,7 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,7 +52,6 @@ import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultRemovalKind
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
@@ -74,7 +70,6 @@ fun DatabasePickerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ISSUE-P3-21：生成型密钥文件的一次性交付状态（复合密钥第二因子，丢失即无法解锁）
     val keyFileDelivery by viewModel.keyFileDelivery.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -86,17 +81,8 @@ fun DatabasePickerScreen(
         }
     }
 
-    uiState.userMessage?.let { message ->
-        val text = message.resolveText()
-        LaunchedEffect(message, text) {
-            snackbarHostState.showSnackbar(text)
-            viewModel.clearUserMessage()
-        }
-    }
-
     DatabasePickerContent(
         uiState = uiState,
-        snackbarHostState = snackbarHostState,
         keyFileDelivery = keyFileDelivery,
         onBackClick = onBackClick,
         onSelectDatabase = viewModel::selectDatabase,
@@ -118,7 +104,6 @@ fun DatabasePickerScreen(
 @Composable
 fun DatabasePickerContent(
     uiState: DatabasePickerUiState,
-    snackbarHostState: SnackbarHostState,
     onBackClick: () -> Unit,
     onSelectDatabase: (String) -> Unit,
     onOpenCreateDialog: () -> Unit,
@@ -174,7 +159,6 @@ fun DatabasePickerContent(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -210,6 +194,26 @@ fun DatabasePickerContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            // ISSUE-P2-354 AC①：isLoading 死字段接线为真实渲染——建库（Argon2 秒级）进行中
+            // 展示进度与文案，下方两个入口一并禁用（防止向导外再开第二条写库路径）
+            if (uiState.isLoading) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Text(
+                        text = stringResource(R.string.db_picker_creating),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
 
             // 快速新建与打开已有操作栏
@@ -219,6 +223,7 @@ fun DatabasePickerContent(
             ) {
                 Button(
                     onClick = onOpenCreateDialog,
+                    enabled = !uiState.isLoading,
                     shape = CapsuleShape,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -229,6 +234,7 @@ fun DatabasePickerContent(
 
                 OutlinedButton(
                     onClick = onOpenExistingClick,
+                    enabled = !uiState.isLoading,
                     shape = CapsuleShape,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -291,7 +297,9 @@ fun DatabasePickerContent(
         CreateVaultWizardDialog(
             onDismiss = onCloseCreateDialog,
             onConfirm = onCreateDatabase,
-            onWeakPasswordConfirmed = onWeakPasswordConfirmed
+            onWeakPasswordConfirmed = onWeakPasswordConfirmed,
+            // ISSUE-P2-354 AC①：busy 真相源是 isLoading（ViewModel 同步守卫的投影）
+            isBusy = uiState.isLoading
         )
     }
 
@@ -336,59 +344,4 @@ internal fun queryDocumentDisplayName(context: android.content.Context, uri: Uri
             if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
         }
     }.getOrNull() ?: uri.lastPathSegment.orEmpty()
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@Preview(name = "密码库选择内容 - 浅色", showBackground = true)
-@Preview(name = "密码库选择内容 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun DatabasePickerContentPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        val previewSnackbar = remember { SnackbarHostState() }
-
-        DatabasePickerContent(
-            uiState = com.keepasskey.app.ui.screens.database.DatabasePickerUiState(
-                databases = listOf(
-                    com.keepasskey.app.ui.model.VaultDatabaseInfo(
-                        id = "preview-db-local",
-                        name = "预览本地密码库",
-                        path = "/storage/emulated/0/Documents/preview.kdbx",
-                        isRemote = false,
-                        syncType = "本地",
-                        lastOpenedAt = "2026-01-02 12:00",
-                        fileSizeFormatted = "128.0 KB",
-                        isActive = true
-                    ),
-                    com.keepasskey.app.ui.model.VaultDatabaseInfo(
-                        id = "preview-db-remote",
-                        name = "预览云端密码库",
-                        path = "https://dav.example.com/preview.kdbx",
-                        isRemote = true,
-                        syncType = "WebDAV",
-                        lastOpenedAt = "2026-01-01 09:00",
-                        fileSizeFormatted = "256.0 KB",
-                        isActive = false
-                    )
-                ),
-                isLoading = false,
-                showCreateDialog = false,
-                showOpenSourceDialog = false
-            ),
-            snackbarHostState = previewSnackbar,
-            onBackClick = {},
-            onSelectDatabase = { _ -> },
-            onOpenCreateDialog = {},
-            onCloseCreateDialog = {},
-            onCreateDatabase = { _, _, _, _, _, _ -> },
-            onOpenExistingClick = {},
-            onCloseOpenSourceDialog = {},
-            onImportFromSource = { _, _, _ -> },
-            onRemoveDatabase = { _, _ -> },
-            keyFileDelivery = com.keepasskey.app.ui.screens.database.KeyFileDeliveryState.PendingSave(
-                suggestedFileName = "预览密钥文件.keyx"
-            ),
-            onSaveKeyFile = { _ -> },
-            onKeyFileDeliveryDismissed = {}
-        )
-    }
 }

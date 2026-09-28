@@ -23,7 +23,6 @@ import com.keepasskey.app.ui.screens.importer.VaultImportController
 import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
-import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -108,6 +107,18 @@ class SettingsViewModel @Inject constructor(
 
     /** 关闭导入结果报告对话框。 */
     fun dismissImportReport() = importPresenter.dismissReport()
+
+    /** ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation；导入对话框取消按钮通道）。 */
+    fun cancelImport() = importPresenter.cancel()
+
+    // ===== 更换主密钥任务态（ISSUE-P2-354 AC③，实现与擦除契约见 SettingsMasterKeyChangeController） =====
+    private val masterKeyChange = SettingsMasterKeyChangeController(vaultRepository, viewModelScope)
+
+    /** P0-3 整改 + ISSUE-P2-354 AC③：提交更换主密钥（数组所有权移交；忙态并发第二次被拒并清零入参）。 */
+    fun changeMasterPassword(newPasswordChars: CharArray) = masterKeyChange.submit(newPasswordChars)
+
+    /** ISSUE-P2-354 AC③：换密回执经 Snackbar 展示后清除（一次性消息语义）。 */
+    fun clearMasterKeyChangeFeedback() = masterKeyChange.clearFeedback()
 
     // ===== 子库挂载（UI 接线，委托 [SettingsChildDatabaseController]） =====
     private val childDatabaseController = features.childDatabaseController
@@ -219,7 +230,9 @@ class SettingsViewModel @Inject constructor(
             extendedSettings = extendedPreferences.settings,
             debugLogLines = preferences.debugLogLines,
             // ISSUE-P3-20：子库已挂载计数（替代原先硬编码的 0）
-            childDatabaseCount = childDatabaseController.countFlow
+            childDatabaseCount = childDatabaseController.countFlow,
+            // ISSUE-P2-354 AC③：更换主密钥任务态（busy + 结果反馈）
+            masterKeyChangeState = masterKeyChange.state
         ),
         strings = strings
     )
@@ -292,9 +305,6 @@ class SettingsViewModel @Inject constructor(
     fun setEncryptionAlgorithm(algorithm: String) = preferences.setEncryptionAlgorithm(algorithm)
     fun setKdfAlgorithm(kdf: String) = preferences.setKdfAlgorithm(kdf)
     fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) = preferences.setArgon2Parameters(iterations, memoryMb, parallelism)
-    /** P0-3 整改：真实调用仓库修改当前数据库的主密钥 */
-    suspend fun changeMasterPassword(newPasswordChars: CharArray): KdbxResult<Unit> = vaultRepository.changeMasterPassword(newPasswordChars)
-
     /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文 / 不落强度值以外的信息）。 */
     fun noteWeakMasterPasswordConfirmed() {
         debugLogBuffer.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（改密）")

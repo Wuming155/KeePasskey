@@ -99,6 +99,8 @@ internal fun EntryEditTotpSection(
             onToggleVisibility = { totpVisible = !totpVisible },
             initialPassword = loadedTotpSecret,
             initialKey = "${entryId?.let { "totp-$it" } ?: "totp-new-entry"}#$totpPrefillEpoch",
+            // ISSUE-P3-359 AC①：与密码框同型——默认 `{}` 会吞掉框架收键盘行为，Done 显式收起
+            onDone = rememberEntryEditHideKeyboard(),
             trailingIcon = {
                 // 断点5 整改：按钮直接呼起真实扫码
                 IconButton(onClick = onScanTotpQr) {
@@ -244,12 +246,15 @@ internal fun EntryEditExtraSection(
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // ISSUE-P3-359 AC①：tags → AutoType → Override URL 的 Next 链，末端 Done 收键盘
             OutlinedTextField(
                 value = tagsInput,
                 onValueChange = onTagsInputChange,
                 label = { Text(stringResource(R.string.edit_tags_hint)) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
+                keyboardOptions = entryEditNextKeyboardOptions,
+                keyboardActions = rememberEntryEditNextKeyboardActions(),
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -263,6 +268,8 @@ internal fun EntryEditExtraSection(
                 supportingText = { Text(stringResource(R.string.edit_autotype_note)) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
+                keyboardOptions = entryEditNextKeyboardOptions,
+                keyboardActions = rememberEntryEditNextKeyboardActions(),
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -272,6 +279,8 @@ internal fun EntryEditExtraSection(
                 label = { Text(stringResource(R.string.edit_override_url_hint)) },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium,
+                keyboardOptions = entryEditDoneKeyboardOptions,
+                keyboardActions = rememberEntryEditDoneKeyboardActions(),
                 modifier = Modifier.fillMaxWidth()
             )
 

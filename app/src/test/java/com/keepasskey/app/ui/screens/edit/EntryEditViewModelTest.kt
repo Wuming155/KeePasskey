@@ -2,8 +2,10 @@ package com.keepasskey.app.ui.screens.edit
 
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import androidx.lifecycle.SavedStateHandle
+import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.security.UnsavedEditRegistry
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
@@ -196,6 +198,112 @@ class EntryEditViewModelTest {
             "未注入 SettingsRepository（纯 JVM 单测形态）必须恒 true（fail-closed，不因缺注入放宽遮罩）",
             noRepoViewModel.flagSecureEnabled.value
         )
+    }
+
+    /**
+     * ISSUE-P2-355 AC③：编辑页必须向全局注册脏态提供者——锁定前「是否存在未保存编辑」
+     * 的判定完全依赖本注册（security 侧不反向依赖 ui）。注册随 init 发生、随 onCleared 注销；
+     * 本用例锁定「注册已发生 + 提供者随编辑翻转」的前半环（注销半环由 UnsavedEditRegistryTest 锁定）。
+     */
+    @Test
+    fun `编辑页注册脏态提供者并随编辑翻转`() = runTest {
+        val registry = UnsavedEditRegistry()
+        val viewModel = EntryEditViewModel(
+            SavedStateHandle(mapOf("groupId" to "group_work")),
+            FakeVaultRepository(),
+            unsavedEditRegistry = registry
+        )
+        MainDispatcherGuard.track(viewModel)
+        testScheduler.runCurrent()
+
+        assertFalse("初始未编辑不得报告脏表单", registry.hasUnsavedEdits())
+
+        viewModel.onTitleChange("脏态条目")
+
+        assertTrue("编辑发生后必须报告脏表单", registry.hasUnsavedEdits())
+    }
+
+    /**
+     * `ISSUE-P3-359` AC②：标题必填校验必须落到**字段级**错误位——保存被拒置位、
+     * 用户重新输入即清除（标题框据此渲染 `isError + supportingText` 并聚焦）。
+     * 与既有 Snackbar（`userMessage`）并存断言，锁住「消息不丢、字段位新增」两条线。
+     */
+    @Test
+    fun `标题空白保存置字段级错误并随输入清除`() = runTest {
+        val repository = FakeVaultRepository()
+        val viewModel = EntryEditViewModel(SavedStateHandle(), repository)
+        MainDispatcherGuard.track(viewModel)
+        val events = mutableListOf<EntryEditEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+        testScheduler.runCurrent()
+
+        viewModel.saveEntry()
+        testScheduler.runCurrent()
+
+        assertTrue("标题空白被拒必须置字段级错误位", viewModel.uiState.value.titleError)
+        assertEquals(
+            "既有一次性消息通道必须保留（与 inline 错误并存）",
+            R.string.edit_title_required,
+            viewModel.uiState.value.userMessage?.resId
+        )
+
+        viewModel.onTitleChange("修复后的标题")
+        assertFalse("任何标题输入必须即时清除字段级错误位", viewModel.uiState.value.titleError)
+
+        viewModel.saveEntry()
+        testScheduler.runCurrent()
+        assertEquals("修复后保存必须放行", listOf(EntryEditEvent.SaveSuccess), events)
+        assertNotNull("放行即落库并记下条目 id", viewModel.uiState.value.entryId)
+        assertFalse("成功后错误位保持清除", viewModel.uiState.value.titleError)
+    }
+
+    /**
+     * `ISSUE-P3-359` AC⑤：打开既有条目异步解密期间必须置 `isLoading`
+     * （表单遮罩 + 进度的唯一驱动源），载入完成回落并填充表单；
+     * 加载期保存请求被守卫拦下——表单数据尚不可信时不得提交。
+     */
+    @Test
+    fun `打开既有条目载入期间置加载态并完成回落`() = runTest {
+        val viewModel = EntryEditViewModel(
+            SavedStateHandle(mapOf("entryId" to "1")),
+            FakeVaultRepository()
+        )
+        MainDispatcherGuard.track(viewModel)
+
+        assertTrue(
+            "loadEntry 在 init 内同步置位：构造返回时即应处于加载态（首帧即在遮罩之下）",
+            viewModel.uiState.value.isLoading
+        )
+
+        viewModel.saveEntry()
+        assertFalse("加载期保存必须被守卫拦截（不得进入忙态）", viewModel.uiState.value.isSaving)
+
+        testScheduler.runCurrent()
+        assertFalse("载入完成后加载态必须回落", viewModel.uiState.value.isLoading)
+        assertEquals(
+            "载入完成后表单应填充既有条目",
+            "Google Workspace",
+            viewModel.uiState.value.title
+        )
+    }
+
+    /**
+     * `ISSUE-P3-359` AC⑤ 的失败半环：条目不存在（被删除 / 无效 id）时
+     * 加载态同样回落——否则遮罩永久悬挂，编辑页彻底不可用。
+     */
+    @Test
+    fun `条目不存在时加载态同样回落不再悬挂`() = runTest {
+        val viewModel = EntryEditViewModel(
+            SavedStateHandle(mapOf("entryId" to "no-such-id")),
+            FakeVaultRepository()
+        )
+        MainDispatcherGuard.track(viewModel)
+        assertTrue("无效 id 同样先进入加载态", viewModel.uiState.value.isLoading)
+
+        testScheduler.runCurrent()
+        assertFalse("未找到路径必须结束加载态（遮罩不得永久悬挂）", viewModel.uiState.value.isLoading)
     }
 
     private companion object {

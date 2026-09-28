@@ -31,8 +31,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -41,7 +39,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,9 +47,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
-import kotlinx.coroutines.launch
 
 /**
  * 两步验证与 TOTP 高级规范映射设置页 (对应 KeePass2Android TrayTOTP 插件兼容设置)
@@ -65,9 +64,6 @@ fun TotpSettingsScreen(
     onUpdateTotpFieldMapping: (seedField: String, settingsField: String, stepSeconds: Int, digits: Int) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
-    val totpMappingSavedMsg = stringResource(R.string.totp_mapping_saved)
 
     var seedField by remember(uiState.totpSeedFieldName) { mutableStateOf(uiState.totpSeedFieldName) }
     var settingsField by remember(uiState.totpSettingsFieldName) { mutableStateOf(uiState.totpSettingsFieldName) }
@@ -78,7 +74,6 @@ fun TotpSettingsScreen(
         titleRes = R.string.set_totp_entry_title,
         onBackClick = onBackClick,
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -260,9 +255,8 @@ fun TotpSettingsScreen(
                         Button(
                             onClick = {
                                 onUpdateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(totpMappingSavedMsg)
-                                }
+                                // ISSUE-P3-359 AC④：保存成功提示直发全局通道（外壳唯一宿主呈现）
+                                AppSnackbarChannel.trySend(AppSnackbarEvent(UiMessage(R.string.totp_mapping_saved)))
                             },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()

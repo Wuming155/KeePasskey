@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +33,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +65,8 @@ fun ConflictResolutionScreen(
     ApplyObscuredTouchFilter()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    // ISSUE-P3-360 AC①：批量选择 / 合并推送一点即生效 ⇒ 先挂确认（正文说明覆盖范围），确认后才执行
+    var pendingConfirm by remember { mutableStateOf<ConflictConfirmAction?>(null) }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -103,45 +108,90 @@ fun ConflictResolutionScreen(
             ConflictResolutionBottomBar(
                 isResolving = uiState.isResolving,
                 onLaterClick = onBackClick,
-                onMergeClick = viewModel::applyMerge
+                onMergeClick = { pendingConfirm = ConflictConfirmAction.MERGE }
             )
         }
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
+        ConflictResolutionBody(
+            innerPadding = innerPadding,
+            uiState = uiState,
+            viewModel = viewModel,
+            onBulkChoice = { pendingConfirm = it }
+        )
+    }
 
-            // 警示说明卡片
-            item {
-                ConflictWarningCard(conflictCount = uiState.entries.size)
-            }
+    // ISSUE-P3-360 AC①：确认后才真正执行批量选择 / 合并推送
+    pendingConfirm?.let { action ->
+        ConflictActionConfirmDialog(
+            action = action,
+            conflictCount = uiState.entries.size,
+            onConfirm = {
+                pendingConfirm = null
+                when (action) {
+                    ConflictConfirmAction.ALL_LOCAL -> viewModel.selectAll(FieldChoice.LOCAL)
+                    ConflictConfirmAction.ALL_REMOTE -> viewModel.selectAll(FieldChoice.REMOTE)
+                    ConflictConfirmAction.MERGE -> viewModel.applyMerge()
+                }
+            },
+            onDismiss = { pendingConfirm = null }
+        )
+    }
+}
 
-            // 快捷一键批量选择
-            item {
-                ConflictBulkChoiceRow(
-                    onSelectAllLocal = { viewModel.selectAll(FieldChoice.LOCAL) },
-                    onSelectAllRemote = { viewModel.selectAll(FieldChoice.REMOTE) }
-                )
-            }
+/**
+ * 冲突列表主体（自根函数下沉：根函数承载状态编排与 `ApplyObscuredTouchFilter` 首语句锚点，
+ * 本函数只做纯呈现编排，令两处均处于函数规模档内）。
+ */
+@Composable
+private fun ConflictResolutionBody(
+    innerPadding: PaddingValues,
+    uiState: ConflictResolutionUiState,
+    viewModel: ConflictResolutionViewModel,
+    onBulkChoice: (ConflictConfirmAction) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding)
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item { Spacer(modifier = Modifier.height(4.dp)) }
 
-            // 冲突条目列表
-            items(uiState.entries, key = { it.id }) { entry ->
-                ConflictedEntryCard(
-                    entry = entry,
-                    onFieldChoiceChange = { fieldKey, choice ->
-                        viewModel.selectFieldChoice(entry.id, fieldKey, choice)
-                    },
-                    onModeChange = { mode -> viewModel.selectEntryMode(entry.id, mode) }
-                )
-            }
-
-            item { Spacer(modifier = Modifier.height(20.dp)) }
+        // 警示说明卡片
+        item {
+            ConflictWarningCard(conflictCount = uiState.entries.size)
         }
+
+        // ISSUE-P3-360 AC①：两侧修改时间 + 「较新」标注（此前 UI 无消费点）
+        item {
+            ConflictModifiedTimesRow(
+                localTime = uiState.localModifiedTime,
+                remoteTime = uiState.remoteModifiedTime,
+                newerSide = uiState.newerSide
+            )
+        }
+
+        // 快捷一键批量选择（ISSUE-P3-360 AC①：先弹确认说明覆盖范围）
+        item {
+            ConflictBulkChoiceRow(
+                onSelectAllLocal = { onBulkChoice(ConflictConfirmAction.ALL_LOCAL) },
+                onSelectAllRemote = { onBulkChoice(ConflictConfirmAction.ALL_REMOTE) }
+            )
+        }
+
+        // 冲突条目列表
+        items(uiState.entries, key = { it.id }) { entry ->
+            ConflictedEntryCard(
+                entry = entry,
+                onFieldChoiceChange = { fieldKey, choice ->
+                    viewModel.selectFieldChoice(entry.id, fieldKey, choice)
+                },
+                onModeChange = { mode -> viewModel.selectEntryMode(entry.id, mode) }
+            )
+        }
+
+        item { Spacer(modifier = Modifier.height(20.dp)) }
     }
 }
 

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -178,6 +179,8 @@ internal fun CreateVaultPresetChips(
 @Composable
 internal fun CreateVaultConfirmButton(
     enabled: Boolean,
+    /** ISSUE-P2-354 AC①：建库进行中——按钮内嵌进度（无字面量默认值，调用方必须显式传） */
+    showProgress: Boolean,
     onCreate: () -> Unit
 ) {
     Button(
@@ -189,7 +192,14 @@ internal fun CreateVaultConfirmButton(
         colors = disabledPrimaryButtonColors(),
         border = disabledPrimaryButtonBorder()
     ) {
-        Text(stringResource(R.string.btn_create))
+        if (showProgress) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(CREATE_PROGRESS_SIZE.dp),
+                strokeWidth = 2.dp
+            )
+        } else {
+            Text(stringResource(R.string.btn_create))
+        }
     }
 }
 
@@ -271,3 +281,6 @@ private fun StorageLocationOption(
         }
     }
 }
+
+/** ISSUE-P2-354 AC①：「创建」按钮内嵌进度圈直径（dp） */
+private const val CREATE_PROGRESS_SIZE = 18

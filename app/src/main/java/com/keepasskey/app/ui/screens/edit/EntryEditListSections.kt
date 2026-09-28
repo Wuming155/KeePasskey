@@ -167,6 +167,8 @@ private fun CustomFieldEditCard(
                 onToggleVisibility = { protectedVisible = !protectedVisible },
                 initialPassword = loadedProtectedFields[field.id],
                 initialKey = field.id,
+                // ISSUE-P3-359 AC①：与密码框同型——默认 `{}` 会吞掉框架收键盘行为，Done 显式收起
+                onDone = rememberEntryEditHideKeyboard(),
                 modifier = Modifier.fillMaxWidth()
             )
         } else {

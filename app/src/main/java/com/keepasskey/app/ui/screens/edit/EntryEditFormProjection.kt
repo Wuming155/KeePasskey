@@ -44,6 +44,9 @@ internal fun applyLoadedEntry(
     // ISSUE-P3-310：既有过期值回填编辑表单（Instant → 本地日期）
     expiresEnabled = entry.expiresAt != null,
     expiryDate = entry.expiresAt?.atZone(java.time.ZoneId.systemDefault())?.toLocalDate(),
+    // ISSUE-P3-359 AC⑤②：载入完成结束加载态；重载后的标题来自库内，旧校验位一并复位
+    isLoading = false,
+    titleError = false,
     isDirty = false
 )
 
@@ -76,6 +79,8 @@ internal fun applyTemplateEntry(
     tagsInput = template.tags.joinToString(", "),
     autoTypeSequence = template.autoTypeSequence,
     overrideUrl = template.overrideUrl.orEmpty(),
+    // ISSUE-P3-359 AC⑤：模板预填完成同样结束加载态（见 applyLoadedEntry 同行注释）
+    isLoading = false,
     isDirty = false
 )
 

@@ -24,6 +24,11 @@ enum class OpenVaultSourceType(
  */
 data class DatabasePickerUiState(
     val databases: List<VaultDatabaseInfo> = emptyList(),
+    /**
+     * ISSUE-P2-354 AC①：建库进行中。曾是「仅预览置值、无渲染点」的死字段，
+     * 现由 `DatabasePickerViewModel.isCreatingFlow` 驱动：`DatabasePickerScreen`
+     * 据此渲染进度并禁用入口，建库向导据此进入 busy（禁提交 / 禁关闭）。
+     */
     val isLoading: Boolean = false,
     val showCreateDialog: Boolean = false,
     val showOpenSourceDialog: Boolean = false,

@@ -159,7 +159,12 @@ internal fun CreateVaultWizardDialog(
         targetUri: String?
     ) -> Unit,
     /** ISSUE-P2-288：用户显式确认弱主口令时的留痕回调（不落明文） */
-    onWeakPasswordConfirmed: () -> Unit = {}
+    onWeakPasswordConfirmed: () -> Unit = {},
+    /**
+     * ISSUE-P2-354 AC①：建库进行中（busy 时提交按钮禁用 + 内嵌进度、取消与点按外部均不可关闭）。
+     * 真相源是 `DatabasePickerUiState.isLoading`（ViewModel 同步守卫的投影），不是对话框本地态。
+     */
+    isBusy: Boolean = false
 ) {
     val state = remember { CreateVaultWizardState() }
     val launchers = rememberCreateVaultWizardLaunchers(
@@ -184,6 +189,7 @@ internal fun CreateVaultWizardDialog(
     CreateVaultWizardAlertDialog(
         state = state,
         launchers = launchers,
+        isBusy = isBusy,
         onDismiss = onDismiss,
         // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
         // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
@@ -207,6 +213,8 @@ internal fun CreateVaultWizardDialog(
 private fun CreateVaultWizardAlertDialog(
     state: CreateVaultWizardState,
     launchers: CreateVaultWizardLaunchers,
+    /** ISSUE-P2-354 AC①：建库进行中（见 [CreateVaultWizardDialog.isBusy]） */
+    isBusy: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onWeakPasswordConfirmed: () -> Unit
@@ -229,7 +237,8 @@ private fun CreateVaultWizardAlertDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        // ISSUE-P2-354 AC①：建库进行中不可关闭（Argon2 派生秒级；关框会留下「看不见的并发建库」入口）
+        onDismissRequest = { if (!isBusy) onDismiss() },
         // 同 KeyFileOneTimeSaveDialog：本窗含主密码与确认主密码，须显式要求对话框窗口遮罩
         properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = {
@@ -243,7 +252,8 @@ private fun CreateVaultWizardAlertDialog(
         },
         confirmButton = {
             CreateVaultConfirmButton(
-                enabled = state.isFormValid,
+                enabled = state.isFormValid && !isBusy,
+                showProgress = isBusy,
                 onCreate = {
                     if (MasterPasswordPolicy.verdictOf(state.passwordChars.size, strengthBits) ==
                         MasterPasswordPolicy.Verdict.WEAK_REQUIRES_CONFIRM
@@ -256,7 +266,8 @@ private fun CreateVaultWizardAlertDialog(
             )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            // ISSUE-P2-354 AC①：busy 时「取消」同样禁用——任务在跑，放行取消会留下孤儿协程观感
+            TextButton(onClick = onDismiss, enabled = !isBusy) {
                 Text(stringResource(R.string.btn_cancel))
             }
         }
@@ -429,6 +440,24 @@ internal fun CreateVaultWizardDialogPreview() {
         CreateVaultWizardDialog(
             onDismiss = {},
             onConfirm = { _, _, _, _, _, _ -> }
+        )
+    }
+}
+
+/**
+ * `ISSUE-P2-354 AC①`：`isBusy = true` 那一态（默认态预览只画 `false`）——
+ * busy 的差异恰在按钮禁用 / 内嵌进度 / 取消置灰，不补态就永远看不见。
+ * 单独开一个预览函数，不在同一张图里叠两个整屏。
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@androidx.compose.ui.tooling.preview.Preview(name = "新建密码库向导 - 建库进行中", showBackground = true)
+@Composable
+internal fun CreateVaultWizardDialogBusyPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        CreateVaultWizardDialog(
+            onDismiss = {},
+            onConfirm = { _, _, _, _, _, _ -> },
+            isBusy = true
         )
     }
 }

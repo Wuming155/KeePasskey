@@ -32,7 +32,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.PasswordStrengthBar
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
@@ -58,7 +58,7 @@ internal fun GeneratorDisplayCard(
         animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>(),
         label = "rotate"
     )
-    val haptic = LocalHapticFeedback.current
+    val maybeHaptic = rememberMaybeHaptic()
 
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -90,7 +90,7 @@ internal fun GeneratorDisplayCard(
             // 核心动作是「重新生成」；「复制」降为次级，避免高亮按钮语义与生成器主业颠倒
             Button(
                 onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                    maybeHaptic(HapticFeedbackType.ContextClick)
                     rotationAngle += 360f
                     onRegenerate()
                 },

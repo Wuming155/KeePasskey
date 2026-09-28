@@ -35,6 +35,19 @@ enum class VaultSortOption(@StringRes val labelRes: Int) {
  * 主密码库列表页面的不可变 UI 状态
  */
 data class VaultListUiState(
+    /**
+     * ISSUE-P3-360 AC⑤：库列表**首载**骨架占位态。
+     *
+     * 默认 true（ViewModel `stateIn` 的 `initialValue` 即本默认构造）——首条真实投影
+     * （`buildVaultListUiState`，恒以 false 装配）落地后翻 false；`stateIn` 对后续订阅
+     * 保留最近值，故从详情页返回不会重闪骨架。UI 据此渲染骨架而非「空态闪现」。
+     */
+    val isLoading: Boolean = true,
+    /**
+     * 防抖后的**过滤**关键词快照（`filterParams.query`）。搜索框等 UI 呈现读
+     * `VaultListViewModel.searchQueryDisplay`（未防抖即时回显，ISSUE-P2-356）；
+     * 本字段经 `VaultListContent.searchQuery` 缺省值（预览）与过滤时序单测消费。
+     */
     val searchQuery: String = "",
     val isSearchActive: Boolean = false,
     val sortOption: VaultSortOption = VaultSortOption.DEFAULT,

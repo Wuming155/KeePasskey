@@ -1,19 +1,33 @@
 package com.keepasskey.app.ui.screens.vault
 
 import android.content.res.Configuration
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.res.stringResource
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 
 /**
  * 密码库列表页对话框编排（ISSUE-P3-29：自 `VaultListScreen.kt` 拆出，纯结构性拆分）。
  *
- * 把「8 个对话框的可见性 / 目标对象」状态从巨型 Composable 中收敛为一个
+ * 把「10 个对话框的可见性 / 目标对象」状态从巨型 Composable 中收敛为一个
  * [Stable] 状态持有者，配合 [VaultListDialogHost] 完成渲染；Screen 只负责触发者
  * （顶栏 / FAB / 行回调）与宿主之间的一次性开关置位，不再内联 100 行对话框接线。
  */
@@ -29,6 +43,10 @@ internal class VaultListDialogController {
     var groupToRename by mutableStateOf<VaultGroup?>(null)
     var groupToChangeIcon by mutableStateOf<VaultGroup?>(null)
     var groupToDelete by mutableStateOf<VaultGroup?>(null)
+    // ISSUE-P2-357 AC①：批量删除确认（顶栏删除图标先置位，确认后才执行）
+    var showBatchDeleteConfirm by mutableStateOf(false)
+    // ISSUE-P2-357 AC①：回收站永久删除确认的目标条目（非空即确认对话框可见）
+    var purgeEntryToDelete by mutableStateOf<UiVaultEntry?>(null)
 }
 
 @Composable
@@ -51,7 +69,10 @@ internal fun VaultListDialogHost(
     onChangeGroupIcon: (VaultGroup, String) -> Unit,
     onDeleteGroup: (String) -> Unit,
     onEmptyRecycleBin: () -> Unit,
-    onBatchMove: (String?) -> Unit
+    onBatchMove: (String?) -> Unit,
+    // ISSUE-P2-357 AC①：两条破坏性删除的确认出口（确认后才执行）
+    onBatchDelete: () -> Unit,
+    onPurgeEntry: (String) -> Unit
 ) {
     // 排序选择对话框
     if (controller.showSortDialog) {
@@ -103,6 +124,30 @@ internal fun VaultListDialogHost(
             onConfirm = {
                 onEmptyRecycleBin()
                 controller.showEmptyRecycleBinDialog = false
+            }
+        )
+    }
+
+    // ISSUE-P2-357 AC①：批量删除确认（含条目数与后果文案；确认后才执行软删除）
+    if (controller.showBatchDeleteConfirm) {
+        VaultBatchDeleteConfirmDialog(
+            selectedCount = uiState.selectedEntryIds.size,
+            onDismiss = { controller.showBatchDeleteConfirm = false },
+            onConfirm = {
+                controller.showBatchDeleteConfirm = false
+                onBatchDelete()
+            }
+        )
+    }
+
+    // ISSUE-P2-357 AC①：回收站永久删除确认（不可逆；确认后才执行）
+    controller.purgeEntryToDelete?.let { target ->
+        VaultPurgeEntryConfirmDialog(
+            entryTitle = target.title,
+            onDismiss = { controller.purgeEntryToDelete = null },
+            onConfirm = {
+                controller.purgeEntryToDelete = null
+                onPurgeEntry(target.id)
             }
         )
     }
@@ -241,7 +286,80 @@ internal fun VaultListDialogHostPreview() {
             onChangeGroupIcon = { _, _ -> },
             onDeleteGroup = {},
             onEmptyRecycleBin = {},
-            onBatchMove = {}
+            onBatchMove = {},
+            onBatchDelete = {},
+            onPurgeEntry = {}
         )
     }
+}
+
+/**
+ * ISSUE-P2-357 AC①/AC③：批量删除确认对话框——文案含**条目数与后果说明**（软删除 → 回收站可找回）。
+ * 样式 / 按钮措辞 / error 色与既有三处确认同口径（分组删除 [VaultDeleteGroupDialog]、
+ * 清空回收站 [VaultEmptyRecycleBinDialog]、详情页单条删除）：error 图标 + error 容器色确认键 +
+ * Reject 触感 + `btn_delete` / `btn_cancel` 措辞。
+ */
+@Composable
+internal fun VaultBatchDeleteConfirmDialog(
+    selectedCount: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val maybeHaptic = rememberMaybeHaptic()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text(stringResource(R.string.vault_batch_delete_confirm_title)) },
+        text = { Text(stringResource(R.string.vault_batch_delete_confirm_message, selectedCount)) },
+        confirmButton = {
+            Button(
+                onClick = {
+                    maybeHaptic(HapticFeedbackType.Reject)
+                    onConfirm()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                )
+            ) { Text(stringResource(R.string.btn_delete)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
+        }
+    )
+}
+
+/**
+ * ISSUE-P2-357 AC①/AC③：回收站永久删除确认对话框——文案明示**永久、无法恢复**（不可逆）。
+ * 样式与 [VaultBatchDeleteConfirmDialog] / [VaultEmptyRecycleBinDialog] 同口径
+ * （DeleteForever 图标 + error 容器色确认键 + Reject 触感 + `btn_delete` / `btn_cancel`）。
+ */
+@Composable
+internal fun VaultPurgeEntryConfirmDialog(
+    entryTitle: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val maybeHaptic = rememberMaybeHaptic()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text(stringResource(R.string.vault_purge_entry_confirm_title)) },
+        text = { Text(stringResource(R.string.vault_purge_entry_confirm_message, entryTitle)) },
+        confirmButton = {
+            Button(
+                onClick = {
+                    maybeHaptic(HapticFeedbackType.Reject)
+                    onConfirm()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                )
+            ) { Text(stringResource(R.string.btn_delete)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
+        }
+    )
 }

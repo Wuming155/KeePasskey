@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
@@ -60,7 +61,8 @@ internal fun DatabaseFieldRow(
                 if (onClick != null) {
                     Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onClick)
+                        // ISSUE-P3-358 AC④：操作行补 Role.Button（原裸 clickable 无可播报角色）
+                        .clickable(onClick = onClick, role = Role.Button)
                         .padding(vertical = 4.dp, horizontal = 2.dp)
                 } else {
                     Modifier
@@ -104,7 +106,8 @@ internal fun DatabaseActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
+            // ISSUE-P3-358 AC④：操作行补 Role.Button（原裸 clickable 无可播报角色）
+            .clickable(onClick = onClick, role = Role.Button)
             .padding(vertical = 6.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween

@@ -3,6 +3,8 @@ package com.keepasskey.app.ui.screens.unlock
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.security.FakeUnlockThrottleStore
+import com.keepasskey.app.security.ThrottleConfig
+import com.keepasskey.app.security.ThrottleConfigSource
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.app.security.UnlockThrottlePolicy
 import com.keepasskey.app.security.UnlockThrottleRecord
@@ -292,5 +294,158 @@ class UnlockViewModelTest {
         assertEquals(0, store.read("db_personal").failureCount)
         assertEquals(0, viewModel.uiState.value.throttleFailureCount)
         assertEquals(0L, viewModel.uiState.value.throttleLockoutRemainingMs)
+        assertNull("成功后不得残留剩余尝试提示", viewModel.uiState.value.throttleAttemptsRemaining)
+    }
+
+    // ── ISSUE-P2-355 AC②：节流反馈接线（剩余尝试 / 每秒倒计时 ticker） ──────────────
+
+    @Test
+    fun `凭据失败提示附剩余尝试次数`() = runTest {
+        val store = FakeUnlockThrottleStore()
+        val viewModel = createThrottledViewModel(store, forceInvalidCredentials = true)
+
+        viewModel.onPasswordChangeSecure("WrongPass#1".toCharArray())
+        viewModel.unlock()
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals(com.keepasskey.app.R.string.unlock_error_invalid_password, state.errorMessage?.resId)
+        assertEquals(
+            "第 1 次失败后应呈现剩余 ${UnlockThrottlePolicy.FAILURE_THRESHOLD - 1} 次尝试",
+            UnlockThrottlePolicy.FAILURE_THRESHOLD - 1,
+            state.throttleAttemptsRemaining
+        )
+    }
+
+    @Test
+    fun `节流关闭时失败不呈现剩余尝试`() = runTest {
+        val store = FakeUnlockThrottleStore()
+        val manager = UnlockThrottleManager(
+            store,
+            object : ThrottleConfigSource {
+                override val current: ThrottleConfig = ThrottleConfig(enabled = false)
+            }
+        )
+        val viewModel = UnlockViewModel(
+            FakeVaultRepository(forceInvalidCredentials = true),
+            FakeSettingsRepository(),
+            null,
+            null,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            unlockThrottleManager = manager
+        )
+        MainDispatcherGuard.track(viewModel)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect {}
+        }
+        testScheduler.runCurrent()
+
+        viewModel.onPasswordChangeSecure("WrongPass#1".toCharArray())
+        viewModel.unlock()
+        testScheduler.runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals(com.keepasskey.app.R.string.unlock_error_invalid_password, state.errorMessage?.resId)
+        assertNull("节流关闭不存在锁定上限，呈现剩余次数即假承诺", state.throttleAttemptsRemaining)
+    }
+
+    @Test
+    fun `输入清除失败提示时同步清除剩余尝试`() = runTest {
+        val store = FakeUnlockThrottleStore()
+        val viewModel = createThrottledViewModel(store, forceInvalidCredentials = true)
+
+        viewModel.onPasswordChangeSecure("WrongPass#1".toCharArray())
+        viewModel.unlock()
+        testScheduler.runCurrent()
+        assertNotNull(viewModel.uiState.value.throttleAttemptsRemaining)
+
+        // 用户开始输入：失败提示与附着其上的剩余尝试一并收起（既有「输入即清提示」语义不变）
+        viewModel.onPasswordChangeSecure("NextTry#2".toCharArray())
+
+        assertNull(viewModel.uiState.value.errorMessage)
+        assertNull(viewModel.uiState.value.throttleAttemptsRemaining)
+    }
+
+    @Test
+    fun `锁定倒计时逐秒刷新并在到期复位`() = runTest {
+        val store = FakeUnlockThrottleStore()
+        store.seed(
+            "db_personal",
+            UnlockThrottleRecord(
+                failureCount = UnlockThrottlePolicy.FAILURE_THRESHOLD,
+                lockoutUntilEpochMs = System.currentTimeMillis() + 30_000L
+            )
+        )
+        val viewModel = createThrottledViewModel(store, forceInvalidCredentials = false)
+
+        viewModel.onPasswordChangeSecure("AnyPass#1".toCharArray())
+        viewModel.unlock()
+        testScheduler.runCurrent()
+
+        val locked = viewModel.uiState.value
+        assertTrue("预置锁定应被闸门拒绝", locked.throttleLockoutRemainingMs > 0L)
+        assertEquals(
+            com.keepasskey.app.R.string.unlock_error_locked_out_seconds,
+            locked.errorMessage?.resId
+        )
+        val initialRemaining = locked.throttleLockoutRemainingMs
+
+        // 虚拟时钟推进 5.5 秒：恰好 5 个 1 秒 tick 落入窗口
+        testScheduler.advanceTimeBy(5_500L)
+        testScheduler.runCurrent()
+
+        val mid = viewModel.uiState.value
+        assertEquals(
+            "每秒 ticker 应恰好累计递减 5000ms",
+            initialRemaining - 5_000L,
+            mid.throttleLockoutRemainingMs
+        )
+        assertEquals(
+            "倒计时刷新后仍应呈现锁定文案",
+            com.keepasskey.app.R.string.unlock_error_locked_out_seconds,
+            mid.errorMessage?.resId
+        )
+
+        // 虚拟时钟快进到锁定到期：ticker 归零并移除锁定文案
+        testScheduler.advanceUntilIdle()
+
+        val expired = viewModel.uiState.value
+        assertEquals("到期后剩余时长复位为 0", 0L, expired.throttleLockoutRemainingMs)
+        assertNull("到期后锁定文案移除", expired.errorMessage)
+    }
+
+    // ── ISSUE-P2-355 AC③：锁定丢弃未保存编辑的解锁页一次性告知 ──────────────────────
+
+    @Test
+    fun `锁定丢弃未保存编辑后解锁页一次性告知`() = runTest {
+        val registry = com.keepasskey.app.security.UnsavedEditRegistry()
+        registry.register(Any()) { true }
+        registry.markDirtyEditsDiscarded()
+
+        val first = UnlockViewModel(
+            FakeVaultRepository(),
+            FakeSettingsRepository(),
+            null,
+            null,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            unsavedEditRegistry = registry
+        )
+        MainDispatcherGuard.track(first)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { first.uiState.collect {} }
+        testScheduler.runCurrent()
+        assertTrue("首个解锁页应呈现丢弃告知", first.uiState.value.unsavedEditsDiscardedNotice)
+
+        val second = UnlockViewModel(
+            FakeVaultRepository(),
+            FakeSettingsRepository(),
+            null,
+            null,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            unsavedEditRegistry = registry
+        )
+        MainDispatcherGuard.track(second)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { second.uiState.collect {} }
+        testScheduler.runCurrent()
+        assertFalse("告知必须一次性消费，不跨页面残留", second.uiState.value.unsavedEditsDiscardedNotice)
     }
 }

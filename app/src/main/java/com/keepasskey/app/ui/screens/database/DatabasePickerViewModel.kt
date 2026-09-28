@@ -68,9 +68,12 @@ class DatabasePickerViewModel @Inject constructor(
         debugLog?.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（建库）")
     }
 
-    private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
+    // ISSUE-P3-359 AC④：放宽 internal 供同包 publishPickerMessage 双写（见该文件 KDoc）
+    internal val userMessageFlow = MutableStateFlow<UiMessage?>(null)
     private val showCreateDialogFlow = MutableStateFlow(false)
     private val showOpenSourceDialogFlow = MutableStateFlow(false)
+    /** ISSUE-P2-354 AC①：建库进行中（原 UiState.isLoading 死字段的真相源；busy 守卫读它） */
+    private val isCreatingFlow = MutableStateFlow(false)
 
     /** ISSUE-P3-21：生成型密钥文件的一次性交付状态（Screen 据此弹出强制保存提示） */
     private val keyFileDeliveryFlow = MutableStateFlow<KeyFileDeliveryState>(KeyFileDeliveryState.None)
@@ -82,10 +85,12 @@ class DatabasePickerViewModel @Inject constructor(
     val uiState: StateFlow<DatabasePickerUiState> = combine(
         vaultRepository.getDatabases(),
         userMessageFlow,
-        combine(showCreateDialogFlow, showOpenSourceDialogFlow) { c, o -> Pair(c, o) }
-    ) { databases, userMessage, (showCreateDialog, showOpenSourceDialog) ->
+        combine(showCreateDialogFlow, showOpenSourceDialogFlow) { c, o -> Pair(c, o) },
+        isCreatingFlow
+    ) { databases, userMessage, (showCreateDialog, showOpenSourceDialog), isLoading ->
         DatabasePickerUiState(
             databases = databases,
+            isLoading = isLoading,
             userMessage = userMessage,
             showCreateDialog = showCreateDialog,
             showOpenSourceDialog = showOpenSourceDialog
@@ -145,6 +150,11 @@ class DatabasePickerViewModel @Inject constructor(
         /** ISSUE-P2-229：非空即建到用户经系统文件选择器自选的位置（`content://` uri 字符串） */
         targetUri: String? = null
     ) {
+        // ISSUE-P2-354 AC①：busy 守卫——Argon2 派生是秒级操作，守卫在**协程之外同步置位**，
+        // 快速连点的第二次调用直接被拒（对话框按钮的 enabled 只是 UI 层，挡不住重帧内的双击）。
+        // 入参为借用语义（调用方持有并自行擦除），被拒路径不接管、不擦除。
+        if (isCreatingFlow.value) return
+        isCreatingFlow.value = true
         viewModelScope.launch {
             // H2 整改：主密码全程 CharArray——复制私有副本并在 finally 擦除；
             // 入参数组为调用方（弹窗）所有，由其自身生命周期管理擦除
@@ -152,7 +162,7 @@ class DatabasePickerViewModel @Inject constructor(
             try {
                 val resolution = resolveKeyFileFactor(keyFile, keyFileSourceUri)
                 if (resolution is KeyFileFactorResolution.Failed) {
-                    userMessageFlow.value = resolution.message
+                    publishPickerMessage(resolution.message)
                     return@launch
                 }
                 val resolved = resolution as KeyFileFactorResolution.Resolved
@@ -166,7 +176,7 @@ class DatabasePickerViewModel @Inject constructor(
                 if (result is KdbxResult.Success) {
                     val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
                     showCreateDialogFlow.value = false
-                    userMessageFlow.value = UiMessage(R.string.db_picker_msg_created)
+                    publishPickerMessage(UiMessage(R.string.db_picker_msg_created))
                     if (resolved.generated) {
                         // ISSUE-P3-21 验收 2：生成型密钥文件必须一次性交付（丢失即无法解锁）
                         keyFileDeliveryFlow.value = KeyFileDeliveryState.PendingSave(
@@ -177,10 +187,12 @@ class DatabasePickerViewModel @Inject constructor(
                     // 以文件名下行的选中事件对这类库无效
                     _events.emit(DatabasePickerEvent.DatabaseSelected(targetUri ?: fileName))
                 } else {
-                    userMessageFlow.value = UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message))
+                    publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
                 }
             } finally {
                 pwd.fill('0')
+                // ISSUE-P2-354 AC①：busy 在任何结果路径（含失败/提前返回）都回落
+                isCreatingFlow.value = false
             }
         }
     }
@@ -197,13 +209,13 @@ class DatabasePickerViewModel @Inject constructor(
             val resolver = appContext?.contentResolver
             if (resolver == null) {
                 // 禁止静默失败：没有写盘上下文时如实告知用户，提示保持驻留
-                userMessageFlow.value = UiMessage(R.string.db_picker_keyfile_save_failed)
+                publishPickerMessage(UiMessage(R.string.db_picker_keyfile_save_failed))
                 return@launch
             }
             // 复用既有导出通道取字节：会话未绑定密钥文件时如实失败（绝不写空文件冒充成功）
             val bytes = vaultRepository.exportKeyFileBytes().getOrNull()
             if (bytes == null) {
-                userMessageFlow.value = UiMessage(R.string.db_picker_keyfile_save_failed)
+                publishPickerMessage(UiMessage(R.string.db_picker_keyfile_save_failed))
                 return@launch
             }
             val written = withContext(Dispatchers.IO) {
@@ -223,9 +235,9 @@ class DatabasePickerViewModel @Inject constructor(
             }
             if (written) {
                 keyFileDeliveryFlow.value = KeyFileDeliveryState.None
-                userMessageFlow.value = UiMessage(R.string.db_picker_keyfile_saved)
+                publishPickerMessage(UiMessage(R.string.db_picker_keyfile_saved))
             } else {
-                userMessageFlow.value = UiMessage(R.string.db_picker_keyfile_save_failed)
+                publishPickerMessage(UiMessage(R.string.db_picker_keyfile_save_failed))
             }
         }
     }
@@ -266,10 +278,10 @@ class DatabasePickerViewModel @Inject constructor(
             if (result is KdbxResult.Success) {
                 val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
                 showOpenSourceDialogFlow.value = false
-                userMessageFlow.value = UiMessage(R.string.db_picker_msg_opened)
+                publishPickerMessage(UiMessage(R.string.db_picker_msg_opened))
                 _events.emit(DatabasePickerEvent.DatabaseSelected(fileName))
             } else {
-                userMessageFlow.value = UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message))
+                publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }
@@ -287,9 +299,9 @@ class DatabasePickerViewModel @Inject constructor(
         viewModelScope.launch {
             val result = vaultRepository.removeDatabase(id, kind)
             if (result is KdbxResult.Success) {
-                userMessageFlow.value = UiMessage(R.string.db_picker_msg_removed)
+                publishPickerMessage(UiMessage(R.string.db_picker_msg_removed))
             } else {
-                userMessageFlow.value = UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message))
+                publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
             }
         }
     }

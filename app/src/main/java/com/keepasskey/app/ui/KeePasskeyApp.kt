@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui
 
-import android.content.res.Configuration
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -30,17 +29,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.keepasskey.app.MainApplication
-import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.security.AutoLockManager
 import com.keepasskey.app.ui.components.AppBottomBar
 import com.keepasskey.app.ui.components.AppNavigationRail
 import com.keepasskey.app.ui.components.BottomNavItem
+import com.keepasskey.app.ui.components.HapticsEnabled
 import com.keepasskey.app.ui.navigation.Screen
 import com.keepasskey.app.ui.screens.settings.SettingsViewModel
 import com.keepasskey.app.ui.screens.vault.AppTerminationPolicy
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
-import java.util.Locale
 
 /**
  * KeePasskey 界面总入口与全局路由宿主。
@@ -92,7 +90,7 @@ fun KeePasskeyApp() {
 
     CompositionLocalProvider(
         LocalContext provides localizedContext,
-        LocalConfiguration provides localizedConfiguration
+        LocalConfiguration provides localizedConfiguration, HapticsEnabled provides appSettings.hapticFeedbackEnabled // ISSUE-P3-358 AC①
     ) {
         KeePasskeyTheme(
             themeMode = appSettings.themeMode,
@@ -170,12 +168,7 @@ private fun buildKillAppAction(
     }
 }
 
-/** 语言偏好 → [Locale]；[AppLanguage.SYSTEM] 返回 null 表示「跟随系统、不改写配置」（§185 下沉，可 JVM 单测） */
-internal fun localeFor(appLanguage: AppLanguage): Locale? = when (appLanguage) {
-    AppLanguage.ZH_CN -> Locale.SIMPLIFIED_CHINESE
-    AppLanguage.EN_US -> Locale.ENGLISH
-    AppLanguage.SYSTEM -> null
-}
+/** 语言偏好 → Locale 的取值与配置派生见同包 `AppShellLocalization.kt`（§185 续拆，ISSUE-P3-359 AC④）。 */
 
 /** 主题三态循环 Light → Dark → System → Light（§185 下沉为纯函数，可 JVM 单测） */
 internal fun nextThemeMode(themeMode: AppThemeMode): AppThemeMode = when (themeMode) {
@@ -197,27 +190,6 @@ internal fun hiddenTabRedirectRoute(
     currentRoute == Screen.Authenticator.route && !showAuthenticatorTab -> Screen.VaultList.route
     currentRoute == Screen.Generator.route && !showGeneratorTab -> Screen.VaultList.route
     else -> null
-}
-
-/** 按 [locale] 改写 [base] 的语言与布局方向；`null` 时返回原样副本（§185：原先两处重复逻辑并为一处） */
-private fun localizedConfigurationOf(base: Configuration, locale: Locale?): Configuration {
-    val cfg = Configuration(base)
-    if (locale != null) {
-        cfg.setLocale(locale)
-        cfg.setLayoutDirection(locale)
-    }
-    return cfg
-}
-
-/** 供 `LocalContext` 使用的本地化上下文；`null` 语言时退回原上下文 */
-private fun localizedContextOf(
-    context: Context,
-    base: Configuration,
-    locale: Locale?
-): Context = if (locale == null) {
-    context
-} else {
-    context.createConfigurationContext(localizedConfigurationOf(base, locale))
 }
 
 /**
@@ -352,7 +324,10 @@ private fun AppShellScaffold(
                 )
             }
         },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        // ISSUE-P3-359 AC④：全局唯一 Snackbar 宿主挂在外壳 Scaffold——
+        // 导航切换不销毁，扫码导入 / popBackStack 前发出的消息不丢不延迟
+        snackbarHost = { AppGlobalSnackbarHost() }
     ) { innerPadding ->
         Row(
             modifier = Modifier

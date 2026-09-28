@@ -205,12 +205,20 @@ class AutofillConfirmActivity : FragmentActivity() {
                     )
                 }
             }
+            // ISSUE-P3-360 AC④（局部）：确认钮禁用时在 hint 位就地给出原因——
+            // 首现调用方未勾选授权前 confirmEnabled=false，此前界面无任何解释；
+            // 勾选状态翻转即重组，原因文案随之消失（与按钮门控同一条件，不会漂移）
+            val confirmEnabled = !requiresExplicitAuthorization || trustChecked
             CredentialFillConfirmScreen(
                 title = getString(R.string.autofill_confirm_title),
-                hint = manualHint,
+                hint = if (confirmEnabled) {
+                    manualHint
+                } else {
+                    "$manualHint\n${getString(R.string.autofill_confirm_disabled_reason)}"
+                },
                 confirmText = getString(R.string.autofill_confirm_ok),
                 cancelText = getString(R.string.autofill_confirm_cancel),
-                confirmEnabled = !requiresExplicitAuthorization || trustChecked,
+                confirmEnabled = confirmEnabled,
                 attributionContent = attributionContent,
                 onConfirm = { completeAuthResult() },
                 onCancel = { finish() }

@@ -358,7 +358,8 @@ internal fun HealthTipsCard() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.Security,
-                    contentDescription = "Security tips",
+                    // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
+                    contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp)
                 )

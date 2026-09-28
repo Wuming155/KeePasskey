@@ -231,6 +231,16 @@ data class SettingsUiState(
     // 读取侧仅校验 major（见 `KdbxHeader` 的版本策略声明）。
     // 若将来确需展示格式行，**必须**取自活动库真实文件头（`KdbxDatabase.header.version`），
     // 不得再写为静态字面量。
+
+    // 10. 更换主密钥任务（ISSUE-P2-354 AC③）
+    /**
+     * 全库 Argon2 重派生 + 重加密进行中（真相源 [MasterKeyChangeTaskState]，见
+     * `SettingsMasterKeyChangeController.kt`）。任务挂 ViewModel 作用域（不随对话框关闭 /
+     * 切 Tab 取消）；busy 期间对话框不可重复提交、不可关闭。`false` 仅为首帧占位默认值。
+     */
+    val isChangingMasterKey: Boolean = false,
+    /** 更换主密钥结果反馈（成功/失败各一条），SettingsContent 经既有 Snackbar 路径展示后清除 */
+    val masterKeyChangeFeedback: UiMessage? = null
 )
 
 /**

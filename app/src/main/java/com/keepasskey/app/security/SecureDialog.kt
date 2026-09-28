@@ -117,6 +117,8 @@ import androidx.compose.ui.window.DialogWindowProvider
  * （排序 / 锁定密码库 / 彻底退出应用 / 重命名 / 更改图标 / 删除分组 / 移动到分组 / 删除条目 /
  * 删除共享图标 / WebDAV·S3 provider 名与描述），**无任何口令、TOTP、密钥或用户数据插值**；
  * 全仓亦无其它 `Popup(` / `TooltipBox(` / `ModalBottomSheet(` 调用点。
+ * **2026-09-28 `ISSUE-P3-360` AC④a 复验**：顶栏溢出菜单新增第 12 个菜单项「选择」（纯静态动作
+ * 文案 `vault_menu_select_entries`，无插值）——调用点仍 4 处，结论不变（详见同名测试的编年注记）。
  *
  * ⇒ **不接线**（避免「全量加 flag」的过度改动）。**接线条件（须遵守）**：一旦任一 Popup
  * 的菜单项开始渲染**凭据类内容**（口令 / TOTP / 密钥 / 用户名等用户数据插值），

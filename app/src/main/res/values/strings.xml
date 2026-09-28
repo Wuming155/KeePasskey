@@ -11,6 +11,7 @@
     <string name="btn_continue_edit">继续编辑</string>
     <string name="btn_copy">复制</string>
     <string name="btn_restore">还原</string>
+    <string name="btn_undo">撤销</string>
     <string name="btn_empty">清空</string>
     <string name="btn_create">创建</string>
     <string name="btn_add">添加</string>
@@ -53,6 +54,10 @@
     <string name="cd_scan_qr">扫码</string>
     <string name="cd_regenerate">重新生成</string>
     <string name="cd_more_actions">更多操作</string>
+    <!-- ISSUE-P3-358 AC③：单选卡选中态描述（配合 selectable 的 selected 语义） -->
+    <string name="cd_selected">已选中</string>
+    <!-- ISSUE-P3-358 AC⑥：验证码卡倒计时数字的整体播报（避免孤立数字被单独读出） -->
+    <string name="cd_totp_remaining">剩余 %1$d 秒</string>
 
     <!-- 解锁页面 -->
     <string name="unlock_title">KeePasskey</string>
@@ -91,6 +96,8 @@
     <string name="db_picker_open_external">打开已有 KDBX</string>
     <string name="db_picker_create_new">新建密码库</string>
     <string name="db_picker_create_title">新建密码库向导</string>
+    <!-- ISSUE-P2-354 AC①：建库进行中（Argon2 派生期间）页面级进度文案 -->
+    <string name="db_picker_creating">正在创建密码库…</string>
     <string name="db_picker_vault_name">密码库名称</string>
     <string name="db_picker_vault_name_hint">例如：my_passwords.kdbx</string>
     <string name="db_picker_new_pwd">设置主密码</string>
@@ -138,7 +145,13 @@
     <string name="vault_empty_recycle_bin">清空回收站</string>
     <string name="vault_empty_recycle_bin_confirm">确定彻底清空回收站内的所有条目吗？此操作不可逆！</string>
     <string name="vault_entry_restored">凭据条目已成功还原至原目录</string>
+    <string name="vault_entry_deleted">凭据条目已移至回收站</string>
     <string name="vault_entry_purged">条目已从回收站彻底粉碎删除</string>
+    <!-- ISSUE-P2-357：破坏性操作确认（批量删除 / 回收站永久删除） -->
+    <string name="vault_batch_delete_confirm_title">删除所选条目？</string>
+    <string name="vault_batch_delete_confirm_message">将把 %1$d 个条目移入回收站，之后可在回收站还原或彻底删除。</string>
+    <string name="vault_purge_entry_confirm_title">永久删除条目？</string>
+    <string name="vault_purge_entry_confirm_message">「%1$s」将从回收站彻底删除，此操作无法恢复。</string>
 
     <!-- 凭据详情页面 -->
     <string name="detail_title">凭据详情</string>
@@ -263,8 +276,10 @@
     <string name="system_settings_open">打开系统设置</string>
     <string name="vault_copy_totp_done">已安全复制 %1$s 的动态验证码到剪贴板</string>
     <string name="vault_copy_totp_missing">该凭据未配置动态验证码</string>
+    <string name="clipboard_copy_failed">复制失败：内容未写入剪贴板</string>
     <string name="vault_batch_moved">已成功批量移动 %1$d 个条目</string>
     <string name="vault_batch_deleted">已将选中的 %1$d 个条目移至回收站</string>
+    <string name="vault_batch_restored">已还原 %1$d 个条目</string>
     <string name="vault_recycle_emptied">回收站已清空</string>
     <string name="vault_sync_verifying">正在与云端服务器校验最新版本...</string>
     <string name="vault_sync_completed">云端数据库同步校验完成，当前为最新版本</string>
@@ -283,6 +298,10 @@
     <string name="vault_group_icon_updated">已更新文件夹图标</string>
     <string name="vault_group_deleted">已删除文件夹</string>
     <string name="vault_batch_selected_count">已选中 %1$d 项</string>
+    <!-- ISSUE-P3-360 AC④a：溢出菜单「选择」项（进入批量模式） -->
+    <string name="vault_menu_select_entries">选择</string>
+    <!-- ISSUE-P3-360 AC④b：首次长按进入批量模式的一次性引导 -->
+    <string name="vault_batch_select_guide">长按条目可进入多选：勾选后可批量移动或删除</string>
     <string name="vault_new_entry_desc">保存账号、密码、网址及通行密钥</string>
     <string name="vault_new_folder_desc">创建分类文件夹，层级化整理密码条目</string>
     <!-- ISSUE-P3-51：从模板新建条目（模板来自库内「模板」分组） -->
@@ -326,11 +345,18 @@
     <string name="detail_username_copied">账号已复制到安全剪贴板</string>
     <string name="detail_username_copied_short">账号已复制</string>
     <string name="detail_totp_copied">动态验证码已复制</string>
+    <!-- ISSUE-P3-360 AC③a：剩余 ≤5s 时的临期复制提示（秒数插值） -->
+    <string name="detail_totp_copied_expiring">验证码 %1$d 秒后过期，已复制</string>
     <string name="detail_totp_copy_failed">验证码复制失败，请稍后重试</string>
     <string name="detail_field_copied">已复制 %1$s</string>
+    <string name="detail_url_missing">该条目未配置网址</string>
+    <string name="detail_url_fallback_copied">无法直接打开，已复制网址到剪贴板</string>
     <string name="detail_password_copied_timeout_seconds">密码已复制，%1$d 秒后自动清空</string>
     <string name="detail_password_copied_timeout_minutes">密码已复制，%1$d 分钟后自动清空</string>
     <string name="detail_password_copied_no_clear">密码已复制（剪贴板自动清空已关闭）</string>
+    <!-- ISSUE-P3-360 AC③b：敏感复制消息的清空倒计时后缀（UiMessage.clipboardClearSeconds 拼接） -->
+    <string name="clipboard_clear_suffix_seconds">，%1$d 秒后自动清空</string>
+    <string name="clipboard_clear_suffix_minutes">，%1$d 分钟后自动清空</string>
     <!-- ISSUE-P3-352 AC③：定时擦除实际发生后的可见反馈（口径参照 Kp2a "Clipboard cleared."） -->
     <string name="clipboard_auto_cleared">剪贴板已自动清空</string>
     <string name="detail_attachment_tap_preview">%1$s • 点击安全预览</string>
@@ -355,12 +381,17 @@
     <string name="db_picker_msg_opened">已成功打开并加载外部 KDBX 文件</string>
     <string name="db_picker_msg_removed">已从切换列表中移除该密码库关联</string>
     <string name="edit_title_required">请输入凭据标题</string>
+    <string name="edit_form_loading">正在加载凭据…</string>
     <string name="conflict_resolved_msg">冲突解决完毕，已完成本地与云端三方合并</string>
     <string name="unlock_error_empty_password">请输入主密码以解锁</string>
     <string name="unlock_error_invalid_password">主密码错误或密钥不匹配，解锁失败</string>
     <!-- ISSUE-P1-04：主密码连续失败触发渐进退避锁定的提示（反暴力破解） -->
     <string name="unlock_error_locked_out_seconds">连续多次解锁失败，密码库已临时锁定，请在 %1$d 秒后重试</string>
     <string name="unlock_error_locked_out_minutes">连续多次解锁失败，密码库已临时锁定，请在 %1$d 分钟后重试</string>
+    <!-- ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（仅节流生效且未达锁定阈值时呈现） -->
+    <string name="unlock_attempts_remaining">剩余 %1$d 次尝试</string>
+    <!-- ISSUE-P2-355 AC③：锁定销毁未保存编辑后，解锁页一次性告知 -->
+    <string name="unlock_unsaved_edits_discarded">上次未保存的改动已丢弃</string>
     <!-- 既有构建债顺手整改：values-en 存在此条翻译但默认 locale 缺失，lintVitalRelease 因此 fail（阻塞 assembleRelease） -->
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
@@ -368,6 +399,10 @@
     <string name="unlock_biometric_enroll_subtitle">请验证指纹或面容，以安全保存免密解锁凭据</string>
     <string name="sec_biometric_auth_failed">生物识别验证未通过或已取消</string>
     <string name="sec_biometric_key_invalidated">系统生物特征发生变更，安全密钥已失效，请使用主密码重新登录</string>
+    <!-- ISSUE-P2-355 AC④：生物识别错误按 errorCode 分档（lockout / hardware / timeout / 其他） -->
+    <string name="sec_biometric_lockout">生物识别尝试次数过多已暂时锁定，请稍后重试或改用主密码解锁</string>
+    <string name="sec_biometric_hardware">生物识别硬件不可用，请改用主密码解锁</string>
+    <string name="sec_biometric_timeout">生物识别验证超时，请重试或改用主密码解锁</string>
     <!-- ISSUE-P1-22：软件级 Keystore 快速解锁降级（显式确认 + 常驻声明） -->
     <string name="quick_unlock_software_key_notice">本机快速解锁降级为软件密钥，不提供硬件级保护</string>
     <string name="unlock_downgrade_dialog_title">快速解锁安全降级</string>
@@ -456,6 +491,25 @@
     <string name="conflict_entry_keep_remote">整条取云端</string>
     <string name="conflict_entry_duplicate_both">双方保留（云端存副本）</string>
     <string name="conflict_entry_mode_whole_hint">该条目将按上方所选方式整条裁决，字段选择已停用</string>
+    <!-- ISSUE-P3-360 AC①：两侧修改时间对照行 + 「较新」徽标 -->
+    <string name="conflict_time_local_label">本地修改：%1$s</string>
+    <string name="conflict_time_remote_label">云端修改：%1$s</string>
+    <string name="conflict_time_newer">较新</string>
+    <!-- ISSUE-P3-360 AC①：批量选择 / 合并推送前的确认（正文说明覆盖范围与条目数） -->
+    <string name="conflict_confirm_all_local_title">全部保留本地？</string>
+    <string name="conflict_confirm_all_local_msg">将把 %1$d 个冲突条目的全部差异字段设为「保留本地版本」，覆盖你此前的逐字段选择；推送后这些字段的云端修改将被本地版本取代。推送前仍可逐字段改回。</string>
+    <string name="conflict_confirm_all_remote_title">全部保留云端？</string>
+    <string name="conflict_confirm_all_remote_msg">将把 %1$d 个冲突条目的全部差异字段设为「保留云端版本」，覆盖你此前的逐字段选择；推送后这些字段的本地修改将被云端版本取代。推送前仍可逐字段改回。</string>
+    <string name="conflict_confirm_merge_title">确认合并并推送？</string>
+    <string name="conflict_confirm_merge_msg">将按当前选择合并 %1$d 个冲突条目并推送为云端新版本：未逐字段调整的字段默认保留本地版本，其云端修改会被覆盖。此操作即时生效。</string>
+    <!-- ISSUE-P3-360 AC①：敏感字段的安全差异线索（掩码 + 长度 + 字符形态，不揭示明文） -->
+    <string name="conflict_sensitive_hint">••••••••（%1$d 位 · %2$s）</string>
+    <string name="conflict_sensitive_hint_length_only">••••••••（%1$d 位）</string>
+    <string name="conflict_sensitive_cat_upper">大写</string>
+    <string name="conflict_sensitive_cat_lower">小写</string>
+    <string name="conflict_sensitive_cat_digit">数字</string>
+    <string name="conflict_sensitive_cat_symbol">符号</string>
+    <string name="conflict_sensitive_cat_separator">、</string>
 
     <!-- 版本差异对比 -->
     <string name="diff_dialog_title">版本差异对比</string>
@@ -1081,6 +1135,8 @@
     <!-- ISSUE-P1-24 AC②：首次出现的目标须显式授权 -->
     <string name="autofill_confirm_first_occurrence">这是你首次向该应用填充凭据：请核对以上归属信息，谨防仿冒登录页。</string>
     <string name="autofill_confirm_remember_trust">我已核对归属，记住此应用并授权填充</string>
+    <!-- ISSUE-P3-360 AC④：确认钮禁用（首现调用方未勾选授权）时的就地原因文案（hint 位） -->
+    <string name="autofill_confirm_disabled_reason">确认按钮暂不可用：首次向该应用填充前，需在下方勾选授权选项。</string>
     <string name="autofill_confirm_already_trusted">此应用此前已获你显式授权（同包名换签名将重新要求授权）。</string>
     <!-- ISSUE-P0-02：Credential Manager 密码下发前的强制用户验证（PasswordFillActivity） -->
     <string name="cred_fill_confirm_title">确认填充凭据</string>
@@ -1226,6 +1282,10 @@
     <!-- 硬约束：报告只展示**计数**与**机器可读定位符**（doc / row:3 / entry:12 / path:A/B），
          绝不出现条目标题、用户名、URL、备注、密码等任何字段明文。 -->
     <string name="import_untitled_entry">未命名条目</string>
+    <!-- ISSUE-P2-354 AC④：导入分阶段进度（READING 段；%1$s=数据源名） -->
+    <string name="import_progress_reading">正在读取 %1$s 数据...</string>
+    <!-- ISSUE-P2-354 AC④：落库阶段可量化计数（%1$d=已处理 %2$d=本批总数） -->
+    <string name="import_progress_persisting">正在写入密码库（%1$d / %2$d）</string>
     <string name="import_report_title">导入完成</string>
     <string name="import_report_source">数据源：%1$s</string>
     <!-- %1$d=新增 %2$d=更新 %3$d=跳过 %4$d=失败 -->

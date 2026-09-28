@@ -26,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -44,7 +43,7 @@ fun ValueSlider(
     valueRange: IntRange,
     modifier: Modifier = Modifier
 ) {
-    val haptics = LocalHapticFeedback.current
+    val maybeHaptic = rememberMaybeHaptic()
     val interactionSource = remember { MutableInteractionSource() }
     var dragging by remember { mutableStateOf(false) }
     var lastHapticValue by remember { mutableIntStateOf(value) }
@@ -88,7 +87,7 @@ fun ValueSlider(
                 val next = raw.roundToInt().coerceIn(valueRange)
                 if (next != lastHapticValue) {
                     lastHapticValue = next
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    maybeHaptic(HapticFeedbackType.TextHandleMove)
                 }
                 onValueChange(next)
             },

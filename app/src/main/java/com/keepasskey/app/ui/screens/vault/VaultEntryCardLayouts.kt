@@ -58,7 +58,8 @@ internal fun CreditCardLayout(
     isBatchMode: Boolean,
     isSelected: Boolean,
     densitySpec: ListDensitySpec,
-    groupPath: String?,
+    groupPath: String?, // ISSUE-P3-360 AC④c：highlightQuery = 搜索命中高亮词（已生效过滤词）
+    highlightQuery: String = "",
     onCopyNumber: () -> Unit
 ) {
     Row(
@@ -77,7 +78,6 @@ internal fun CreditCardLayout(
             )
             Spacer(modifier = Modifier.width(10.dp))
         }
-
         Box(
             modifier = Modifier
                 .size(densitySpec.iconContainerSizeDp.dp)
@@ -98,7 +98,7 @@ internal fun CreditCardLayout(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = entry.title,
+                    text = searchHighlight(entry.title, highlightQuery),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = densitySpec.titleFontSizeSp.sp
@@ -165,7 +165,8 @@ internal fun SecureNoteLayout(
     isBatchMode: Boolean,
     isSelected: Boolean,
     densitySpec: ListDensitySpec,
-    groupPath: String?
+    groupPath: String?,
+    highlightQuery: String = "" // ISSUE-P3-360 AC④c：搜索命中高亮词
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(
@@ -204,7 +205,7 @@ internal fun SecureNoteLayout(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = entry.title,
+                    text = searchHighlight(entry.title, highlightQuery),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = densitySpec.titleFontSizeSp.sp

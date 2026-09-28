@@ -9,6 +9,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.PasskeyImportDraft
 import com.keepasskey.app.passkey.ScanPayloadClassifier
 import com.keepasskey.app.passkey.ScanPayloadKind
+import com.keepasskey.app.security.UnsavedEditRegistry
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
@@ -23,16 +24,8 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.UUID
 import javax.inject.Inject
 import java.security.SecureRandom
-
-/**
- * 编辑页单次事件
- */
-sealed interface EntryEditEvent {
-    data object SaveSuccess : EntryEditEvent
-}
 
 /**
  * 凭据添加与编辑状态容器 ViewModel
@@ -55,7 +48,9 @@ class EntryEditViewModel @Inject constructor(
     // PD-47：防截屏开关读取（生产 DI 注入真实现；单测注入 null 时恒 true = fail-closed）
     private val settingsRepository: SettingsRepository? = null,
     // ISSUE-P3-352 AC①：搜索词预填宿主（生产 DI 注入 @Singleton；null 仅纯 JVM 单测）
-    private val createEntryPrefill: CreateEntryPrefillHost? = null
+    private val createEntryPrefill: CreateEntryPrefillHost? = null,
+    // ISSUE-P2-355 AC③：全局脏表单注册表（生产 DI 注入 @Singleton；null 仅纯 JVM 单测）
+    private val unsavedEditRegistry: UnsavedEditRegistry? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -193,9 +188,13 @@ class EntryEditViewModel @Inject constructor(
                 repo.getSettings().map { it.flagSecureEnabled }.collect { _flagSecureEnabled.value = it }
             }
         }
+
+        unsavedEditRegistry?.register(this) { _uiState.value.isDirty } // ISSUE-P2-355 AC③：注册脏态提供者（onCleared 注销配对，杜绝陈旧脏态）
     }
 
     fun loadEntry(id: String) {
+        // ISSUE-P3-359 AC⑤：解密预填期间置加载态——入口同步置位，首帧即在遮罩之下
+        _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             val entry = vaultRepository.getEntry(id).firstOrNull()
             if (entry != null) {
@@ -241,6 +240,9 @@ class EntryEditViewModel @Inject constructor(
                 if (password != null && password.isNotEmpty()) {
                     entropyRefresh.refresh(password)
                 }
+            } else {
+                // ISSUE-P3-359 AC⑤：未找到（被删除 / 无效 id）同样回落，避免遮罩永久悬挂
+                _uiState.update { it.copy(isLoading = false) }
             }
         }
     }
@@ -250,8 +252,15 @@ class EntryEditViewModel @Inject constructor(
      * 模板不可用（被删除）时保持空白新建表单，不报错。
      */
     private fun loadTemplate(templateId: String, targetGroupId: String?) {
+        // ISSUE-P3-359 AC⑤：模板预填同为异步载入，遮罩口径与 loadEntry 一致
+        _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
-            val template = vaultRepository.getEntry(templateId).firstOrNull() ?: return@launch
+            val template = vaultRepository.getEntry(templateId).firstOrNull()
+            if (template == null) {
+                // 模板不可用（被删除）→ 保持空白新建表单并结束加载态，不报错
+                _uiState.update { it.copy(isLoading = false) }
+                return@launch
+            }
             _uiState.update { applyTemplateEntry(it, template, targetGroupId) }
         }
     }
@@ -293,7 +302,8 @@ class EntryEditViewModel @Inject constructor(
             }
         }
     }
-    fun onTitleChange(title: String) = _uiState.update { it.copy(title = title, isDirty = true) }
+    // ISSUE-P3-359 AC②：任何标题输入即清除字段级校验位（问题修复的即时反馈）
+    fun onTitleChange(title: String) = _uiState.update { it.copy(title = title, isDirty = true, titleError = false) }
     fun onUsernameChange(username: String) = _uiState.update { it.copy(username = username, isDirty = true) }
     fun onUrlChange(url: String) = _uiState.update { it.copy(url = url, isDirty = true) }
     fun onNotesChange(notes: String) = _uiState.update { it.copy(notes = notes, isDirty = true) }
@@ -404,51 +414,23 @@ class EntryEditViewModel @Inject constructor(
 
     fun removeAttachment(id: String) = attachments.remove(id)
 
-    fun saveEntry() {
-        val state = _uiState.value
-        entrySaveRejectionRes(state)?.let { rejectionRes ->
-            _uiState.update { it.copy(userMessage = UiMessage(rejectionRes)) }
-            return
-        }
+    /**
+     * 保存执行体（`ISSUE-P2-354 AC①②` 下沉同批，行为与守卫语义见其 KDoc）。
+     * 借用 lambda 只在协程体内读取私有驻留，本字段不引入任何新明文副本。
+     */
+    private val saveRunner = EntryEditSaveRunner(
+        scope = viewModelScope,
+        repository = vaultRepository,
+        strings = strings,
+        uiState = _uiState,
+        events = _events,
+        passwordChars = { passwordChars },
+        totpSecretChars = { totpSecretChars },
+        protectedFieldChars = { protectedFieldChars }
+    )
 
-        viewModelScope.launch {
-            val entryId = state.entryId ?: UUID.randomUUID().toString()
-            val entry = buildEntrySaveSnapshot(state, entryId, strings.get(R.string.time_just_now))
-            // M1 整改：密码以独立参数显式提交，不再随条目投影携带；提交副本归仓库擦除
-            // （契约：仓库任何结果路径用毕清零），ViewModel 自有副本保留以支持失败后继续编辑
-            // 断点4 整改 + TASK-10：TOTP 种子与受保护自定义字段明文以 CharArray 副本随保存显式提交
-            // H3 整改：保存失败必须显式反馈，禁止磁盘写失败时谎报成功
-            val passwordCopy = passwordChars.copyOf()
-            val totpCopy = totpSecretChars.copyOf()
-            val protectedCopy = protectedFieldChars.mapValues { (_, v) -> v.copyOf() }
-            val result = try {
-                vaultRepository.saveEntry(
-                    entry,
-                    passwordChars = passwordCopy,
-                    totpSecretChars = totpCopy,
-                    protectedFieldChars = protectedCopy
-                )
-            } finally {
-                // 兜底擦除：若仓库实现未按契约清零（如旧版本 Fake），此处保证副本不残留明文
-                passwordCopy.fill('0')
-                totpCopy.fill('0')
-                protectedCopy.values.forEach { it.fill('0') }
-            }
-            if (result is KdbxResult.Success) {
-                // ISSUE-P3-342 不变量：**保存成功必须清脏位并记下条目 id**。
-                // 理由不是体验：通行密钥导入闸门以 `hasUnsavedEdits()`（＝ isDirty）作前置拒绝
-                // （见 EntryEditPasskeyImport）。今天不出事**仅因** SaveSuccess 随即出页；
-                // 一旦改成"保存后留在本页"，用户刚保存完就会被提示「请先保存」而永久导不进去。
-                _uiState.update { it.copy(isDirty = false, entryId = entryId) }
-                _events.emit(EntryEditEvent.SaveSuccess)
-            } else {
-                val failure = result as KdbxResult.Failure
-                _uiState.update {
-                    it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(failure.message)))
-                }
-            }
-        }
-    }
+    /** 保存条目（`ISSUE-P2-354 AC①②`：并发第二次直接 return，成功才一次性导航）。 */
+    fun saveEntry() = saveRunner.request()
 
     fun showMessage(msg: UiMessage) {
         _uiState.update { it.copy(userMessage = msg) }
@@ -461,6 +443,8 @@ class EntryEditViewModel @Inject constructor(
     override fun onCleared() {
         // M1 整改：ViewModel 销毁时彻底擦除密码驻留（预填通道与编辑副本）
         clearAllSecrets()
+        // ISSUE-P2-355 AC③：注销全局脏态提供者（锁定销毁编辑页后不得残留陈旧脏态）
+        unsavedEditRegistry?.unregister(this)
         sessionLockGuard.unregister()
         super.onCleared()
     }

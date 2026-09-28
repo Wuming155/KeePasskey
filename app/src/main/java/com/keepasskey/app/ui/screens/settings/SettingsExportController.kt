@@ -48,7 +48,7 @@ internal class SettingsExportController(
     fun exportDebugLogs(targetUri: Uri) {
         val resolver = appContext?.contentResolver
         if (resolver == null) {
-            debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed)
+            debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed, isError = true)
             return
         }
         scope.launch(Dispatchers.IO) {
@@ -61,11 +61,11 @@ internal class SettingsExportController(
                 } ?: false
                 debugExportFeedbackFlow.value =
                     if (written) UiMessage(R.string.debug_export_done)
-                    else UiMessage(R.string.debug_export_failed)
+                    else UiMessage(R.string.debug_export_failed, isError = true)
             } catch (e: Exception) {
                 // 只留痕异常类型，不落异常消息（防御性，避免潜在敏感内容回流日志缓冲）
                 debugLogBuffer.warn(TAG, "调试日志导出失败: ${e.javaClass.simpleName}")
-                debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed)
+                debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed, isError = true)
             }
         }
     }
@@ -78,7 +78,8 @@ internal class SettingsExportController(
 
     private val exportFeedbackFlow = MutableStateFlow<UiMessage?>(null)
 
-    /** 导出/模板动作结果反馈（成功/失败），由 Screen 层消费后清除 */
+    /** 导出/模板动作结果反馈（成功/失败），由 Screen 层消费后清除。
+     * ISSUE-P2-353 AC④：失败反馈一律带 `isError = true`，展示层据此上错误样式、不读文案。 */
     val exportFeedback: StateFlow<UiMessage?> = exportFeedbackFlow.asStateFlow()
 
     fun clearExportFeedback() {
@@ -147,7 +148,7 @@ internal class SettingsExportController(
     private fun rejectTicket(artifactKind: ExportArtifactKind, targetUri: Uri): UiMessage {
         exportAuditRecorder.record(artifactKind, targetUri.toString(), success = false)
         SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-        return UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_confirmation_missing)))
+        return UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_confirmation_missing)), isError = true)
     }
 
     /**
@@ -172,7 +173,8 @@ internal class SettingsExportController(
             } else {
                 UiMessage(
                     R.string.op_failed,
-                    listOf((result as com.keepasskey.core.result.KdbxResult.Failure).message)
+                    listOf((result as com.keepasskey.core.result.KdbxResult.Failure).message),
+                    isError = true
                 )
             }
         }
@@ -192,7 +194,7 @@ internal class SettingsExportController(
             exportAuditRecorder.record(artifactKind, rawTarget, success = false)
             // ISSUE-P2-20：序列化已失败，SAF 目标必然仍是空文档——清理不留 0 字节残留
             SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-            return UiMessage(R.string.op_failed, listOf(failure.message))
+            return UiMessage(R.string.op_failed, listOf(failure.message), isError = true)
         }
         val bytes = result.getOrNull()
         val resolver = appContext?.contentResolver
@@ -228,7 +230,7 @@ internal class SettingsExportController(
             // ISSUE-P2-20：写盘失败（含会话熔断/流不可得/异常），清理空或残缺目标文档，
             // 不向用户目录静默遗留 0 字节产物
             SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-            UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_saf_write_failed)))
+            UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_saf_write_failed)), isError = true)
         }
     }
 }

@@ -23,10 +23,11 @@ import kotlinx.coroutines.flow.stateIn
 /**
  * 组装设置页 [SettingsUiState] 状态流（原 `SettingsViewModel.uiState` 的 combine 编排逐字迁移）。
  *
- * 九路输入流收拢为 [SettingsUiStateFlows]（§284 摘除 `LongParameterList` 压制）；
+ * 十路输入流收拢为 [SettingsUiStateFlows]（§284 摘除 `LongParameterList` 压制；
+ * ISSUE-P2-354 AC③ 增第十路）；
  * combine 仍以 `Map`/`Triple` 元组嵌套避开重载上限，行为零变化。
  */
-/** 九路输入流快照（§284 参数对象化；仅承载引用，不产生新订阅） */
+/** 十路输入流快照（§284 参数对象化；仅承载引用，不产生新订阅；P2-354 增第十路） */
 internal data class SettingsUiStateFlows(
     val userSettings: Flow<UserSettings>,
     val syncState: Flow<SettingsSyncController.SyncUiState>,
@@ -37,7 +38,9 @@ internal data class SettingsUiStateFlows(
     val securityTimeoutState: Flow<SecurityTimeoutUiState>,
     val extendedSettings: Flow<ExtendedSettings>,
     val debugLogLines: Flow<List<String>>,
-    val childDatabaseCount: Flow<Int>
+    val childDatabaseCount: Flow<Int>,
+    // ISSUE-P2-354 AC③：更换主密钥任务态（busy + 结果反馈，活在 ViewModel 不随组合销毁）
+    val masterKeyChangeState: Flow<MasterKeyChangeTaskState>
 )
 
 internal fun settingsUiStateFlow(
@@ -56,12 +59,15 @@ internal fun settingsUiStateFlow(
         combine(flows.securityTimeoutState, flows.extendedSettings, flows.debugLogLines) { sec, ext, logs ->
             Triple(sec, ext, logs)
         },
-        flows.childDatabaseCount
-    ) { securityState, mountedChildDatabases ->
-        Pair(securityState, mountedChildDatabases)
+        combine(flows.childDatabaseCount, flows.masterKeyChangeState) { mounted, masterKey ->
+            Pair(mounted, masterKey)
+        }
+    ) { securityState, taskExtra ->
+        Pair(securityState, taskExtra)
     }
-) { settings, sync, health, (db, biometricToggle), (securityState, mounted) ->
+) { settings, sync, health, (db, biometricToggle), (securityState, taskExtra) ->
     val (secState, extState, logs) = securityState
+    val (mounted, masterKeyTask) = taskExtra
     buildSettingsUiState(
         userSettings = settings,
         syncState = sync,
@@ -72,6 +78,7 @@ internal fun settingsUiStateFlow(
         extState = extState,
         debugLogLines = logs,
         mountedChildDatabases = mounted,
+        masterKeyTask = masterKeyTask,
         strings = strings
     )
 }.stateIn(
@@ -91,6 +98,8 @@ internal fun buildSettingsUiState(
     extState: ExtendedSettings,
     debugLogLines: List<String>,
     mountedChildDatabases: Int,
+    // ISSUE-P2-354 AC③：更换主密钥任务态（默认值便于既有直调用点不受影响）
+    masterKeyTask: MasterKeyChangeTaskState = MasterKeyChangeTaskState(),
     strings: StringsProvider
 ): SettingsUiState = SettingsUiState(
     // 1. 密码库与加密设置
@@ -224,7 +233,11 @@ internal fun buildSettingsUiState(
     // 8. 调试日志
     debugLogEnabled = extState.debugLogEnabled,
     verboseSyncLog = extState.verboseSyncLog,
-    debugLogLines = debugLogLines
+    debugLogLines = debugLogLines,
+
+    // 10. 更换主密钥任务（ISSUE-P2-354 AC③）
+    isChangingMasterKey = masterKeyTask.isChanging,
+    masterKeyChangeFeedback = masterKeyTask.feedback
 )
 
 /**

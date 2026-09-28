@@ -39,8 +39,10 @@ class ThemePaletteMutualExclusionWiringTest {
             source.contains("enabled: Boolean = true")
         )
         assertTrue(
-            "clickable 必须传 enabled（置灰期间不得可点）",
-            source.contains(".clickable(enabled = enabled, onClick = onClick)")
+            "selectable 必须传 enabled（置灰期间不得可点；ISSUE-P3-358 AC④ 起单选卡改 selectable）",
+            source.contains(
+                ".selectable(selected = isSelected, enabled = enabled, onClick = onClick, role = Role.RadioButton)"
+            )
         )
         assertTrue(
             "置灰须有视觉呈现（整体降透明度）",

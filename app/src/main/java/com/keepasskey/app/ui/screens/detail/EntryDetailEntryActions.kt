@@ -8,6 +8,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
 /**
@@ -26,7 +27,13 @@ internal class EntryDetailEntryActions(
     private val boundCustomIconId: () -> String?,
     private val onEntrySwitched: (String) -> Unit,
     private val onEntryDeleted: () -> Unit,
-    private val showMessage: (UiMessage) -> Unit
+    private val showMessage: (UiMessage) -> Unit,
+    /**
+     * ISSUE-P3-357 + `ISSUE-P3-359` AC④：可撤销消息的发布口——比 [showMessage] 多带一个
+     * 撤销动作（由外壳全局宿主在 `ActionPerformed` 时以自身作用域执行；软删除发生在
+     * 确认删除链路里，届时详情页正回退、本 ViewModel 即将销毁，动作不得依赖它存活）。
+     */
+    private val showUndoable: (UiMessage, suspend () -> Unit) -> Unit
 ) {
 
     /**
@@ -54,13 +61,31 @@ internal class EntryDetailEntryActions(
      * 条目已在回收站内或回收站被禁用 → 物理删除并记录墓碑。
      * 只读会话 / 缺少条目 id 时为 no-op；成功置一次性信号供 Screen 回退导航，
      * 失败经 [KdbxResult.Failure] 如实上浮（不谎报成功）。
+     *
+     * `ISSUE-P3-357` 遗留补齐（`ISSUE-P3-359` 本轮）：**软删成功附「撤销」**（与批量删除同口径）——
+     * 删除后复查投影区分软 / 硬：仍可查到且 `isRecycled` ⇒ 软删（给撤销入口，撤销即 `restoreEntry`）；
+     * 查无此条（物理删除 / 墓碑已立）⇒ 无从还原，不给点了会失败的假入口。
+     * 恢复结果经 [showMessage] 如实回执（成功还原 / 失败原因），与列表页还原口径一致。
      */
     fun deleteEntry() {
         val entryId = currentEntryId() ?: return
         if (isReadOnly()) return
         scope.launch {
             when (val result = vaultRepository.deleteEntry(entryId)) {
-                is KdbxResult.Success -> onEntryDeleted()
+                is KdbxResult.Success -> {
+                    val stillInBin = vaultRepository.getEntry(entryId).firstOrNull()?.isRecycled == true
+                    if (stillInBin) {
+                        showUndoable(UiMessage(R.string.vault_entry_deleted, undoable = true)) {
+                            when (val restored = vaultRepository.restoreEntry(entryId)) {
+                                is KdbxResult.Success ->
+                                    showMessage(UiMessage(R.string.vault_entry_restored))
+                                is KdbxResult.Failure ->
+                                    showMessage(UiMessage(R.string.op_failed, listOf(restored.message)))
+                            }
+                        }
+                    }
+                    onEntryDeleted()
+                }
                 is KdbxResult.Failure ->
                     showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
             }

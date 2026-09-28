@@ -130,7 +130,7 @@ internal fun VaultCreateTypeDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onAddEntry),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onAddEntry, role = Role.Button),
                     color = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -146,7 +146,7 @@ internal fun VaultCreateTypeDialog(
                 }
 
                 Surface(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onCreateFolder),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onCreateFolder, role = Role.Button),
                     color = MaterialTheme.colorScheme.surfaceContainerLow
                 ) {
                     Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -164,7 +164,7 @@ internal fun VaultCreateTypeDialog(
                 // ISSUE-P3-51：库内已安装模板库时提供「从模板新建」
                 if (templateCount > 0) {
                     Surface(
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onCreateFromTemplate),
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onCreateFromTemplate, role = Role.Button),
                         color = MaterialTheme.colorScheme.surfaceContainerLow
                     ) {
                         Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {

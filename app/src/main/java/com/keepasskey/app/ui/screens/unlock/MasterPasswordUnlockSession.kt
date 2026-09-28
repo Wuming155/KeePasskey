@@ -6,9 +6,12 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ThrottleGate
 import com.keepasskey.app.security.UnlockThrottleManager
+import com.keepasskey.app.security.UnlockThrottlePolicy
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -52,6 +55,8 @@ internal class MasterPasswordUnlockSession(
             it.copy(
                 errorMessage = null,
                 infoMessage = null,
+                // ISSUE-P2-355 AC②：「剩余 N 次尝试」附着于失败提示——提示被输入清掉时一并收起
+                throttleAttemptsRemaining = null,
                 hasPassword = passwordChars.isNotEmpty()
             )
         }
@@ -100,10 +105,13 @@ internal class MasterPasswordUnlockSession(
                         isLoading = false,
                         throttleFailureCount = gate.failureCount,
                         throttleLockoutRemainingMs = gate.remainingMs,
+                        throttleAttemptsRemaining = null,
                         clearPasswordFieldToken = it.clearPasswordFieldToken + 1,
-                        errorMessage = lockoutMessage(gate.remainingMs)
+                        errorMessage = lockoutUiMessage(gate.remainingMs)
                     )
                 }
+                // ISSUE-P2-355 AC②：锁定期文案从一次性快照升级为每秒 ticker 倒计时
+                ensureLockoutTicker()
                 return@launch
             }
 
@@ -154,6 +162,7 @@ internal class MasterPasswordUnlockSession(
                 keyFileName = "",
                 throttleFailureCount = 0,
                 throttleLockoutRemainingMs = 0L,
+                throttleAttemptsRemaining = null,
                 // ISSUE-P3-01：主密码解锁成功即用尽本实例的自动唤起机会，
                 // 防止解锁后残留的状态重算把用户重新拉回快速解锁界面/再次弹窗
                 biometricAutoPrompt = BiometricAutoPrompt.CONSUMED
@@ -182,7 +191,7 @@ internal class MasterPasswordUnlockSession(
             null
         }
         val errorMsg = when {
-            newGate is ThrottleGate.Locked -> lockoutMessage(newGate.remainingMs)
+            newGate is ThrottleGate.Locked -> lockoutUiMessage(newGate.remainingMs)
             // ISSUE-P3-04：携带密钥文件时的凭据失败——KDBX 复合密钥在一次
             // HMAC 校验中协议上无法判定具体是哪个因子错，故给出并列可行动提示
             // （不谎称「主密码错」，也不新造底层不存在的分型异常）
@@ -201,26 +210,95 @@ internal class MasterPasswordUnlockSession(
                 clearPasswordFieldToken = it.clearPasswordFieldToken + 1,
                 throttleFailureCount = newGate?.failureCount ?: it.throttleFailureCount,
                 throttleLockoutRemainingMs =
-                    (newGate as? ThrottleGate.Locked)?.remainingMs ?: 0L
+                    (newGate as? ThrottleGate.Locked)?.remainingMs ?: 0L,
+                // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（锁定态改走倒计时，此处收起）
+                throttleAttemptsRemaining = attemptsRemainingOf(newGate)
             )
         }
+        // ISSUE-P2-355 AC②：进入锁定即启动每秒倒计时 ticker（未锁定时空操作）
+        ensureLockoutTicker()
     }
 
     /**
-     * 将锁定剩余时长映射为本地化 [UiMessage]：≥1 分钟按分钟（向上取整）呈现，否则按秒。
-     * 数值计算内联、文案交由字符串资源，杜绝硬编码文案泄漏到代码层。
+     * ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」的呈现值。
+     *
+     * 仅在**节流生效**（[UnlockThrottleManager.isLockoutEnforced]）且本次闸门为
+     * [ThrottleGate.Allowed]（未达锁定阈值）时给出；锁定态改走倒计时呈现、
+     * 节流被用户关闭时不存在上限（任何「剩余次数」都是假承诺）——两种情况一律 null。
      */
-    private fun lockoutMessage(remainingMs: Long): UiMessage {
-        val totalSeconds = (remainingMs + 999L) / 1000L
-        return if (totalSeconds >= 60L) {
-            val minutes = (totalSeconds + 59L) / 60L
-            UiMessage(R.string.unlock_error_locked_out_minutes, listOf(minutes.toInt()))
-        } else {
-            UiMessage(R.string.unlock_error_locked_out_seconds, listOf(totalSeconds.toInt()))
+    private fun attemptsRemainingOf(newGate: ThrottleGate?): Int? {
+        if (newGate !is ThrottleGate.Allowed) return null
+        if (unlockThrottleManager?.isLockoutEnforced != true) return null
+        return (UnlockThrottlePolicy.FAILURE_THRESHOLD - newGate.failureCount)
+            .takeIf { it > 0 }
+    }
+
+    /**
+     * ISSUE-P2-355 AC②：锁定期每秒 ticker 倒计时（幂等：已在跑则复用，剩余时长为 0 不启动）。
+     *
+     * 每 tick 把 [UnlockUiState.throttleLockoutRemainingMs] 减 [LOCKOUT_TICK_MS] 并重写
+     * 锁定期文案快照；归零时清零剩余时长并移除锁定文案。与「用户开始输入即清提示」
+     * （[onPasswordChangeSecure]）的竞争按**锁定期信息优先**裁决：当前提示为空或是锁定文案时
+     * 按最新剩余时长重写（输入冲不掉倒计时），用户其它错误文案不覆盖。任务随 viewModelScope 取消。
+     */
+    private fun ensureLockoutTicker() {
+        if (uiState.value.throttleLockoutRemainingMs <= 0L) return
+        if (lockoutTickerJob?.isActive == true) return
+        lockoutTickerJob = scope.launch {
+            while (true) {
+                delay(LOCKOUT_TICK_MS)
+                val remaining = uiState.value.throttleLockoutRemainingMs - LOCKOUT_TICK_MS
+                if (remaining > 0L) {
+                    uiState.update { state ->
+                        state.copy(
+                            throttleLockoutRemainingMs = remaining,
+                            errorMessage = state.errorMessage
+                                ?.takeIf { !it.isLockoutCountdown() }
+                                ?: lockoutUiMessage(remaining)
+                        )
+                    }
+                } else {
+                    uiState.update { state ->
+                        state.copy(
+                            throttleLockoutRemainingMs = 0L,
+                            errorMessage = state.errorMessage?.takeIf { !it.isLockoutCountdown() }
+                        )
+                    }
+                    break
+                }
+            }
+            lockoutTickerJob = null
         }
     }
 
+    /** 锁定期倒计时任务句柄（null = 未在跑；随 viewModelScope 生命周期一并取消） */
+    private var lockoutTickerJob: Job? = null
+
     private companion object {
         private const val TAG = "Unlock"
+
+        /** ISSUE-P2-355 AC②：倒计时刷新周期 */
+        private const val LOCKOUT_TICK_MS = 1000L
     }
 }
+
+/**
+ * ISSUE-P2-355 AC②：锁定剩余时长 → 本地化 [UiMessage]。
+ * ≥1 分钟按分钟（向上取整）呈现，否则按秒；数值计算内联、文案交由字符串资源。
+ * [MasterPasswordUnlockSession]（写入 errorMessage 快照与 ticker 刷新）与
+ * 解锁页（状态直驱逐秒倒计时行）共用本口径，杜绝两处格式漂移。
+ */
+internal fun lockoutUiMessage(remainingMs: Long): UiMessage {
+    val totalSeconds = (remainingMs + 999L) / 1000L
+    return if (totalSeconds >= 60L) {
+        val minutes = (totalSeconds + 59L) / 60L
+        UiMessage(R.string.unlock_error_locked_out_minutes, listOf(minutes.toInt()))
+    } else {
+        UiMessage(R.string.unlock_error_locked_out_seconds, listOf(totalSeconds.toInt()))
+    }
+}
+
+/** ISSUE-P2-355 AC②：该提示是否为锁定倒计时文案（锁定快照与直驱行的去重判据） */
+internal fun UiMessage.isLockoutCountdown(): Boolean =
+    resId == R.string.unlock_error_locked_out_seconds ||
+        resId == R.string.unlock_error_locked_out_minutes

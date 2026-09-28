@@ -7,7 +7,7 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.ScanPayloadClassifier
 import com.keepasskey.app.passkey.ScanPayloadKind
-import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.ui.model.EntryDisplayDispatcher
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.TotpCountdownTracker
@@ -73,7 +73,7 @@ import javax.inject.Inject
 class VaultListViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val settingsRepository: SettingsRepository,
-    private val clipboardSecurityManager: ClipboardSecurityManager? = null,
+    private val clipboardSecurityManager: ClipboardSecurityChannel? = null,
     private val syncCoordinator: com.keepasskey.app.sync.SyncCoordinator,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
@@ -99,7 +99,7 @@ class VaultListViewModel @Inject constructor(
     // ISSUE-P3-297 处置③：标签 / 收藏筛选档（会话态，随排序同口径不持久化）
     private val selectedTagFlow = MutableStateFlow<String?>(null)
     private val favoriteOnlyFlow = MutableStateFlow(false)
-    private val userMessageFlow = MutableStateFlow<UiMessage?>(null)
+    internal val userMessageFlow = MutableStateFlow<UiMessage?>(null) // ISSUE-P3-359 AC④：放宽 internal 供同包 publishVaultMessage 双写
 
     // H2 整改：存在待解决的冲突会话时驱动「去解决冲突」入口
     private val hasPendingConflictFlow = MutableStateFlow(false)
@@ -134,7 +134,7 @@ class VaultListViewModel @Inject constructor(
             currentGroupId = { currentGroupIdFlow.value },
             currentGroups = { uiState.value.currentGroups },
             currentEntryIds = { uiState.value.entries.map { it.id } },
-            onMessage = { userMessageFlow.value = it }
+            onMessage = { publishVaultMessage(it) }
         )
     )
 
@@ -143,7 +143,7 @@ class VaultListViewModel @Inject constructor(
         syncCoordinator = syncCoordinator,
         scope = viewModelScope,
         strings = strings,
-        onMessage = { userMessageFlow.value = it }
+        onMessage = { publishVaultMessage(it) }
     )
 
     // ISSUE-P3-29：TOTP 实时倒计时（种子只在数据层解析）
@@ -202,20 +202,18 @@ class VaultListViewModel @Inject constructor(
     }
 
     /**
-     * P2 整改：搜索输入防抖 —— 官方 kotlinx.coroutines `Flow.debounce` 标准算子。
-     *
-     * 原实现 searchQueryFlow 直接进 combine，每敲一个字符都触发一次
-     * 「全条目过滤 + 排序 + 分组树遍历 + 回收站集合构建」的完整重算，
-     * 大库场景下构成明显掉帧源；现在输入停顿 SEARCH_DEBOUNCE_MS 后才下发新关键词。
-     *
-     * 首帧补发（flow{emit(current); emitAll(...)}）：保证初次渲染与
-     * 「关闭搜索时立即清空关键词」不被防抖窗口延迟，distinctUntilChanged 负责吸收重复值。
+     * P2 整改：搜索输入防抖（官方 `Flow.debounce`）——原实现每字符触发一次全量过滤重算（大库
+     * 掉帧源），现停顿 SEARCH_DEBOUNCE_MS 才下发，首帧补发保初次渲染即时。ISSUE-P2-356：
+     * 防抖**只**作用于过滤流——显示回显走 [searchQueryDisplay]，空串零超时旁路立即下发。
      */
     @OptIn(FlowPreview::class)
     private val debouncedSearchQueryFlow: Flow<String> = flow {
         emit(searchQueryFlow.value)
-        emitAll(searchQueryFlow.debounce(SEARCH_DEBOUNCE_MS))
+        emitAll(searchQueryFlow.debounce { if (it.isEmpty()) 0L else SEARCH_DEBOUNCE_MS })
     }.distinctUntilChanged()
+
+    /** ISSUE-P2-356：搜索框即时回显通道（未防抖，UI 只读）——防抖若波及显示值，快速连打即回吞；顶栏 / 返回键清空判定读本通道。 */
+    val searchQueryDisplay: StateFlow<String> = searchQueryFlow.asStateFlow()
 
     private val filterParamsFlow = combine(
         debouncedSearchQueryFlow,
@@ -423,6 +421,8 @@ class VaultListViewModel @Inject constructor(
     fun batchMoveSelected(targetGroupId: String?) = actions.batchMoveSelected(targetGroupId)
 
     fun batchDeleteSelected() = actions.batchDeleteSelected()
+
+    fun undoPendingSoftDelete() = actions.undoBatchDelete() // ISSUE-P2-357 AC②：软删除 Snackbar 的撤销入口
 
     /** 下拉手势同步触发：真实执行 SyncCoordinator 全量同步（不再使用演示性假桩） */
     fun triggerPullRefresh() = syncController.triggerPullRefresh()

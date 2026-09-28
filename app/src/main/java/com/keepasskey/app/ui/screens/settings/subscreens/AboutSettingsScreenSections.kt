@@ -62,7 +62,8 @@ internal fun AboutBrandCard(
             ) {
                 Icon(
                     imageVector = Icons.Default.Key,
-                    contentDescription = "Logo",
+                    // ISSUE-P3-358 AC③：装饰 Logo 图标不再出英文硬编码描述
+                    contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(36.dp)
                 )

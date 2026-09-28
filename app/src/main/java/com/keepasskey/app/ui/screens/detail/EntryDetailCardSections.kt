@@ -26,13 +26,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.PasswordStrengthBar
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.theme.MonospacePasswordStyle
 
@@ -86,7 +86,7 @@ internal fun BasicCredentialsPasswordArea(
     onTogglePasswordVisibility: () -> Unit,
     onCopyPassword: (String) -> Unit
 ) {
-    val haptic = LocalHapticFeedback.current
+    val maybeHaptic = rememberMaybeHaptic()
     // ISSUE-P3-261 AC⑤：密码明文/掩码交叉淡化取主题 MotionScheme 的 fast 效果 spec
     val passwordRevealFade = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
     Column {
@@ -126,7 +126,7 @@ internal fun BasicCredentialsPasswordArea(
             Row {
                 IconButton(onClick = {
                     // 揭示明文用轻触感（Tick）：克制、不与复制成功反馈混淆
-                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    maybeHaptic(HapticFeedbackType.SegmentTick)
                     onTogglePasswordVisibility()
                 }) {
                     Icon(
@@ -137,7 +137,7 @@ internal fun BasicCredentialsPasswordArea(
                     )
                 }
                 IconButton(onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                    maybeHaptic(HapticFeedbackType.Confirm)
                     onCopyPassword(entry.title)
                 }) {
                     Icon(

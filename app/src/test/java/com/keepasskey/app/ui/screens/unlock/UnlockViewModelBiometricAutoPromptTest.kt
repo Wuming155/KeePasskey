@@ -490,4 +490,72 @@ class UnlockViewModelBiometricAutoPromptTest {
         assertEquals(UnlockMode.STANDARD, state.unlockMode)
         assertFalse(state.isLoading)
     }
+
+    // ── ISSUE-P2-355 AC①：QUICK 三条失败路径统一回落 STANDARD 并渲染错误文案 ─────────
+
+    /** 路径 1：单次比对未通过（[BiometricResult.Failed]）——原实现滞留 QUICK 且卡片无错误槽位 ⇒ 静默 */
+    @Test
+    fun `单次比对失败回落主密码并渲染失败提示`() = runTest {
+        val storage = InMemorySealedCredentialStore().also { it.sealPlaceholderCredential() }
+        val viewModel = createViewModel(enabledSettings(), storage.storage)
+        assertEquals("前置：存在封印凭据时处于快速解锁模式", UnlockMode.QUICK_UNLOCK, viewModel.uiState.value.unlockMode)
+
+        viewModel.handleBiometricResult(
+            BiometricResult.Failed,
+            storage.storage,
+            activeDbId,
+            ByteArray(0)
+        )
+
+        val state = viewModel.uiState.value
+        assertEquals("比对失败必须回落主密码模式", UnlockMode.STANDARD, state.unlockMode)
+        assertEquals("比对失败必须渲染失败文案", R.string.sec_biometric_auth_failed, state.errorMessage?.resId)
+        assertFalse(state.isLoading)
+    }
+
+    /** 路径 2：授权 Cipher 缺失（[BiometricResult.Success] 携带 null cipher）——原实现连消息都不设 ⇒ 纯静默 */
+    @Test
+    fun `授权Cipher缺失回落主密码并渲染提示`() = runTest {
+        val storage = InMemorySealedCredentialStore().also { it.sealPlaceholderCredential() }
+        val viewModel = createViewModel(enabledSettings(), storage.storage)
+        assertEquals(UnlockMode.QUICK_UNLOCK, viewModel.uiState.value.unlockMode)
+
+        viewModel.handleBiometricResult(
+            BiometricResult.Success(null),
+            storage.storage,
+            activeDbId,
+            ByteArray(0)
+        )
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("Cipher 缺失必须回落主密码模式", UnlockMode.STANDARD, state.unlockMode)
+        assertEquals("Cipher 缺失必须渲染失败文案", R.string.sec_biometric_auth_failed, state.errorMessage?.resId)
+        assertFalse(state.isLoading)
+    }
+
+    /**
+     * 路径 3：解封成功但解库失败（凭据陈旧）——原实现清了凭据、置了提示，却滞留 QUICK
+     * 且快速解锁卡无错误槽位 ⇒ 用户仍只见按钮复原。
+     */
+    @Test
+    fun `解封成功但解库失败清除封印凭据并回落主密码`() = runTest {
+        val storage = InMemorySealedCredentialStore().also { it.sealPlaceholderCredential() }
+        val viewModel = createViewModel(
+            enabledSettings(),
+            storage.storage,
+            FakeVaultRepository(forceInvalidCredentials = true)
+        )
+        assertEquals(UnlockMode.QUICK_UNLOCK, viewModel.uiState.value.unlockMode)
+
+        val payload = BiometricSealedPayloadCodec.encode("StaleSealedPass#1".toCharArray(), null)
+        viewModel.completeBiometricUnlock(payload, storage.storage, activeDbId)
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("解库失败必须回落主密码模式", UnlockMode.STANDARD, state.unlockMode)
+        assertEquals("解库失败必须渲染失败文案", R.string.unlock_error_invalid_password, state.errorMessage?.resId)
+        assertFalse("陈旧封印凭据必须清除", storage.storage.hasEncryptedCredential(activeDbId))
+        assertFalse(state.isQuickUnlockAvailable)
+    }
 }

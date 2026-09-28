@@ -27,16 +27,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -47,6 +45,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -85,6 +85,7 @@ fun SettingsScreen(
         onNavigateToAbout = onNavigateToAbout,
         onChangeMasterPassword = { viewModel.changeMasterPassword(it) },
         onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
+        onMasterKeyChangeFeedbackShown = viewModel::clearMasterKeyChangeFeedback,
         onBackClick = onBackClick,
         showBackButton = showBackButton,
         modifier = modifier
@@ -107,23 +108,31 @@ fun SettingsContent(
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
-    onChangeMasterPassword: suspend (CharArray) -> com.keepasskey.core.result.KdbxResult<Unit> = { com.keepasskey.core.result.KdbxResult.Success(Unit) },
+    /** ISSUE-P2-354 AC③：提交新主口令——数组所有权移交 ViewModel（viewModelScope 任务负责清零） */
+    onChangeMasterPassword: (CharArray) -> Unit = { chars -> chars.fill('0') },
     /** ISSUE-P2-288：弱主口令显式确认后的留痕回调（不落明文） */
     onWeakPasswordConfirmed: () -> Unit = {},
+    /** ISSUE-P2-354 AC③：换密反馈经 Snackbar 展示后的一次性清除 */
+    onMasterKeyChangeFeedbackShown: () -> Unit = {},
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
     val securityColors = LocalSecurityColors.current
-    val masterKeyUpdatedMsg = stringResource(R.string.set_master_key_updated)
     var showMasterKeyDialog by remember { mutableStateOf(false) }
+
+    // ISSUE-P2-354 AC③ + ISSUE-P3-359 AC④：换密结果反馈（成功/失败）转发全局通道——
+    // 反馈存于 uiState，发出即交外壳唯一宿主呈现（切 Tab 离开也不丢），回执后一次性清位
+    uiState.masterKeyChangeFeedback?.let { feedback ->
+        LaunchedEffect(feedback) {
+            AppSnackbarChannel.trySend(AppSnackbarEvent(feedback))
+            onMasterKeyChangeFeedbackShown()
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -263,15 +272,13 @@ fun SettingsContent(
         }
     }
 
-    // 现代主密钥更改对话框
+    // 现代主密钥更改对话框（ISSUE-P2-354 AC③：busy 下行自 uiState，完成才自行关闭）
     if (showMasterKeyDialog) {
         MasterKeyChangeDialog(
             kdfAlgorithm = uiState.kdfAlgorithm,
-            coroutineScope = coroutineScope,
-            snackbarHostState = snackbarHostState,
-            masterKeyUpdatedMsg = masterKeyUpdatedMsg,
-            onDismiss = { showMasterKeyDialog = false },
+            isBusy = uiState.isChangingMasterKey,
             onChangeMasterPassword = onChangeMasterPassword,
+            onDismiss = { showMasterKeyDialog = false },
             onWeakPasswordConfirmed = onWeakPasswordConfirmed
         )
     }

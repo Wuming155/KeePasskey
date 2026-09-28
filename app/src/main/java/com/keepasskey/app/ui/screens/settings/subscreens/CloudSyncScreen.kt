@@ -24,8 +24,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -33,7 +31,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,12 +38,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.app.ui.screens.settings.ConflictResolution
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
-import kotlinx.coroutines.launch
 
 /**
  * 云端同步与文件处理配置页 (全面整合 KeePass2Android 离线缓存、定时同步与容灾备份)
@@ -96,8 +93,6 @@ fun CloudSyncScreen(
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
 
     var dropdownExpanded by remember { mutableStateOf(false) }
 
@@ -133,7 +128,6 @@ fun CloudSyncScreen(
     var showIntervalDialog by remember { mutableStateOf(false) }
     var showConflictDialog by remember { mutableStateOf(false) }
     var saveFeedbackMessage by remember { mutableStateOf<UiMessage?>(null) }
-    val saveFeedbackText = saveFeedbackMessage?.resolveText()
 
     /**
      * 持久化当前表单的同步配置，返回是否保存成功。
@@ -168,11 +162,11 @@ fun CloudSyncScreen(
         }
     }
 
-    LaunchedEffect(saveFeedbackText) {
-        if (saveFeedbackText != null) {
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar(saveFeedbackText)
-            }
+    // ISSUE-P3-359 AC④：同步配置保存反馈转发全局通道（外壳唯一宿主呈现），回执后清位防重复发
+    LaunchedEffect(saveFeedbackMessage) {
+        saveFeedbackMessage?.let { message ->
+            AppSnackbarChannel.trySend(AppSnackbarEvent(message))
+            saveFeedbackMessage = null
         }
     }
 
@@ -180,7 +174,6 @@ fun CloudSyncScreen(
         titleRes = R.string.sync_screen_title,
         onBackClick = onBackClick,
         modifier = modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier

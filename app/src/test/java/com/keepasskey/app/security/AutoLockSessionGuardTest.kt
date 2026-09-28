@@ -160,6 +160,46 @@ class AutoLockSessionGuardTest {
         assertEquals("Banking", loadedEntries!!.single().title)
     }
 
+    // ===== ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知 =====
+
+    @Test
+    fun `锁定时存在未保存编辑则登记一次性丢弃告知`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val registry = UnsavedEditRegistry()
+        val owner = Any()
+        var dirty = true
+        registry.register(owner) { dirty }
+        val settings = FakeSettingsRepository()
+        settings.setLockWhenScreenOff(true)
+        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer(), registry)
+
+        guard.lockOnScreenOff()
+
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+        assertTrue("锁定存在脏表单时必须登记告知", registry.consumeDiscardNotice())
+        assertFalse("告知为一次性：再次消费必须为空", registry.consumeDiscardNotice())
+
+        // 脏态已消失（如保存后未再编辑）：再次锁定不得重复登记
+        dirty = false
+        registry.markDirtyEditsDiscarded()
+        assertFalse("干净表单不再登记告知", registry.consumeDiscardNotice())
+        registry.unregister(owner)
+    }
+
+    @Test
+    fun `锁定时无未保存编辑不登记告知`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val registry = UnsavedEditRegistry()
+        val settings = FakeSettingsRepository()
+        settings.setLockWhenScreenOff(true)
+        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer(), registry)
+
+        guard.lockOnScreenOff()
+
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+        assertFalse("无脏表单的锁定不得给出丢弃告知", registry.consumeDiscardNotice())
+    }
+
     // ===== ISSUE-P2-13 (ZT-18/ZT-19)：自动锁定超时三档语义 =====
 
     @Test

@@ -37,8 +37,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -52,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,9 +59,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
-import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.MonospaceTotpStyle
@@ -84,12 +85,11 @@ fun AuthenticatorScreen(
     // 卡片自身的组合作用域内（见下方 items 内注释），秒级 tick 只失效可见卡片。
     val nowSeconds = viewModel.nowSeconds.collectAsStateWithLifecycle()
     val liveCodes = viewModel.liveCodes.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
 
+    // ISSUE-P3-359 AC④：一次性消息转发到全局通道（外壳唯一宿主呈现），本页不再持有 SnackbarHost
     uiState.userMessage?.let { message ->
-        val text = message.resolveText()
-        LaunchedEffect(message, text) {
-            snackbarHostState.showSnackbar(text)
+        LaunchedEffect(message) {
+            AppSnackbarChannel.trySend(AppSnackbarEvent(message))
             viewModel.clearUserMessage()
         }
     }
@@ -101,7 +101,6 @@ fun AuthenticatorScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -349,6 +348,8 @@ private fun TotpLargeCard(
 
                 // 微型环形倒计时器（HOTP 无时间步长，不呈现）
                 if (!item.isHotp) {
+                    // ISSUE-P3-358 AC⑥：倒计时数字的整体播报串（clearAndSetSemantics 非组合作用域，先解析）
+                    val remainingLabel = stringResource(R.string.cd_totp_remaining, remainingSeconds)
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
                             // ISSUE-P3-158：分母取条目自身周期（此前写死 30，period != 30 时环比例错误）
@@ -360,9 +361,17 @@ private fun TotpLargeCard(
                         )
                         Text(
                             text = "$remainingSeconds",
+                            // ISSUE-P3-358 AC⑥：孤立倒计时数字并入整体播报（TalkBack 读「剩余 N 秒」）；
+                            // 大字号（fontScale 2.0）下不换行、超出即裁剪，不撑破 28dp 环
+                            modifier = Modifier.clearAndSetSemantics {
+                                contentDescription = remainingLabel
+                            },
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = gaugeColor,
-                            fontSize = 10.sp
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip
                         )
                     }
                 }
@@ -384,12 +393,17 @@ private fun TotpLargeCard(
             ) {
                 Text(
                     text = formatTotpCode(code),
+                    // ISSUE-P3-358 AC⑥：验证码占满剩余宽度，大字号下裁剪而非换行/顶走复制键
+                    modifier = Modifier.weight(1f),
                     style = MonospaceTotpStyle.copy(
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 3.sp,
                         color = if (actionable) gaugeColor else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip
                 )
 
                 Surface(

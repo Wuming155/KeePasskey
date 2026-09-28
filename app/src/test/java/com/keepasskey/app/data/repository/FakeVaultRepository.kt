@@ -218,7 +218,14 @@ class FakeVaultRepository(
     }
 
     override fun getEntry(id: String): Flow<UiVaultEntry?> {
-        return entriesFlow.map { list -> list.find { it.id == id } }
+        // ISSUE-P3-359 AC④：与生产 `entryFlow` 同口径（ISSUE-P2-341）——单条投影同样按组归属
+        // 推导 isRecycled；此前只有 getEntries 派生，详情侧「软删后复查是否入桶」会误判为硬删
+        return entriesFlow.map { list ->
+            val found = list.find { it.id == id }
+            found?.copy(
+                isRecycled = found.groupId == RECYCLE_BIN_GROUP_ID
+            )
+        }
     }
 
     override suspend fun saveEntry(

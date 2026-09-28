@@ -13,6 +13,7 @@
     <string name="btn_continue_edit">Keep Editing</string>
     <string name="btn_copy">Copy</string>
     <string name="btn_restore">Restore</string>
+    <string name="btn_undo">Undo</string>
     <string name="btn_empty">Empty</string>
     <string name="btn_create">Create</string>
     <string name="btn_add">Add</string>
@@ -53,6 +54,10 @@
     <string name="cd_scan_qr">Scan QR</string>
     <string name="cd_regenerate">Regenerate</string>
     <string name="cd_more_actions">More actions</string>
+    <!-- ISSUE-P3-358 AC③: selected-state description for radio cards (pairs with selectable selected semantics) -->
+    <string name="cd_selected">Selected</string>
+    <!-- ISSUE-P3-358 AC⑥: whole-phrase announcement for the countdown digits (avoids isolated number reads) -->
+    <string name="cd_totp_remaining">%1$d seconds remaining</string>
 
     <!-- Unlock Screen -->
     <string name="unlock_title">KeePasskey</string>
@@ -86,6 +91,8 @@
     <string name="db_picker_open_external">Open Existing KDBX</string>
     <string name="db_picker_create_new">New Vault</string>
     <string name="db_picker_create_title">New Vault Wizard</string>
+    <!-- ISSUE-P2-354 AC①: page-level progress copy while a vault is being created (Argon2 derive) -->
+    <string name="db_picker_creating">Creating vault…</string>
     <string name="db_picker_vault_name">Vault Name</string>
     <string name="db_picker_vault_name_hint">e.g. personal_vault.kdbx</string>
     <string name="db_picker_new_pwd">Master Password</string>
@@ -128,7 +135,13 @@
     <string name="vault_empty_recycle_bin">Empty Recycle Bin</string>
     <string name="vault_empty_recycle_bin_confirm">Are you sure you want to permanently delete all items in the Recycle Bin? This cannot be undone!</string>
     <string name="vault_entry_restored">Entry restored to original folder successfully</string>
+    <string name="vault_entry_deleted">Entry moved to recycle bin</string>
     <string name="vault_entry_purged">Entry permanently deleted from Recycle Bin</string>
+    <!-- ISSUE-P2-357: destructive-action confirmations (batch delete / purge from recycle bin) -->
+    <string name="vault_batch_delete_confirm_title">Delete selected entries?</string>
+    <string name="vault_batch_delete_confirm_message">%1$d entries will be moved to the recycle bin; you can restore or permanently delete them there.</string>
+    <string name="vault_purge_entry_confirm_title">Delete forever?</string>
+    <string name="vault_purge_entry_confirm_message">%1$s will be permanently deleted from the recycle bin. This cannot be undone.</string>
 
     <!-- Entry Detail Screen -->
     <string name="detail_title">Entry Details</string>
@@ -254,8 +267,10 @@
     <string name="system_settings_open">Open system settings</string>
     <string name="vault_copy_totp_done">One-time code of %1$s copied securely to clipboard</string>
     <string name="vault_copy_totp_missing">This entry has no one-time code configured</string>
+    <string name="clipboard_copy_failed">Copy failed: nothing was written to the clipboard</string>
     <string name="vault_batch_moved">Successfully moved %1$d entries</string>
     <string name="vault_batch_deleted">Moved %1$d selected entries to recycle bin</string>
+    <string name="vault_batch_restored">Restored %1$d entries</string>
     <string name="vault_recycle_emptied">Recycle bin emptied</string>
     <string name="vault_sync_verifying">Verifying latest version with cloud server...</string>
     <string name="vault_sync_completed">Cloud sync verification complete, you are up to date</string>
@@ -275,6 +290,10 @@
     <string name="vault_group_icon_updated">Folder icon updated</string>
     <string name="vault_group_deleted">Folder deleted</string>
     <string name="vault_batch_selected_count">%1$d selected</string>
+    <!-- ISSUE-P3-360 AC④a：溢出菜单「选择」项（进入批量模式） -->
+    <string name="vault_menu_select_entries">Select</string>
+    <!-- ISSUE-P3-360 AC④b：首次长按进入批量模式的一次性引导 -->
+    <string name="vault_batch_select_guide">Long-press an entry to multi-select: move or delete in batch after selecting</string>
     <string name="vault_new_entry_desc">Save accounts, passwords, URLs and passkeys</string>
     <string name="vault_new_folder_desc">Create category folders to organize entries</string>
     <!-- ISSUE-P3-51: new entry from a template (templates live in the vault's "模板" group) -->
@@ -318,11 +337,18 @@
     <string name="detail_username_copied">Username copied to secure clipboard</string>
     <string name="detail_username_copied_short">Username copied</string>
     <string name="detail_totp_copied">One-time code copied</string>
+    <!-- ISSUE-P3-360 AC③a：剩余 ≤5s 时的临期复制提示（秒数插值） -->
+    <string name="detail_totp_copied_expiring">Code expires in %1$d seconds — copied</string>
     <string name="detail_totp_copy_failed">Couldn\'t copy the code, please try again</string>
     <string name="detail_field_copied">Copied %1$s</string>
+    <string name="detail_url_missing">This entry has no URL configured</string>
+    <string name="detail_url_fallback_copied">Could not open the URL directly — copied to clipboard</string>
     <string name="detail_password_copied_timeout_seconds">Password copied, clipboard clears in %1$d seconds</string>
     <string name="detail_password_copied_timeout_minutes">Password copied, clipboard clears in %1$d minutes</string>
     <string name="detail_password_copied_no_clear">Password copied (clipboard auto-clear is disabled)</string>
+    <!-- ISSUE-P3-360 AC③b：敏感复制消息的清空倒计时后缀（UiMessage.clipboardClearSeconds 拼接） -->
+    <string name="clipboard_clear_suffix_seconds">, clipboard clears in %1$d seconds</string>
+    <string name="clipboard_clear_suffix_minutes">, clipboard clears in %1$d minutes</string>
     <string name="clipboard_auto_cleared">Clipboard cleared automatically</string>
     <string name="detail_attachment_tap_preview">%1$s • Tap to preview securely</string>
     <string name="detail_revision_meta">Historical revision · %1$s</string>
@@ -346,18 +372,27 @@
     <string name="db_picker_msg_opened">External KDBX file opened and loaded</string>
     <string name="db_picker_msg_removed">Vault removed from the switch list</string>
     <string name="edit_title_required">Please enter an entry title</string>
+    <string name="edit_form_loading">Loading entry…</string>
     <string name="conflict_resolved_msg">Conflict resolved, local and cloud merged successfully</string>
     <string name="unlock_error_empty_password">Enter master password to unlock</string>
     <string name="unlock_error_invalid_password">Incorrect master password or key mismatch</string>
     <!-- ISSUE-P1-04: progressive backoff lockout after repeated failed master password attempts -->
     <string name="unlock_error_locked_out_seconds">Too many failed attempts. Vault temporarily locked, retry in %1$d seconds</string>
     <string name="unlock_error_locked_out_minutes">Too many failed attempts. Vault temporarily locked, retry in %1$d minutes</string>
+    <!-- ISSUE-P2-355 AC2: failure prompt appends "N attempts remaining" (only while throttling is enforced and below the lockout threshold) -->
+    <string name="unlock_attempts_remaining">%1$d attempts remaining</string>
+    <!-- ISSUE-P2-355 AC3: one-time notice on the unlock screen after a lock discarded unsaved edits -->
+    <string name="unlock_unsaved_edits_discarded">Unsaved changes from last time were discarded</string>
     <string name="unlock_biometric_title">Biometric Unlock</string>
     <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
     <string name="unlock_biometric_enroll_title">Enable Biometric Unlock</string>
     <string name="unlock_biometric_enroll_subtitle">Verify your fingerprint or face to securely store the passwordless unlock credential</string>
     <string name="sec_biometric_auth_failed">Biometric authentication failed or was cancelled</string>
     <string name="sec_biometric_key_invalidated">Biometric credentials changed, security key invalidated. Please use master password.</string>
+    <!-- ISSUE-P2-355 AC4: biometric errors tiered by errorCode (lockout / hardware / timeout / other) -->
+    <string name="sec_biometric_lockout">Too many biometric attempts; temporarily locked. Try again later or use your master password.</string>
+    <string name="sec_biometric_hardware">Biometric hardware is unavailable. Please unlock with your master password.</string>
+    <string name="sec_biometric_timeout">Biometric verification timed out. Please try again or use your master password.</string>
     <!-- ISSUE-P1-22: software-level Keystore quick unlock downgrade (explicit consent + resident notice) -->
     <string name="quick_unlock_software_key_notice">Quick unlock on this device falls back to a software key without hardware-level protection</string>
     <string name="unlock_downgrade_dialog_title">Quick unlock security downgrade</string>
@@ -444,6 +479,25 @@
     <string name="conflict_entry_keep_remote">Keep entire cloud</string>
     <string name="conflict_entry_duplicate_both">Keep both (cloud as copy)</string>
     <string name="conflict_entry_mode_whole_hint">This entry will be resolved as a whole; per-field choices are disabled</string>
+    <!-- ISSUE-P3-360 AC①：两侧修改时间对照行 + 「较新」徽标 -->
+    <string name="conflict_time_local_label">Local edit: %1$s</string>
+    <string name="conflict_time_remote_label">Cloud edit: %1$s</string>
+    <string name="conflict_time_newer">Newer</string>
+    <!-- ISSUE-P3-360 AC①：批量选择 / 合并推送前的确认（正文说明覆盖范围与条目数） -->
+    <string name="conflict_confirm_all_local_title">Keep all local?</string>
+    <string name="conflict_confirm_all_local_msg">Every differing field of the %1$d conflicted entries will be set to \"keep local version\", overwriting your earlier per-field choices; after pushing, the cloud-side edits of these fields will be replaced by the local versions. You can still switch individual fields before pushing.</string>
+    <string name="conflict_confirm_all_remote_title">Keep all cloud?</string>
+    <string name="conflict_confirm_all_remote_msg">Every differing field of the %1$d conflicted entries will be set to \"keep cloud version\", overwriting your earlier per-field choices; after pushing, the local-side edits of these fields will be replaced by the cloud versions. You can still switch individual fields before pushing.</string>
+    <string name="conflict_confirm_merge_title">Merge and push now?</string>
+    <string name="conflict_confirm_merge_msg">The %1$d conflicted entries will be merged according to your current choices and pushed as a new cloud version: fields you have not adjusted individually keep the local version by default, so their cloud-side edits will be overwritten. This takes effect immediately.</string>
+    <!-- ISSUE-P3-360 AC①：敏感字段的安全差异线索（掩码 + 长度 + 字符形态，不揭示明文） -->
+    <string name="conflict_sensitive_hint">•••••••• (%1$d chars · %2$s)</string>
+    <string name="conflict_sensitive_hint_length_only">•••••••• (%1$d chars)</string>
+    <string name="conflict_sensitive_cat_upper">upper</string>
+    <string name="conflict_sensitive_cat_lower">lower</string>
+    <string name="conflict_sensitive_cat_digit">digits</string>
+    <string name="conflict_sensitive_cat_symbol">symbols</string>
+    <string name="conflict_sensitive_cat_separator">", "</string>
 
     <!-- Revision diff -->
     <string name="diff_dialog_title">Revision Diff</string>
@@ -1031,6 +1085,8 @@
     <!-- ISSUE-P1-24 AC2: explicit authorization required for first-time targets -->
     <string name="autofill_confirm_first_occurrence">This is the first time you fill credentials into this app. Verify the attribution above to avoid spoofed login pages.</string>
     <string name="autofill_confirm_remember_trust">I have verified the attribution — remember this app and authorize filling</string>
+    <!-- ISSUE-P3-360 AC④：确认钮禁用（首现调用方未勾选授权）时的就地原因文案（hint 位） -->
+    <string name="autofill_confirm_disabled_reason">Confirm is unavailable: check the authorization option below before filling into this app for the first time.</string>
     <string name="autofill_confirm_already_trusted">This app was explicitly authorized by you before (a re-signed APK of the same package will require authorization again).</string>
     <string name="cred_passkey_create_title">Create Passkey</string>
     <string name="cred_passkey_assert_title">Verify Passkey</string>
@@ -1109,6 +1165,10 @@
          (doc / row:3 / entry:12 / path:A/B). Entry titles, usernames, URLs, notes and
          passwords must never appear. -->
     <string name="import_untitled_entry">Untitled entry</string>
+    <!-- ISSUE-P2-354 AC④: staged import progress (READING stage; %1$s=source label) -->
+    <string name="import_progress_reading">Reading %1$s data...</string>
+    <!-- ISSUE-P2-354 AC④: quantifiable persist counters (%1$d=processed %2$d=batch total) -->
+    <string name="import_progress_persisting">Writing into vault (%1$d of %2$d)</string>
     <string name="import_report_title">Import finished</string>
     <string name="import_report_source">Source: %1$s</string>
     <!-- %1$d=added %2$d=updated %3$d=skipped %4$d=failed -->

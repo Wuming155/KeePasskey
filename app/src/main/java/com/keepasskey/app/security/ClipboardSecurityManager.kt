@@ -50,6 +50,14 @@ interface ClipboardSecurityChannel {
 
     /** 复制普通文本（不标记敏感属性） */
     fun copyPlainText(label: CharSequence, text: CharSequence)
+
+    /**
+     * ISSUE-P3-360 AC③：本次敏感复制将调度的自动擦除秒数——null 表示**不会**自动清空
+     * （用户关闭自动清空 / 超时配置 ≤ 0）。裁决与 [armScheduledClear] 同源走
+     * [ClipboardClearPolicy.resolveScheduledTimeoutSeconds]，消息侧不得另行编造时长。
+     * 默认实现返回 null（保守：不提示清空），纯 JVM 假通道无需覆写。
+     */
+    suspend fun scheduledClearSeconds(): Int? = null
 }
 
 /**
@@ -236,6 +244,19 @@ class ClipboardSecurityManager @Inject constructor(
         clipboardManager.setPrimaryClip(clipData)
         clipboardSuperseded = true
         prefs.edit().putBoolean(KEY_PENDING_SENSITIVE, false).apply()
+    }
+
+    /**
+     * ISSUE-P3-360 AC③：按用户设置现场裁决「将调度的清空秒数」（与 [armScheduledClear]
+     * 的裁决函数、参数完全一致——消息文案与真实调度绝不能两处口径）。
+     */
+    override suspend fun scheduledClearSeconds(): Int? {
+        val settings = settingsRepository.getSettings().first()
+        return ClipboardClearPolicy.resolveScheduledTimeoutSeconds(
+            customTimeoutSeconds = null,
+            autoClearClipboard = settings.autoClearClipboard,
+            settingsTimeoutSeconds = settings.clipboardTimeoutSeconds
+        )
     }
 
     /**

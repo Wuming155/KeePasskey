@@ -110,6 +110,7 @@ internal fun VaultListBatchModeTopBar(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun VaultListSearchTopBar(
+    /** ISSUE-P2-356：须传**未防抖**的即时回显值——受控输入框接防抖值即快速打字回吞 */
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     isInsideRecycleBin: Boolean,
@@ -122,6 +123,8 @@ internal fun VaultListSearchTopBar(
     onKillApp: (() -> Unit)? = null,
     /** 非空才呈现「扫码」入口；只读会话传 null 隐藏 */
     onScanClick: (() -> Unit)? = null,
+    /** ISSUE-P3-360 AC④a：非空才呈现溢出菜单「选择」项（进入批量模式；回收站内无溢出菜单） */
+    onSelectEntriesClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -206,7 +209,7 @@ internal fun VaultListSearchTopBar(
                     )
                 }
             } else {
-                // 收敛后的竖排三点溢出菜单：排序 / 锁定 / 扫码（只读隐藏）/（可选）彻底退出
+                // 收敛后的竖排三点溢出菜单：排序 / 选择（ISSUE-P3-360 AC④a）/ 锁定 / 扫码（只读隐藏）/（可选）彻底退出
                 Box {
                     IconButton(onClick = { showOverflowMenu = true }) {
                         Icon(
@@ -233,6 +236,19 @@ internal fun VaultListSearchTopBar(
                                 onSortClick()
                             }
                         )
+                        // ISSUE-P3-360 AC④a：批量模式的第二入口（首长按之外的可发现路径）
+                        if (onSelectEntriesClick != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.vault_menu_select_entries)) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.SelectAll, contentDescription = null)
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    onSelectEntriesClick()
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.cd_lock)) },
                             leadingIcon = {

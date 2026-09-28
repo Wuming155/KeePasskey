@@ -137,4 +137,15 @@ class VaultListProjectionFiltersTest {
         val state = build(entries = listOf(entry(id = "e1")))
         assertTrue(state.availableTags.isEmpty())
     }
+
+    // ---------------- ISSUE-P3-360 AC⑤：首载骨架态 ----------------
+
+    @Test
+    fun `默认构造为首载中而真实投影恒为已加载`() {
+        // ViewModel `stateIn(initialValue = VaultListUiState())` = 首载骨架态；
+        // buildVaultListUiState 是首条真实投影，必须以 isLoading=false 落地，
+        // 否则列表永远停在骨架、真实内容永不出现（骨架最危险的失效形态）。
+        assertTrue("默认构造必须是首载态（渲染骨架）", VaultListUiState().isLoading)
+        assertFalse("真实投影必须为已加载（渲染内容）", build().isLoading)
+    }
 }

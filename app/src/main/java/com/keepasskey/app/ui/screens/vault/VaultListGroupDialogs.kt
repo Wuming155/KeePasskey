@@ -24,13 +24,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.getVaultIcon
+import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.theme.CapsuleShape
 /**
@@ -184,7 +184,7 @@ internal fun VaultDeleteGroupDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    val haptic = LocalHapticFeedback.current
+    val maybeHaptic = rememberMaybeHaptic()
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
@@ -194,7 +194,7 @@ internal fun VaultDeleteGroupDialog(
             Button(
                 onClick = {
                     // 危险操作确认：Reject 触感强化「不可逆」心智
-                    haptic.performHapticFeedback(HapticFeedbackType.Reject)
+                    maybeHaptic(HapticFeedbackType.Reject)
                     onConfirm()
                 },
                 colors = ButtonDefaults.buttonColors(
@@ -217,7 +217,7 @@ internal fun VaultEmptyRecycleBinDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    val haptic = LocalHapticFeedback.current
+    val maybeHaptic = rememberMaybeHaptic()
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
@@ -226,7 +226,7 @@ internal fun VaultEmptyRecycleBinDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.Reject)
+                    maybeHaptic(HapticFeedbackType.Reject)
                     onConfirm()
                 },
                 colors = ButtonDefaults.buttonColors(

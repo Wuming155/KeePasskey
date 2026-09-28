@@ -100,11 +100,31 @@ class DatabaseSettingsSectionWiringTest {
     private fun indexOfTopLevelCall(source: String, call: String): Int =
         source.lines().indexOfFirst { it.startsWith("    $call") }
 
-    /** 按花括号配平取出某个顶层函数的函数体（调用前已剥注释，故不会因注释里的括号错位） */
+    /** 按花括号配平取出某个顶层函数的函数体（调用前已剥注释，故不会因注释里的括号错位）。
+     *  首个 `{` 不可靠：参数默认值（如 `onCancel: () -> Unit = {}`）会先于函数体出现，
+     *  故先按圆括号配平越过参数表，再取其后的第一个 `{` 为函数体起点。 */
     private fun functionBodyOf(source: String, signature: String): String {
         val start = source.indexOf(signature)
         assertTrue("未找到函数：$signature（是否被改名/移走）", start >= 0)
-        val open = source.indexOf('{', start)
+        val parenOpen = source.indexOf('(', start)
+        assertTrue("未找到参数表开括号：$signature", parenOpen >= 0)
+        var parenDepth = 0
+        var parenClose = -1
+        for (i in parenOpen until source.length) {
+            when (source[i]) {
+                '(' -> parenDepth++
+                ')' -> {
+                    parenDepth--
+                    if (parenDepth == 0) {
+                        parenClose = i
+                        break
+                    }
+                }
+            }
+        }
+        assertTrue("参数表未闭合：$signature", parenClose >= 0)
+        val open = source.indexOf('{', parenClose)
+        assertTrue("未找到函数体开括号：$signature", open >= 0)
         var depth = 0
         for (i in open until source.length) {
             when (source[i]) {
