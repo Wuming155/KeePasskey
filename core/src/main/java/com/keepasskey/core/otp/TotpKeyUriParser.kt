@@ -19,6 +19,11 @@ object TotpKeyUriParser {
     private const val DEFAULT_DIGITS = 6
     private const val DEFAULT_ALGORITHM = "SHA1"
 
+    /** ISSUE-P3-383：Steam Guard 算法标识（`steam://` 与 `algorithm=STEAM` 共用） */
+    const val ALGORITHM_STEAM = "STEAM"
+    private const val STEAM_DIGITS = 5
+    private const val TYPE_STEAM = "steam"
+
     /** RFC 6238 / 官方实现共同接受的验证码位数区间（钳制上下界，ISSUE-P3-273 复用）。 */
     private const val DIGITS_MIN = 6
     private const val DIGITS_MAX = 8
@@ -45,6 +50,7 @@ object TotpKeyUriParser {
     private const val BYTE_AMPERSAND = 0x26
     private const val BYTE_QUESTION = 0x3F
     private const val BYTE_SLASH = 0x2F
+    private const val BYTE_COLON = 0x3A
 
     private const val CHAR_LOWER_A = 0x61
     private const val CHAR_LOWER_Z = 0x7A
@@ -54,6 +60,7 @@ object TotpKeyUriParser {
     private const val CHAR_SEVEN = 0x37
 
     private val OTPAUTH_PREFIX: ByteArray = "otpauth://".toByteArray(StandardCharsets.US_ASCII)
+    private val STEAM_PREFIX: ByteArray = "steam://".toByteArray(StandardCharsets.US_ASCII)
 
     /**
      * 字节语义解析入口（ISSUE-P2-12）：输入不物化为 String，种子全程以 ASCII 字节承载。
@@ -64,6 +71,9 @@ object TotpKeyUriParser {
      * 验证码位数」）——只在条目自身未声明该参数时生效（[parsePlainBase32] 的纯 Base32 种子、
      * 或 otpauth URI 缺 `period` / `digits` 参数）。注入值**同样过钳制**：
      * 非正的周期与不在 `6..8` 的位数一律回落内置常量，故「不得绕过钳制语义」不被破坏。
+     *
+     * ISSUE-P3-383：新增 `steam://` 前缀与 `algorithm=STEAM` 两形态；Steam 恒 5 字符字母表，
+     * **不**走 `6..8` 位数钳制（隔离于 RFC 路径，见 [ALGORITHM_STEAM]）。
      */
     fun parse(
         uriOrSecret: ByteArray?,
@@ -77,12 +87,72 @@ object TotpKeyUriParser {
         return try {
             when {
                 working.isEmpty() -> null
-                startsWithIgnoreCase(working, OTPAUTH_PREFIX) -> parseOtpAuthUri(working, period, digits)
+                startsWithIgnoreCase(working, STEAM_PREFIX) ->
+                    parseSteamUri(working, period)
+                startsWithIgnoreCase(working, OTPAUTH_PREFIX) ->
+                    parseOtpAuthUri(working, period, digits)
                 else -> parsePlainBase32(working, period, digits)
             }
         } finally {
             // 工作副本含种子字节，成功/失败路径一律擦除
             working.fill(0)
+        }
+    }
+
+    /**
+     * ISSUE-P3-383：`steam://<Base32 种子>[?secret=...]` —— 恒 Steam 算法 / 5 字符。
+     */
+    private fun parseSteamUri(uri: ByteArray, defaultPeriodSeconds: Int): ParsedTotpConfig? {
+        val rest = uri.copyOfRange(STEAM_PREFIX.size, uri.size)
+        try {
+            val question = indexOfByte(rest, BYTE_QUESTION)
+            if (question >= 0) {
+                val secretPart = rest.copyOfRange(0, question)
+                val query = rest.copyOfRange(question + 1, rest.size)
+                val scan = scanQueryParameters(query, defaultPeriodSeconds, STEAM_DIGITS)
+                try {
+                    val period = if (scan.period > 0) scan.period else defaultPeriodSeconds
+                    val secretSource = scan.secretRaw ?: secretPart
+                    val normalized = normalizeBase32(secretSource)
+                    if (normalized.isEmpty() || !isBase32Alphabet(normalized)) {
+                        normalized.fill(0)
+                        return null
+                    }
+                    return ParsedTotpConfig(
+                        secret = normalized,
+                        period = period,
+                        digits = STEAM_DIGITS,
+                        algorithm = ALGORITHM_STEAM,
+                        issuer = "Steam",
+                        account = null,
+                        isHotp = false,
+                        counter = 0L,
+                        warnings = scan.warnings
+                    )
+                } finally {
+                    secretPart.fill(0)
+                    query.fill(0)
+                    scan.secretRaw?.fill(0)
+                }
+            }
+            val normalized = normalizeBase32(rest)
+            return if (normalized.isEmpty() || !isBase32Alphabet(normalized)) {
+                normalized.fill(0)
+                null
+            } else {
+                ParsedTotpConfig(
+                    secret = normalized,
+                    period = defaultPeriodSeconds,
+                    digits = STEAM_DIGITS,
+                    algorithm = ALGORITHM_STEAM,
+                    issuer = "Steam",
+                    account = null,
+                    isHotp = false,
+                    counter = 0L
+                )
+            }
+        } finally {
+            rest.fill(0)
         }
     }
 
@@ -122,54 +192,6 @@ object TotpKeyUriParser {
         val counter: Long,
         val warnings: List<String>
     )
-
-    private fun parseOtpAuthUri(
-        uri: ByteArray,
-        defaultPeriodSeconds: Int,
-        defaultDigits: Int
-    ): ParsedTotpConfig? {
-        // 形如 otpauth://<type>/<label>?<query>
-        val slash = indexOfByte(uri, BYTE_SLASH, OTPAUTH_PREFIX.size)
-        // ISSUE-P3-49：类型段（totp / hotp）
-        val typeEnd = if (slash >= 0) slash else uri.size
-        val type = String(uri, OTPAUTH_PREFIX.size, typeEnd - OTPAUTH_PREFIX.size, StandardCharsets.US_ASCII)
-        val isHotp = type.equals(TYPE_HOTP, ignoreCase = true)
-        val restStart = if (slash >= 0) slash + 1 else uri.size
-        val question = indexOfByte(uri, BYTE_QUESTION, restStart)
-        val labelEnd = if (question >= 0) question else uri.size
-        // ISSUE-P2-289 AC①：label 先百分号解码再归一（`%20` / `%40` 不再原样入库显示）
-        val label = String(percentDecode(uri.copyOfRange(restStart, labelEnd)), StandardCharsets.UTF_8)
-
-        val query = if (question >= 0) uri.copyOfRange(question + 1, uri.size) else ByteArray(0)
-        val scan = scanQueryParameters(query, defaultPeriodSeconds, defaultDigits)
-        try {
-            val rawSecret = scan.secretRaw ?: return null
-            val normalized = normalizeBase32(rawSecret)
-            // ISSUE-P2-289 AC②：新输入解析为**严格口径**——含字母表外字符即解析失败
-            // （调用方如实报「URI 非法」，禁由下游宽容解码静默解出错误密钥）；
-            // 存量库展示的宽容口径在 `OtpEngine.Base32Decoder`（作用域分列，互不外推）
-            if (normalized.isEmpty() || !isBase32Alphabet(normalized)) {
-                normalized.fill(0)
-                return null
-            }
-            val account = if (label.contains(':')) label.substringAfter(':').trim() else label.trim()
-            val issuer = (scan.issuerParam ?: label.substringBefore(':')).trim()
-            return ParsedTotpConfig(
-                secret = normalized,
-                period = if (scan.period > 0) scan.period else defaultPeriodSeconds,
-                digits = if (scan.digits in DIGITS_MIN..DIGITS_MAX) scan.digits else defaultDigits,
-                algorithm = scan.algorithm,
-                issuer = issuer.ifBlank { null },
-                account = account.ifBlank { null },
-                isHotp = isHotp,
-                counter = if (isHotp) scan.counter else 0L,
-                warnings = scan.warnings
-            )
-        } finally {
-            query.fill(0)
-            scan.secretRaw?.fill(0)
-        }
-    }
 
     /**
      * 扫描 `?` 之后的查询段（ISSUE-P3-305：自 `parseOtpAuthUri` 逐行搬出，判定顺序与
@@ -223,7 +245,9 @@ object TotpKeyUriParser {
                         val normalized = normalizeAlgorithm(raw)
                         // ISSUE-P2-289 AC③：不支持的算法回落 SHA1 带诊断（禁静默改写）
                         if (normalized == DEFAULT_ALGORITHM &&
-                            !raw.equals(DEFAULT_ALGORITHM, ignoreCase = true) && raw.isNotBlank()
+                            !raw.equals(DEFAULT_ALGORITHM, ignoreCase = true) &&
+                            !raw.equals(ALGORITHM_STEAM, ignoreCase = true) &&
+                            raw.isNotBlank()
                         ) {
                             warnings += "algorithm=$raw 不支持，已回落 $DEFAULT_ALGORITHM"
                         }
@@ -242,46 +266,87 @@ object TotpKeyUriParser {
         return QueryScan(secretRaw, period, digits, algorithm, issuerParam, counter, warnings)
     }
 
-    /** 查询参数值的百分号解码 + UTF-8 成串（非敏感元数据用；种子走 [percentDecode] 字节路径）。 */
-    private fun queryValueString(query: ByteArray, start: Int, end: Int): String =
-        String(percentDecode(query.copyOfRange(start, end)), StandardCharsets.UTF_8)
+    private fun parseOtpAuthUri(
+        uri: ByteArray,
+        defaultPeriodSeconds: Int,
+        defaultDigits: Int
+    ): ParsedTotpConfig? {
+        // 形如 otpauth://<type>/<label>?<query>
+        val slash = indexOfByte(uri, BYTE_SLASH, OTPAUTH_PREFIX.size)
+        // ISSUE-P3-49：类型段（totp / hotp）
+        val typeEnd = if (slash >= 0) slash else uri.size
+        val type = String(uri, OTPAUTH_PREFIX.size, typeEnd - OTPAUTH_PREFIX.size, StandardCharsets.US_ASCII)
+        val isHotp = type.equals(TYPE_HOTP, ignoreCase = true)
+        val restStart = if (slash >= 0) slash + 1 else uri.size
+        val question = indexOfByte(uri, BYTE_QUESTION, restStart)
+        val labelEnd = if (question >= 0) question else uri.size
+        // ISSUE-P2-289 AC①：label 先百分号解码再归一（`%20` / `%40` 不再原样入库显示）
+        val label = String(percentDecode(uri.copyOfRange(restStart, labelEnd)), StandardCharsets.UTF_8)
 
-    /**
-     * ISSUE-P2-289 AC①：百分号解码（`%XX` → 对应字节；非法 `%` 序列按字面量原样保留）。
-     * 只处理 RFC 3986 百分号编码，`+` 不当空格（URI 规范口径，非表单编码）。
-     * 返回全新数组（原数组不修改）；调用方对含种子语义的产物承担擦除义务。
-     */
-    private fun percentDecode(raw: ByteArray): ByteArray {
-        val out = ByteArray(raw.size)
-        var size = 0
-        var i = 0
-        while (i < raw.size) {
-            val b = raw[i].toInt() and 0xFF
-            if (b == BYTE_PERCENT && i + 2 <= raw.size - 1) {
-                val hi = hexValue(raw[i + 1].toInt() and 0xFF)
-                val lo = hexValue(raw[i + 2].toInt() and 0xFF)
-                if (hi >= 0 && lo >= 0) {
-                    out[size++] = ((hi shl 4) or lo).toByte()
-                    i += 3
-                    continue
+        val query = if (question >= 0) uri.copyOfRange(question + 1, uri.size) else ByteArray(0)
+        val scan = scanQueryParameters(query, defaultPeriodSeconds, defaultDigits)
+        try {
+            val rawSecret = scan.secretRaw ?: return null
+            val normalized = normalizeBase32(rawSecret)
+            // ISSUE-P3-383：Steam 算法路径——恒 5 字符，不走 RFC 6..8 位数钳制
+            if (scan.algorithm.equals(ALGORITHM_STEAM, ignoreCase = true) ||
+                issuerLooksLikeSteam(scan.issuerParam, label)
+            ) {
+                if (normalized.isEmpty() || !isBase32Alphabet(normalized)) {
+                    normalized.fill(0)
+                    return null
                 }
+                val account = if (label.contains(':')) label.substringAfter(':').trim() else label.trim()
+                val issuer = (scan.issuerParam ?: label.substringBefore(':')).trim().ifBlank { "Steam" }
+                return ParsedTotpConfig(
+                    secret = normalized,
+                    period = if (scan.period > 0) scan.period else defaultPeriodSeconds,
+                    digits = STEAM_DIGITS,
+                    algorithm = ALGORITHM_STEAM,
+                    issuer = issuer,
+                    account = account.ifBlank { null },
+                    isHotp = false,
+                    counter = 0L,
+                    warnings = scan.warnings
+                )
             }
-            out[size++] = raw[i]
-            i++
+            // ISSUE-P2-289 AC②：新输入解析为**严格口径**——含字母表外字符即解析失败
+            // （调用方如实报「URI 非法」，禁由下游宽容解码静默解出错误密钥）；
+            // 存量库展示的宽容口径在 `OtpEngine.Base32Decoder`（作用域分列，互不外推）
+            if (normalized.isEmpty() || !isBase32Alphabet(normalized)) {
+                normalized.fill(0)
+                return null
+            }
+            val account = if (label.contains(':')) label.substringAfter(':').trim() else label.trim()
+            val issuer = (scan.issuerParam ?: label.substringBefore(':')).trim()
+            return ParsedTotpConfig(
+                secret = normalized,
+                period = if (scan.period > 0) scan.period else defaultPeriodSeconds,
+                digits = if (scan.digits in DIGITS_MIN..DIGITS_MAX) scan.digits else defaultDigits,
+                algorithm = scan.algorithm,
+                issuer = issuer.ifBlank { null },
+                account = account.ifBlank { null },
+                isHotp = isHotp,
+                counter = if (isHotp) scan.counter else 0L,
+                warnings = scan.warnings
+            )
+        } finally {
+            query.fill(0)
+            scan.secretRaw?.fill(0)
         }
-        if (size == out.size) return out
-        val result = out.copyOf(size)
-        out.fill(0)
-        return result
     }
 
-    /** 十六进制字符 → 数值（非法返回 -1）。 */
-    private fun hexValue(value: Int): Int = when (value) {
-        in 0x30..0x39 -> value - 0x30
-        in 0x41..0x46 -> value - 0x41 + 10
-        in 0x61..0x66 -> value - 0x61 + 10
-        else -> -1
+    private fun issuerLooksLikeSteam(issuerParam: String?, label: String): Boolean {
+        val candidates = listOfNotNull(issuerParam, label.substringBefore(':'))
+        return candidates.any { it.trim().equals("Steam", ignoreCase = true) }
     }
+
+    private fun queryValueString(query: ByteArray, start: Int, end: Int): String =
+        TotpUriTextCodec.queryValueString(query, start, end)
+
+    private fun percentDecode(raw: ByteArray): ByteArray = TotpUriTextCodec.percentDecode(raw)
+
+    private fun hexValue(value: Int): Int = TotpUriTextCodec.hexValue(value)
 
     private fun parsePlainBase32(
         candidate: ByteArray,
@@ -308,66 +373,24 @@ object TotpKeyUriParser {
     private fun normalizeAlgorithm(raw: String): String = when (raw.uppercase()) {
         "SHA256" -> "SHA256"
         "SHA512" -> "SHA512"
+        ALGORITHM_STEAM -> ALGORITHM_STEAM
         else -> DEFAULT_ALGORITHM
     }
 
-    /** 去除空白与 '=' 填充并转大写 ASCII；返回全新数组（原数组不修改） */
-    private fun normalizeBase32(raw: ByteArray): ByteArray {
-        val buffer = ByteArray(raw.size)
-        var size = 0
-        for (b in raw) {
-            val v = b.toInt() and 0xFF
-            when {
-                isAsciiWhitespace(v) || v == BYTE_EQUALS -> Unit
-                v in CHAR_LOWER_A..CHAR_LOWER_Z -> buffer[size++] = (v - ASCII_CASE_OFFSET).toByte()
-                else -> buffer[size++] = b
-            }
-        }
-        if (size == buffer.size) return buffer
-        val result = buffer.copyOf(size)
-        buffer.fill(0)
-        return result
-    }
+    private fun normalizeBase32(raw: ByteArray): ByteArray = TotpUriTextCodec.normalizeBase32(raw)
 
-    private fun isBase32Alphabet(bytes: ByteArray): Boolean {
-        for (b in bytes) {
-            val v = b.toInt() and 0xFF
-            if (!(v in CHAR_UPPER_A..CHAR_UPPER_Z || v in CHAR_TWO..CHAR_SEVEN)) return false
-        }
-        return true
-    }
+    private fun isBase32Alphabet(bytes: ByteArray): Boolean = TotpUriTextCodec.isBase32Alphabet(bytes)
 
-    private fun trimAsciiWhitespace(bytes: ByteArray): ByteArray {
-        var start = 0
-        var end = bytes.size
-        while (start < end && isAsciiWhitespace(bytes[start].toInt() and 0xFF)) start++
-        while (end > start && isAsciiWhitespace(bytes[end - 1].toInt() and 0xFF)) end--
-        return bytes.copyOfRange(start, end)
-    }
+    private fun trimAsciiWhitespace(bytes: ByteArray): ByteArray = TotpUriTextCodec.trimAsciiWhitespace(bytes)
 
-    private fun isAsciiWhitespace(value: Int): Boolean =
-        value == BYTE_SPACE || value == BYTE_TAB || value == BYTE_LF ||
-            value == BYTE_VT || value == BYTE_FF || value == BYTE_CR
+    private fun isAsciiWhitespace(value: Int): Boolean = TotpUriTextCodec.isAsciiWhitespace(value)
 
-    private fun indexOfByte(bytes: ByteArray, target: Int, from: Int = 0): Int {
-        var i = from
-        while (i < bytes.size) {
-            if ((bytes[i].toInt() and 0xFF) == target) return i
-            i++
-        }
-        return -1
-    }
+    private fun indexOfByte(bytes: ByteArray, target: Int, from: Int = 0): Int =
+        TotpUriTextCodec.indexOfByte(bytes, target, from)
 
-    private fun startsWithIgnoreCase(bytes: ByteArray, prefix: ByteArray): Boolean {
-        if (bytes.size < prefix.size) return false
-        for (i in prefix.indices) {
-            if (toUpperAscii(bytes[i]) != toUpperAscii(prefix[i])) return false
-        }
-        return true
-    }
+    private fun startsWithIgnoreCase(bytes: ByteArray, prefix: ByteArray): Boolean =
+        TotpUriTextCodec.startsWithIgnoreCase(bytes, prefix)
 
-    private fun toUpperAscii(b: Byte): Int {
-        val v = b.toInt() and 0xFF
-        return if (v in CHAR_LOWER_A..CHAR_LOWER_Z) v - ASCII_CASE_OFFSET else v
-    }
+    private fun toUpperAscii(b: Byte): Int = TotpUriTextCodec.toUpperAscii(b)
 }
+

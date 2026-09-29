@@ -94,6 +94,11 @@ class RealSettingsRepository @Inject constructor(
         biometricEnabled = prefs[KEY_BIOMETRIC_ENABLED] ?: false,
         autoLockBackground = prefs[KEY_AUTO_LOCK_BACKGROUND] ?: true,
         autoLockTimeoutSeconds = prefs[KEY_AUTO_LOCK_TIMEOUT] ?: 60,
+        // ISSUE-P2-379：默认开启前台闲置锁；超时默认 300 秒（5 分钟）
+        autoLockForegroundEnabled = prefs[KEY_AUTO_LOCK_FOREGROUND_ENABLED] ?: true,
+        autoLockForegroundTimeoutSeconds = prefs[KEY_AUTO_LOCK_FOREGROUND_TIMEOUT] ?: 300,
+        // ISSUE-P3-381：默认开启回前台远端探测
+        syncProbeOnResumeEnabled = prefs[KEY_SYNC_PROBE_ON_RESUME] ?: true,
         lockWhenScreenOff = prefs[KEY_LOCK_WHEN_SCREEN_OFF] ?: true,
         flagSecureEnabled = prefs[KEY_FLAG_SECURE] ?: true,
         autoClearClipboard = prefs[KEY_AUTO_CLEAR_CLIPBOARD] ?: true,
@@ -160,6 +165,15 @@ class RealSettingsRepository @Inject constructor(
 
     override suspend fun setLockWhenScreenOff(enabled: Boolean) =
         edit { it[KEY_LOCK_WHEN_SCREEN_OFF] = enabled }
+
+    override suspend fun setAutoLockForegroundEnabled(enabled: Boolean) =
+        edit { it[KEY_AUTO_LOCK_FOREGROUND_ENABLED] = enabled }
+
+    override suspend fun setAutoLockForegroundTimeoutSeconds(seconds: Int) =
+        edit { it[KEY_AUTO_LOCK_FOREGROUND_TIMEOUT] = seconds }
+
+    override suspend fun setSyncProbeOnResumeEnabled(enabled: Boolean) =
+        edit { it[KEY_SYNC_PROBE_ON_RESUME] = enabled }
 
     override suspend fun setFlagSecureEnabled(enabled: Boolean) =
         edit { it[KEY_FLAG_SECURE] = enabled }
@@ -237,6 +251,11 @@ class RealSettingsRepository @Inject constructor(
         private val KEY_BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
         private val KEY_AUTO_LOCK_BACKGROUND = booleanPreferencesKey("auto_lock_background")
         private val KEY_AUTO_LOCK_TIMEOUT = intPreferencesKey("auto_lock_timeout_seconds")
+        // ISSUE-P2-379：前台闲置自动锁定
+        private val KEY_AUTO_LOCK_FOREGROUND_ENABLED = booleanPreferencesKey("auto_lock_foreground_enabled")
+        private val KEY_AUTO_LOCK_FOREGROUND_TIMEOUT = intPreferencesKey("auto_lock_foreground_timeout_seconds")
+        // ISSUE-P3-381：回前台远端探测
+        private val KEY_SYNC_PROBE_ON_RESUME = booleanPreferencesKey("sync_probe_on_resume")
         private val KEY_LOCK_WHEN_SCREEN_OFF = booleanPreferencesKey("lock_when_screen_off")
         private val KEY_FLAG_SECURE = booleanPreferencesKey("flag_secure_enabled")
         private val KEY_AUTO_CLEAR_CLIPBOARD = booleanPreferencesKey("auto_clear_clipboard")

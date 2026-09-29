@@ -25,6 +25,14 @@ object OtpEngine {
     }
 
     /**
+     * ISSUE-P3-383：Steam Guard 字母表（26 字符，与 KeePassXC / Monica 一致）。
+     * **与 RFC 6238 纯数字码路径隔离**——仅 [calculateSteamCode] / [calculateSteamHotp] 消费。
+     */
+    const val STEAM_ALPHABET = "23456789BCDFGHJKMNPQRTVWXY"
+    private const val STEAM_DIGITS = 5
+    private const val STEAM_ALPHABET_SIZE = 26
+
+    /**
      * ISSUE-P3-173：`10^digits` 查表，替代每次取码各一次 `10.0.pow(...)` 浮点运算。
      *
      * 表覆盖 `digits ∈ [0, 9]`；越界位数回退原浮点路径，故既有行为（含 `digits ≥ 10` 时
@@ -55,6 +63,41 @@ object OtpEngine {
     ): String {
         val counter = (timestampMillis / 1000L) / periodSeconds
         return calculateHotp(secretKey, counter, digits, algorithm)
+    }
+
+    /**
+     * ISSUE-P3-383：Steam Guard 5 字符验证码（标准 HMAC-SHA1 动态截断后映射 Steam 字母表）。
+     * 与 [calculateTotp] 隔离：标准路径仍出纯数字码，本路径恒出 [STEAM_ALPHABET] 字符。
+     */
+    fun calculateSteamCode(
+        secretKey: ByteArray,
+        timestampMillis: Long = System.currentTimeMillis(),
+        periodSeconds: Int = 30
+    ): String {
+        val counter = (timestampMillis / 1000L) / periodSeconds
+        return calculateSteamHotp(secretKey, counter)
+    }
+
+    /**
+     * ISSUE-P3-383：Steam HOTP（计数器驱动，5 字符字母表）。
+     * 截断算法与 RFC 4226 相同（HMAC-SHA1 + 动态截断取 31 bit），编码层换字母表。
+     */
+    fun calculateSteamHotp(secretKey: ByteArray, counter: Long): String {
+        val counterBytes = ByteBuffer.allocate(8).putLong(counter).array()
+        val mac = Mac.getInstance(HashAlgorithm.SHA1.hmacAlgorithm)
+        mac.init(SecretKeySpec(secretKey, HashAlgorithm.SHA1.hmacAlgorithm))
+        val hash = mac.doFinal(counterBytes)
+        val offset = hash[hash.size - 1].toInt() and 0x0F
+        var binary = ((hash[offset].toInt() and 0x7F) shl 24) or
+            ((hash[offset + 1].toInt() and 0xFF) shl 16) or
+            ((hash[offset + 2].toInt() and 0xFF) shl 8) or
+            (hash[offset + 3].toInt() and 0xFF)
+        val out = CharArray(STEAM_DIGITS)
+        for (i in 0 until STEAM_DIGITS) {
+            out[i] = STEAM_ALPHABET[binary % STEAM_ALPHABET_SIZE]
+            binary /= STEAM_ALPHABET_SIZE
+        }
+        return String(out)
     }
 
     /**

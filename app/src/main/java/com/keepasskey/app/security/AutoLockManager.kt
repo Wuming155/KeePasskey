@@ -65,9 +65,64 @@ class AutoLockManager @Inject constructor(
 
     private var isInBackground: Boolean = false
     private var isInitialized = false
+    /** 本地锁态镜像（前台闲置调度用）；对外真相源仍是 [isLocked] 的 StateFlow */
+    private var sessionLocked: Boolean = false
+    private var lastInteractionAtMillis: Long = System.currentTimeMillis()
+    private var foregroundLockJob: Job? = null
 
     /** 后台延迟锁定任务；到点即锁，取消路径覆盖 onStart / onUnlockSuccess / triggerLock / 设置变更 */
     private var backgroundLockJob: Job? = null
+
+    /**
+     * ISSUE-P2-379：前台闲置计时。交互刷新语义由 [onUserInteraction] 承担；
+     * 锁定态下交互不刷新（[ForegroundIdleLockPolicy.shouldRefreshOnInteraction]）。
+     */
+    fun onUserInteraction() {
+        val now = System.currentTimeMillis()
+        if (!ForegroundIdleLockPolicy.shouldRefreshOnInteraction(sessionLocked)) return
+        lastInteractionAtMillis = now
+        // 后台定时器不受前台交互影响；仅前台闲置档需要重排
+        if (!isInBackground) scheduleForegroundIdleLock()
+    }
+
+    private fun scheduleForegroundIdleLock() {
+        foregroundLockJob?.cancel()
+        foregroundLockJob = null
+        scope.launch {
+            val settings = settingsRepository.getSettings().first()
+            if (!settings.autoLockForegroundEnabled || sessionLocked) {
+                return@launch
+            }
+            val decision = ForegroundIdleLockPolicy.decide(
+                idleTimeoutSeconds = settings.autoLockForegroundTimeoutSeconds,
+                lastInteractionMillis = lastInteractionAtMillis,
+                nowMillis = System.currentTimeMillis()
+            )
+            when (decision) {
+                is ForegroundIdleLockPolicy.IdleDecision.LockNow -> {
+                    sessionGuard.triggerLock(decision.reason)
+                }
+
+                ForegroundIdleLockPolicy.IdleDecision.NeverIdleLock -> Unit
+                ForegroundIdleLockPolicy.IdleDecision.KeepAlive -> {
+                    val lockAt = ForegroundIdleLockPolicy.nextLockAtMillis(
+                        settings.autoLockForegroundTimeoutSeconds,
+                        lastInteractionAtMillis
+                    ) ?: return@launch
+                    val delayMs = (lockAt - System.currentTimeMillis()).coerceAtLeast(0L)
+                    delay(delayMs)
+                    val recheck = ForegroundIdleLockPolicy.decide(
+                        idleTimeoutSeconds = settings.autoLockForegroundTimeoutSeconds,
+                        lastInteractionMillis = lastInteractionAtMillis,
+                        nowMillis = System.currentTimeMillis()
+                    )
+                    if (recheck is ForegroundIdleLockPolicy.IdleDecision.LockNow) {
+                        sessionGuard.triggerLock(recheck.reason)
+                    }
+                }
+            }
+        }
+    }
 
     private val screenOffReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -108,11 +163,12 @@ class AutoLockManager @Inject constructor(
 
         scope.launch {
             settingsRepository.getSettings()
-                .map { AutoLockSchedule(it.autoLockBackground, it.autoLockTimeoutSeconds) }
+                .map { AutoLockSchedule(it.autoLockBackground, it.autoLockTimeoutSeconds, it.autoLockForegroundEnabled, it.autoLockForegroundTimeoutSeconds) }
                 .distinctUntilChanged()
                 .collect {
                     // 仅后台期间才需要按新超时值重排；前台态由回前台补偿判定负责
                     if (isInBackground) scheduleBackgroundLock()
+                    if (!isInBackground) scheduleForegroundIdleLock()
                 }
         }
     }
@@ -120,6 +176,8 @@ class AutoLockManager @Inject constructor(
     override fun onStop(owner: LifecycleOwner) {
         // 应用整体退至后台：持久化起始时刻（进程重建后可恢复）并按当前超时值启动延迟锁定任务
         isInBackground = true
+        foregroundLockJob?.cancel()
+        foregroundLockJob = null
         backgroundStamp.markBackground(System.currentTimeMillis())
         scheduleBackgroundLock()
     }
@@ -137,6 +195,9 @@ class AutoLockManager @Inject constructor(
             sessionGuard.lockOnBackgroundResume(backgroundTimestamp)
             // 判定完成只清本段——窗口内再次退后台写入的新时间戳不得被抹掉
             backgroundStamp.clearIfCurrent(backgroundTimestamp)
+            // ISSUE-P2-379：回前台后以当前时刻为交互播种，重启前台闲置计时
+            lastInteractionAtMillis = System.currentTimeMillis()
+            if (!sessionLocked) scheduleForegroundIdleLock()
         }
     }
 
@@ -182,7 +243,10 @@ class AutoLockManager @Inject constructor(
      * 触发锁定：擦除内存数据库敏感状态，发出锁定事件（委托内核执行）。
      */
     fun triggerLock(reason: String = "安全锁定") {
+        sessionLocked = true
         cancelBackgroundLock()
+        foregroundLockJob?.cancel()
+        foregroundLockJob = null
         scope.launch {
             sessionGuard.triggerLock(reason)
         }
@@ -192,14 +256,21 @@ class AutoLockManager @Inject constructor(
      * 用户重新成功解锁后调用，重置锁定标记与后台定时器
      */
     fun onUnlockSuccess() {
+        sessionLocked = false
+        lastInteractionAtMillis = System.currentTimeMillis()
         backgroundStamp.clear()
         cancelBackgroundLock()
+        foregroundLockJob?.cancel()
+        foregroundLockJob = null
         sessionGuard.onUnlockSuccess()
+        if (!isInBackground) scheduleForegroundIdleLock()
     }
 
-    /** 设置流观察用的调度键：仅在「后台锁定开关 + 超时秒数」变化时触发重排 */
+    /** 设置流观察用的调度键：仅在相关开关/超时变化时触发重排 */
     private data class AutoLockSchedule(
         val backgroundLockEnabled: Boolean,
-        val timeoutSeconds: Int
+        val timeoutSeconds: Int,
+        val foregroundLockEnabled: Boolean,
+        val foregroundTimeoutSeconds: Int
     )
 }

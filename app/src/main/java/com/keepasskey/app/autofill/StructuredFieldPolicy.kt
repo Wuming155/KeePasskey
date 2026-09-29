@@ -48,6 +48,11 @@ enum class StructuredFieldRole {
  * 候选供给（AC②）：**含全部所需字段**的条目才入选（缺字段的卡不入选，AC③），按最后修改
  * 时间降序、上限 [SELECT_LIMIT]；不走域名匹配——卡 / 地址是跨站点上下文（与 Monica 同型），
  * 安全面由「确认页二次认证 + 调用方归属展示」承担（见批次 §355.2）。
+ *
+ * ISSUE-P2-380：识别与取值**同时**接受内置信用卡模板中文键（「卡号/持卡人/有效期」等，
+ * 见 `VaultTemplateFactory` / `VaultEntryMapper.CARD_FIELD_*`）与 Android hint 键
+ * （`creditCardNumber` 等）；存量中文名录入的条目无需迁移即可被结构化填充。
+ * 取值时 hint 键优先，其次中文模板键（避免双写冲突时静默取错）。
  */
 object StructuredFieldPolicy {
 
@@ -64,6 +69,21 @@ object StructuredFieldPolicy {
         StructuredFieldRole.POSTAL_ADDRESS_LOCALITY to "addressLocality",
         StructuredFieldRole.POSTAL_ADDRESS_REGION to "addressRegion",
         StructuredFieldRole.POSTAL_CODE to "postalCode"
+    )
+
+    /**
+     * ISSUE-P2-380：角色 → 内置信用卡模板中文键（与 `VaultEntryMapper.CARD_FIELD_*` 一致）。
+     * 「有效期」为复合字段（月/年同键）：取值时若能解析 `MM/YY` 或 `MMYYYY` 再拆到月/年角色。
+     */
+    private val TEMPLATE_ZH_FIELD_NAMES = mapOf(
+        StructuredFieldRole.CREDIT_CARD_NUMBER to listOf("卡号", "Card Number"),
+        StructuredFieldRole.CREDIT_CARD_SECURITY_CODE to listOf("CVV", "CVC"),
+        StructuredFieldRole.CREDIT_CARD_EXPIRATION_MONTH to listOf("有效期", "Expiry", "Expiry Date"),
+        StructuredFieldRole.CREDIT_CARD_EXPIRATION_YEAR to listOf("有效期", "Expiry", "Expiry Date"),
+        StructuredFieldRole.POSTAL_STREET_ADDRESS to listOf("街道地址", "地址"),
+        StructuredFieldRole.POSTAL_ADDRESS_LOCALITY to listOf("城市"),
+        StructuredFieldRole.POSTAL_ADDRESS_REGION to listOf("省份", "州"),
+        StructuredFieldRole.POSTAL_CODE to listOf("邮编", "邮政编码")
     )
 
     /**
@@ -108,6 +128,20 @@ object StructuredFieldPolicy {
     /** 角色 → 自定义字段名（存储口径单点；对外只读） */
     fun fieldNameFor(role: StructuredFieldRole): String =
         FIELD_NAMES.getValue(role)
+
+    /**
+     * ISSUE-P2-380：角色 → 可接受的字段名候选（hint 键在前、模板中文键在后）。
+     * 供 `hasField` / `valuesFor` 多键探测；对外只读。
+     */
+    fun acceptedFieldNamesFor(role: StructuredFieldRole): List<String> {
+        val hint = FIELD_NAMES.getValue(role)
+        val zh = TEMPLATE_ZH_FIELD_NAMES[role].orEmpty()
+        return (listOf(hint) + zh).distinct()
+    }
+
+    /** 角色 → 模板英文/中文别名（展示与编辑面提示用） */
+    fun templateAliasNamesFor(role: StructuredFieldRole): List<String> =
+        TEMPLATE_ZH_FIELD_NAMES[role].orEmpty()
 
     /**
      * AC① 识别（hint / autocomplete 两源 ⇒ 可填充；label 源见 [labelRoleOf]）。
@@ -181,32 +215,112 @@ object StructuredFieldPolicy {
     /**
      * AC③ 取值：按角色读自定义字段；空白值 / 缺字段**缺席**（填充侧只写非空值）。
      * 明文物化只允许发生在**用户确认之后**的交付路径（确认页 / 选择器）。
+     *
+     * ISSUE-P2-380：hint 键优先；命中中文模板键时，有效期类角色若读到
+     * `MM/YY` / `MM/YYYY` / `YYYY-MM` 等复合形态再拆月/年。
      */
     fun valuesFor(
         entry: KdbxEntry,
         roles: Collection<StructuredFieldRole>
     ): Map<StructuredFieldRole, String> {
         val out = LinkedHashMap<StructuredFieldRole, String>()
+        val byKey = entry.customFields.associateBy { it.key }
         for (role in roles) {
-            val raw = entry.customFields.firstOrNull { it.key == fieldNameFor(role) }
-                ?.value?.readString()
-                .orEmpty()
-            if (raw.isNotBlank()) out[role] = raw
+            val raw = readFieldByAnyKey(byKey, role)?.orEmpty().orEmpty()
+            val resolved = resolveRoleValue(role, raw, byKey, out)
+            if (resolved.isNotBlank()) out[role] = resolved
         }
         return out
     }
 
-    /** 条目是否携带任一结构化字段（选择器「明确标注」用，AC④） */
-    fun hasAnyStructuredData(entry: KdbxEntry): Boolean =
-        entry.customFields.any { field -> FIELD_NAMES.values.contains(field.key) }
+    private fun resolveRoleValue(
+        role: StructuredFieldRole,
+        raw: String,
+        byKey: Map<String, com.keepasskey.core.model.KdbxCustomField>,
+        already: Map<StructuredFieldRole, String>
+    ): String {
+        if (role !in setOf(
+                StructuredFieldRole.CREDIT_CARD_EXPIRATION_MONTH,
+                StructuredFieldRole.CREDIT_CARD_EXPIRATION_YEAR
+            )
+        ) {
+            return raw
+        }
+        // 复合有效期已由另一角色解析出月/年时，不再二次解析（避免重复占用同一源）
+        val counterpart = when (role) {
+            StructuredFieldRole.CREDIT_CARD_EXPIRATION_MONTH -> StructuredFieldRole.CREDIT_CARD_EXPIRATION_YEAR
+            else -> StructuredFieldRole.CREDIT_CARD_EXPIRATION_MONTH
+        }
+        val counterpartResolved = already[counterpart]
+        if (counterpartResolved != null) {
+            // 对方角色已给出结果；本角色仍可从同一复合串解析自己的半边
+            return parseExpiryHalf(role, raw) ?: counterpartResolved
+        }
+        // hint 键优先（本角色独立字段名）
+        val hintRaw = byKey[fieldNameFor(role)]?.value?.readString()?.orEmpty().orEmpty()
+        if (hintRaw.isNotBlank()) return hintRaw
+        // 中文/模板键：复合串拆半
+        return parseExpiryHalf(role, raw) ?: raw
+    }
 
-    /** 条目是否具备全部所需字段（结构化模式的列表过滤，AC④ 交付安全面） */
+    private fun parseExpiryHalf(role: StructuredFieldRole, raw: String): String? {
+        val v = raw.trim()
+        if (v.isEmpty()) return null
+        // MM/YY | MM/YYYY | MM-YY | MMYYYY(4/6位) | YYYY-MM
+        val slash = v.split('/', '-', '.')
+        if (slash.size >= 2) {
+            val a = slash[0].trim()
+            val b = slash[1].trim()
+            return when (role) {
+                StructuredFieldRole.CREDIT_CARD_EXPIRATION_MONTH -> a.takeIf { it.isNotEmpty() }
+                StructuredFieldRole.CREDIT_CARD_EXPIRATION_YEAR -> b.takeIf { it.isNotEmpty() }
+                else -> null
+            }
+        }
+        val digits = v.filter { it.isDigit() }
+        return when (role) {
+            StructuredFieldRole.CREDIT_CARD_EXPIRATION_MONTH -> when (digits.length) {
+                4 -> digits.take(2)
+                6 -> digits.take(2)
+                else -> null
+            }
+
+            StructuredFieldRole.CREDIT_CARD_EXPIRATION_YEAR -> when (digits.length) {
+                4 -> digits
+                6 -> digits.takeLast(2)
+                else -> null
+            }
+
+            else -> null
+        }
+    }
+
+    private fun readFieldByAnyKey(
+        byKey: Map<String, com.keepasskey.core.model.KdbxCustomField>,
+        role: StructuredFieldRole
+    ): String? {
+        for (key in acceptedFieldNamesFor(role)) {
+            val v = byKey[key]?.value?.readString()?.orEmpty().orEmpty()
+            if (v.isNotBlank()) return v
+        }
+        return null
+    }
+
+    /** 条目是否携带任一结构化字段（选择器「明确标注」用，AC④；含模板中文键） */
+    fun hasAnyStructuredData(entry: KdbxEntry): Boolean {
+        val accepted = FIELD_NAMES.values + TEMPLATE_ZH_FIELD_NAMES.values.flatten()
+        return entry.customFields.any { field -> field.key in accepted }
+    }
+
+    /** 条目是否具备全部所需字段（结构化模式的列表过滤，AC④ 交付安全面；含模板中文键） */
     fun hasAllFields(entry: KdbxEntry, roles: Collection<StructuredFieldRole>): Boolean =
         roles.isNotEmpty() && roles.all { hasField(entry, it) }
 
     private fun hasField(entry: KdbxEntry, role: StructuredFieldRole): Boolean {
-        val name = fieldNameFor(role)
-        return entry.customFields.any { it.key == name && it.value.readString().isNotBlank() }
+        val byKey = entry.customFields.associateBy { it.key }
+        return acceptedFieldNamesFor(role).any { name ->
+            byKey[name]?.value?.readString()?.isNotBlank() == true
+        }
     }
 
     private fun normalize(raw: String): String =

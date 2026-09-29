@@ -161,6 +161,13 @@ internal class SettingsPreferencesController(
 
     // ========== 密码库与加密配置 ==========
 
+    /** ISSUE-P3-385/381/382 / P2-379：Meta / 探测 / 去重 / 前台闲置协作对象（见其 KDoc） */
+    val databaseMetaController = SettingsDatabaseMetaController(
+        settingsRepository = settingsRepository,
+        databaseSession = databaseSession,
+        scope = scope
+    )
+
     /**
      * 应用外层加密算法（ISSUE-P2-271 整改：真实生效）。
      *

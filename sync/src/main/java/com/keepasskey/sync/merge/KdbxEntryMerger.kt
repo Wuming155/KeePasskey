@@ -160,6 +160,9 @@ internal object KdbxEntryMerger {
         // 不经 readString() 将全库密码物化为不可清除的 String
         if (base.fields != current.fields) return true
         if (base.customFields != current.customFields) return true
+        // ISSUE-P2-385：条目级 customData（KPEX 扩展以外的第三方键、KeePassXC 浏览器扩展
+        // 密钥等）参与修改判定——否则远端只改 customData 会被判为「未修改」而整表被本地覆盖。
+        if (base.customData != current.customData) return true
         if (base.tags != current.tags) return true
         if (base.attachments != current.attachments) return true
         if (base.parentGroupId != current.parentGroupId) return true
@@ -204,6 +207,8 @@ internal object KdbxEntryMerger {
         // 字段级三方合并
         val mergedFields = mergeStandardFields(base, local, remote, diffFields)
         val mergedCustomFields = mergeCustomFields(base, local, remote, diffFields)
+        // ISSUE-P2-385：条目级 customData 三方合并（第三方扩展键不得静默丢失）
+        val mergedCustomData = mergeCustomData(base, local, remote)
 
         // 标签合并 (Union；ISSUE-P2-282：经同一词汇表归一化——去重 + 自然排序与读写侧同口径)
         val mergedTags = KdbxTags.normalizeTags(local.tags + remote.tags)
@@ -232,6 +237,7 @@ internal object KdbxEntryMerger {
         val mergedEntry = mergeScalarFields(base, local, remote, diffFields).copy(
             fields = mergedFields,
             customFields = mergedCustomFields,
+            customData = mergedCustomData,
             tags = mergedTags,
             attachments = mergedAttachments,
             history = mergedHistory,
@@ -337,83 +343,40 @@ internal object KdbxEntryMerger {
         return mergedFields
     }
 
-    /** 自定义字段三方合并：判定口径同标准字段，冲突记入 [diffFields]。 */
+    /**
+     * 自定义字段三方合并：判定口径同标准字段，冲突记入 [diffFields]。
+     * 策略体在 [EntryCustomDataMerge]（ISSUE-P2-385/387）。
+     */
     private fun mergeCustomFields(
         base: KdbxEntry?,
         local: KdbxEntry,
         remote: KdbxEntry,
         diffFields: MutableList<String>
-    ): List<KdbxCustomField> {
-        val baseCustomMap = base?.customFields?.associateBy { it.key } ?: emptyMap()
-        val localCustomMap = local.customFields.associateBy { it.key }
-        val remoteCustomMap = remote.customFields.associateBy { it.key }
-        val allCustomKeys = (localCustomMap.keys + remoteCustomMap.keys + baseCustomMap.keys).toSet()
-        val mergedCustomFields = mutableListOf<KdbxCustomField>()
+    ): List<KdbxCustomField> = EntryCustomDataMerge.mergeCustomFields(base, local, remote, diffFields)
 
-        for (key in allCustomKeys) {
-            val bc = baseCustomMap[key]
-            val lc = localCustomMap[key]
-            val rc = remoteCustomMap[key]
-
-            // KdbxCustomField 为 data class，其 value 的 ProtectedString.equals
-            // 为字节数组内容比较，无需物化明文
-            val lChanged = lc?.value != bc?.value
-            val rChanged = rc?.value != bc?.value
-
-            when {
-                lChanged && !rChanged -> if (lc != null) mergedCustomFields.add(lc)
-                !lChanged && rChanged -> if (rc != null) mergedCustomFields.add(rc)
-                !lChanged && !rChanged -> if (lc != null) mergedCustomFields.add(lc)
-                else -> {
-                    if (lc?.value == rc?.value) {
-                        if (lc != null) mergedCustomFields.add(lc)
-                    } else {
-                        // ISSUE-P2-281：机读差异键＝前缀 + 字段名（与 resolveConflictByFields 同表）
-                        diffFields.add(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + key)
-                        val picked = if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) rc else lc
-                        if (picked != null) mergedCustomFields.add(picked)
-                    }
-                }
-            }
-        }
-        return mergedCustomFields
-    }
+    /**
+     * 条目级 customData 三方合并（ISSUE-P2-385）：策略体在 [EntryCustomDataMerge]。
+     */
+    internal fun mergeCustomData(
+        base: KdbxEntry?,
+        local: KdbxEntry,
+        remote: KdbxEntry
+    ): Map<String, String> = EntryCustomDataMerge.mergeCustomData(base, local, remote)
 
     /** 附件合并：单侧变更取该侧；双侧变更按名称并集（远端先入、本地覆盖同名项）。 */
     private fun mergeAttachments(
         base: KdbxEntry?,
         local: KdbxEntry,
         remote: KdbxEntry
-    ): List<KdbxAttachment> {
-        val bAttachments: List<KdbxAttachment> = base?.attachments ?: emptyList()
-        return when {
-            local.attachments != bAttachments && remote.attachments == bAttachments -> local.attachments
-            local.attachments == bAttachments && remote.attachments != bAttachments -> remote.attachments
-            else -> {
-                val attMap = mutableMapOf<String, KdbxAttachment>()
-                bAttachments.forEach { attMap[it.name] = it }
-                remote.attachments.forEach { attMap[it.name] = it }
-                local.attachments.forEach { attMap[it.name] = it }
-                attMap.values.toList()
-            }
-        }
-    }
+    ): List<KdbxAttachment> = EntryMergeHelpers.mergeAttachments(base, local, remote)
 
     /** 父分组归属：单侧移动取该侧；双侧异动按最后修改时间取胜方。 */
     private fun resolveMergedParentGroup(
         base: KdbxEntry?,
         local: KdbxEntry,
         remote: KdbxEntry
-    ): KdbxUuid? = when {
-        local.parentGroupId != base?.parentGroupId && remote.parentGroupId == base?.parentGroupId -> local.parentGroupId
-        local.parentGroupId == base?.parentGroupId && remote.parentGroupId != base?.parentGroupId -> remote.parentGroupId
-        else -> if (remote.times.lastModificationTime.isAfter(local.times.lastModificationTime)) remote.parentGroupId else local.parentGroupId
-    }
+    ): KdbxUuid? = EntryMergeHelpers.resolveMergedParentGroup(base, local, remote)
 
-    private fun isFieldDifferent(a: ProtectedString?, b: ProtectedString?): Boolean {
-        if (a == null && b == null) return false
-        if (a == null || b == null) return true
-        // ProtectedString.equals 为字节数组内容比较，不物化明文 String
-        return a != b
-    }
+    private fun isFieldDifferent(a: ProtectedString?, b: ProtectedString?): Boolean =
+        EntryMergeHelpers.isFieldDifferent(a, b)
 }

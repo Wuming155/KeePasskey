@@ -150,6 +150,11 @@ data class SettingsUiState(
      */
     val biometricToggleNotice: UiMessage? = null,
     val autoLockBackground: Boolean = true,
+    // ISSUE-P2-379：前台闲置自动锁定
+    val autoLockForegroundEnabled: Boolean = true,
+    val autoLockForegroundTimeoutSeconds: Int = 300,
+    // ISSUE-P3-381：回前台远端探测
+    val syncProbeOnResumeEnabled: Boolean = true,
     val flagSecureEnabled: Boolean = true,
     val autoClearClipboard: Boolean = true,
     val autoLockTimeoutSeconds: Int = 0, // 0 = 立即, 30, 60, 300, 900, -1 = 永不

@@ -163,6 +163,17 @@ object AutofillCandidateRanker {
         }
     }
 
+    /**
+     * ISSUE-P3-393：条目是否已过期（Times.Expires=true 且 ExpiryTime 早于 now）。
+     * 与 `HealthCheckEngine` / 详情页 ExpiryStatusCard 同口径。
+     */
+    fun isEntryExpired(entry: KdbxEntry, now: java.time.Instant = java.time.Instant.now()): Boolean {
+        val times = entry.times
+        if (!times.expires) return false
+        // KdbxTimes.expiryTime 为非空 Instant；过期与否由 expires 开关控制
+        return times.expiryTime.isBefore(now)
+    }
+
     private fun scoreEntry(
         entry: KdbxEntry,
         callingPackage: String,
@@ -171,6 +182,10 @@ object AutofillCandidateRanker {
         callingAppLabel: String?,
         wifiContext: Boolean
     ): Ranked? {
+        // ISSUE-P3-393 AC①：过期条目直接排除出填充候选（对齐 KeePassXC 浏览器扩展
+        // 「prior to custom data」检查；两通道一致见调用方过滤）。
+        if (isEntryExpired(entry)) return null
+
         val reasons = linkedSetOf<MatchReason>()
         var score = 0
 

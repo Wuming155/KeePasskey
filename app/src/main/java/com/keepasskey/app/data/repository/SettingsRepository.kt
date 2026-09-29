@@ -29,6 +29,11 @@ data class UserSettings(
     val autoLockBackground: Boolean = true,
     val autoLockTimeoutSeconds: Int = 60,
     val lockWhenScreenOff: Boolean = true,
+    // ISSUE-P2-379：前台闲置自动锁定（与后台/熄屏并列；默认开 + 300 秒）
+    val autoLockForegroundEnabled: Boolean = true,
+    val autoLockForegroundTimeoutSeconds: Int = 300,
+    // ISSUE-P3-381：回前台/网络恢复时轻量远端探测（默认开）
+    val syncProbeOnResumeEnabled: Boolean = true,
     val flagSecureEnabled: Boolean = true,
     val autoClearClipboard: Boolean = true,
     // 列表视图显示偏好（由密码库列表消费，设置页外观项可调）
@@ -78,6 +83,12 @@ interface SettingsRepository {
     suspend fun setAutoLockBackground(enabled: Boolean)
     suspend fun setAutoLockTimeoutSeconds(seconds: Int)
     suspend fun setLockWhenScreenOff(enabled: Boolean)
+    /** ISSUE-P2-379：前台闲置自动锁定开关 */
+    suspend fun setAutoLockForegroundEnabled(enabled: Boolean)
+    /** ISSUE-P2-379：前台闲置超时（秒；-1 永不 / 0 立即 / >0 秒） */
+    suspend fun setAutoLockForegroundTimeoutSeconds(seconds: Int)
+    /** ISSUE-P3-381：回前台远端探测开关 */
+    suspend fun setSyncProbeOnResumeEnabled(enabled: Boolean)
     suspend fun setFlagSecureEnabled(enabled: Boolean)
     suspend fun setAutoClearClipboard(enabled: Boolean)
     suspend fun setShowUsernameInList(enabled: Boolean)

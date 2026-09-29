@@ -300,7 +300,11 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         packageDimensionAuthorized: Boolean
     ): List<com.keepasskey.app.ui.model.UiVaultEntry> {
         val cleanOrigin = DomainMatcher.extractDomain(origin)
+        val now = java.time.Instant.now()
         return entries.filter { entry ->
+            // ISSUE-P3-393：填充链两通道均排除已过期条目（与 Autofill 候选排序器同口径）
+            val exp = entry.expiresAt
+            if (exp != null && exp.isBefore(now)) return@filter false
             val rpMatch = entry.isPasskey && entry.passkeyRpId != null &&
                     DomainMatcher.isDomainMatch(entry.passkeyRpId, cleanOrigin)
             // ⚠️ URL 兜底**只服务口令 / 密码条目**（`ISSUE-P3-339` 实测越界后收紧）：

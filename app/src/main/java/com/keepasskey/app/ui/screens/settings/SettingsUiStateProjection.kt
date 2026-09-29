@@ -173,6 +173,11 @@ internal fun buildSettingsUiState(
     autoLockBackground = userSettings.autoLockBackground,
     flagSecureEnabled = userSettings.flagSecureEnabled,
     autoClearClipboard = userSettings.autoClearClipboard,
+    // ISSUE-P2-379：前台闲置自动锁定（与后台超时同源）
+    autoLockForegroundEnabled = userSettings.autoLockForegroundEnabled,
+    autoLockForegroundTimeoutSeconds = userSettings.autoLockForegroundTimeoutSeconds,
+    // ISSUE-P3-381：回前台远端探测开关
+    syncProbeOnResumeEnabled = userSettings.syncProbeOnResumeEnabled,
     // ISSUE-P3-362：回显与行为同源——原读 secState 内存流（初值 0 且无播种，冷启动显示「立即」
     // 而行为侧生效仓库持久化值），现直读 userSettings 单一真相源
     autoLockTimeoutSeconds = userSettings.autoLockTimeoutSeconds,

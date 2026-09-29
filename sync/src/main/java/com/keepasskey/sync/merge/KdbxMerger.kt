@@ -152,6 +152,7 @@ object KdbxMerger {
 
         val mergedRootGroup = KdbxGroupMerger.assembleGroupTree(
             rootId = rootId,
+            baseRoot = base.rootGroup,
             localRoot = local.rootGroup,
             remoteRoot = remote.rootGroup,
             sanitizedGroups = sanitizedGroups,

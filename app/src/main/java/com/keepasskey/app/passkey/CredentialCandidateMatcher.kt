@@ -2,6 +2,7 @@ package com.keepasskey.app.passkey
 
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
+import java.time.Instant
 
 /**
  * CM 通道**候选层**的条目入选判定（自 [CredentialResponseAssembler] 抽取，纯函数）。
@@ -20,6 +21,7 @@ import com.keepasskey.core.model.PasskeyData
  *   **且**（请求给出 `allowCredentials` 时）凭据 id 必须在白名单内 —— WebAuthn 规范要求
  *   认证器只呈现请求列出的凭据，否则用户可能选中 RP 明确不接受的凭据导致登录失败；
  * - 密码候选：域匹配 **或** `android://` 包名匹配，后者同样受门控约束；条目必须**确有密码**。
+ * - ISSUE-P3-393：两通道均排除**已过期**条目（与 Autofill 候选面同口径）。
  */
 internal object CredentialCandidateMatcher {
 
@@ -37,6 +39,8 @@ internal object CredentialCandidateMatcher {
         packageDimensionAllowed: Boolean,
         allowedCredentialIds: Set<String> = emptySet()
     ): Boolean {
+        // ISSUE-P3-393：过期条目不出候选（两通道一致；对齐 KeePassXC 浏览器扩展）
+        if (isExpired(entry)) return false
         val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return false
         if (allowedCredentialIds.isNotEmpty() && passkey.credentialId !in allowedCredentialIds) return false
         return if (browserFlow) {
@@ -54,11 +58,22 @@ internal object CredentialCandidateMatcher {
         callingPackage: String,
         packageDimensionAllowed: Boolean
     ): Boolean {
+        if (isExpired(entry)) return false
         if (entry.password == null) return false
         val domainMatch = targetDomain.isNotBlank() && entry.url.isNotBlank() &&
             DomainMatcher.isDomainMatch(entry.url, targetDomain)
         val packageMatch = packageDimensionAllowed && callingPackage.isNotBlank() && entry.url.isNotBlank() &&
             DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
         return domainMatch || packageMatch
+    }
+
+    /**
+     * ISSUE-P3-393：条目过期判定（与 AutofillCandidateRanker.isEntryExpired 同口径）。
+     * 与 HealthCheckEngine 一致：仅 `Times.Expires=true` 且 `ExpiryTime` 早于 now 时判定过期。
+     */
+    fun isExpired(entry: KdbxEntry, now: Instant = Instant.now()): Boolean {
+        val times = entry.times
+        if (!times.expires) return false
+        return times.expiryTime.isBefore(now)
     }
 }

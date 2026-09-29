@@ -112,83 +112,43 @@ object AutofillFieldScanner {
     private const val TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS = 0x000000d0
     private const val TYPE_NUMBER_VARIATION_PASSWORD = 0x00000010
 
-    /** 账号类 label 词（CJK / 西里尔按子串匹配） */
-    private val USERNAME_SUBSTRING_TERMS = listOf(
-        "用户名", "用戶名", "账号", "帐号", "帳號", "登录名", "登入名", "手機號", "手机号", "手机号码",
-        "電話號碼", "电话号码", "登录", "登入",
-        "логин", "логін", "пользовател", "користувач", "identifiant", "utilisateur", "usuario", "correo"
-    )
-
-    /** 账号类 label 词（拉丁文按 token 精确匹配，避免 "user" 命中 "userFeedback" 之类） */
-    private val USERNAME_TOKEN_TERMS = setOf(
-        "user", "username", "userid", "login", "loginid", "nickname", "account", "email", "mail",
-        "phone", "mobile", "telephone", "tel"
-    )
-
-    /** 密码类 label 词（子串匹配） */
-    private val PASSWORD_SUBSTRING_TERMS = listOf(
-        "密码", "密碼", "口令", "пароль", "паролі", "motdepasse", "mot de passe", "contraseña", "contrasena"
-    )
-
-    /** 密码类 label 词（token 精确匹配） */
-    private val PASSWORD_TOKEN_TERMS = setOf("password", "passwd", "pwd", "pass", "passphrase", "clave")
-
-    /**
-     * OTP 验证码 hint 白名单（ISSUE-P3-298 ⑤，归一化比较：去 `-`/`_` 转小写）。
-     * 覆盖 W3C autocomplete `one-time-code` 与平台 hint `smsOtpCode` / `2faAppOtpCode`。
-     */
-    private val OTP_HINTS = setOf("onetimecode", "smsotpcode", "2faappotpcode")
-
-    /** 搜索框排除词（子串，含拼接形态如 searchInput） */
-    private val SEARCH_SUBSTRING_TERMS = listOf(
-        "搜索", "搜尋", "查询", "查詢", "筛选", "篩選", "search", "query", "keyword"
-    )
-
-    /** 搜索框排除词（token） */
-    private val SEARCH_TOKEN_TERMS = setOf("search", "query", "find", "filter", "keyword")
-
-    /** 非凭据字段排除词（token）：验证码 / 评论 / 反馈等，避免被误判为账号框 */
-    private val NON_CREDENTIAL_TOKEN_TERMS = setOf(
-        "captcha", "verification", "verify", "otp", "comment", "feedback", "message", "reply", "promo", "coupon"
-    )
-
-    /** 非凭据字段强排除子串（覆盖拼接形态如 userFeedback） */
-    private val NON_CREDENTIAL_SUBSTRING_TERMS = listOf(
-        "feedback", "comment", "captcha", "verification", "coupon", "promo", "reply"
-    )
-
-    /**
-     * label 文本的 token 切分正则（ISSUE-P3-172）。
-     *
-     * 原实现把 `Regex(...)` 写在 [tokensOf] 函数体内 ⇒ 每次调用都重新编译 Pattern
-     * （`scan` 对每个节点最多触发 4 次），30 节点登录页约 100 次编译/请求，与系统
-     * assist 超时预算直接竞争。正则本身无状态，提为对象级常量即可。
-     */
-    private val TOKEN_SPLIT_REGEX = Regex("[^\\p{L}\\p{N}]+")
-
     /**
      * 扫描节点列表并提取用户名框、密码框与来源信息。
+     *
+     * ISSUE-P2-383：同一填充结构中出现**多个不同** webDomain（顶层页域 A + iframe 域 B）
+     * 时，整结构 **fail-closed 拒绝**（`webDomain = null`，且不产出账号/密码/OTP 候选）——
+     * 受信浏览器场景下若仍按「首个非空 domain 胜出」放行，凭据可被填进异域 iframe 字段，
+     * 归属展示与实际落点背离。纯同域结构不受影响。
      *
      * @param respectImportantForAutofill ISSUE-P3-43：true 时跳过页面显式声明
      *   `importantForAutofill=no` 的字段（默认行为，对应 `overrideNoAutofill = false`）；
      *   调用方传 false 表示用户选择「覆盖应用的禁止填充标记」。
      */
     fun scan(nodes: List<ScanNode>, respectImportantForAutofill: Boolean = true): ScanResult {
-        var resolvedWebDomain: String? = null
-        var resolvedPackageName: String? = null
+        // ISSUE-P2-383：混域整结构拒绝（策略在 AutofillDomainConsistencyPolicy）
+        val mixedDomains = AutofillDomainConsistencyPolicy.isMixedDomain(nodes)
+        val resolvedWebDomain = AutofillDomainConsistencyPolicy.resolveSingleDomain(nodes)
+        val resolvedPackageName = AutofillDomainConsistencyPolicy.resolvePackageName(nodes)
+
+        // 混域：整结构拒绝，不产出任何填充候选（AC①「整结构拒绝」口径）
+        if (mixedDomains) {
+            return ScanResult(
+                usernameId = null,
+                passwordId = null,
+                webDomain = null,
+                packageName = resolvedPackageName,
+                usernameConfidence = FieldConfidence.NONE,
+                passwordConfidence = FieldConfidence.NONE,
+                isPasswordOnlyLogin = false,
+                otpId = null
+            )
+        }
 
         val usernameCandidates = mutableListOf<Candidate>()
         val passwordCandidates = mutableListOf<Candidate>()
         val otpCandidates = mutableListOf<Candidate>()
 
         for (node in nodes) {
-            if (resolvedWebDomain == null && !node.webDomain.isNullOrBlank()) {
-                resolvedWebDomain = node.webDomain.trim()
-            }
-            if (resolvedPackageName == null && node.packageName.isNotBlank()) {
-                resolvedPackageName = node.packageName.trim()
-            }
-
             // ISSUE-P3-298 ⑤：OTP 通道优先于搜索 / 非凭据排除——`otp` 一词同时也在
             // 非凭据排除词表内（那是针对「别把验证码框当账号框」的旧语义），显式声明的
             // OTP 框如今要被捕获为直填目标，故必须先判 OTP 再走排除。OTP 框不可见时
@@ -249,7 +209,7 @@ object AutofillFieldScanner {
     /** 平台 / W3C 的 OTP hint（归一化精确匹配；不匹配用户名/密码 hint 的包含形态） */
     fun isOtpHint(hint: String): Boolean {
         val normalized = hint.lowercase().replace("-", "").replace("_", "").trim()
-        return normalized in OTP_HINTS
+        return normalized in AutofillFieldLexicon.OTP_HINTS
     }
 
     /** htmlName / idEntry 含 `otp`（覆盖 `totp` / `hotp` / `otpcode` / `one_time_code` 等拼接形态） */
@@ -336,16 +296,16 @@ object AutofillFieldScanner {
     fun isUsernameLabel(label: String?): Boolean {
         val v = label?.lowercase()?.trim().orEmpty()
         if (v.isEmpty()) return false
-        if (USERNAME_SUBSTRING_TERMS.any { v.contains(it) }) return true
-        return tokensOf(v).any { it in USERNAME_TOKEN_TERMS }
+        if (AutofillFieldLexicon.USERNAME_SUBSTRING_TERMS.any { v.contains(it) }) return true
+        return AutofillFieldLexicon.tokensOf(v).any { it in AutofillFieldLexicon.USERNAME_TOKEN_TERMS }
     }
 
     /** 邻近 label 是否为密码类（多语言；ISSUE-P3-39 新增） */
     fun isPasswordLabel(label: String?): Boolean {
         val v = label?.lowercase()?.trim().orEmpty()
         if (v.isEmpty()) return false
-        if (PASSWORD_SUBSTRING_TERMS.any { v.contains(it) }) return true
-        return tokensOf(v).any { it in PASSWORD_TOKEN_TERMS }
+        if (AutofillFieldLexicon.PASSWORD_SUBSTRING_TERMS.any { v.contains(it) }) return true
+        return AutofillFieldLexicon.tokensOf(v).any { it in AutofillFieldLexicon.PASSWORD_TOKEN_TERMS }
     }
 
     /** 搜索框判定（ISSUE-P3-39 新增）：命中即排除，绝不作为账号/密码候选 */
@@ -355,8 +315,8 @@ object AutofillFieldScanner {
             .lowercase()
         if (haystack.isBlank()) return false
         if (node.autofillHints.any { it.lowercase().trim().contains("search") }) return true
-        if (SEARCH_SUBSTRING_TERMS.any { haystack.contains(it) }) return true
-        return tokensOf(haystack).any { it in SEARCH_TOKEN_TERMS }
+        if (AutofillFieldLexicon.SEARCH_SUBSTRING_TERMS.any { haystack.contains(it) }) return true
+        return AutofillFieldLexicon.tokensOf(haystack).any { it in AutofillFieldLexicon.SEARCH_TOKEN_TERMS }
     }
 
     /** 非凭据字段判定（ISSUE-P3-39 新增）：验证码 / 评论 / 反馈等（ISSUE-P3-372 起 internal：二次解析沿用同一排除口径） */
@@ -365,12 +325,9 @@ object AutofillFieldScanner {
             .joinToString(" ")
             .lowercase()
         if (haystack.isBlank()) return false
-        if (NON_CREDENTIAL_SUBSTRING_TERMS.any { haystack.contains(it) }) return true
-        return tokensOf(haystack).any { it in NON_CREDENTIAL_TOKEN_TERMS }
+        if (AutofillFieldLexicon.NON_CREDENTIAL_SUBSTRING_TERMS.any { haystack.contains(it) }) return true
+        return AutofillFieldLexicon.tokensOf(haystack).any { it in AutofillFieldLexicon.NON_CREDENTIAL_TOKEN_TERMS }
     }
-
-    private fun tokensOf(value: String): List<String> =
-        TOKEN_SPLIT_REGEX.split(value).filter { it.isNotBlank() }
 
     private data class Candidate(val id: String, val score: Int)
 }

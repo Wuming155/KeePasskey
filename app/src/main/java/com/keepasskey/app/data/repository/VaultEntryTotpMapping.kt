@@ -81,6 +81,14 @@ internal object VaultEntryTotpMapping {
             return null
         }
         return try {
+            // ISSUE-P3-383：Steam 算法走独立字母表路径（恒 5 字符），不落入 RFC 纯数字码分支
+            if (config.algorithm.equals("STEAM", ignoreCase = true)) {
+                return OtpEngine.calculateSteamCode(
+                    secretKey = secretBytes,
+                    timestampMillis = timestampMillis,
+                    periodSeconds = config.period
+                )
+            }
             val algo = when (config.algorithm.uppercase()) {
                 "SHA256" -> OtpEngine.HashAlgorithm.SHA256
                 "SHA512" -> OtpEngine.HashAlgorithm.SHA512

@@ -180,6 +180,7 @@ internal object KdbxGroupMerger {
      */
     fun assembleGroupTree(
         rootId: KdbxUuid,
+        baseRoot: KdbxGroup,
         localRoot: KdbxGroup,
         remoteRoot: KdbxGroup,
         sanitizedGroups: Map<KdbxUuid, KdbxGroup>,
@@ -188,12 +189,18 @@ internal object KdbxGroupMerger {
     ): KdbxGroup {
         fun assembleGroup(gid: KdbxUuid): KdbxGroup {
             val rawGroup = if (gid == rootId) {
-                val laterTimes = if (remoteRoot.times.lastModificationTime.isAfter(localRoot.times.lastModificationTime)) {
-                    remoteRoot.times
-                } else {
-                    localRoot.times
-                }
-                localRoot.copy(times = laterTimes)
+                val lTime = localRoot.times.lastModificationTime
+                val rTime = remoteRoot.times.lastModificationTime
+                val laterTimes = if (rTime.isAfter(lTime)) remoteRoot.times else localRoot.times
+                // ISSUE-P2-385：根组 customData 与子组同口径三方合并（Secret Service 暴露组等）
+                val rootCustomData = mergeCustomDataMap(
+                    base = baseRoot.customData,
+                    local = localRoot.customData,
+                    remote = remoteRoot.customData,
+                    localTime = lTime,
+                    remoteTime = rTime
+                )
+                localRoot.copy(times = laterTimes, customData = rootCustomData)
             } else {
                 sanitizedGroups[gid]!!
             }
@@ -228,12 +235,15 @@ internal object KdbxGroupMerger {
         GroupFieldSpec({ it.iconId }, { g, v -> g.copy(iconId = v as Int) }),
         GroupFieldSpec({ it.customIconId }, { g, v -> g.copy(customIconId = v as KdbxUuid?) }),
         GroupFieldSpec({ it.parentGroupId }, { g, v -> g.copy(parentGroupId = v as KdbxUuid?) })
+        // ISSUE-P2-385：组级 customData（Secret Service 暴露组标记等第三方键）由
+        // [mergeCustomDataMap] 单独并入，不进本词汇表——其为 Map 语义、需三方键并集。
     )
 
     private fun isGroupModified(base: KdbxGroup?, current: KdbxGroup): Boolean {
         if (base == null) return true
         // ISSUE-P2-279：判定与合并共用同一词汇表（禁两份清单）
         return MERGED_GROUP_FIELDS.any { it.read(base) != it.read(current) } ||
+                base.customData != current.customData ||
                 base.times.lastModificationTime != current.times.lastModificationTime
     }
 
@@ -241,6 +251,7 @@ internal object KdbxGroupMerger {
      * 双方均修改时的分组字段级合并：逐字段三方裁决——单侧变更取该侧，双侧同值取本地，
      * 双侧异值按最后修改时间（LWW）取胜方；时间戳取较晚者。
      * 词汇表见 [MERGED_GROUP_FIELDS]（ISSUE-P2-279 起含 `customIconId`）。
+     * ISSUE-P2-385：组级 customData 由 [mergeCustomDataMap] 并入。
      */
     private fun mergeGroupsBothModified(
         base: KdbxGroup?,
@@ -264,7 +275,41 @@ internal object KdbxGroupMerger {
             merged = spec.write(merged, winner)
         }
 
+        merged = merged.copy(customData = EntryCustomDataMerge.mergeCustomDataMap(base?.customData, local.customData, remote.customData, lTime, rTime))
         val maxMod = if (rTime.isAfter(lTime)) rTime else lTime
         return merged.copy(times = local.times.copy(lastModificationTime = maxMod))
+    }
+
+    /**
+     * 组级 customData 三方合并（ISSUE-P2-385）：键并集 + 三方值裁决。
+     * 与条目级同口径：单侧取该侧，双侧同值取本地，双侧异值按 LMT 取胜；
+     * 第三方键（含本仓无写入者但同步可带入的 Secret Service 暴露组标记）默认保留。
+     */
+    internal fun mergeCustomDataMap(
+        base: Map<String, String>?,
+        local: Map<String, String>,
+        remote: Map<String, String>,
+        localTime: java.time.Instant,
+        remoteTime: java.time.Instant
+    ): Map<String, String> {
+        val baseMap = base.orEmpty()
+        if (local == remote) return local
+        if (local == baseMap && remote != baseMap) return remote
+        if (remote == baseMap && local != baseMap) return local
+        val keys = baseMap.keys + local.keys + remote.keys
+        val merged = LinkedHashMap<String, String>()
+        for (key in keys) {
+            val bv = baseMap[key]
+            val lv = local[key]
+            val rv = remote[key]
+            val winner = when {
+                lv != bv && rv == bv -> lv
+                lv == bv && rv != bv -> rv
+                lv == rv -> lv
+                else -> if (remoteTime.isAfter(localTime)) rv else lv
+            }
+            if (winner != null) merged[key] = winner
+        }
+        return merged
     }
 }

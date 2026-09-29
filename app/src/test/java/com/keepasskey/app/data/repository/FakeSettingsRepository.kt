@@ -52,6 +52,18 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(lockWhenScreenOff = enabled) }
     }
 
+    override suspend fun setAutoLockForegroundEnabled(enabled: Boolean) {
+        settingsFlow.update { it.copy(autoLockForegroundEnabled = enabled) }
+    }
+
+    override suspend fun setAutoLockForegroundTimeoutSeconds(seconds: Int) {
+        settingsFlow.update { it.copy(autoLockForegroundTimeoutSeconds = seconds) }
+    }
+
+    override suspend fun setSyncProbeOnResumeEnabled(enabled: Boolean) {
+        settingsFlow.update { it.copy(syncProbeOnResumeEnabled = enabled) }
+    }
+
     override suspend fun setFlagSecureEnabled(enabled: Boolean) {
         settingsFlow.update { it.copy(flagSecureEnabled = enabled) }
     }

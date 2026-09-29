@@ -27,14 +27,21 @@ class AlgoHotPathGuardsTest {
     @Test
     fun `自动填充字段扫描的 token 切分正则必须为对象级常量`() {
         val source = stripped(SCANNER)
+        // ISSUE-P3-305 / 行数门禁：正则已下沉至 AutofillFieldLexicon（对象级常量），
+        // scanner 本体禁止再出现函数内现编译写法。
+        val lexicon = stripped(LEXICON)
         assertTrue(
             "切分正则必须提为对象级常量（原实现写在 tokensOf 函数体内 ⇒ 每次调用重新编译 Pattern，" +
                 "而 scan 对每个节点最多触发 4 次）",
-            source.contains("private val TOKEN_SPLIT_REGEX = Regex(")
+            lexicon.contains("val TOKEN_SPLIT_REGEX = Regex(")
         )
         assertFalse(
             "不得残留函数内现编译正则的写法",
-            source.contains("split(Regex(")
+            source.contains("split(Regex(") || lexicon.contains("split(Regex(")
+        )
+        assertFalse(
+            "scanner 本体不得再持有私有正则常量副本",
+            source.contains("TOKEN_SPLIT_REGEX")
         )
     }
 
@@ -520,6 +527,7 @@ class AlgoHotPathGuardsTest {
 
     private companion object {
         const val SCANNER = "app/src/main/java/com/keepasskey/app/autofill/AutofillFieldScanner.kt"
+        const val LEXICON = "app/src/main/java/com/keepasskey/app/autofill/AutofillFieldLexicon.kt"
         const val PROJECTION =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListProjection.kt"
         const val GROUP_PATH =
