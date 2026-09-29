@@ -149,6 +149,11 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
+        <!-- ISSUE-P3-386：常驻通知「立即锁定」广播动作（仅本应用内 PendingIntent 可投递） -->
+        <receiver
+            android:name=".notification.VaultLockActionReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".passkey.PasskeyAssertionActivity"
             android:exported="false"

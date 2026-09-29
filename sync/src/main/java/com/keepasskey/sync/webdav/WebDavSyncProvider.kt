@@ -293,6 +293,12 @@ class WebDavSyncProvider(
      * 3. MOVE 失败重试 1 次；
      * 4. 仍失败则 DELETE 清除临时文件并抛错回滚。
      *
+     * **ISSUE-P2-381**：部分服务器对 MOVE 覆盖已有目标报 409/423（仅靠 `Overwrite:T` 不可靠；
+     * keepass2android `WebDavStorage.java:235` 注释 + 提交 `9c8ee243` 实证）。
+     * 收到 409/423 时先 DELETE 目标（404 容忍，与 `delete()` 同语义）再单次重试 MOVE
+     * （无 If 预条件、`Overwrite:T`——目标已被删除，预条件恒失败无意义），
+     * 409/423 与 412 分开报错文案。
+     *
      * Overwrite 语义裁定（expectedEtag 为空时的两种形态必须区分）：
      * - **真首传**（远端目标不存在）→ `Overwrite: F` 保持原子创建保护，
      *   目标若被并发创建由服务端 412 转 ConflictError；
@@ -330,14 +336,15 @@ class WebDavSyncProvider(
                 if (exists) "T" else "F"
             }
 
-            fun createMoveRequest(): Request {
+            fun createMoveRequest(withPrecondition: Boolean = true): Request {
                 val moveBuilder = Request.Builder()
                     .url(sourceUrl)
                     .method("MOVE", null)
                     .header("Authorization", authHeader)
                     .header("Destination", destUrl)
 
-                if (!expectedEtag.isNullOrBlank()) {
+                // 409/423 兜底重试：目标已被 DELETE，If 预条件恒失败，改走无预条件 + Overwrite:T
+                if (withPrecondition && !expectedEtag.isNullOrBlank()) {
                     // RFC 4918 Section 10.4: tagged list If 头把 ETag 预条件绑定到 MOVE 目标资源。
                     // ISSUE-P1-275 AC②：经 formatHeaderEtag 保留弱校验标记（`([W/"abc"])`）——
                     // RFC 4918 §10.4.4 允许服务器对 If 头用弱或强比较，回传服务器签发的原形态
@@ -353,6 +360,8 @@ class WebDavSyncProvider(
             var moveResponse: Response? = null
             var moveSuccess = false
             var conflictError: SyncException.ConflictError? = null
+            var overwriteConflictCode: Int? = null
+            var lastMoveCode = 0
 
             for (attempt in 0..1) {
                 try {
@@ -361,12 +370,13 @@ class WebDavSyncProvider(
                     val resp = executeTransientRetryable(
                         retryable = !expectedEtag.isNullOrBlank()
                     ) { createMoveRequest() }
-                    if (resp.code == 412) {
+                    lastMoveCode = resp.code
+                    if (resp.code == WebDavMoveOverwritePolicy.HTTP_PRECONDITION_FAILED) {
                         val currentMeta = getMetadata(remotePath).getOrNull()
                         conflictError = SyncException.ConflictError(
                             remoteEtag = currentMeta?.etag.orEmpty(),
                             localExpectedEtag = expectedEtag.orEmpty(),
-                            message = "WebDAV 原子写入 MOVE 失败：远端已被其他人修改 (HTTP 412)"
+                            message = WebDavMoveOverwritePolicy.preconditionFailureMessage()
                         )
                         resp.close()
                         break
@@ -375,9 +385,21 @@ class WebDavSyncProvider(
                         moveResponse = resp
                         moveSuccess = true
                         break
-                    } else {
-                        resp.close()
                     }
+                    // ISSUE-P2-381：409/423 = 服务器对 MOVE 覆盖已有目标的拒绝形态
+                    // （仅靠 Overwrite:T 不可靠）。先 DELETE 目标再单次无预条件重试。
+                    if (WebDavMoveOverwritePolicy.isOverwriteConflict(resp.code)) {
+                        val conflictCode = resp.code
+                        overwriteConflictCode = conflictCode
+                        resp.close()
+                        if (attempt == 0) {
+                            WebDavMoveOverwritePolicy.logOverwriteConflict(conflictCode)
+                            delete(remotePath)
+                            continue
+                        }
+                        break
+                    }
+                    resp.close()
                 } catch (e: Exception) {
                     if (attempt == 1) throw e
                 }
@@ -389,7 +411,8 @@ class WebDavSyncProvider(
                 if (conflictError != null) {
                     throw conflictError
                 }
-                throw SyncException.ProtocolError(500, "WebDAV 原子写入 MOVE 失败，已清理临时文件")
+                // ISSUE-P2-381 AC②：409/423 与 412 分开报错文案
+                throw WebDavMoveOverwritePolicy.protocolErrorFor(overwriteConflictCode, lastMoveCode)
             }
 
             val finalEtag = moveResponse?.header("ETag")?.cleanEtag()

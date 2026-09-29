@@ -208,18 +208,13 @@ internal class VaultEntryWriteCoordinator(
 
     /**
      * 断点1-2 整改：附件全链路——UI 侧新附件（data 非空）直接随条目提交，
-     * 已落库附件（data 为空）按名称匹配既有引用保留 refIndex；
-     * UI 中被移除的附件不再出现在列表里，即自然从条目上删除（二进制池在保存时去重重建）
+     * 已落库附件（data 为空）按下标 / refIndex 身份匹配既有引用保留；
+     * UI 中被移除的附件不再出现在列表里，即自然从条目上删除（二进制池在保存时去重重建）。
+     *
+     * 匹配语义收敛在 [AttachmentMergePolicy.merge]（ISSUE-P2-386：同名附件不得折叠）。
      */
     private fun mergeAttachments(existing: KdbxEntry, entry: UiVaultEntry): List<KdbxAttachment> =
-        entry.attachments.map { ui ->
-            if (ui.data != null) {
-                KdbxAttachment(name = ui.fileName, data = ui.data, isProtected = false)
-            } else {
-                existing.attachments.firstOrNull { it.name == ui.fileName }
-                    ?: KdbxAttachment(name = ui.fileName, data = byteArrayOf())
-            }
-        }
+        AttachmentMergePolicy.merge(existing, entry)
 
     /**
      * 收藏状态写入：持久化至 KDBX 条目 customData（随库文件同步），

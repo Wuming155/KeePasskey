@@ -21,7 +21,10 @@ internal data class TargetFields(
     val otpId: AutofillId?,
     // ISSUE-P3-375 AC①：结构化数据目标（角色 → 框 id；不经字段级屏蔽——见下方口径说明）
     val structuredTargetIds: Map<StructuredFieldRole, AutofillId>,
-    val scanResult: ScanResult
+    val scanResult: ScanResult,
+    // ISSUE-P2-384 AC②：本次扫描中被字段级屏蔽的框 id（供 FillResponse.setIgnoredIds
+    // 使系统侧缓存响应失效——与 Monica 修复同型；不含任何凭据值）
+    val blockedIds: List<AutofillId> = emptyList()
 )
 
 internal fun KeePasskeyAutofillService.resolveTargetFields(
@@ -94,12 +97,19 @@ internal fun KeePasskeyAutofillService.resolveTargetFields(
     }
     // ISSUE-P3-372 AC③：屏蔽判定通过后刷新记忆（只记「本次确实可用」的登录字段结构）
     rememberLoginFields(scanResult, parsedNodes, callingPkg)
+    // ISSUE-P2-384 AC②：被屏蔽的框 id 随目标投影下传，供 FillResponse.setIgnoredIds
+    // 使系统侧缓存响应失效（Monica 同型）；仅记录屏蔽事实，不含凭据值
+    val blockedIds = buildList {
+        if (scannedUsernameId != null && !fieldDecision.allowUsername) add(scannedUsernameId)
+        if (scannedPasswordId != null && !fieldDecision.allowPassword) add(scannedPasswordId)
+    }
     return TargetFields(
         usernameId = scannedUsernameId.takeIf { fieldDecision.allowUsername },
         passwordId = scannedPasswordId.takeIf { fieldDecision.allowPassword },
         otpId = scannedOtpId,
         structuredTargetIds = structuredParsed,
-        scanResult = scanResult
+        scanResult = scanResult,
+        blockedIds = blockedIds
     )
 }
 

@@ -152,6 +152,15 @@ class KeePasskeyAutofillService : AutofillService() {
         val structuredTargetIds = targets.structuredTargetIds
 
         val responseBuilder = FillResponse.Builder()
+        // ISSUE-P2-384 AC②：被字段屏蔽的框写入 FillResponse.setIgnoredIds，使系统侧
+        // 缓存响应 / 再次确认不再把被屏蔽字段当作可填充目标（Monica `c854ef2a` 同型）。
+        // setClientState 评估结论：本仓填充服务无「按 FillResponse 会话跟踪 clientState
+        // 并主动失效」的既有管道，引入会扩大状态面且 AC② 已由 setIgnoredIds 覆盖主路径，
+        // 故本批只落地 setIgnoredIds，setClientState 不实施（见批次文档 §2.4）。
+        if (targets.blockedIds.isNotEmpty()) {
+            responseBuilder.setIgnoredIds(*targets.blockedIds.toTypedArray())
+            AppLog.i(TAG, "字段级屏蔽已写入 setIgnoredIds（数量=${targets.blockedIds.size}）")
+        }
         // 内联建议通道（IME）：请求侧携带 InlineSuggestionsRequest 且声明 supportsInlineSuggestions
         // 时才构建 InlinePresentation，否则 Dataset 自动回退为下拉/填充对话框展示
         val inlineRequest = request.inlineSuggestionsRequest

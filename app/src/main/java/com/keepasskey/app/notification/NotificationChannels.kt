@@ -141,6 +141,9 @@ internal object NotificationIntents {
     /** 同步失败通知的跳转请求码（ISSUE-P3-298 ④） */
     private const val REQUEST_CODE_SYNC_FAILURE = 3003
 
+    /** 已解锁常驻通知「立即锁定」动作请求码（ISSUE-P3-386） */
+    private const val REQUEST_CODE_UNLOCKED_LOCK = 3004
+
     fun openAppForUnlockedStatus(context: Context): PendingIntent =
         openApp(context, REQUEST_CODE_UNLOCKED_STATUS)
 
@@ -149,6 +152,22 @@ internal object NotificationIntents {
 
     fun openAppForSyncFailure(context: Context): PendingIntent =
         openApp(context, REQUEST_CODE_SYNC_FAILURE)
+
+    /**
+     * ISSUE-P3-386：常驻通知「立即锁定」动作。
+     *
+     * 走广播接收器 [VaultLockActionReceiver] → [com.keepasskey.app.security.AutoLockManager.triggerLock]
+     * （与自动锁同收口），**不**另起 Activity、不打开主界面——用户离开设备时可直接锁库。
+     */
+    fun lockVaultNow(context: Context): PendingIntent {
+        val intent = Intent(context, VaultLockActionReceiver::class.java)
+        return PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE_UNLOCKED_LOCK,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
 
     private fun openApp(context: Context, requestCode: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {

@@ -875,9 +875,8 @@
     <string name="theme_auto_search_title">Auto-focus search</string>
     <string name="theme_auto_search_sub">Raise the keyboard for search when entering the vault</string>
     <string name="theme_unlocked_notif_title">Unlocked status notification</string>
-    <!-- ISSUE-P3-18 honesty fix: the previous copy promised a "quick lock shortcut", but this
-         notification carries NO action button (status + tap-to-open only). Aligned with reality. -->
-    <string name="theme_unlocked_notif_sub">Show the current unlocked status in the notification bar; tap to return to the app</string>
+    <!-- ISSUE-P3-386: notification now carries a "Lock now" action (same pipeline as auto-lock). -->
+    <string name="theme_unlocked_notif_sub">Show the current unlocked status in the notification bar; tap to return to the app, or lock the vault immediately from the notification</string>
     <string name="theme_lang_system_desc">Follow the system language</string>
     <string name="theme_lang_zh_desc">Display the interface in Simplified Chinese</string>
 
@@ -1132,6 +1131,7 @@
     <string name="notification_unlocked_title">KeePasskey vault is unlocked</string>
     <string name="notification_unlocked_text">Auto-lock countdown in progress; tap to return to the app</string>
     <string name="notification_unlocked_text_idle">KeePasskey vault is unlocked; tap to return to the app</string>
+    <string name="notification_unlocked_lock_now">Lock now</string>
     <string name="notification_channel_totp_name">Dynamic codes</string>
     <string name="notification_channel_totp_desc">Shows the dynamic code of the autofilled entry; it disappears once the code expires</string>
     <string name="notification_totp_title">Dynamic code</string>

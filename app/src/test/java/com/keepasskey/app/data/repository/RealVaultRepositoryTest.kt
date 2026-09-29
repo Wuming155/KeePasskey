@@ -216,8 +216,9 @@ class RealVaultRepositoryTest {
             tags = listOf("finance", "critical"),
             overrideUrl = "https://custom.override.url",
             attachments = listOf(
-                // data=null 表示已落库附件，仓库按名称匹配保留既有 refIndex 引用
-                UiAttachment(id = "att1", fileName = "secret.key", fileSizeFormatted = "1 KB")
+                // data=null 表示已落库附件，仓库按 refIndex 身份匹配保留既有引用
+                // （ISSUE-P2-386：同名附件按下标匹配，不得按名称 firstOrNull 折叠）
+                UiAttachment(id = "att1", fileName = "secret.key", fileSizeFormatted = "1 KB", refIndex = 0)
             ),
             customFields = listOf(
                 UiCustomField(id = "cf1", key = "AppLanguage", value = "zh-CN", isProtected = false)
@@ -246,7 +247,7 @@ class RealVaultRepositoryTest {
         assertEquals(listOf("finance", "critical"), resultEntry.tags)
         assertEquals(1, resultEntry.attachments.size)
         assertEquals("secret.key", resultEntry.attachments[0].name)
-        // 已落库附件按名称匹配保留引用，二进制内容不丢
+        // 已落库附件按 refIndex 匹配保留引用，二进制内容不丢
         assertTrue(resultEntry.attachments[0].resolveData(listOf("BIN_DATA_0".toByteArray())).contentEquals("BIN_DATA_0".toByteArray()))
 
         // 3. Passkey 等未在 UI 展示的自定义字段完整保留，且新增的自定义字段也写入

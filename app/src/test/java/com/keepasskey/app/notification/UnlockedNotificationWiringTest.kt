@@ -81,6 +81,27 @@ class UnlockedNotificationWiringTest {
         )
     }
 
+    @Test
+    fun `常驻通知带立即锁定快捷动作且走AutoLock同收口`() {
+        assertTrue(
+            "通知必须挂「立即锁定」addAction（ISSUE-P3-386）",
+            code.contains("addAction(") && code.contains("lockVaultNow")
+        )
+        assertTrue(
+            "锁定动作必须委托 AutoLockManager.triggerLock，不得另起第二条锁定路径",
+            code.contains("autoLockManager") || readSource(LOCK_RECEIVER_PATH).contains("triggerLock")
+        )
+        assertTrue(
+            "锁定接收器必须经 AutoLockManager.triggerLock（与自动锁同收口）",
+            readSource(LOCK_RECEIVER_PATH).contains("autoLockManager.triggerLock")
+        )
+        assertTrue(
+            "中英文案必须存在且零插值",
+            readSource(STRINGS_ZH).contains("notification_unlocked_lock_now") &&
+                readSource(STRINGS_EN).contains("notification_unlocked_lock_now")
+        )
+    }
+
     /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
@@ -91,6 +112,10 @@ class UnlockedNotificationWiringTest {
     private companion object {
         const val CONTROLLER_PATH =
             "app/src/main/java/com/keepasskey/app/notification/UnlockedNotificationController.kt"
+        const val LOCK_RECEIVER_PATH =
+            "app/src/main/java/com/keepasskey/app/notification/VaultLockActionReceiver.kt"
+        const val STRINGS_ZH = "app/src/main/res/values/strings.xml"
+        const val STRINGS_EN = "app/src/main/res/values-en/strings.xml"
         const val ROOT_SEARCH_DEPTH = 4
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

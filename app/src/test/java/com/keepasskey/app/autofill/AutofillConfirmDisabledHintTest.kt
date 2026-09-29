@@ -14,28 +14,36 @@ import java.io.File
  * 本用例为接线守卫（静态源码断言）：
  * 1. 禁用态 hint 必须拼接 `autofill_confirm_disabled_reason`，且与按钮门控共用同一条件；
  * 2. 该文案必须 values + values-en 双写（单语缺失即守卫红）。
+ *
+ * 规模闸门拆分后：界面体收口于 [AutofillConfirmManualScreen]，Activity 只作 setContent 委托，
+ * 守卫改读拆分后文件（行为锚点不变）。
  */
 class AutofillConfirmDisabledHintTest {
 
+    private val screenSource: String by lazy { readSource(CONFIRM_SCREEN_PATH) }
     private val activitySource: String by lazy { readSource(CONFIRM_ACTIVITY_PATH) }
 
     @Test
     fun `确认按钮禁用时 hint 必须拼接原因文案且与门控同条件`() {
         assertTrue(
-            "确认页必须在禁用态拼接原因文案（hint 位就地解释）",
-            activitySource.contains("R.string.autofill_confirm_disabled_reason")
+            "确认页界面必须在禁用态拼接原因文案（hint 位就地解释）",
+            screenSource.contains("R.string.autofill_confirm_disabled_reason")
         )
         assertTrue(
             "原因文案必须由 confirmEnabled 门控（勾选授权后随之消失，条件不漂移）",
-            activitySource.contains("hint = if (confirmEnabled)")
+            screenSource.contains("hint = if (confirmEnabled)")
         )
         assertTrue(
             "按钮门控必须收敛为同一 confirmEnabled 局部值",
-            activitySource.contains("confirmEnabled = confirmEnabled")
+            screenSource.contains("confirmEnabled = confirmEnabled")
         )
         assertTrue(
             "门控条件本身不得被改写（首现调用方未勾选授权即禁用）",
-            activitySource.contains("val confirmEnabled = !requiresExplicitAuthorization || trustChecked")
+            screenSource.contains("val confirmEnabled = !requiresExplicitAuthorization || trustChecked")
+        )
+        assertTrue(
+            "Activity 必须把确认页委托给 AutofillConfirmManualScreen（唯一界面实现）",
+            activitySource.contains("AutofillConfirmManualScreen(")
         )
     }
 
@@ -60,6 +68,8 @@ class AutofillConfirmDisabledHintTest {
     private companion object {
         const val CONFIRM_ACTIVITY_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt"
+        const val CONFIRM_SCREEN_PATH =
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmManualScreen.kt"
         const val STRINGS_ZH_PATH = "app/src/main/res/values/strings.xml"
         const val STRINGS_EN_PATH = "app/src/main/res/values-en/strings.xml"
 

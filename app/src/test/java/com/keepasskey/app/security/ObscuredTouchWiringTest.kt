@@ -31,7 +31,11 @@ class ObscuredTouchWiringTest {
         "app/src/main/java/com/keepasskey/app/ui/screens/authenticator/AuthenticatorScreen.kt" to
             "AuthenticatorScreen",
         "app/src/main/java/com/keepasskey/app/ui/screens/conflict/ConflictResolutionScreen.kt" to
-            "ConflictResolutionScreen"
+            "ConflictResolutionScreen",
+        // ISSUE-P3-386 批次规模闸门：确认页手动确认界面自 AutofillConfirmActivity
+        // 纯结构性拆出后，遮挡触摸过滤接线随界面体迁入本文件（防接线静默移除）
+        "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmManualScreen.kt" to
+            "AutofillConfirmManualScreen"
     )
 
     /** 以「`setContent {}` lambda 体」为接线锚点的敏感窗口（独立 Activity 入口，无具名根 Composable） */
@@ -44,8 +48,10 @@ class ObscuredTouchWiringTest {
         // ISSUE-P2-220：创建链路 fail-closed 拒绝原因页（渲染在基类自己的受保护窗口内）
         "app/src/main/java/com/keepasskey/app/passkey/BaseCredentialActivity.kt",
         // 自动填充两窗口（ISSUE-P2-09 既有接线，纳入清单防止回归移除）
-        "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockActivity.kt",
-        "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt"
+        // AutofillConfirmActivity 的手动确认界面体已拆至 AutofillConfirmManualScreen
+        // （根 Composable 锚点见 rootComposableScreens），本 Activity 的其余 setContent
+        // 路径（若后续引入）仍须自行接线——当前确认页唯一 UI 入口即该拆分文件
+        "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockActivity.kt"
     )
 
     @Test

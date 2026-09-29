@@ -297,6 +297,24 @@ class AutofillPickerActivity : FragmentActivity() {
                 vaultRepository.getKdbxEntry(entryId)?.title.orEmpty()
             }.getOrDefault("")
             val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
+            // ISSUE-P2-384 AC①：认证回传构造 Dataset 前复检字段级屏蔽（fail-closed）。
+            // 屏蔽写入可发生在「onFillRequest 下发 → 用户打开选择器」之间的任意时刻；
+            // 缓存响应重放 / 再次确认同样走本闸门，被屏蔽字段不出现在回传数据集里。
+            val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty()
+            val formDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)?.takeIf { it.isNotBlank() }
+            val deliverable = AutofillAuthDeliveryBlockPolicy.filter(
+                usernameId = intent.readAutofillId(EXTRA_USERNAME_ID),
+                passwordId = intent.readAutofillId(EXTRA_PASSWORD_ID)
+            ) { role ->
+                autofillFieldBlocklistStore.isBlocked(callingPackage, formDomain, role)
+            }
+            if (deliverable.blocksEntireForm) {
+                // 日志不携带包名/域/角色外的用户数据（ISSUE-P1-10）
+                AppLog.w(TAG, "认证回传复检：字段已被屏蔽，按取消回传（不交付被屏蔽字段）")
+                setResult(RESULT_CANCELED, authenticationCanceledIntent())
+                finish()
+                return@launch
+            }
             val dataset = buildAuthenticationResultDataset(
                 packageName = packageName,
                 menuTitle = credentials.username.ifBlank {
@@ -305,8 +323,8 @@ class AutofillPickerActivity : FragmentActivity() {
                 menuSubtitle = if (credentials.username.isNotBlank()) entryTitle else "",
                 username = credentials.username,
                 password = credentials.password,
-                usernameId = intent.readAutofillId(EXTRA_USERNAME_ID),
-                passwordId = intent.readAutofillId(EXTRA_PASSWORD_ID),
+                usernameId = deliverable.usernameId,
+                passwordId = deliverable.passwordId,
                 otpId = otpId,
                 otpCode = otpCode
             )

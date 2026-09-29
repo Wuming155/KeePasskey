@@ -132,6 +132,15 @@ class UnlockedNotificationController @Inject constructor(
             .setOngoing(true)
             .setSilent(true)
             .setOnlyAlertOnce(true)
+            // ISSUE-P3-386：常驻通知「立即锁定」快捷动作——与自动锁同收口，
+            // 触发后会话锁定 → 本控制器观察 state 变化自动 cancel 撤销通知
+            .addAction(
+                NotificationCompat.Action.Builder(
+                    null,
+                    context.getString(R.string.notification_unlocked_lock_now),
+                    NotificationIntents.lockVaultNow(context)
+                ).build()
+            )
 
         val now = System.currentTimeMillis()
         if (deadline != null && deadline > now) {

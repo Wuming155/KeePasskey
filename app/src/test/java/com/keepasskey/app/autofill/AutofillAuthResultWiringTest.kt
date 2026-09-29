@@ -58,7 +58,12 @@ class AutofillAuthResultWiringTest {
         assertTrue(
             "确认页必须经共享交付通道回传数据集（认证成功路径）",
             confirm.contains("authenticationResultIntent(") &&
-                confirm.contains("buildAuthenticationResultDataset(")
+                (
+                    // 结构性拆分后 Dataset 构造收口于 AutofillConfirmAuthDelivery（内部仍走
+                    // buildAuthenticationResultDataset），确认页只传复检后的 deliverable
+                    confirm.contains("AutofillConfirmAuthDelivery.build(") ||
+                        confirm.contains("buildAuthenticationResultDataset(")
+                    )
         )
         // 选择器（既有可用路径）同样必须走共享交付通道——两处同语义只剩一份实现
         assertTrue(
@@ -70,6 +75,12 @@ class AutofillAuthResultWiringTest {
         assertTrue(
             "$AUTOFILL_DELIVERY 必须把数据集放进 AutofillManager.EXTRA_AUTHENTICATION_RESULT",
             delivery.contains("AutofillManager.EXTRA_AUTHENTICATION_RESULT, dataset")
+        )
+        // 确认页拆分后的交付对象同样委托共享构造（防第二份 Dataset 构造路径）
+        val confirmDelivery = readSource(AUTOFILL_CONFIRM_DELIVERY)
+        assertTrue(
+            "$AUTOFILL_CONFIRM_DELIVERY 必须委托 buildAuthenticationResultDataset 构造 Dataset",
+            confirmDelivery.contains("buildAuthenticationResultDataset(")
         )
         // 取消路径必须双参 + extras 非空（同上「extras 为 null 会崩溃」口径）
         assertTrue(
@@ -222,6 +233,7 @@ class AutofillAuthResultWiringTest {
         const val AUTOFILL_CONFIRM = "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt"
         const val AUTOFILL_PICKER = "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt"
         const val AUTOFILL_DELIVERY = "app/src/main/java/com/keepasskey/app/autofill/AutofillAuthResultDelivery.kt"
+        const val AUTOFILL_CONFIRM_DELIVERY = "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthDelivery.kt"
         const val BUILDERS = "app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt"
 
         val repositoryRoot: File by lazy {

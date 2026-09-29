@@ -140,3 +140,5 @@ venv/
 # CI / 本地调试产物整树（APK/dex 转储、backup_passwords.kdbx 等）；原先只忽略
 # devtest/ 子路径，非 build 子路径的新文件会变成未跟踪垃圾，故收口为整目录。
 .ci-artifacts/
+
+nul

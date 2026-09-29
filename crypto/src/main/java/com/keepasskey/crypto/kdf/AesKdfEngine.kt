@@ -31,6 +31,8 @@ class AesKdfEngine : KdfEngine {
             // 探活已证明原生通路与 JCE 逐字节等价；此处失败即真实异常，如实上抛（不静默回退重算）
             return NativeAesKdf.derive(compositeKey, aesParams.seed, aesParams.rounds)
         }
+        // ISSUE-P3-392：探活失败静默回落不可观测——回落时一次性记「已回落」事实（不含参数）
+        NativeKdfFallbackLog.noteFallbackOnce("AES-KDF")
         return AesKdfJce.transform(compositeKey, aesParams.seed, aesParams.rounds)
     }
 }

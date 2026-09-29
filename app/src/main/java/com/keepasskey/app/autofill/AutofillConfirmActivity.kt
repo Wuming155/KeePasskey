@@ -7,21 +7,16 @@ import android.view.WindowManager
 import android.view.autofill.AutofillId
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.passkey.CredentialFillConfirmScreen
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricAuthManager
@@ -97,6 +92,10 @@ class AutofillConfirmActivity : FragmentActivity() {
     // ISSUE-P3-39：「上次填充」记忆写入点——用户确认填充即真实填充落点
     @Inject
     lateinit var autofillLastFilledStore: AutofillLastFilledStore
+
+    // ISSUE-P2-384：认证回传前复检字段级屏蔽（与选择器同源策略）
+    @Inject
+    lateinit var autofillFieldBlocklistStore: AutofillFieldBlocklistStore
 
     // ISSUE-P2-88：确认后取回条目凭据的通道——与选择器复用同一 ViewModel，
     // 使「按条目取用户名 + 按需解密口令 + 字段引用展开」只有一份实现。
@@ -182,51 +181,14 @@ class AutofillConfirmActivity : FragmentActivity() {
         localizedContext: Context
     ) {
         setContent {
-            // ISSUE-P2-09：Compose 侧遮挡触摸过滤（点击劫持防护）
-            ApplyObscuredTouchFilter()
-            CompositionLocalProvider(
-                LocalContext provides localizedContext,
-                LocalConfiguration provides localizedContext.resources.configuration
-            ) {
-                // ISSUE-P1-24 AC②：首次出现的目标在确认前必须显式勾选「记住此应用」授权
-                var trustChecked by remember { mutableStateOf(false) }
-                val requiresExplicitAuthorization = attribution?.firstOccurrence == true
-                val attributionContent: (@Composable () -> Unit)? = attribution?.let { attr ->
-                    {
-                        AutofillCallerAttributionBlock(
-                            attribution = attr,
-                            showTrustCheckbox = requiresExplicitAuthorization,
-                            trustChecked = trustChecked,
-                            onTrustCheckedChange = { checked ->
-                                trustChecked = checked
-                                if (checked) {
-                                    callerTrustStore.trust(attr.packageName, attr.certSha256Hex)
-                                } else {
-                                    callerTrustStore.untrust(attr.packageName, attr.certSha256Hex)
-                                }
-                            }
-                        )
-                    }
-                }
-                // ISSUE-P3-360 AC④（局部）：确认钮禁用时在 hint 位就地给出原因——
-                // 首现调用方未勾选授权前 confirmEnabled=false，此前界面无任何解释；
-                // 勾选状态翻转即重组，原因文案随之消失（与按钮门控同一条件，不会漂移）
-                val confirmEnabled = !requiresExplicitAuthorization || trustChecked
-                CredentialFillConfirmScreen(
-                    title = localizedContext.getString(R.string.autofill_confirm_title),
-                    hint = if (confirmEnabled) {
-                        manualHint
-                    } else {
-                        "$manualHint\n${localizedContext.getString(R.string.autofill_confirm_disabled_reason)}"
-                    },
-                    confirmText = localizedContext.getString(R.string.autofill_confirm_ok),
-                    cancelText = localizedContext.getString(R.string.autofill_confirm_cancel),
-                    confirmEnabled = confirmEnabled,
-                    attributionContent = attributionContent,
-                    onConfirm = { completeAuthResult() },
-                    onCancel = { finish() }
-                )
-            }
+            AutofillConfirmManualScreen(
+                manualHint = manualHint,
+                attribution = attribution,
+                callerTrustStore = callerTrustStore,
+                onConfirm = { completeAuthResult() },
+                onCancel = { finish() },
+                localizedContext = localizedContext
+            )
         }
     }
 
@@ -318,6 +280,26 @@ class AutofillConfirmActivity : FragmentActivity() {
         val structured = readStructuredTargetsFrom(intent)
         if (usernameId == null && passwordId == null && structured.isEmpty()) return null
 
+        // ISSUE-P2-384 AC①：认证回传构造 Dataset 前复检字段级屏蔽（fail-closed）。
+        // 确认页是「再次确认」路径——屏蔽写入后系统缓存重放 / 用户再次确认时，
+        // 被屏蔽字段不得再出现在回传数据集里（与选择器 deliver 同一策略对象）。
+        // 域取表单**自报**域（与屏蔽写入键同源）；确认页仅有归属校验后域时回落之。
+        val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE)
+            ?: intent.getStringExtra(EXTRA_GRANT_PACKAGE)
+            ?: packageName
+        val formDomain = intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
+            ?: intent.getStringExtra(EXTRA_GRANT_DOMAIN)?.takeIf { it.isNotBlank() }
+        val deliverable = AutofillAuthDeliveryBlockPolicy.filter(
+            usernameId = usernameId,
+            passwordId = passwordId
+        ) { role ->
+            autofillFieldBlocklistStore.isBlocked(callingPackage, formDomain, role)
+        }
+        if (deliverable.blocksEntireForm && structured.isEmpty()) {
+            AppLog.w(TAG, "确认页回传复检：字段已被屏蔽，按取消回传")
+            return null
+        }
+
         val credentials = pickerViewModel.resolveCredentials(entryId) ?: return null
         val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
         // ISSUE-P3-298 ⑤：回传时刻现算 TOTP（值新鲜度以交付时刻为准）；仅 TOTP 参与
@@ -333,27 +315,28 @@ class AutofillConfirmActivity : FragmentActivity() {
             val entry = vaultRepository.getKdbxEntry(entryId) ?: return null
             buildStructuredFieldValues(structured, entry)
         }
-        val dataset = buildAuthenticationResultDataset(
+        val dataset = AutofillConfirmAuthDelivery.build(
             packageName = packageName,
             // ISSUE-P3-330：用户名为空时标题行即条目标题，副行留空——避免两行同文
             menuTitle = credentials.username.ifBlank { credentialTitle },
             menuSubtitle = if (credentials.username.isNotBlank()) credentialTitle else "",
             username = credentials.username,
             password = credentials.password,
-            usernameId = usernameId,
-            passwordId = passwordId,
+            deliverable = deliverable,
             otpId = otpId,
             otpCode = otpCode,
             structuredFields = structuredValues
         ) ?: return null
         // 只记录「哪些字段真的有值」，不含任何凭据内容 / 用户名 / 条目名 / 包名
-        AppLog.d(
-            TAG,
-            "确认后回传数据集：用户名有值=${credentials.username.isNotEmpty()}" +
-                " 口令有值=${credentials.password.isNotEmpty()}" +
-                " 验证码有值=${otpCode.isNotEmpty()}" +
-                " 结构化字段数=${structuredValues.size}" +
-                " 用户名框=${usernameId != null} 密码框=${passwordId != null} 验证码框=${otpId != null}"
+        AutofillConfirmAuthDelivery.logDelivery(
+            tag = TAG,
+            usernameHasValue = credentials.username.isNotEmpty(),
+            passwordHasValue = credentials.password.isNotEmpty(),
+            otpHasValue = otpCode.isNotEmpty(),
+            structuredCount = structuredValues.size,
+            usernameIdPresent = deliverable.usernameId != null,
+            passwordIdPresent = deliverable.passwordId != null,
+            otpIdPresent = otpId != null
         )
         return authenticationResultIntent(dataset)
     }

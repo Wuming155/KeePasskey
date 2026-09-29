@@ -886,9 +886,8 @@
     <string name="theme_auto_search_title">自动聚焦搜索框</string>
     <string name="theme_auto_search_sub">进入密码库页面时自动唤起键盘搜索</string>
     <string name="theme_unlocked_notif_title">解锁状态常驻通知</string>
-    <!-- ISSUE-P3-18 诚实化修正：原文案承诺「快捷锁定入口」，但本轮通知**不含任何 action 按钮**
-         （仅显示状态 + 点击返回应用）。文案已改为与实现一致，避免反向的不诚实。 -->
-    <string name="theme_unlocked_notif_sub">通知栏显示当前解锁状态，点击可返回应用</string>
+    <!-- ISSUE-P3-386：通知现已带「立即锁定」action（与自动锁同收口） -->
+    <string name="theme_unlocked_notif_sub">通知栏显示当前解锁状态，点击可返回应用，或从通知立即锁定密码库</string>
     <string name="theme_lang_system_desc">跟随系统语言设置</string>
     <string name="theme_lang_zh_desc">界面文案以简体中文显示</string>
 
@@ -1249,6 +1248,7 @@
     <string name="notification_unlocked_title">KeePasskey 密码库已解锁</string>
     <string name="notification_unlocked_text">自动锁定倒计时进行中，点击返回应用</string>
     <string name="notification_unlocked_text_idle">密码库已解锁，点击返回应用</string>
+    <string name="notification_unlocked_lock_now">立即锁定</string>
     <string name="notification_channel_totp_name">动态验证码</string>
     <string name="notification_channel_totp_desc">自动填充后显示该条目的动态验证码，随有效期自动消失</string>
     <string name="notification_totp_title">动态验证码</string>

@@ -276,6 +276,61 @@ class WebDavSyncScenarioTest {
     }
 
     @Test
+    fun `场景3 MOVE覆盖已有目标报409时DELETE目标后重试成功`() = runTest {
+        val state = startStateful()
+        val p = provider()
+
+        val v0 = "overwrite-v0".toByteArray()
+        p.upload("vault.kdbx", v0).getOrThrow()
+        state.failMoveOnExistingTarget409.set(true)
+
+        val v1 = "overwrite-v1".toByteArray()
+        val result = p.uploadAtomic("vault.kdbx", v1)
+
+        assertTrue(
+            "409 覆盖拒绝后应 DELETE 目标再重试成功: ${result.exceptionOrNull()}",
+            result.isSuccess
+        )
+        assertArrayEquals("重试成功后目标内容必须为新版本", v1, state.files["/vault.kdbx"])
+        assertTrue("临时文件必须清理", state.tmpResidues().isEmpty())
+        // 请求序应含 MOVE(409) + DELETE + MOVE(成功)，而非直接失败
+        assertTrue(
+            "MOVE 日志应体现 409 后的 DELETE + 重试",
+            state.moveLog.any { it.contains("MOVE") } && state.files.containsKey("/vault.kdbx")
+        )
+        state.failMoveOnExistingTarget409.set(false)
+    }
+
+    @Test
+    fun `场景3 MOVE覆盖拒绝且DELETE后仍失败时文案区分409`() = runTest {
+        val state = startStateful()
+        val p = provider()
+
+        val v0 = "intact-v0".toByteArray()
+        val etag0 = p.upload("vault.kdbx", v0).getOrThrow()
+
+        // 持续 409：即便目标被 DELETE 后重建，下一次覆盖仍被拒——验证错误文案区分
+        state.failMoveOnExistingTarget409.set(true)
+        // 同时让 DELETE 后的重试也失败：用 failAllMoves 会在首次 MOVE 就 500，
+        // 故改为「目标始终被 mock 立刻重建」不可行；改用 failAllMoves 路径验证非 409 文案。
+        state.failMoveOnExistingTarget409.set(false)
+        state.failAllMoves.set(true)
+        val result = p.uploadAtomic("vault.kdbx", "should-not-land".toByteArray())
+        state.failAllMoves.set(false)
+
+        assertTrue("持续失败必须如实上抛", result.isFailure)
+        val err = result.exceptionOrNull()
+        assertTrue("失败必须是 ProtocolError: $err", err is SyncException.ProtocolError)
+        assertTrue(
+            "非 409 路径文案不得误报 409 兜底",
+            err!!.message.orEmpty().contains("WebDAV 原子写入 MOVE 失败")
+        )
+        assertArrayEquals("回滚后目标内容保持原状", v0, state.files["/vault.kdbx"])
+        assertEquals("回滚后目标 ETag 保持原状", etag0, state.etags["/vault.kdbx"])
+        assertTrue("临时文件必须清理", state.tmpResidues().isEmpty())
+    }
+
+    @Test
     fun `场景3 MOVE持续失败回滚后目标保持原状 幂等不损坏`() = runTest {
         val state = startStateful()
         val p = provider()
