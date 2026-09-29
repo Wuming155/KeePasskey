@@ -92,7 +92,8 @@ internal suspend fun runPostFillTotpActions(
     notifyEnabled: Boolean,
     calculateTotp: suspend (String) -> EntryTotpSnapshot?,
     copyToClipboard: (String) -> Unit,
-    publishNotification: (code: String, periodSeconds: Int) -> Unit,
+    // ISSUE-P3-390 AC②：通知构建改走挂起的本地化上下文派生，故发布回调为 suspend
+    publishNotification: suspend (code: String, periodSeconds: Int) -> Unit,
     timeoutMillis: Long = POST_FILL_TOTP_TIMEOUT_MS
 ) {
     if (entryId.isBlank()) return

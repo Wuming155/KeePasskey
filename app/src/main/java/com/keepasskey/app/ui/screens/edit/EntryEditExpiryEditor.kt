@@ -20,6 +20,9 @@ import com.keepasskey.app.R
 /**
  * ISSUE-P3-310：过期编辑行——「永不过期」开关；开启后展示日期入口（Material3 日期选择器）。
  * §313 结构性拆分：自 `EntryEditComponents.kt` 搬出（纯搬移，行为零变更）。
+ * ISSUE-P3-389：选择器毫秒 ↔ 过期日的双向换算收敛到 `ExpiryDatePickerDates.kt` 的
+ * UTC 锚定纯函数（平台 `selectedDateMillis` 契约是所选日的 UTC 零点；旧实现按设备
+ * 默认时区双向解释，非 UTC 时区用户双向各偏一天）。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -75,9 +78,9 @@ internal fun ExpiryEditorRow(
     }
 
     if (showDatePicker) {
-        val initialMillis = expiryDate
-            ?.atStartOfDay(java.time.ZoneId.systemDefault())
-            ?.toInstant()?.toEpochMilli()
+        // ISSUE-P3-389：双向都走 UTC 锚定纯函数（initialSelectedDateMillis / selectedDateMillis
+        // 的平台契约是所选日历日的 UTC 零点毫秒，与设备默认时区无关）。
+        val initialMillis = expiryDateAsPickerMillis(expiryDate)
         val pickerState = androidx.compose.material3.rememberDatePickerState(
             initialSelectedDateMillis = initialMillis
         )
@@ -86,12 +89,9 @@ internal fun ExpiryEditorRow(
             confirmButton = {
                 androidx.compose.material3.TextButton(
                     onClick = {
-                        pickerState.selectedDateMillis?.let { millis ->
-                            onExpiryDateSelected(
-                                java.time.Instant.ofEpochMilli(millis)
-                                    .atZone(java.time.ZoneId.systemDefault())
-                                    .toLocalDate()
-                            )
+                        val picked = pickerMillisAsExpiryDate(pickerState.selectedDateMillis)
+                        if (picked != null) {
+                            onExpiryDateSelected(picked)
                         }
                         showDatePicker = false
                     }

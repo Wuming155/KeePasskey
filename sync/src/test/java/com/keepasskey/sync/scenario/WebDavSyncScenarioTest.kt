@@ -232,7 +232,8 @@ class WebDavSyncScenarioTest {
         assertEquals("PROPFIND", server.takeRequest().method)
         val deleteReq = server.takeRequest()
         assertEquals("DELETE", deleteReq.method)
-        assertTrue("清理的是本事务临时文件", deleteReq.path.orEmpty().endsWith(".kpktmp"))
+        // ISSUE-P2-382：临时名保留原扩展名（`vault.<uuid>.kpktmp.kdbx`），按 `.kpktmp` 中缀识别
+        assertTrue("清理的是本事务临时文件", deleteReq.path.orEmpty().contains(".kpktmp"))
     }
 
     // ------------------------------------------------------------------

@@ -28,7 +28,7 @@ import java.util.UUID
  * 1. PROPFIND: 基于 DOM 解析 getetag, getcontentlength, getlastmodified, resourcetype;
  * 2. GET: 二进制流下载;
  * 3. PUT: 支持 If-Match: <etag> 乐观并发保护;
- * 4. 事务写 (uploadAtomic): PUT 唯一随机名 .kpktmp -> MOVE 覆盖 -> 失败重试/回滚;
+ * 4. 事务写 (uploadAtomic): PUT 唯一随机临时名（后缀插在原扩展名前，保留原扩展名）-> MOVE 覆盖 -> 失败重试/回滚;
  * 5. URL 编码：对路径段执行逐段 UTF-8 编码。
  *
  * 纯结构性拆分（零行为变更）：XML(multistatus) 解析委托 [WebDavPropfindParser]、路径 ↔ URL
@@ -279,8 +279,12 @@ class WebDavSyncProvider(
     /**
      * 事务性原子上传 (P2-16)。
      * 流程：
-     * 1. 上传至 `<remotePath>.<随机UUID>.kpktmp` 临时文件——临时名含每次操作的
-     *    随机成分：若多客户端共用固定临时名，A 的 MOVE 可能搬运到 B 刚覆盖写入的
+     * 1. 上传至临时文件——临时名由 [atomicTmpPath] 构造：固定后缀 `.kpktmp` 插在**原扩展名之前**、
+     *    保留末段扩展名与目标一致（`vault.kdbx` → `vault.<随机UUID>.kpktmp.kdbx`，ISSUE-P2-382；
+     *    keepass2android `b1ae0482` 实测存在按扩展名限制上传的服务器，末段被替换成 `.kpktmp`
+     *    的旧形态会被拒收）。注意：由此残留临时文件也会以原扩展名出现在远端目录中，
+     *    做目录列举/扩展名过滤时须同时排除含 `.kpktmp` 中缀的名字（P3-387 评估面）。
+     *    临时名含每次操作的随机成分：若多客户端共用固定临时名，A 的 MOVE 可能搬运到 B 刚覆盖写入的
      *    临时内容（If 预条件只约束 MOVE 目标，不约束源临时文件），造成数据交叉污染；
      * 2. 发送 WebDAV MOVE 命令（Destination: 目标完整 URL）；
      *    对远端目标文件的 ETag 预条件使用 RFC 4918 `If` 头 tagged list 语法
@@ -305,7 +309,7 @@ class WebDavSyncProvider(
         remoteExists: Boolean?
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val tmpPath = "$remotePath.${UUID.randomUUID()}$ATOMIC_TMP_SUFFIX"
+            val tmpPath = atomicTmpPath(remotePath, UUID.randomUUID().toString())
             val tmpUploadResult = upload(tmpPath, data, expectedEtag = null)
             if (tmpUploadResult.isFailure) {
                 throw tmpUploadResult.exceptionOrNull() ?: SyncException.NetworkError("上传临时文件失败")
@@ -414,6 +418,25 @@ class WebDavSyncProvider(
 
     companion object {
         const val ATOMIC_TMP_SUFFIX = ".kpktmp"
+
+        /**
+         * 事务上传临时名构造（ISSUE-P2-382）：把固定后缀 [ATOMIC_TMP_SUFFIX] 插在**原扩展名之前**，
+         * 保留末段扩展名与目标一致（`vault.kdbx` → `vault.<uniqueToken>.kpktmp.kdbx`）——
+         * keepass2android `b1ae0482` 实测存在按扩展名限制上传的 WebDAV 服务器，
+         * 末段被替换为 `.kpktmp` 的旧形态（`vault.kdbx.<uniqueToken>.kpktmp`）会被这类服务器拒收。
+         * 无扩展名的路径（或末段以「.」开头且无主干，如 `.kdbx` 这种点文件名）保持旧行为尾部追加。
+         * 纯函数；命名形态由 `WebDavSyncProviderTest` 单测锁定防回潮。
+         */
+        internal fun atomicTmpPath(remotePath: String, uniqueToken: String): String {
+            val lastSegment = remotePath.substringAfterLast('/', remotePath)
+            val lastDot = lastSegment.lastIndexOf('.')
+            return if (lastDot > 0) {
+                val extension = lastSegment.substring(lastDot)
+                "${remotePath.removeSuffix(extension)}.$uniqueToken$ATOMIC_TMP_SUFFIX$extension"
+            } else {
+                "$remotePath.$uniqueToken$ATOMIC_TMP_SUFFIX"
+            }
+        }
 
         private const val PROPFIND_XML = """<?xml version="1.0" encoding="utf-8" ?>
 <D:propfind xmlns:D="DAV:">

@@ -1,7 +1,11 @@
 package com.keepasskey.database.audit
 
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.crypto.strength.PasswordStrengthEvaluator
+import com.keepasskey.database.fieldref.FieldReferenceCharExpansion
+import java.nio.CharBuffer
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 
 /**
@@ -32,6 +36,10 @@ data class EntryHealthIssue(
  *    （原生 Rust 内核，模式惩罚型模型；原生不可用时降级为 `PasswordStrengthFallback`）。
  *    判据为 [PasswordStrength.isWeak]，**保留**接线前的两条规则（长度 < 8、命中常见口令表）
  *    并新增「强度分档 ≤ 1」，可识别 `qwertyuiop` / `abcabcabc` / `20260101` 等旧实现无感的口令；
+ *    ISSUE-P3-394 起，口令含 `{REF:...}` 引用时先经 [FieldReferenceCharExpansion]
+ *    （String 引擎的 Char 通道）多级展开为被引用条目的真实口令再评分——按引用原文评分失真
+ *    （keepassxc `e888fec0` 同坑）；展开结果属敏感数据，只走 CharArray/ByteArray 且用毕
+ *    显式清零，绝不物化 String、绝不进日志；
  * 2. 跨条目密码重复使用 (Reused Passwords) 检测；
  * 3. 密码时效性与过期检查。
  *
@@ -64,8 +72,14 @@ object HealthCheckEngine {
      */
     fun analyzeEntries(entries: List<KdbxEntry>): List<EntryHealthIssue> {
         val index = buildReuseIndex(entries)
+        // ISSUE-P3-394：{REF} 展开的检索根。本方法入参的既有契约即「全库扁平化」（唯一生产
+        // 调用方 SettingsHealthController 经 getKdbxEntries() 取 rootGroup.allEntries()），
+        // 以合成根承载展开通道的索引即可——通道只消费 root.allEntries()，文档序与扁平列表
+        // 逐位一致；合成根仅存在于本次扫描的内存中，不落任何存储。索引在通道内部惰性构建：
+        // 无引用的库零额外成本。
+        val referenceRoot = KdbxGroup(name = "", entries = entries)
         val issues = mutableListOf<EntryHealthIssue>()
-        for (entry in entries) analyzeEntry(entry, index, issues)
+        for (entry in entries) analyzeEntry(entry, index, issues, referenceRoot)
         return issues
     }
 
@@ -95,7 +109,8 @@ object HealthCheckEngine {
     private fun analyzeEntry(
         entry: KdbxEntry,
         index: ReuseIndex,
-        issues: MutableList<EntryHealthIssue>
+        issues: MutableList<EntryHealthIssue>,
+        referenceRoot: KdbxGroup
     ) {
         // 密码时效性：条目声明了过期时间且已过期（文档承诺的 EXPIRED 风险等级真实落地）
         if (entry.times.expires && entry.times.expiryTime.isBefore(Instant.now())) {
@@ -114,9 +129,18 @@ object HealthCheckEngine {
             return
         }
 
-        // 检查弱口令与长度（单条临时读取并在 finally 中擦除）
-        val passChars = passProtected.readChars()
-        val passBytes = passProtected.readUtf8()
+        // ISSUE-P3-394：口令含 {REF:...} 引用时先经 FieldReferenceEngine 多级展开再评估
+        // （keepassxc e888fec0 同坑：按引用原文评分失真）。展开结果是被引用条目的真实口令——
+        // 敏感数据铁律：只走 CharArray/ByteArray 且用毕显式清零，绝不物化 String、绝不进日志；
+        // 未命中 / 超限引用由展开通道保守回退引用原文（与填充通道 resolve 的语义一致）。
+        // 无引用时展开入口返回 null，直接以本次读出的原文评估（零额外副本、零额外解密）。
+        val rawChars = passProtected.readChars()
+        val expanded = FieldReferenceCharExpansion.resolvePasswordFace(rawChars, referenceRoot)
+        if (expanded != null) java.util.Arrays.fill(rawChars, '0')
+        val passChars = expanded ?: rawChars
+        // 单条临时读取并在 finally 中擦除；字节数组由 CharArray 按 UTF-8 重编码而来
+        // （模型侧内容均为合法 UTF-8 文本，往返无损），省去第二遍整段解密。
+        val passBytes = utf8BytesOf(passChars)
         val passLength = passChars.size
         var isWeak = false
         var strengthScore = 0
@@ -155,6 +179,21 @@ object HealthCheckEngine {
                     "密码在 $reuseCount 个不同条目中被重复使用"
                 )
             )
+        }
+    }
+
+    /**
+     * CharArray → UTF-8 字节（敏感中间量不落 String，手法同 `ProtectedString` 的自有编码通道）：
+     * 编码器内部缓冲承载过明文，一并清零；返回的字节副本由调用方负责清零。
+     */
+    private fun utf8BytesOf(chars: CharArray): ByteArray {
+        val buffer = StandardCharsets.UTF_8.encode(CharBuffer.wrap(chars))
+        try {
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            return bytes
+        } finally {
+            if (buffer.hasArray()) java.util.Arrays.fill(buffer.array(), 0.toByte())
         }
     }
 

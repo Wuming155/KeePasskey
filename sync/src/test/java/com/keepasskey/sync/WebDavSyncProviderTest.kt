@@ -202,11 +202,12 @@ class WebDavSyncProviderTest {
         assertTrue(result.isSuccess)
         assertEquals("final-etag-2", result.getOrThrow())
 
-        // 验证请求顺序与头部（临时文件名含随机 UUID 成分，仅断言唯一名模式）
+        // 验证请求顺序与头部（临时文件名含随机 UUID 成分，仅断言唯一名模式）；
+        // ISSUE-P2-382：末段扩展名必须保留 .kdbx（后缀 .kpktmp 插在原扩展名之前）
         val req1 = server.takeRequest()
         assertEquals("PUT", req1.method)
-        assertTrue(req1.path?.startsWith("/vault.kdbx.") == true)
-        assertTrue(req1.path?.endsWith(".kpktmp") == true)
+        assertTrue(req1.path?.startsWith("/vault.") == true)
+        assertTrue(req1.path?.endsWith("${WebDavSyncProvider.ATOMIC_TMP_SUFFIX}.kdbx") == true)
         // F3 修复：无 ETag 上传前先探测目标存在性
         val reqProbe = server.takeRequest()
         assertEquals("PROPFIND", reqProbe.method)
@@ -283,10 +284,43 @@ class WebDavSyncProviderTest {
         val req4 = server.takeRequest() // MOVE 2
         val req5 = server.takeRequest() // DELETE
         assertEquals("DELETE", req5.method)
-        assertTrue(req1.path?.startsWith("/vault.kdbx.") == true)
-        assertTrue(req1.path?.endsWith(".kpktmp") == true)
+        assertTrue(req1.path?.startsWith("/vault.") == true)
+        assertTrue(req1.path?.endsWith("${WebDavSyncProvider.ATOMIC_TMP_SUFFIX}.kdbx") == true)
         assertEquals(req1.path, req3.path)
         assertEquals(req1.path, req5.path)
+    }
+
+    @Test
+    fun `测试事务上传临时名保留原扩展名(ISSUE-P2-382防回潮)`() {
+        // AC② 命名形态锁定：固定后缀 .kpktmp 必须插在**原扩展名之前**，
+        // 末段扩展名与目标一致——按扩展名限制上传的服务器会拒收末段被替换成 .kpktmp 的旧形态
+        // （keepass2android b1ae0482 同型修复）。防回潮：任何改回「$remotePath.$uuid.kpktmp」
+        // 尾部追加形态的实现都会在此变红。
+        val suffix = WebDavSyncProvider.ATOMIC_TMP_SUFFIX
+        assertEquals("vault.token-1$suffix.kdbx", WebDavSyncProvider.atomicTmpPath("vault.kdbx", "token-1"))
+        assertEquals(
+            "多重点号文件名只取末段为扩展名",
+            "my.vault.token-1$suffix.kdbx",
+            WebDavSyncProvider.atomicTmpPath("my.vault.kdbx", "token-1")
+        )
+        assertEquals(
+            "深层路径段保持不变形",
+            "a/b/c/d/vault.token-1$suffix.kdbx",
+            WebDavSyncProvider.atomicTmpPath("a/b/c/d/vault.kdbx", "token-1")
+        )
+        // 无扩展名路径：保持尾部追加旧行为
+        assertEquals("vault.token-1$suffix", WebDavSyncProvider.atomicTmpPath("vault", "token-1"))
+        // 末段以「.」开头且无主干（点文件名）：按无扩展名处理，主干不得被切空
+        assertEquals("a/b/.vault.token-1$suffix", WebDavSyncProvider.atomicTmpPath("a/b/.vault", "token-1"))
+        // 目录段含「.」不影响末段扩展名判定
+        assertEquals(
+            "dir.v2/vault.token-1$suffix.kdbx",
+            WebDavSyncProvider.atomicTmpPath("dir.v2/vault.kdbx", "token-1")
+        )
+        // 随机 token 成分保证临时名唯一（并发事务互不覆盖）
+        val a = WebDavSyncProvider.atomicTmpPath("vault.kdbx", "token-A")
+        val b = WebDavSyncProvider.atomicTmpPath("vault.kdbx", "token-B")
+        assertTrue("不同 token 必须产生不同临时名", a != b)
     }
 
     @Test

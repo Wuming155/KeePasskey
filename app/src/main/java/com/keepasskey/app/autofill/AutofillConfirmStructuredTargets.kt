@@ -56,3 +56,10 @@ internal fun buildStructuredFieldValues(
         if (!raw.isNullOrEmpty()) put(autofillId, raw)
     }
 }
+
+/**
+ * 从认证 Intent 读取目标输入框 id（服务端下发；缺失表示本次请求未识别到该角色）。
+ * `ISSUE-P3-390` 起确认页与选择器共用一份（原各自持有 private 副本，零行为变更）。
+ */
+internal fun Intent.readAutofillId(key: String): AutofillId? =
+    getParcelableExtra(key, AutofillId::class.java)

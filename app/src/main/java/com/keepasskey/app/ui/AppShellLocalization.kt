@@ -3,6 +3,8 @@ package com.keepasskey.app.ui
 import android.content.Context
 import android.content.res.Configuration
 import com.keepasskey.app.data.repository.AppLanguage
+import com.keepasskey.app.data.repository.SettingsRepository
+import kotlinx.coroutines.flow.first
 import java.util.Locale
 
 /**
@@ -35,3 +37,17 @@ internal fun localizedContextOf(context: Context, base: Configuration, locale: L
     } else {
         context.createConfigurationContext(localizedConfigurationOf(base, locale))
     }
+
+/**
+ * 非 Compose 装配点的本地化上下文快捷派生（`ISSUE-P3-390`：确认页 / 选择器 / TOTP 通知共用）——
+ * `appLanguage` 在 DataStore，须挂起读取快照；返回上下文的 `getString` 即按应用内语言取文案。
+ * 语言偏好为 SYSTEM 时返回原上下文（跟随系统），与主外壳口径一致。
+ */
+internal suspend fun localizedContextForAppLanguage(
+    context: Context,
+    settings: SettingsRepository
+): Context = localizedContextOf(
+    context,
+    context.resources.configuration,
+    localeFor(settings.getSettings().first().appLanguage)
+)

@@ -12,29 +12,41 @@ import java.io.File
  * **只读门控与回程接线**是纯接线事实，源码守卫即可锁定——漏掉任何一条，
  * 要么出现「只读会话也能点新建」的假入口（`PD-50`），要么新建后回不到填充链路
  * （保存成功却把用户丢在空结果页）。
+ *
+ * `ISSUE-P3-390` 起内容树拆至 [AutofillPickerLocalizedContent]，门控与回程锚点
+ * 分布在 Activity 与内容树两文件——守卫按职责分别扫描。
  */
 class AutofillPickerCreateNewWiringTest {
 
-    @Test
-    fun `空态新建入口必须由只读会话门控`() {
-        val activity = stripCommentsOnly(
+    private val activity: String
+        get() = stripCommentsOnly(
             File("src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt").readText()
         )
+
+    private val content: String
+        get() = stripCommentsOnly(
+            File("src/main/java/com/keepasskey/app/autofill/AutofillPickerLocalizedContent.kt").readText()
+        )
+
+    @Test
+    fun `空态新建入口必须由只读会话门控`() {
         assertTrue(
             "canCreateNew 必须取自 isSessionReadOnly 的反值（只读不呈现，PD-50 / PD-51 裁决 4）",
-            activity.contains("canCreateNew = !vaultRepository.isSessionReadOnly()")
+            content.contains("canCreateNew = !vaultRepository.isSessionReadOnly()")
         )
         assertTrue(
-            "onCreateNew 必须接线草稿页拉起（completed 防重入）",
-            activity.contains("onCreateNew = {") && activity.contains("draftLauncher.launch(")
+            "Activity 必须把 onCreateNew 回程接到内容树（completed 防重入）",
+            activity.contains("onCreateNew = ::launchDraftCreate") ||
+                content.contains("onCreateNew = {") || content.contains("onCreateNew()")
+        )
+        assertTrue(
+            "草稿拉起必须经 draftLauncher.launch（completed 防重入）",
+            activity.contains("draftLauncher.launch(")
         )
     }
 
     @Test
     fun `新建完成后必须复用既有 confirmAndFill 交付链`() {
-        val activity = stripCommentsOnly(
-            File("src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt").readText()
-        )
         assertTrue(
             "草稿回程必须经 ActivityResultLauncher（不得用已废弃的 onActivityResult）",
             activity.contains("ActivityResultContracts.StartActivityForResult()")

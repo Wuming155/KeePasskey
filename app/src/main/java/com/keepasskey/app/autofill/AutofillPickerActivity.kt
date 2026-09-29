@@ -6,20 +6,16 @@ import android.view.autofill.AutofillId
 import android.widget.RemoteViews
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.fragment.app.FragmentActivity
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricStatus
+import com.keepasskey.app.ui.localizedContextForAppLanguage
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -78,6 +74,10 @@ class AutofillPickerActivity : FragmentActivity() {
     @Inject
     lateinit var totpPostFillActions: AutofillPostFillTotpActions
 
+    // ISSUE-P3-390 AC①：应用内语言快照通道（选择器页不经主外壳）
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+
     private val viewModel: AutofillPickerViewModel by viewModels()
 
     private var completed = false
@@ -108,42 +108,38 @@ class AutofillPickerActivity : FragmentActivity() {
         // VM 不再于 init 自动装载，否则按需创建的二次确认页会被动付同样的成本。
         viewModel.loadEntries()
 
-        setContent {
-            var query by remember { mutableStateOf("") }
-            val entries by viewModel.entries.collectAsStateWithLifecycle()
-            val results = remember(query, entries) { AutofillEntrySearch.filter(entries, query) }
-
-            ApplyObscuredTouchFilter()
-            AutofillPickerScreen(
-                query = query,
-                onQueryChange = { query = it },
-                results = results,
-                onPick = ::confirmAndFill,
-                onCancel = ::finish,
-                // ISSUE-P2-70：强制展示请求方身份（包名 / 应用名 / 签名摘要 / 表单自报域）
-                requester = requester,
-                // 仅在本次请求确实识别到对应框时提供屏蔽入口（否则是无对象的假按钮）
-                canBlockUsername = readAutofillId(EXTRA_USERNAME_ID) != null,
-                canBlockPassword = readAutofillId(EXTRA_PASSWORD_ID) != null,
-                onBlockField = ::blockFieldAndFinish,
-                // ISSUE-P3-345 / PD-51：只读会话不呈现新建入口（控件不许骗人）；
-                // 入口 Intent 构造集中在 PasswordDraftActivity.createIntent
-                // ISSUE-P3-376：无匹配就地新建入口开关（默认开启）——关闭即空态不呈现新建按钮
-                canCreateNew = !vaultRepository.isSessionReadOnly() &&
-                    settingsStore.isAutofillOfferCreateEntryEnabled(),
-                onCreateNew = {
-                    if (!completed) {
-                        draftLauncher.launch(
-                            com.keepasskey.app.passkey.PasswordDraftActivity.createIntent(
-                                this@AutofillPickerActivity,
-                                callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty(),
-                                webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN).orEmpty()
-                            )
-                        )
-                    }
-                }
-            )
+        // ISSUE-P3-390 AC①：选择器页不经主外壳——语言快照就绪后经 AppShellLocalization 派生本地化
+        // 上下文并同源包装（与解锁入口同法），页内文案随应用内语言。
+        // 内容树拆至 [AutofillPickerLocalizedContent]（行数分档）。
+        lifecycleScope.launch {
+            val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
+            setContent {
+                AutofillPickerLocalizedContent(
+                    localizedContext = localizedContext,
+                    requester = requester,
+                    intent = intent,
+                    viewModel = viewModel,
+                    vaultRepository = vaultRepository,
+                    settingsStore = settingsStore,
+                    isCompleted = { completed },
+                    onPick = ::confirmAndFill,
+                    onCancel = ::finish,
+                    onBlockField = ::blockFieldAndFinish,
+                    onCreateNew = ::launchDraftCreate
+                )
+            }
         }
+    }
+
+    /** ISSUE-P3-345：就地新建入口（Intent 构造集中在 PasswordDraftActivity.createIntent） */
+    private fun launchDraftCreate() {
+        draftLauncher.launch(
+            com.keepasskey.app.passkey.PasswordDraftActivity.createIntent(
+                this,
+                callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty(),
+                webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN).orEmpty()
+            )
+        )
     }
 
     /** ISSUE-P2-70：解析本次填充的请求方身份（解析体下沉 [resolveAutofillPickerRequester] 以控分档） */
@@ -203,6 +199,7 @@ class AutofillPickerActivity : FragmentActivity() {
             // ISSUE-P3-52：可用认证器时以 Keystore 认证绑定密钥的 Cipher 发起（CryptoObject），
             // 本次放行与生物识别密码学绑定；无可用认证器 / 密钥不可用 / 结果未携带绑定 Cipher
             // 时退化为受保护窗口内的显式点选确认（既有退化语义，不回归）。
+            val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
             val authStatus = biometricAuthManager.canAuthenticate(
                 this@AutofillPickerActivity,
                 BiometricAuthManager.UNLOCK_AUTHENTICATORS
@@ -215,8 +212,8 @@ class AutofillPickerActivity : FragmentActivity() {
             if (authStatus == BiometricStatus.AVAILABLE && authCipher != null) {
                 biometricAuthManager.authenticate(
                     activity = this@AutofillPickerActivity,
-                    title = getString(R.string.autofill_confirm_title),
-                    subtitle = getString(R.string.autofill_picker_confirm_sub),
+                    title = localizedContext.getString(R.string.autofill_confirm_title),
+                    subtitle = localizedContext.getString(R.string.autofill_picker_confirm_sub),
                     authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS,
                     cipher = authCipher
                 ) { result ->
@@ -287,7 +284,7 @@ class AutofillPickerActivity : FragmentActivity() {
             // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
             // ISSUE-P3-298 ⑤：表单显式声明 OTP 框时按所选条目现算 TOTP 交付（仅 TOTP；
             // HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值）
-            val otpId = readAutofillId(EXTRA_OTP_ID)
+            val otpId = intent.readAutofillId(EXTRA_OTP_ID)
             val otpCode = if (otpId != null) {
                 vaultRepository.calculateEntryTotp(entryId)
                     ?.takeIf { !it.isHotp }?.code.orEmpty()
@@ -299,16 +296,17 @@ class AutofillPickerActivity : FragmentActivity() {
             val entryTitle = runCatching {
                 vaultRepository.getKdbxEntry(entryId)?.title.orEmpty()
             }.getOrDefault("")
+            val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
             val dataset = buildAuthenticationResultDataset(
                 packageName = packageName,
                 menuTitle = credentials.username.ifBlank {
-                    entryTitle.ifBlank { getString(R.string.autofill_picker_title) }
+                    entryTitle.ifBlank { localizedContext.getString(R.string.autofill_picker_title) }
                 },
                 menuSubtitle = if (credentials.username.isNotBlank()) entryTitle else "",
                 username = credentials.username,
                 password = credentials.password,
-                usernameId = readAutofillId(EXTRA_USERNAME_ID),
-                passwordId = readAutofillId(EXTRA_PASSWORD_ID),
+                usernameId = intent.readAutofillId(EXTRA_USERNAME_ID),
+                passwordId = intent.readAutofillId(EXTRA_PASSWORD_ID),
                 otpId = otpId,
                 otpCode = otpCode
             )
@@ -358,9 +356,6 @@ class AutofillPickerActivity : FragmentActivity() {
         val written = callerTrustStore.trust(callingPackage, digests.primary)
         AppLog.i(TAG, "android:// 维度首次绑定写入结果=$written")
     }
-
-    private fun readAutofillId(key: String): AutofillId? =
-        intent.getParcelableExtra(key, AutofillId::class.java)
 
     companion object {
         private const val TAG = "AutofillPicker"

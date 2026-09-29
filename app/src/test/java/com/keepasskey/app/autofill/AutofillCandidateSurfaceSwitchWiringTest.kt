@@ -102,7 +102,8 @@ class AutofillCandidateSurfaceSwitchWiringTest {
 
     @Test
     fun `新建入口开关被选择器与CM装配两处消费`() {
-        val picker = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt")
+        // ISSUE-P3-390 拆分后：选择器 canCreateNew 消费点在内容树文件（Activity 只透传 onCreateNew）
+        val picker = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillPickerLocalizedContent.kt")
         val assembler = readSource("app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt")
 
         assertTrue(
@@ -113,7 +114,7 @@ class AutofillCandidateSurfaceSwitchWiringTest {
             "CM 第五门控必须读该开关",
             assembler.contains("offerCreateEntryEnabled = settingsStore.isAutofillOfferCreateEntryEnabled()")
         )
-        // 消费点计数 = 2（选择器 + CM），防「只接一处」
+        // 消费点计数 = 2（选择器内容树 + CM），防「只接一处」
         val pickerCount = Regex("""isAutofillOfferCreateEntryEnabled\(\)""").findAll(picker).count()
         val assemblerCount = Regex("""isAutofillOfferCreateEntryEnabled\(\)""").findAll(assembler).count()
         assertEquals(1, pickerCount)

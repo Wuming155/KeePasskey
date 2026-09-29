@@ -5,6 +5,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.app.ui.localizedContextForAppLanguage
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -32,6 +34,8 @@ import javax.inject.Singleton
 class TotpNotificationPublisher @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsStore: ExtendedSettingsStore,
+    // ISSUE-P3-390 AC②：通知文案随应用内语言（与确认页/选择器同法经 AppShellLocalization）
+    private val settingsRepository: SettingsRepository,
     private val permissionPrompter: NotificationPermissionPrompter
 ) {
 
@@ -43,7 +47,7 @@ class TotpNotificationPublisher @Inject constructor(
      * @param nowMillis 时间源注入，便于单测断言剩余秒数边界
      * @return true 表示已交给系统通知栏；false 表示被闸门拦下或系统拒绝（静默降级，绝不抛异常）
      */
-    fun publish(
+    suspend fun publish(
         code: String,
         periodSeconds: Int,
         nowMillis: Long = System.currentTimeMillis()
@@ -54,15 +58,18 @@ class TotpNotificationPublisher @Inject constructor(
             return false
         }
 
+        // ISSUE-P3-390 AC②：通知构建与确认页/选择器同法接线 AppShellLocalization
+        // （appLanguage=EN 时文案必须为英文，不得随系统语言回落）
+        val localizedContext = localizedContextForAppLanguage(context, settingsRepository)
         val remainingSeconds = NotificationGate.totpRemainingSeconds(nowMillis, periodSeconds)
         val notification = NotificationCompat.Builder(
             context,
             NotificationChannelSpec.AUTOFILL_TOTP.channelId
         )
             .setSmallIcon(NotificationChannels.SMALL_ICON_RES)
-            .setContentTitle(context.getString(R.string.notification_totp_title))
+            .setContentTitle(localizedContext.getString(R.string.notification_totp_title))
             .setContentText(
-                context.getString(R.string.notification_totp_text, code, remainingSeconds)
+                localizedContext.getString(R.string.notification_totp_text, code, remainingSeconds)
             )
             .setContentIntent(NotificationIntents.openAppForTotp(context))
             .setCategory(NotificationCompat.CATEGORY_STATUS)

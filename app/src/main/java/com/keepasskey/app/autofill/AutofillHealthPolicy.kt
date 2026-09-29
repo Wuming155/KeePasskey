@@ -14,7 +14,13 @@ enum class AutofillHealthIssue {
     /** 应用内「旧版自动填充服务」开关已关闭 */
     APP_DISABLED,
 
-    /** 系统当前未把本应用选为自动填充服务 */
+    /**
+     * 系统当前未把本应用选为自动填充服务。
+     *
+     * `ISSUE-P3-391` 起该读数为**双路合成**（manager 优先 + `Settings.Secure` 回退复核，
+     * 口径见 [AutofillHealthPolicy.resolveSystemEnabled]）：不再是单源判定，但两路**皆**
+     * 读不到时仍会如实落到本项（不谎报正常）。
+     */
     SYSTEM_NOT_ENABLED,
 
     /** Credential Manager 通道不可用（依赖缺失 / 运行环境异常） */
@@ -111,4 +117,32 @@ object AutofillHealthPolicy {
         credentialManagerAvailable = credentialManagerAvailable,
         credentialProviderRegistration = credentialProviderRegistration
     )
+
+    /**
+     * 系统启用态**双路合成**（`ISSUE-P3-391` AC①）。
+     *
+     * 单源判定（仅 `AutofillManager.hasEnabledAutofillServices()`）在部分厂商 ROM 上会因查询
+     * 延迟或返回空而把「已启用」误报成「未启用」（Monica `AutofillServiceChecker.kt:172`
+     * 同坑实证），其修复即本口径：manager 读数为 false 时回退读 `Settings.Secure` 的
+     * `autofill_service` 复核。口径落定如下：
+     *
+     * - manager 读数已启用 ⇒ 直接判启用（误报方向只在 false 一侧，无须回退）；
+     * - manager 读数未启用 ⇒ 以回退读数与本应用组件名**精确比对**为准（[ownServiceIds]
+     *   收录组件名两种落盘形态——全名 / 短名，哪系 ROM 落哪种不做臆测）；
+     * - 两路皆读不到（回退读取抛异常 / 值为空、其他服务当选、组件名推导失败）⇒
+     *   如实判「未启用」，与原单源失败口径一致，**不**谎报正常（同 `ISSUE-P2-239` 反例纪律）。
+     *
+     * 纯函数，JVM 可测；平台读取（`AutofillManager` / `Settings.Secure`）单点在
+     * [com.keepasskey.app.autofill.AutofillHealthProbe]。
+     *
+     * **待真机实测（AC③，2026-09-29 整改时无真机）**：哪些厂商 ROM 复现 manager 延迟/空值、
+     * `autofill_service` 内部键在各 ROM 上是否可读（本仓先例：内部键 `credential_service`
+     * 真机读取抛 `SecurityException`，见 `CredentialProviderHealthProbe` KDoc），均待真机实测
+     * 后回填本注释留痕。
+     */
+    fun resolveSystemEnabled(
+        managerEnabled: Boolean,
+        secureSetting: String?,
+        ownServiceIds: Set<String>
+    ): Boolean = managerEnabled || (!secureSetting.isNullOrBlank() && secureSetting in ownServiceIds)
 }

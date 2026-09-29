@@ -42,16 +42,18 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（10 项）
+## P2 中危缺陷与协议/测试缺口（9 项）
 
-> **开放项 10 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
+> **开放项 9 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
 > ① `ISSUE-P2-378` —— 外部修改检测与重载提示缺失（外部改动后保存静默覆盖）；
 > ② `ISSUE-P2-379` —— 前台闲置自动锁定缺失；
 > ③ `ISSUE-P2-380` —— 结构化卡片填充与内置信用卡模板脱节（§355 遗留「另立条目」落账）；
-> ④ `ISSUE-P2-381` —— WebDAV MOVE 覆盖 409 无兜底；⑤ `ISSUE-P2-382` —— 事务上传临时名改扩展名；
-> ⑥ `ISSUE-P2-383` —— Autofill webDomain 混域无一致性校验；⑦ `ISSUE-P2-384` —— 字段拉黑后认证回传不复检；
-> ⑧ `ISSUE-P2-385` —— customData 不参与 KDBX 合并；⑨ `ISSUE-P2-386` —— 同名附件保存折叠；
-> ⑩ `ISSUE-P2-387` —— passkey signCount 多设备同库分叉。
+> ④ `ISSUE-P2-381` —— WebDAV MOVE 覆盖 409 无兜底；
+> ⑤ `ISSUE-P2-383` —— Autofill webDomain 混域无一致性校验；⑥ `ISSUE-P2-384` —— 字段拉黑后认证回传不复检；
+> ⑦ `ISSUE-P2-385` —— customData 不参与 KDBX 合并；⑧ `ISSUE-P2-386` —— 同名附件保存折叠；
+> ⑨ `ISSUE-P2-387` —— passkey signCount 多设备同库分叉。
+> 另：2026-09-29 两轮对照登记的 `ISSUE-P2-382`（事务上传临时名改扩展名）已于 §358 整条闭环
+> （AC③ 真实服务器覆盖写链路待 P2-381 同批实测，见批次 §1.3）。
 > 来源：2026-09-28 参考项目对照调研（Monica / KeePassDX / keepass2android，提出者/独立核实员/基线盘点
 > 三源隔离核实），共 12 条候选、11 条核实成立后登记（P2-378~380 与 P3-381~388）；
 > 候选第 12 条「云同步协议广度（WebDAV+S3 之外的主流网盘/SSH 通道）」经用户明示**不登记**。
@@ -167,20 +169,6 @@
   ②409/423 与 412 分开报错文案；③不采纳兜底则按规则 6.1 在《已知工程限界》登记
   「MOVE 覆盖遇 409 服务器不可用」并写明触发面。
 
-### ISSUE-P2-382：WebDAV 事务上传临时名改掉原扩展名——按扩展名过滤的服务器拒收
-
-- **状态（2026-09-29 登记）**：开放。源自 keepass2android git 提交 `b1ae0482`（2026-04-02）。
-- **背景与整改依据**：`WebDavSyncProvider.kt:308,416`（快照行号）事务上传临时名形如
-  `db.kdbx.<uuid>.kpktmp`——末段扩展名被改成 `.kpktmp`。keepass2android 同型缺陷实测证明存在
-  按扩展名限制上传的服务器（其修复 `b1ae0482` = 把 `.tmp` 插到原扩展名之前、保留原扩展名），
-  本仓临时命名与该修复前形态一致。
-- **核实时间点 + 核实方式**：2026-09-29 参考项目对照工作流：排查子代理定位、独立复核子代理实读
-  `:308,416` 确认命名形态；《产品裁决登记》《已知工程限界》无本面取舍。证据见
-  [`references/参考项目Git历史对照/02-keepass2android.md`](references/参考项目Git历史对照/02-keepass2android.md)。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/webdav/WebDavSyncProvider.kt`。
-- **AC**：①临时名改为保留原扩展名的形态（`.tmp` 插在原扩展名前，或等效方案，评估对端过滤影响后定）；
-  ②单测锁定命名形态防回潮；③与 P2-381 一并验证同一台服务器上的覆盖写链路。
-
 ### ISSUE-P2-383：Autofill 结构树 webDomain 混域无一致性校验——受信浏览器下凭据可填进异域 iframe 字段
 
 - **状态（2026-09-29 登记）**：开放。源自 keepass2android git 提交 `e2e7666c`（2018-12-10）。
@@ -279,9 +267,9 @@
   （「同库多设备自产通行密钥计数器分叉」）；②不得采纳「断言恒写 0」（PD-49 已实测否证）；
   ③评估结论落《产品裁决登记》或《已知工程限界》后按结论实施或归档。
 
-## P3 低危问题、特性接线与体验优化（14 项）
+## P3 低危问题、特性接线与体验优化（10 项）
 
-> **开放项 14 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
+> **开放项 10 条**（这里只列**各条还欠什么**；历史闭环流水一律见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
 > ① `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）；
 > ② ~ ⑧ `ISSUE-P3-381` ~ `ISSUE-P3-387` —— 2026-09-28 参考项目对照调研登记的 7 条
 > 特性/体验缺口（回前台同步探测、重复条目去重、Steam TOTP、.kdbx 并入、库级 Meta 编辑、
@@ -289,9 +277,10 @@
 > 用户裁决见 P2 区引言——原第 8 条 `ISSUE-P3-388`（插件宿主体系）经用户 2026-09-29 裁决
 > 「不接入第三方插件」，按其 AC② 登记 [`PD-56`](architecture/产品裁决登记.md) 并归档
 > [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §357；
-> ⑨ ~ ⑭ `ISSUE-P3-389` ~ `ISSUE-P3-394` —— 2026-09-29 参考项目两轮对照（注释踩坑标注扫描 +
-> git 历史修复/防护挖掘）登记的 6 条（过期时间时区、应用内语言接线、Autofill 启用态双路核对、
-> 原生 KDF 降级可观测、填充链过期检查、{REF} 强度评估展开），来源与核实方式见各条。
+> ⑨ `ISSUE-P3-392` —— 原生 KDF 探活失败静默回落不可观测；
+> ⑩ `ISSUE-P3-393` —— 填充链（Autofill + CM）不检查条目过期。
+> 另：2026-09-29 两轮对照登记的 `ISSUE-P3-389` / `P3-390` / `P3-391` / `P3-394`
+> 四条已于 §358 整条闭环（P3-391 的 OEM 真机面为遗留验证项，见批次 §1.3）。
 > Monica 自动填充吸收已全部闭环：`ISSUE-P3-371` / `ISSUE-P3-372`（§352）、
 > `ISSUE-P3-373` / `ISSUE-P3-376`（§353）、`ISSUE-P3-374`（§354）、`ISSUE-P3-375`（§355）、
 > `ISSUE-P3-377` 分值档对账（§356）；
@@ -451,54 +440,6 @@
 - **AC**：①先评估实施范围（接口加浏览成员：仅 WebDAV 先行 vs 全协议）并留痕后再动手；
   ②SSRF 口径不变（PD-02 端点默认拒绝，浏览目标同受约束）；③分页/大目录边界；④中英文案。
 
-### ISSUE-P3-389：条目过期时间 DatePicker 时区解释错位——双向差一天
-
-- **状态（2026-09-29 登记）**：开放。源自 KeePassDX `TimeUtil.kt:34` 注释标注（该坑 KeePassDX 已修复）。
-- **背景与整改依据**：`EntryEditExpiryEditor.kt:89`（快照行号）把 DatePicker 回传的
-  `selectedDateMillis`（UTC 语义毫秒）按**本地时区**解释为 UTC 时刻，双向转换都会差一天
-  （非 UTC 时区用户编辑过期时间时偏移一天）。KeePassDX 同坑修复 = 按 UTC 取年月日再重建毫秒。
-- **核实时间点 + 核实方式**：2026-09-29 参考项目对照工作流：独立复核子代理实读该位置确认
-  「恰好踩反」；现无守卫测试。证据见
-  [`references/参考项目踩坑对照/02-KeePassDX.md`](references/参考项目踩坑对照/02-KeePassDX.md)。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditExpiryEditor.kt`。
-- **AC**：①双向统一按 UTC 取年月日（或用 material3 1.4+ 的 `getSelectedDate()` /
-  `setSelectedDate(LocalDate)`）；②抽纯函数并加 `America/New_York` 与 `Asia/Shanghai`
-  两端参数化单测锁定。
-
-### ISSUE-P3-390：应用内语言未覆盖 Autofill 确认页/选择器与 TOTP 通知——强制英文时仍随系统语言
-
-- **状态（2026-09-29 登记）**：开放。源自 keepass2android `Util.cs:60` 注释标注
-  （Xamarin bug 11182：一种语言设置机制未覆盖全部 surface 的同型坑）。
-- **背景与整改依据**：应用内语言 `appLanguage` 只经 Compose 壳包装（`KeePasskeyApp.kt:77-85`）
-  与两个解锁 Activity（`createConfigurationContext`，`AppShellLocalization.kt:32-37`）生效；
-  `AutofillConfirmActivity.kt:119-127/146` 与 `AutofillPickerActivity.kt:218-219/305` 裸用
-  `getString`（`rg "appLanguage|localeFor|AppShellLocalization"` 于两文件零命中），
-  `TotpNotificationPublisher.kt:63-65` 通知文案同样未接线 ⇒ 强制英文时确认页 / 选择器 / 通知
-  仍随系统语言（行号为快照）。
-- **核实时间点 + 核实方式**：2026-09-29 参考项目对照工作流：独立复核子代理实读四处并复跑
-  零命中检索。证据见
-  [`references/参考项目踩坑对照/03-keepass2android.md`](references/参考项目踩坑对照/03-keepass2android.md)。
-- **涉及文件**：`app/` AutofillConfirmActivity / AutofillPickerActivity / TotpNotificationPublisher、
-  `AppShellLocalization`。
-- **AC**：①确认页 / 选择器按 `AppShellLocalization` 同法包 `createConfigurationContext`
-  （勿重复列入已接线的 `CredentialUnlockActivity`）；②通知构建同法接线；③用例锁定
-  `appLanguage=EN` 时三处文案为英文。
-
-### ISSUE-P3-391：Autofill 启用态单路判定——部分 ROM 返回延迟/空值致健康卡误报
-
-- **状态（2026-09-29 登记）**：开放。源自 Monica `AutofillServiceChecker.kt:172` 注释标注。
-- **背景与整改依据**：`AutofillHealthProbe.kt:54`（快照行号）单用
-  `AutofillManager.hasEnabledAutofillServices()` 判定系统启用态，无任何回退；
-  Monica 同坑实证部分厂商 ROM 上该查询延迟或返回空导致误报未启用，其修复 = 回退读
-  `Settings.Secure` 的 `autofill_service` 双路核对。本仓影响面限设置页健康卡诊断展示。
-- **核实时间点 + 核实方式**：2026-09-29 参考项目对照工作流：独立复核子代理实读该位置确认
-  单路判定。证据见
-  [`references/参考项目踩坑对照/04-Monica.md`](references/参考项目踩坑对照/04-Monica.md)。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/autofill/AutofillHealthProbe.kt`。
-- **AC**：①manager 读数为 false 时回退复核 `Settings.Secure` 的 `autofill_service`
-  （Monica 同款）或延迟重试；②至少在 `AutofillHealthPolicy` 文案注明单源判定口径；
-  ③OEM 行为面（哪些 ROM 复现）实测后留痕。
-
 ### ISSUE-P3-392：原生 KDF 探活失败静默回落 JCE/BC——性能骤降全程不可观测
 
 - **状态（2026-09-29 登记）**：开放（先做「日志 vs 登记限界」二选一裁决）。源自 KeePass
@@ -532,21 +473,3 @@
 - **涉及文件**：`app/` autofill 候选面与 CM 凭据装配面。
 - **AC**：①先裁决口径（过期条目直接排除 vs 降权 + 确认）并留痕；②两通道一致实施；
   ③用例覆盖已过期 / 未过期两分支（含过期当日的边界）。
-
-### ISSUE-P3-394：健康检查强度评估不展开 {REF} 引用——按引用原文评分失真
-
-- **状态（2026-09-29 登记）**：开放。源自 keepassxc 提交 `e888fec0`
-  （「Fix password strength evaluation for referenced passwords (#13479)」）。
-- **背景与整改依据**：`HealthCheckEngine.kt:111-128`（快照行号）强度评估直接读
-  `entry.password` 字面，无 `{REF}` 展开；而填充通道已按需多级展开引用
-  （`AutofillDatasetBuilders.kt:330-332` 经 `FieldReferenceEngine`）。口令为
-  `{REF:P@T:…}` 的条目会被按引用原文评强度，得分失真。keepassxc 同坑（其原始缺陷为
-  只解析单级占位符，修复 = 多级解析）。
-- **核实时间点 + 核实方式**：2026-09-29 参考项目对照工作流：独立复核子代理实读两处对比
-  「填充展开 / 健康检查不展开」的不一致。证据见
-  [`references/参考项目Git历史对照/04-keepassxc.md`](references/参考项目Git历史对照/04-keepassxc.md)。
-- **涉及文件**：`database/src/main/java/com/keepasskey/database/audit/HealthCheckEngine.kt`、
-  `core/` FieldReferenceEngine。
-- **AC**：①强度评估前经 `FieldReferenceEngine` 多级展开；②展开结果为敏感数据：
-  只走 CharArray/ByteArray 且用后显式清零，**严禁**落地 String 或进日志（敏感数据铁律）；
-  ③用例覆盖单级 / 多级 / 环引用（环引用须终止不悬挂）。

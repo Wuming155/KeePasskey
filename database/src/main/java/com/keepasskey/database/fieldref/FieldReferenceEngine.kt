@@ -34,6 +34,11 @@ import java.util.TreeMap
  *   以维持 M1 投影层「不把密码明文物化进 UI 状态流」的约束。
  *
  * 调用时机约定：投影层不做展开（投影只下发原文），展开结果由状态层按需装配。
+ *
+ * ISSUE-P3-394：另有**口令消费点的 Char 通道** [FieldReferenceCharExpansion]——健康检查的
+ * 强度评估需要展开后的真实口令，而本引擎的产物是 `String`（敏感数据铁律禁止口令明文落地
+ * String），故该通道以 `CharArray` 承载展开结果、中间副本用毕清零；解析语义、三闸门常量、
+ * [RefIndex] / [ExpansionBudget] 与本引擎直接共享，任一侧语义改动须同步核对另一侧。
  */
 object FieldReferenceEngine {
 
@@ -174,7 +179,8 @@ object FieldReferenceEngine {
      * 超限**不抛异常**：调用方返回该引用的原文（`match.value`），与未命中 / 超深引用的
      * 既有保守语义一致（宁缺毋错，绝不吞掉用户数据）。
      */
-    private class ExpansionBudget {
+    /** `internal` 供同包 Char 通道（[FieldReferenceCharExpansion]）共享，语义见上（ISSUE-P3-394） */
+    internal class ExpansionBudget {
         private var expansions = 0
         private var producedChars = 0L
 
@@ -209,11 +215,13 @@ object FieldReferenceEngine {
      *   故不会像 `lowercase()` 那样在希腊语末位 sigma 等码点上改变等价类），
      *   同值只保留**文档序首个**条目（`TreeMap` 的 `containsKey` 走同一比较器）。
      */
-    private class RefIndex(
+    /** `internal` 供同包 Char 通道（[FieldReferenceCharExpansion]）共享，索引语义见上（ISSUE-P3-394） */
+    internal class RefIndex(
         root: KdbxGroup,
         private val valueOf: (KdbxEntry, RefField) -> String?
     ) {
-        private val entries: List<KdbxEntry> by lazy { root.allEntries() }
+        /** `internal` 供 Char 通道做 `SearchIn=P` 的 Char 区域比较线性扫描（文档序与本索引一致） */
+        internal val entries: List<KdbxEntry> by lazy { root.allEntries() }
         private val byField = mutableMapOf<RefField, TreeMap<String, KdbxEntry>>()
 
         fun find(field: RefField, text: String): KdbxEntry? = indexOf(field)[text]
@@ -292,7 +300,12 @@ object FieldReferenceEngine {
         else -> RefField.UUID
     }
 
-    private fun valueOf(entry: KdbxEntry, field: RefField): String? = when (field) {
+    /**
+     * `internal` 供同包 Char 通道共享取值语义（ISSUE-P3-394）。
+     * 注意：`P` 面会物化 String——Char 通道只在**取值面为公开字段**时调用本函数，
+     * 口令取值走 `ProtectedString.readChars()`（用毕清零）。
+     */
+    internal fun valueOf(entry: KdbxEntry, field: RefField): String? = when (field) {
         RefField.TITLE -> entry.title
         RefField.USER_NAME -> entry.userName
         RefField.PASSWORD -> entry.password?.readString()

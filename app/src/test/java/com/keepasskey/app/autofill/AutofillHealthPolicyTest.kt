@@ -158,4 +158,96 @@ class AutofillHealthPolicyTest {
             }
         )
     }
+
+    // ========== ISSUE-P3-391：系统启用态双路合成（AC①） ==========
+
+    /**
+     * [AutofillHealthPolicy.resolveSystemEnabled] 的判定用例。
+     *
+     * 本项要防的失效形态是 Monica 同坑：部分厂商 ROM 上 manager 查询延迟/返回空，
+     * 单源 false 把「已启用」误报成「未启用」。输入侧取值（manager 两态 × 回退读数
+     * 空缺 / 本应用全名 / 本应用短名 / 其他服务）穷举如下；平台读取一侧
+     * （`AutofillManager` / `Settings.Secure` 的调用与异常收敛）由
+     * [AutofillHealthProbeWiringTest] 源码守卫与真机读数负责。
+     */
+    private val ownServiceIds = setOf(
+        "com.keepasskey/com.keepasskey.app.autofill.KeePasskeyAutofillService",
+        "com.keepasskey/.app.autofill.KeePasskeyAutofillService"
+    )
+
+    @Test
+    fun `manager 读数已启用时直接判启用且回退读数不参与`() {
+        assertTrue(
+            AutofillHealthPolicy.resolveSystemEnabled(
+                managerEnabled = true, secureSetting = null, ownServiceIds = ownServiceIds
+            )
+        )
+        assertTrue(
+            "回退读到其他服务也不得推翻 manager 的「已启用」",
+            AutofillHealthPolicy.resolveSystemEnabled(
+                managerEnabled = true,
+                secureSetting = "com.other.app/com.other.app.OtherService",
+                ownServiceIds = ownServiceIds
+            )
+        )
+    }
+
+    @Test
+    fun `manager 读数未启用且回退读到本应用全名时复核为启用`() {
+        assertTrue(
+            AutofillHealthPolicy.resolveSystemEnabled(
+                managerEnabled = false,
+                secureSetting = "com.keepasskey/com.keepasskey.app.autofill.KeePasskeyAutofillService",
+                ownServiceIds = ownServiceIds
+            )
+        )
+    }
+
+    @Test
+    fun `manager 读数未启用且回退读到本应用短名时复核为启用`() {
+        assertTrue(
+            "各 ROM 落盘形态不做臆测：全名与短名都必须被接受",
+            AutofillHealthPolicy.resolveSystemEnabled(
+                managerEnabled = false,
+                secureSetting = "com.keepasskey/.app.autofill.KeePasskeyAutofillService",
+                ownServiceIds = ownServiceIds
+            )
+        )
+    }
+
+    @Test
+    fun `manager 读数未启用且回退读到其他服务时判未启用`() {
+        assertFalse(
+            AutofillHealthPolicy.resolveSystemEnabled(
+                managerEnabled = false,
+                secureSetting = "com.other.app/com.other.app.OtherService",
+                ownServiceIds = ownServiceIds
+            )
+        )
+    }
+
+    @Test
+    fun `manager 读数未启用且回退读数空缺时如实判未启用`() {
+        // 两路皆读不到（回退抛异常 → null / 键值为空串）不得谎报「已启用」
+        // （同 ISSUE-P2-239 的反例纪律：把「读不到」当成「正常」是本族最坏的失效形态）
+        listOf(null, "", "   ").forEach { emptySetting ->
+            assertFalse(
+                "回退读数=$emptySetting 不得被判启用",
+                AutofillHealthPolicy.resolveSystemEnabled(
+                    managerEnabled = false, secureSetting = emptySetting, ownServiceIds = ownServiceIds
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `组件名推导失败时回退复核不可用一律判未启用`() {
+        assertFalse(
+            AutofillHealthPolicy.resolveSystemEnabled(
+                managerEnabled = false,
+                secureSetting = "com.keepasskey/com.keepasskey.app.autofill.KeePasskeyAutofillService",
+                ownServiceIds = emptySet()
+            )
+        )
+    }
 }

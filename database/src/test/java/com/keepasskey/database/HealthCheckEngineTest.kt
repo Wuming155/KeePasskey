@@ -7,6 +7,7 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -141,6 +142,87 @@ class HealthCheckEngineTest {
         assertFalse(
             "长随机口令不应被判为 WEAK",
             issues.any { it.riskLevel == PasswordRiskLevel.WEAK }
+        )
+    }
+
+    // ===== ISSUE-P3-394：口令为 {REF} 引用时按展开后的真实口令评强度 =====
+    //
+    // 判据设计：WEAK 描述自带「长度: N」——被引用口令与引用原文长度必然不同，
+    // 借此锁定「展开确实发生」而非「恰好同为弱口令」。测试数据全部为虚构假凭据。
+
+    private fun entryOf(title: String, password: String?): KdbxEntry = KdbxEntry(
+        id = KdbxUuid.random(),
+        fields = buildMap {
+            put(KdbxConstants.Fields.TITLE, ProtectedString(title, isProtected = false))
+            if (password != null) {
+                put(KdbxConstants.Fields.PASSWORD, ProtectedString(password, isProtected = true))
+            }
+        }
+    )
+
+    @Test(timeout = 10_000)
+    fun `单级引用按展开后的真实口令评强度`() {
+        val target = entryOf("RefTarget", "123456")
+        val referrer = entryOf("Referrer", "{REF:P@T:RefTarget}")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(target, referrer))
+
+        val weakReferrer = issues.filter {
+            it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Referrer"
+        }
+        assertTrue(
+            "引用条目必须按被引用口令（弱）判级",
+            weakReferrer.isNotEmpty()
+        )
+        assertTrue(
+            "WEAK 描述的长度必须是展开后的口令长度（6）而非引用原文——据此锁定展开确实发生",
+            weakReferrer.all { it.description.contains("长度: 6") }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `多级引用链按链终端口令评强度`() {
+        val c = entryOf("C-Chain", "123456")
+        val b = entryOf("B-Chain", "{REF:P@T:C-Chain}")
+        val a = entryOf("A-Chain", "{REF:P@T:B-Chain}")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(a, b, c))
+
+        val weakA = issues.filter {
+            it.riskLevel == PasswordRiskLevel.WEAK && it.title == "A-Chain"
+        }
+        assertTrue(
+            "两级引用链必须展开至链终端真实口令（弱）再评强度",
+            weakA.isNotEmpty()
+        )
+        assertTrue(
+            "WEAK 描述的长度必须是链终端口令长度（6）",
+            weakA.all { it.description.contains("长度: 6") }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `环引用展开终止不悬挂且扫描可完成`() {
+        val a = entryOf("RingA", "{REF:P@T:RingB}")
+        val b = entryOf("RingB", "{REF:P@T:RingA}")
+
+        // 能走到断言即「终止不悬挂」（timeout 兜底）：环链无终结值，展开通道在深度上限后
+        // 保守回退引用原文，扫描不得抛错或死循环
+        val issues = HealthCheckEngine.analyzeEntries(listOf(a, b))
+
+        assertNotNull("环引用不得使扫描失败", issues)
+    }
+
+    @Test(timeout = 10_000)
+    fun `引用强口令的条目不因引用原文被误判弱口令`() {
+        val target = entryOf("StrongTarget", "tR7#kL9@mQ2!xZ4&vB6*")
+        val referrer = entryOf("StrongReferrer", "{REF:P@T:StrongTarget}")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(target, referrer))
+
+        assertFalse(
+            "展开后的强口令不得判 WEAK（含展开产物为空的回归防护）",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "StrongReferrer" }
         )
     }
 }

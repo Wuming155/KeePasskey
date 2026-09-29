@@ -64,7 +64,12 @@ class StatefulDavDispatcher : Dispatcher() {
     /** 对象当前 ETag 的完整形态（弱路径带 `W/` 前缀）；无对象时为 null */
     fun etagForm(path: String): String? = etags[path]?.let { if (path in weakEtagPaths) "W/$it" else it }
 
-    fun tmpResidues(): List<String> = files.keys.filter { it.endsWith(".kpktmp") }.toList()
+    /**
+     * 事务上传临时文件残留（ISSUE-P2-382：临时名把 `.kpktmp` 插在原扩展名之前、保留原扩展名，
+     * 如 `vault.<uuid>.kpktmp.kdbx`——末段已是 `.kdbx`，故按中缀匹配而非后缀匹配）。
+     */
+    fun tmpResidues(): List<String> =
+        files.keys.filter { it.contains(com.keepasskey.sync.webdav.WebDavSyncProvider.ATOMIC_TMP_SUFFIX) }.toList()
 
     private fun parseIfEtag(request: RecordedRequest): String? {
         // RFC 4918 tagged list: If: <http://host/path> (["etag"]) / ([W/"etag"])
