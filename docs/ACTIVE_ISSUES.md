@@ -43,70 +43,54 @@
 
 ## P2 中危缺陷与协议/测试缺口（2 项）
 
-> **开放项 2 条**（历史闭环流水见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
-> ① `ISSUE-P2-378` —— 外部修改检测与重载提示缺失（**策略层已落，Compose UI 三选未接线**）；
-> ② `ISSUE-P2-379` —— 前台闲置自动锁定缺失（**策略层 + 设置字段 + AutoLockManager 已落，设置页 UI 行未接线**）。
-> 另：`ISSUE-P2-380` / `P2-383` / `P2-385` / `P2-387` 已于 §360 整条闭环；
-> `ISSUE-P2-381` / `P2-382` / `P2-384` / `P2-386` 已于 §358/§359 闭环（真实 DAV / 设备面残留见批次）。
-
 ### ISSUE-P2-378：已打开库文件的外部修改检测与重载/合并提示缺失——外部改动后保存静默覆盖
 
-- **状态**：开放。**§360 已落策略层**：`VaultFileBaseline` / `VaultFileDriftPolicy` / `ExternalModificationChoice`（mtime ≥1s 粒度 + size 双条件、路径不一致即漂移）+ 主机用例。
-- **剩余 AC**：①打通打开库时的基线留存；②保存时与回到前台两时点实际调用 [VaultFileDriftPolicy.shouldAbortSave]，漂移即 UI 三选（重载 / KdbxMerger 合并 / 放弃），不得静默整树覆盖；③中英提示文案。
-- **背景与整改依据 / 参考对照 / 核实方式 / AC**：见 §360 批次正文与归档前条目快照。
+- **状态**：开放。策略层已落（§360）：`VaultFileBaseline` / `VaultFileDriftPolicy` / `ExternalModificationChoice`（mtime ≥1s 粒度 + size 双条件、路径不一致即漂移）+ 主机用例。
+- **剩余 AC**：①打通打开库时的基线留存；②保存时与回到前台两时点实际调用 `VaultFileDriftPolicy.shouldAbortSave`，漂移即 UI 三选（重载 / KdbxMerger 合并 / 放弃），不得静默整树覆盖；③中英提示文案。
 - **涉及文件**：`app/.../security/VaultFileDriftPolicy.kt`（已落）、`VaultLifecycleCoordinator` / `SessionPersistence` / 保存确认 UI（待接线）。
+- **完整背景与 AC 原文**：见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §360 批次正文附录与登记时快照。
 
 ### ISSUE-P2-379：前台闲置自动锁定缺失——无「前台无操作超时」会话刷新机制
 
-- **状态**：开放。**§360 已落策略层与行为层**：`ForegroundIdleLockPolicy`（时钟回拨 fail-closed、锁定态交互不刷新）+ `UserSettings.autoLockForegroundEnabled`（默认 true）/ `autoLockForegroundTimeoutSeconds`（默认 300）+ `AutoLockManager` 前台调度与交互刷新。
+- **状态**：开放。策略层与行为层已落（§360）：`ForegroundIdleLockPolicy`（时钟回拨 fail-closed、锁定态交互不刷新）+ `UserSettings.autoLockForegroundEnabled`（默认 true）/ `autoLockForegroundTimeoutSeconds`（默认 300）+ `AutoLockManager` 前台调度与交互刷新。
 - **剩余 AC**：设置页 Security 区 UI 行（开关 + 超时档位）与 ViewModel 回调接线；中英文案。
 - **涉及文件**：`SecuritySettingsScreen` / `SettingsViewModel`（待接线）。
 
 ---
 
-## P3 低危问题、特性接线与体验优化（5 项）
+## P3 低危问题、特性接线与体验优化（6 项）
 
-> **开放项 5 条**（历史闭环流水见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）：
-> ① `ISSUE-P3-339` —— **用户指示暂时搁置**（浏览器半环需外部域名与信任链资源）；
-> ② `ISSUE-P3-381` —— 回前台同步探测（**策略 + 设置开关已落，网络回调触发未接线**）；
-> ③ `ISSUE-P3-382` —— 重复条目去重（**扫描器 + 控制器方法已落，健康检查 UI 入口未接线**）；
-> ④ `ISSUE-P3-384` —— .kdbx 并入（**未做**）；
-> ⑤ `ISSUE-P3-385` —— 库级 Meta 编辑（**写通道已落，可编辑 UI + 新建条目默认用户名预填未接线**）；
-> ⑥ `ISSUE-P3-387` —— 远端目录浏览（**未做**）。
-> 另：`ISSUE-P3-383` / `P3-393` 已于 §360 整条闭环；`ISSUE-P3-386` / `P3-389`~`P3-392` / `P3-394` 已于 §358/§359 闭环。
+### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室）——**浏览器半环搁置**
 
-### ISSUE-P3-339：仿冒域能否唤醒通行密钥——代码层已闭环，浏览器半环搁置
-
-- **状态（2026-09-27 用户指示）**：**暂时搁置**。威胁模型、已闭环半环与红线见批次与历史条目。**红线**：在破不通真实信任锚之前，本条目下不得出现任何「仿冒域不会唤醒」的结论。
+- **状态（2026-09-27 用户指示）**：**暂时搁置**。剩余部分需要外部资源（自有域名 + ACME DNS-01，或企业策略放行自建 CA，或换自带信任库的浏览器并相应重述判据），用户裁「先精简描述、暂不做」。
+- **威胁模型（勿在后续复用时被悄悄替换）**：**真实攻击者只有公开 DNS 与公网可信证书，没有任何设备篡改能力**。⇒ 一切结论必须出自**攻击者可达的**配置。
+- **已闭环半环（代码层，2026-09-27）**：见批次与历史条目；`CredentialProviderLookalikeMatchTest` 已锁定跨域泄露收紧与 `extractDomain` 去尾点。
+- **红线（不变）**：**在破不通真实信任锚之前，本条目下不得出现任何「仿冒域不会唤醒」的结论**。今天能声称的只有「本应用对给定 rpId 的接受/拒绝判定」，**不是**「Chrome 不唤醒仿冒站」。
 
 ### ISSUE-P3-381：回到前台（Resume）/网络恢复时不探测远端变化——多设备场景切回即旧数据
 
-- **状态**：开放。**§360 已落策略层**：`ResumeSyncProbePolicy`（轻量探测 + 30s 节流 + 锁定态跳过，**不直接 syncNow**）+ `UserSettings.syncProbeOnResumeEnabled`（默认 true）。
+- **状态**：开放。策略层已落（§360）：`ResumeSyncProbePolicy`（轻量探测 + 30s 节流 + 锁定态跳过，**不直接 syncNow**）+ `UserSettings.syncProbeOnResumeEnabled`（默认 true）。
 - **剩余 AC**：进程生命周期 / 网络回调挂点接线，触发统一收口既有同步协调；设置页开关 UI；周期 WorkManager 默认关闭现状不变。
 - **涉及文件**：`VaultListViewModel` / 同步协调 / 生命周期挂点（待接线）。
 
 ### ISSUE-P3-382：库内重复条目检测与合并工具缺失（仅导入时查重，无存量扫描/合并）
 
-- **状态**：开放。**§360 已落扫描器**：`DuplicateEntryScanner`（默认判据「同 URL + 同账号」，可选「同标题 + 同 URL」）+ `SettingsDatabaseMetaController.scanDuplicateEntries()`。
+- **状态**：开放。扫描器已落（§360）：`DuplicateEntryScanner`（默认判据「同 URL + 同账号」，可选「同标题 + 同 URL」）+ `SettingsDatabaseMetaController.scanDuplicateEntries()`。
 - **剩余 AC**：健康检查面只读「重复报告」UI 入口；合并动作用户逐条确认、走既有编辑/删除管线，**不与**同步 `KdbxMerger` 混用。
 - **涉及文件**：健康检查 UI / SettingsViewModel（待接线）。
-
-### ISSUE-P3-383：Steam Guard TOTP 不支持
-
-- **状态（2026-09-28 登记，§360 整条闭环）**：已支持 `steam://` 与 `algorithm=STEAM`（PD-62）；主机用例锁定字母表与路径隔离。
 
 ### ISSUE-P3-384：从另一 .kdbx 文件导入/合并（生态库或备份副本并入当前库）
 
 - **状态**：开放。**未做**。
-- **AC**：①入库路径全程密文；②合并语义复用 `KdbxMerger`；③与进行中同步会话的互斥/串行；④pykeepass 对拍。
+- **AC**：①入库路径全程密文（打开第二库会话→内存合并→写盘），**严禁**解密为中间文件落盘；②合并语义复用 `KdbxMerger`（UUID 三方判定）；③与进行中同步会话的互斥/串行；④合并结果以 pykeepass 对拍验证。
 
 ### ISSUE-P3-385：库级 Meta 编辑面缺失（库名/库描述/默认用户名不可编辑、不预填）
 
-- **状态**：开放。**§360 已落写通道**：`SettingsDatabaseMetaController.setDatabaseMeta`（经 `updateDatabaseMeta` + 立即 `save`；与 PD-35 不冲突）。
+- **状态**：开放。写通道已落（§360）：`SettingsDatabaseMetaController.setDatabaseMeta`（经 `updateDatabaseMeta` + 立即 `save`；与 PD-35 不冲突）。
 - **剩余 AC**：设置页三项可编辑 UI（中英文案）；新建条目消费 `defaultUserName` 预填；编辑后合并语义留痕。
 - **涉及文件**：`DatabaseSettingsComponents` / `DatabaseSettingsScreen` / `EntryEditViewModel`（待接线）。
 
 ### ISSUE-P3-387：远端目录浏览选库缺失（云同步配置只能手输远端路径）
 
 - **状态**：开放。**未做**。
-- **AC**：①先评估实施范围（仅 WebDAV 先行 vs 全协议）并留痕；②SSRF 口径不变（PD-02）；③分页/大目录边界；④中英文案。
+- **AC**：①先评估实施范围（接口加浏览成员：仅 WebDAV 先行 vs 全协议）并留痕后再动手；②SSRF 口径不变（PD-02 端点默认拒绝，浏览目标同受约束）；③分页/大目录边界；④中英文案。
