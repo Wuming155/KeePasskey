@@ -36,6 +36,20 @@ internal object WebDavPropfindParser {
         val isDirectory: Boolean
     )
 
+    /**
+     * PROPFIND Depth:1 目录列举中的一个子资源（ISSUE-P3-387）。
+     *
+     * 保守降级：解析失败时 [parseChildren] 返回 null（**不是**空列表），
+     * 调用方必须把 null 当失败，禁止伪装成「空目录」。
+     */
+    data class ParsedPropfindChild(
+        val href: String,
+        val etag: String,
+        val contentLength: Long,
+        val lastModifiedMillis: Long,
+        val isDirectory: Boolean
+    )
+
     fun parse(xml: String): ParsedPropfind {
         if (xml.isBlank()) {
             return ParsedPropfind("", -1L, 0L, false)
@@ -75,6 +89,54 @@ internal object WebDavPropfindParser {
             // 系统 CA 级 MITM）可单方面构造该响应，必须在解析边界就地遏制为「回退空元数据」
             AppLog.w(TAG, "PROPFIND 响应 XML 解析失败，回退空元数据", e)
             ParsedPropfind("", -1L, 0L, false)
+        }
+    }
+
+    /**
+     * 解析 Depth:1 multistatus 的全部 `<response>` 子资源（ISSUE-P3-387 目录浏览）。
+     *
+     * - 与 [parse] 共用同一加固 DOM 工厂与 XXE 防线；
+     * - **保守降级**：空白输入 / XML 非法 / DOM 不含 multistatus 根时返回 **null**（失败），
+     *   不得返回 `emptyList()`——「解析失败」与「真空目录」不可混同（kp2a 教训）；
+     * - 每个 response 内按文档序取**首个** getetag / getcontentlength / getlastmodified /
+     *   collection（与 Depth:0 元数据通道同口径，多 propstat 时不二次展开求并集）。
+     */
+    fun parseChildren(xml: String): List<ParsedPropfindChild>? {
+        if (xml.isBlank()) return null
+        return try {
+            val builder = newHardenedBuilder()
+            val doc = builder.parse(xml.byteInputStream())
+            val root = doc.documentElement
+            val rootName = root.localName ?: root.nodeName.substringAfter(':')
+            if (!rootName.equals("multistatus", ignoreCase = true)) return null
+
+            val responses = findNodes(root, "response")
+            // multistatus 合法但零 response：视为真空目录（服务端明确列举无子项）
+            responses.map { response ->
+                val hrefNodes = findNodes(response, "href")
+                val href = hrefNodes.firstOrNull()?.textContent?.trim().orEmpty()
+                val propNodes = findNodes(response, "prop")
+                val scope = propNodes.firstOrNull() ?: response
+                val etag = findNodes(scope, "getetag")
+                    .firstOrNull()?.textContent?.trim().orEmpty().cleanEtag()
+                val contentLength = findNodes(scope, "getcontentlength")
+                    .firstOrNull()?.textContent?.trim()?.toLongOrNull() ?: -1L
+                val lastModifiedMillis = parseHttpDate(
+                    findNodes(scope, "getlastmodified")
+                        .firstOrNull()?.textContent?.trim().orEmpty()
+                )
+                val isDirectory = findNodes(scope, "collection").isNotEmpty()
+                ParsedPropfindChild(
+                    href = href,
+                    etag = etag,
+                    contentLength = contentLength,
+                    lastModifiedMillis = lastModifiedMillis,
+                    isDirectory = isDirectory
+                )
+            }
+        } catch (e: Throwable) {
+            AppLog.w(TAG, "PROPFIND 目录列举响应解析失败（保守降级为失败，不伪装空目录）", e)
+            null
         }
     }
 

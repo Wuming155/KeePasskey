@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -43,7 +44,9 @@ internal fun WebDavConfigFields(
     passwordPrefill: CharArray?,
     onPasswordCharsChange: (CharArray) -> Unit,
     remotePath: String,
-    onRemotePathChange: (String) -> Unit
+    onRemotePathChange: (String) -> Unit,
+    /** ISSUE-P3-387：浏览远端目录（用当前表单凭据，不依赖已保存配置） */
+    onBrowseRemote: () -> Unit = {}
 ) {
     OutlinedTextField(
         value = url,
@@ -89,6 +92,14 @@ internal fun WebDavConfigFields(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     )
+
+    // ISSUE-P3-387：远端目录浏览入口（与路径字段同区，选中文件后回填）
+    OutlinedButton(
+        onClick = onBrowseRemote,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(stringResource(R.string.sync_browse_btn))
+    }
 }
 
 /**
@@ -116,7 +127,9 @@ internal fun S3ConfigFields(
     objectKey: String,
     onObjectKeyChange: (String) -> Unit,
     usePathStyle: Boolean,
-    onUsePathStyleChange: (Boolean) -> Unit
+    onUsePathStyleChange: (Boolean) -> Unit,
+    /** ISSUE-P3-387：浏览远端目录（用当前表单凭据） */
+    onBrowseRemote: () -> Unit = {}
 ) {
     OutlinedTextField(
         value = endpoint,
@@ -178,6 +191,14 @@ internal fun S3ConfigFields(
         usePathStyle = usePathStyle,
         onUsePathStyleChange = onUsePathStyleChange
     )
+
+    // ISSUE-P3-387：S3 远端目录浏览入口
+    OutlinedButton(
+        onClick = onBrowseRemote,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(stringResource(R.string.sync_browse_btn))
+    }
 }
 
 /**

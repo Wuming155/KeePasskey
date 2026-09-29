@@ -59,9 +59,10 @@ internal class SettingsFeatureControllers(
     keyFileAccess: com.keepasskey.app.ui.screens.unlock.KeyFileAccess?,
     debugLogBuffer: DebugLogBuffer,
     scope: CoroutineScope,
-    stateSubscribeTimeoutMillis: Long
+    stateSubscribeTimeoutMillis: Long,
+    appContext: android.content.Context? = null
 ) {
-    val importPresenter = SettingsImportPresenter(vaultImportController)
+    val importPresenter = SettingsImportPresenter(vaultImportController, appContext)
 
     val childDatabaseController = SettingsChildDatabaseController(
         manager = childDatabaseSessionManager,

@@ -656,6 +656,21 @@
     <string name="dbset_src_bitwarden">Bitwarden (JSON)</string>
     <string name="dbset_src_keepass">KeePass / KeePassXC</string>
     <string name="dbset_src_browser">浏览器密码导出 (CSV)</string>
+    <!-- ISSUE-P3-384：完整 .kdbx 并入（非明文条目导入） -->
+    <string name="dbset_src_kdbx_merge">并入另一 .kdbx 数据库</string>
+    <string name="kdbx_merge_credential_title">第二库凭据</string>
+    <string name="kdbx_merge_credential_body">正在并入：%1$s\n请输入该数据库的主密码（如使用密钥文件请一并选择），将全程在内存中打开并与当前库合并后落盘。</string>
+    <string name="kdbx_merge_credential_unknown_file">（未命名文件）</string>
+    <string name="kdbx_merge_credential_submit">开始并入</string>
+    <string name="kdbx_merge_credential_password">第二库主密码</string>
+    <string name="kdbx_merge_credential_keyfile">第二库密钥文件（可选）</string>
+    <string name="kdbx_merge_credential_pick_keyfile">选择密钥文件</string>
+    <string name="kdbx_merge_failed_no_vault">请先打开一个密码库，再并入另一 .kdbx</string>
+    <string name="kdbx_merge_failed_readonly">当前库处于只读状态，无法并入</string>
+    <string name="kdbx_merge_failed_conflict_window">合并窗口内会话树已变化，请重试</string>
+    <string name="kdbx_merge_failed_save">合并结果保存失败</string>
+    <string name="import_error_kdbx_merge">并入另一 .kdbx 失败</string>
+    <string name="import_report_kdbx_merge_skipped">冲突条目保留本地：共 %1$d 条</string>
 
     <!-- ===== 设置主页 (SettingsScreen) ===== -->
     <string name="set_section_system">系统</string>
@@ -774,6 +789,17 @@
     <string name="sync_webdav_username_label">用户名</string>
     <string name="sync_webdav_password_label">密码</string>
     <string name="sync_webdav_path_label">远程文件路径</string>
+    <!-- ISSUE-P3-387：远端目录浏览选库 -->
+    <string name="sync_browse_btn">浏览远端目录</string>
+    <string name="sync_browse_title">选择远端文件</string>
+    <string name="sync_browse_loading">正在列举远端目录…</string>
+    <string name="sync_browse_empty">该目录下没有可显示的条目（仍可手动填写路径）</string>
+    <string name="sync_browse_failed">列举远端目录失败，请检查配置或手动填写路径</string>
+    <string name="sync_browse_load_more">加载更多</string>
+    <string name="sync_browse_current_path">当前路径：%1$s</string>
+    <string name="sync_browse_use_path">使用此路径</string>
+    <string name="sync_browse_close">关闭</string>
+    <string name="sync_browse_select_file_hint">点选 .kdbx 文件以回填远程路径；点选文件夹可继续下钻</string>
     <string name="sync_s3_endpoint_label">服务端点 (Endpoint)</string>
     <string name="sync_s3_region_label">区域 (Region)</string>
     <string name="sync_s3_bucket_label">存储桶 (Bucket)</string>

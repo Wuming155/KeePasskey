@@ -91,6 +91,20 @@ fun CloudSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
+    // ISSUE-P3-387：远端目录浏览（表单凭据 + 当前路径；选中文件后由宿主回填 remotePath）
+    browseState: com.keepasskey.app.sync.RemoteBrowseUiState = com.keepasskey.app.sync.RemoteBrowseUiState.Idle,
+    onBrowseWebDav: (url: String, username: String, password: CharArray, remotePath: String, cursor: String?) -> Unit = { _, _, _, _, _ -> },
+    onBrowseS3: (
+        endpoint: String,
+        bucket: String,
+        region: String,
+        accessKey: CharArray,
+        secretKey: CharArray,
+        objectKey: String,
+        usePathStyle: Boolean,
+        cursor: String?
+    ) -> Unit = { _, _, _, _, _, _, _, _ -> },
+    onDismissBrowse: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
 
@@ -103,6 +117,7 @@ fun CloudSyncScreen(
     var webdavPasswordChars by remember { mutableStateOf(CharArray(0)) }
     var webdavRemotePath by remember(uiState.webdavRemotePath) { mutableStateOf(uiState.webdavRemotePath) }
     var webdavPasswordVisible by remember { mutableStateOf(false) }
+    var showBrowseDialog by remember { mutableStateOf(false) }
 
     var s3Endpoint by remember(uiState.s3Endpoint) { mutableStateOf(uiState.s3Endpoint) }
     var s3Bucket by remember(uiState.s3Bucket) { mutableStateOf(uiState.s3Bucket) }
@@ -231,7 +246,17 @@ fun CloudSyncScreen(
                                     onWebDavPasswordEdited()
                                 },
                                 remotePath = webdavRemotePath,
-                                onRemotePathChange = { webdavRemotePath = it }
+                                onRemotePathChange = { webdavRemotePath = it },
+                                onBrowseRemote = {
+                                    showBrowseDialog = true
+                                    onBrowseWebDav(
+                                        webdavUrl,
+                                        webdavUsername,
+                                        webdavPasswordChars,
+                                        webdavRemotePath,
+                                        null
+                                    )
+                                }
                             )
                         } else {
                             S3ConfigFields(
@@ -260,9 +285,55 @@ fun CloudSyncScreen(
                                 objectKey = s3ObjectKey,
                                 onObjectKeyChange = { s3ObjectKey = it },
                                 usePathStyle = s3UsePathStyle,
-                                onUsePathStyleChange = { s3UsePathStyle = it }
+                                onUsePathStyleChange = { s3UsePathStyle = it },
+                                onBrowseRemote = {
+                                    showBrowseDialog = true
+                                    onBrowseS3(
+                                        s3Endpoint,
+                                        s3Bucket,
+                                        s3Region,
+                                        s3AccessKeyChars,
+                                        s3SecretKeyChars,
+                                        s3ObjectKey,
+                                        s3UsePathStyle,
+                                        null
+                                    )
+                                }
                             )
                         }
+
+                        // ISSUE-P3-387：远端目录浏览对话框（段落组件见 RemoteBrowseSection.kt）
+                        RemoteBrowseSection(
+                            visible = showBrowseDialog,
+                            provider = uiState.syncProvider,
+                            browseState = browseState,
+                            webdavUrl = webdavUrl,
+                            webdavUsername = webdavUsername,
+                            webdavPasswordChars = webdavPasswordChars,
+                            webdavRemotePath = webdavRemotePath,
+                            s3Endpoint = s3Endpoint,
+                            s3Bucket = s3Bucket,
+                            s3Region = s3Region,
+                            s3AccessKeyChars = s3AccessKeyChars,
+                            s3SecretKeyChars = s3SecretKeyChars,
+                            s3ObjectKey = s3ObjectKey,
+                            s3UsePathStyle = s3UsePathStyle,
+                            onBrowseWebDav = onBrowseWebDav,
+                            onBrowseS3 = onBrowseS3,
+                            onSelectFile = { entry ->
+                                if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
+                                    webdavRemotePath = entry.path
+                                } else {
+                                    s3ObjectKey = entry.path
+                                }
+                                showBrowseDialog = false
+                                onDismissBrowse()
+                            },
+                            onDismissBrowse = {
+                                showBrowseDialog = false
+                                onDismissBrowse()
+                            }
+                        )
 
                         // 本批整改：主操作由「只保存」上移为「保存并同步」——填完配置后用户的真实意图是
                         // 「让它生效」，而原流程须「保存配置 → 测试连接 → 立即同步」三次点击（且「立即同步」

@@ -33,12 +33,17 @@ internal class S3RequestSigner(
      *
      * TASK-45：生产调用方一律传入补偿后时间戳；[dateTime] 保留默认值
      * 仅供单元测试注入固定时间点（已知答案向量）使用。
+     *
+     * ISSUE-P3-387：[queryString] 为不带 `?` 的原始查询串（如 `list-type=2&prefix=...`）。
+     * 按 RFC 3986 逐键排序并编码后写入 SigV4 canonical request 的 CanonicalQueryString 行；
+     * **空串时该行为空**，与整改前逐字一致（既有对象读写路径签名不变）。
      */
     fun signV4(
         method: String,
         url: String,
         payloadHash: String,
-        dateTime: Date = Date()
+        dateTime: Date = Date(),
+        queryString: String = ""
     ): Map<String, String> {
         val isoFormat = SimpleDateFormat(AMZ_DATE_PATTERN, Locale.US).apply {
             timeZone = TimeZone.getTimeZone(UTC_TIME_ZONE_ID)
@@ -52,11 +57,12 @@ internal class S3RequestSigner(
 
         val host = S3KeyCodec.hostOf(url)
         val canonicalUri = S3KeyCodec.canonicalUri(url)
+        val canonicalQuery = canonicalizeQuery(queryString)
 
         val canonicalHeaders = "host:$host\nx-amz-content-sha256:$payloadHash\nx-amz-date:$amzDate\n"
         val signedHeaders = "host;x-amz-content-sha256;x-amz-date"
 
-        val canonicalRequest = "$method\n$canonicalUri\n\n$canonicalHeaders\n$signedHeaders\n$payloadHash"
+        val canonicalRequest = "$method\n$canonicalUri\n$canonicalQuery\n$canonicalHeaders\n$signedHeaders\n$payloadHash"
         val canonicalRequestBytes = canonicalRequest.toByteArray(Charsets.UTF_8)
         val canonicalRequestHash = try {
             sha256Hex(canonicalRequestBytes)
@@ -93,6 +99,47 @@ internal class S3RequestSigner(
     fun sha256Hex(data: ByteArray): String {
         val digest = MessageDigest.getInstance(SHA_256_ALGORITHM)
         return digest.digest(data).toHexString()
+    }
+
+    /**
+     * ISSUE-P3-387：SigV4 CanonicalQueryString 规范化——按 AWS 规则对键与值分别
+     * URI 编码（RFC 3986 unreserved 保留），键按字典序排序后以 `k=v&` 连接。
+     *
+     * 空输入返回空串（与整改前 canonical request 第三行为空逐字一致）。
+     */
+    internal fun canonicalizeQuery(queryString: String): String {
+        if (queryString.isBlank()) return ""
+        return queryString.trimStart('?')
+            .split('&')
+            .filter { it.isNotEmpty() }
+            .map { pair ->
+                val idx = pair.indexOf('=')
+                val rawKey = if (idx >= 0) pair.substring(0, idx) else pair
+                val rawValue = if (idx >= 0) pair.substring(idx + 1) else ""
+                rawKey to rawValue
+            }
+            .sortedBy { it.first }
+            .joinToString("&") { (k, v) -> "${awsUriEncode(k)}=${awsUriEncode(v)}" }
+    }
+
+    private fun awsUriEncode(value: String): String {
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        val sb = StringBuilder(bytes.size * 3)
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            val ch = c.toChar()
+            val unreserved = (c in 'A'.code..'Z'.code) ||
+                (c in 'a'.code..'z'.code) ||
+                (c in '0'.code..'9'.code) ||
+                ch == '-' || ch == '_' || ch == '.' || ch == '~'
+            if (unreserved) {
+                sb.append(ch)
+            } else {
+                sb.append('%')
+                sb.append(String.format("%02X", c))
+            }
+        }
+        return sb.toString()
     }
 
     /**

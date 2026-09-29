@@ -97,23 +97,36 @@ class SettingsViewModel @Inject constructor(
         keyFileAccess = keyFileAccess,
         debugLogBuffer = debugLogBuffer,
         scope = viewModelScope,
-        stateSubscribeTimeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS
+        stateSubscribeTimeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS,
+        appContext = appContext
     )
     private val importPresenter = features.importPresenter
+    private val remoteBrowseHost = SettingsRemoteBrowseHost(debugLogBuffer, viewModelScope)
 
-    /** 导入状态（Idle / Parsing / Done / Failed）。无控制器时恒为 Idle。 */
+    /** 导入 / 并入 / 浏览状态（动作为成员方法，见下方）。 */
     val importState: StateFlow<ImportUiState> get() = importPresenter.state
+    val mergeState: StateFlow<ImportUiState> get() = importPresenter.mergeState
+    val remoteBrowseState: StateFlow<com.keepasskey.app.sync.RemoteBrowseUiState> get() = remoteBrowseHost.state
 
-    /** 按数据源 + SAF Uri 启动一次导入。 */
     fun startImport(source: ImportSource, uri: Uri) = importPresenter.start(source, uri)
-
-    /** 关闭导入结果报告对话框。 */
     fun dismissImportReport() = importPresenter.dismissReport()
-
-    /** ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation；导入对话框取消按钮通道）。 */
     fun cancelImport() = importPresenter.cancel()
+    fun submitMergeCredentials(passwordChars: CharArray, keyFileData: ByteArray? = null) =
+        importPresenter.submitMergeCredentials(passwordChars, keyFileData)
+    fun submitMergeCredentials(passwordChars: CharArray, keyFileUri: android.net.Uri?) =
+        importPresenter.submitMergeCredentials(passwordChars, keyFileUri)
+    fun cancelMerge() = importPresenter.cancelMerge()
+    fun dismissMergeReport() = importPresenter.dismissMergeReport()
+    fun browseWebDav(url: String, username: String, password: CharArray, remotePath: String, cursor: String? = null) =
+        remoteBrowseHost.browseWebDav(url, username, password, remotePath, cursor)
+    fun browseS3(
+        endpoint: String, bucket: String, region: String,
+        accessKey: CharArray, secretKey: CharArray,
+        objectKey: String, usePathStyle: Boolean, cursor: String? = null
+    ) = remoteBrowseHost.browseS3(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle, cursor)
+    fun dismissRemoteBrowse() = remoteBrowseHost.dismiss()
 
-    // ===== 更换主密钥任务态（ISSUE-P2-354 AC③，实现与擦除契约见 SettingsMasterKeyChangeController） =====
+    // ===== 更换主密钥任务态（ISSUE-P2-354 AC③） =====
     private val masterKeyChange = SettingsMasterKeyChangeController(vaultRepository, viewModelScope)
 
     /** P0-3 整改 + ISSUE-P2-354 AC③：提交更换主密钥（数组所有权移交；忙态并发第二次被拒并清零入参）。 */

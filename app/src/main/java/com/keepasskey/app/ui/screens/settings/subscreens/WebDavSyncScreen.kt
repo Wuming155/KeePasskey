@@ -39,6 +39,20 @@ fun WebDavSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
+    // ISSUE-P3-387：远端目录浏览
+    browseState: com.keepasskey.app.sync.RemoteBrowseUiState = com.keepasskey.app.sync.RemoteBrowseUiState.Idle,
+    onBrowseWebDav: (url: String, username: String, password: CharArray, remotePath: String, cursor: String?) -> Unit = { _, _, _, _, _ -> },
+    onBrowseS3: (
+        endpoint: String,
+        bucket: String,
+        region: String,
+        accessKey: CharArray,
+        secretKey: CharArray,
+        objectKey: String,
+        usePathStyle: Boolean,
+        cursor: String?
+    ) -> Unit = { _, _, _, _, _, _, _, _ -> },
+    onDismissBrowse: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     CloudSyncScreen(
@@ -66,6 +80,10 @@ fun WebDavSyncScreen(
         onCheckRemoteChangesToggle = onCheckRemoteChangesToggle,
         onConflictResolutionChange = onConflictResolutionChange,
         onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle,
+        browseState = browseState,
+        onBrowseWebDav = onBrowseWebDav,
+        onBrowseS3 = onBrowseS3,
+        onDismissBrowse = onDismissBrowse,
         modifier = modifier
     )
 }

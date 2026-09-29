@@ -36,6 +36,8 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
         val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
         // ISSUE-P3-19：明文导入状态流（Idle / Parsing / Done / Failed）
         val importState by settingsViewModel.importState.collectAsStateWithLifecycle()
+        // ISSUE-P3-384：`.kdbx` 并入状态流
+        val mergeState by settingsViewModel.mergeState.collectAsStateWithLifecycle()
         // ISSUE-P3-20：子库挂载状态流（真实挂载记录 + 运行时状态 + 操作反馈）
         val childDatabaseState by settingsViewModel.childDatabaseState.collectAsStateWithLifecycle()
         DatabaseSettingsScreen(
@@ -60,10 +62,15 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             onInstallTemplates = settingsViewModel::installEntryTemplates,
             // ISSUE-P3-19：导入链路（选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）
             importState = importState,
+            mergeState = mergeState,
             onImportFileSelected = settingsViewModel::startImport,
             onImportReportDismiss = settingsViewModel::dismissImportReport,
             // ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation）
             onImportCancel = settingsViewModel::cancelImport,
+            // ISSUE-P3-384：`.kdbx` 并入（第二库凭据提交 + 取消 + 报告关闭）
+            onMergeSubmit = settingsViewModel::submitMergeCredentials,
+            onCancelMerge = settingsViewModel::cancelMerge,
+            onMergeReportDismiss = settingsViewModel::dismissMergeReport,
             // ISSUE-P3-20：子库挂载链路（真实挂载 / 凭据重录解锁 / 卸载）
             childDatabaseState = childDatabaseState,
             onMountChildDatabase = settingsViewModel::mountChildDatabase,
@@ -84,6 +91,8 @@ internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController)
         val s3SecretKeyPrefill by settingsViewModel.s3SecretKeyPrefill.collectAsStateWithLifecycle()
         // ISSUE-P2-01：S3 AccessKey ID 一次性预填通道（明文不进 UiState）
         val s3AccessKeyPrefill by settingsViewModel.s3AccessKeyPrefill.collectAsStateWithLifecycle()
+        // ISSUE-P3-387：远端目录浏览状态
+        val browseState by settingsViewModel.remoteBrowseState.collectAsStateWithLifecycle()
         WebDavSyncScreen(
             uiState = settingsState,
             onBackClick = { navController.popBackStack() },
@@ -110,7 +119,11 @@ internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController)
             onCreateBackupBeforeSaveToggle = settingsViewModel::setCreateBackupBeforeSave,
             onCheckRemoteChangesToggle = settingsViewModel::setCheckRemoteChangesBeforeSave,
             onConflictResolutionChange = settingsViewModel::setConflictResolution,
-            onWebdavChunkedUploadToggle = settingsViewModel::setWebdavChunkedUpload
+            onWebdavChunkedUploadToggle = settingsViewModel::setWebdavChunkedUpload,
+            browseState = browseState,
+            onBrowseWebDav = settingsViewModel::browseWebDav,
+            onBrowseS3 = settingsViewModel::browseS3,
+            onDismissBrowse = settingsViewModel::dismissRemoteBrowse
         )
     }
 }

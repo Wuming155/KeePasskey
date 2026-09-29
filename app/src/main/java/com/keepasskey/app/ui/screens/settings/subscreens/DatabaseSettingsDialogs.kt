@@ -168,13 +168,16 @@ internal fun ExportDatabaseDialog(
 // 1. 删除原 `dbset_import_reserved_note`（「解析器预留，暂未生效」）提示块——该提示已反向失真；
 // 2. `onSourceSelected` 由「本地化显示字符串」改为**传 `ImportSource` 枚举**：文案与枚举在同一处绑定，
 //    杜绝「拿本地化文案反查枚举」的脆弱映射（改文案就会静默失配）。
+// ISSUE-P3-384：新增 `KDBX_MERGE` 选项——完整 `.kdbx` 并入（第二库自身凭据 + KdbxMerger），
+// 不经明文 EntryImporter 管线。
 @Composable
 internal fun ImportSourceDialog(
     onSourceSelected: (ImportSource) -> Unit,
     onDismiss: () -> Unit
 ) {
-    // 选项与枚举同处绑定；顺序与用户心智一致（1PUX / Bitwarden / KeePass / 浏览器）
+    // 选项与枚举同处绑定；顺序：KDBX 并入优先（完整库语义），其余为明文迁移
     val options = listOf(
+        ImportSource.KDBX_MERGE to R.string.dbset_src_kdbx_merge,
         ImportSource.ONEPASSWORD_1PUX to R.string.dbset_src_1pux,
         ImportSource.BITWARDEN_JSON to R.string.dbset_src_bitwarden,
         ImportSource.KEEPASS_XML to R.string.dbset_src_keepass,

@@ -59,10 +59,16 @@ fun DatabaseSettingsScreen(
     // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）。
     // 状态由 VaultImportController 的 StateFlow 上抬，本屏只透传与呈现，不含业务逻辑。
     importState: ImportUiState = ImportUiState.Idle,
+    // ISSUE-P3-384：`.kdbx` 并入状态（AwaitingMergeCredentials 等）
+    mergeState: ImportUiState = ImportUiState.Idle,
     onImportFileSelected: (ImportSource, Uri) -> Unit = { _, _ -> },
     onImportReportDismiss: () -> Unit = {},
     // ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation）
     onImportCancel: () -> Unit = {},
+    // ISSUE-P3-384：提交第二库密码 + 可选密钥文件 Uri
+    onMergeSubmit: (passwordChars: CharArray, keyFileUri: Uri?) -> Unit = { _, _ -> },
+    onCancelMerge: () -> Unit = {},
+    onMergeReportDismiss: () -> Unit = {},
     // ISSUE-P3-20：子库挂载（核心层 ChildDatabaseSessionManager 已落地，本屏为真实入口）。
     // 状态与动作全部上抬自 SettingsViewModel；本屏只维护 SAF 选择结果与表单开关，
     // 不含任何解密/挂载业务逻辑。
@@ -335,11 +341,15 @@ fun DatabaseSettingsScreen(
     // 对话框 7 + 导入报告（§159 下沉至 VaultImportSection；两步式选源-选文件的中间态由该段自持）
     VaultImportSection(
         state = importState,
+        mergeState = mergeState,
         showDialog = showImportDialog,
         onDialogDismiss = { showImportDialog = false },
         onFileSelected = onImportFileSelected,
         onReportDismiss = onImportReportDismiss,
-        onCancelImport = onImportCancel
+        onCancelImport = onImportCancel,
+        onMergeSubmit = onMergeSubmit,
+        onCancelMerge = onCancelMerge,
+        onMergeReportDismiss = onMergeReportDismiss
     )
 }
 

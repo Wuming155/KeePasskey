@@ -2,6 +2,8 @@ package com.keepasskey.sync.s3
 
 import androidx.annotation.VisibleForTesting
 import com.keepasskey.sync.model.RemoteFileMetadata
+import com.keepasskey.sync.model.RemoteListEntry
+import com.keepasskey.sync.model.RemoteListPage
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.model.isWeakEtag
@@ -186,6 +188,25 @@ class S3SyncProvider(
             )
         }
     }
+
+    /**
+     * ISSUE-P3-387：S3 ListObjectsV2 远端目录浏览。
+     * 实现下沉 [S3DirectoryList]；本方法仅委托（行数门禁）。
+     */
+    override suspend fun listRemoteDirectory(
+        remotePath: String,
+        cursor: String?,
+        pageSize: Int
+    ): Result<RemoteListPage> = S3DirectoryList.list(
+        remotePath = remotePath,
+        cursor = cursor,
+        pageSize = pageSize,
+        buildBucketRootUrl = { buildUrl("") },
+        sign = { method, url, payloadHash, queryString ->
+            signV4(method, url, payloadHash, queryString = queryString)
+        },
+        execute = { request -> httpClient.newCall(request).execute() }
+    )
 
     override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -419,8 +440,9 @@ class S3SyncProvider(
         method: String,
         url: String,
         payloadHash: String,
-        dateTime: Date = Date()
-    ): Map<String, String> = signer.signV4(method, url, payloadHash, dateTime)
+        dateTime: Date = Date(),
+        queryString: String = ""
+    ): Map<String, String> = signer.signV4(method, url, payloadHash, dateTime, queryString)
 
     companion object {
         const val EMPTY_SHA256 = S3RequestSigner.EMPTY_SHA256

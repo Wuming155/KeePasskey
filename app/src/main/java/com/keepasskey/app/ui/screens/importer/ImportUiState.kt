@@ -32,6 +32,15 @@ sealed interface ImportUiState {
     /** 完成：[outcome] 为落库结果报告。 */
     data class Done(val outcome: ImportOutcome) : ImportUiState
 
+    /**
+     * ISSUE-P3-384：等待用户提交**第二库**主密码 / 密钥文件（`KDBX_MERGE`）。
+     * [source] 恒为 [ImportSource.KDBX_MERGE]；UI 在凭据对话框内交互。
+     */
+    data class AwaitingMergeCredentials(
+        val source: ImportSource = ImportSource.KDBX_MERGE,
+        val displayName: String? = null
+    ) : ImportUiState
+
     /** 失败：[reason] 为归类原因，UI 经其 `@StringRes` 取文案。 */
     data class Failed(val source: ImportSource?, val reason: ImportFailureReason) : ImportUiState
 }
@@ -45,5 +54,8 @@ enum class ImportStage {
     PARSING,
 
     /** 逐条落库（含冲突判定与保存） */
-    PERSISTING
+    PERSISTING,
+
+    /** ISSUE-P3-384：内存合并后原子保存当前库 */
+    MERGING
 }

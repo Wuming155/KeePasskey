@@ -1,6 +1,8 @@
 package com.keepasskey.sync.provider
 
 import com.keepasskey.sync.model.RemoteFileMetadata
+import com.keepasskey.sync.model.RemoteListPage
+import com.keepasskey.sync.model.SyncException
 import java.io.OutputStream
 
 /**
@@ -19,6 +21,30 @@ interface SyncProvider {
      * 获取指定远程文件的元数据（包含 ETag、大小与最后修改时间）
      */
     suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata>
+
+    /**
+     * 浏览远端目录（ISSUE-P3-387）。
+     *
+     * 默认实现 fail-closed 返回「协议不支持浏览」——新增协议须覆写本方法，
+     * **不得**用「空列表成功」冒充不支持（会与「真实空目录」不可区分）。
+     *
+     * 安全口径（PD-02）：浏览目标仍是**同一端点**下的相对路径，不引入新主机；
+     * 路径遍历段由各协议编码层剔除。
+     *
+     * 保守降级：列举失败 / 响应无法解析时返回失败，**禁止**返回空页当作成功
+     * （keepass2android 教训：列举结果不可尽信）。
+     *
+     * @param remotePath 要浏览的远端目录路径（相对服务器根；空串 = 根目录）
+     * @param cursor 上一页返回的分页游标；null = 首页
+     * @param pageSize 单页条目上限（实现可夹紧到协议允许范围）
+     */
+    suspend fun listRemoteDirectory(
+        remotePath: String,
+        cursor: String? = null,
+        pageSize: Int = DEFAULT_REMOTE_PAGE_SIZE
+    ): Result<RemoteListPage> = Result.failure(
+        SyncException.ProtocolError(501, "当前同步协议不支持远端目录浏览")
+    )
 
     /**
      * 下载远程文件流（ISSUE-P3-206 **流式契约**）。
@@ -72,4 +98,9 @@ interface SyncProvider {
      * 删除远程文件
      */
     suspend fun delete(remotePath: String): Result<Unit>
+
+    companion object {
+        /** 远端目录浏览默认单页条目上限（ISSUE-P3-387 分页边界）。 */
+        const val DEFAULT_REMOTE_PAGE_SIZE: Int = 200
+    }
 }

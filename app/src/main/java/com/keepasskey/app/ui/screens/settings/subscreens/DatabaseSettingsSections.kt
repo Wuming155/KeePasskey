@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -8,10 +9,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import com.keepasskey.app.data.importer.ImportSource
+import com.keepasskey.app.ui.screens.importer.ImportMergeCredentialSheet
 import com.keepasskey.app.ui.screens.importer.ImportReportDialog
 import com.keepasskey.app.ui.screens.importer.ImportUiState
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
+import java.io.IOException
 
 /**
  * 密码库设置页的**子库挂载段**（ISSUE-P3-188 剩余清单第 1 项 · 第二段：自 `DatabaseSettingsScreen` 下沉）。
@@ -109,24 +113,53 @@ internal fun ChildDatabaseSection(
  *
  * 语义保持点：**选源与选文件是两步**——`pendingImportSource` 必须在 SAF 往返期间存活，
  * 回调时把二者一并交给控制器（URI 过滤交给解析器的扩展名闸门，本段不做二次过滤）。
+ *
+ * ISSUE-P3-384：`KDBX_MERGE` 选源后走 SAF 选 `.kdbx` → [ImportMergeCredentialSheet] 补录第二库凭据 →
+ * 经 [onMergeSubmit] 提交（字节读取与清零归宿主）。
  */
 @Composable
 internal fun VaultImportSection(
     state: ImportUiState,
+    mergeState: ImportUiState = ImportUiState.Idle,
     showDialog: Boolean,
     onDialogDismiss: () -> Unit,
     onFileSelected: (ImportSource, Uri) -> Unit,
     onReportDismiss: () -> Unit,
     /** ISSUE-P2-354 AC④：取消进行中的导入（协程 cancellation；对话框「取消」按钮） */
-    onCancelImport: () -> Unit = {}
+    onCancelImport: () -> Unit = {},
+    /** ISSUE-P3-384：提交第二库密码 + 可选密钥文件（宿主负责读字节与清零） */
+    onMergeSubmit: (passwordChars: CharArray, keyFileUri: Uri?) -> Unit = { _, _ -> },
+    onCancelMerge: () -> Unit = {},
+    onMergeReportDismiss: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var pendingImportSource by remember { mutableStateOf<ImportSource?>(null) }
+    var mergeKeyFileUri by remember { mutableStateOf<Uri?>(null) }
+    var mergeKeyFileName by remember { mutableStateOf<String?>(null) }
+    var pendingMergeUri by remember { mutableStateOf<Uri?>(null) }
+
     val importFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         val source = pendingImportSource
         pendingImportSource = null
-        if (uri != null && source != null) onFileSelected(source, uri)
+        if (uri != null && source != null) {
+            if (source == ImportSource.KDBX_MERGE) {
+                pendingMergeUri = uri
+                onFileSelected(source, uri)
+            } else {
+                onFileSelected(source, uri)
+            }
+        }
+    }
+
+    val mergeKeyFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            mergeKeyFileUri = uri
+            mergeKeyFileName = resolveKeyFileDisplayName(context, uri)
+        }
     }
 
     if (showDialog) {
@@ -139,8 +172,59 @@ internal fun VaultImportSection(
         )
     }
 
+    // ISSUE-P3-384：第二库凭据补录
+    if (mergeState is ImportUiState.AwaitingMergeCredentials) {
+        ImportMergeCredentialSheet(
+            displayName = mergeState.displayName,
+            keyFileDisplayName = mergeKeyFileName,
+            onPickKeyFile = { mergeKeyFileLauncher.launch(arrayOf(WILDCARD_MIME)) },
+            onClearKeyFile = {
+                mergeKeyFileUri = null
+                mergeKeyFileName = null
+            },
+            onSubmit = { passwordChars ->
+                val keyUri = mergeKeyFileUri
+                onMergeSubmit(passwordChars, keyUri)
+                mergeKeyFileUri = null
+                mergeKeyFileName = null
+            },
+            onCancel = {
+                mergeKeyFileUri = null
+                mergeKeyFileName = null
+                onCancelMerge()
+            }
+        )
+    }
+
     // 导入报告对话框：状态全来自控制器 StateFlow（Idle 时不渲染）
-    ImportReportDialog(state = state, onDismiss = onReportDismiss, onCancel = onCancelImport)
+    ImportReportDialog(
+        state = when {
+            mergeState is ImportUiState.Done ||
+                mergeState is ImportUiState.Failed ||
+                mergeState is ImportUiState.Parsing -> mergeState
+            else -> state
+        },
+        onDismiss = {
+            if (mergeState is ImportUiState.Done || mergeState is ImportUiState.Failed) {
+                onMergeReportDismiss()
+            } else {
+                onReportDismiss()
+            }
+        },
+        onCancel = onCancelImport
+    )
+}
+
+/** SAF 显示名（密钥文件选择回显）。 */
+private fun resolveKeyFileDisplayName(context: android.content.Context, uri: Uri): String? = try {
+    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+    }
+} catch (_: IOException) {
+    null
+} catch (_: Exception) {
+    null
 }
 
 /** SAF 通配 MIME 过滤器（原三处内联展开，收敛为一个文件级常量） */

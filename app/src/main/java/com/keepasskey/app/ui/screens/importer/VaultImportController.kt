@@ -10,6 +10,7 @@ import com.keepasskey.app.data.importer.ImportLimits
 import com.keepasskey.app.data.importer.ImportLimitExceededException
 import com.keepasskey.app.data.importer.ImporterRegistry
 import com.keepasskey.app.data.importer.ImportSource
+import com.keepasskey.app.data.importer.KdbxMergeController
 import com.keepasskey.app.data.importer.VaultImporter
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.result.KdbxResult
@@ -51,7 +52,9 @@ class VaultImportController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val registry: ImporterRegistry,
     private val vaultImporter: VaultImporter,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    /** ISSUE-P3-384：`.kdbx` 并入执行体（KDBX_MERGE 路径，不经 EntryImporter）。 */
+    private val kdbxMergeController: KdbxMergeController
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -60,6 +63,12 @@ class VaultImportController @Inject constructor(
 
     /** 导入状态流（设置页直接 collect）。 */
     val uiState: StateFlow<ImportUiState> = mutableUiState.asStateFlow()
+
+    /**
+     * ISSUE-P3-384：`.kdbx` 并入状态流（独立控制器；无依赖时恒 Idle）。
+     * 设置页把两条状态流合并渲染（明文导入 vs 完整库并入）。
+     */
+    val mergeUiState: StateFlow<ImportUiState> = kdbxMergeController.uiState
 
     /** 进行中的导入作业（ISSUE-P2-354 AC④：取消通道持有它执行协程 cancellation）。 */
     private var importJob: Job? = null
@@ -77,12 +86,17 @@ class VaultImportController @Inject constructor(
      * 启动一次导入：由设置页在 SAF 选择器返回 [uri] 后调用。
      *
      * 幂等保护：已有导入进行中时忽略重复调用（避免并发写同一库）。
+     * `ImportSource.KDBX_MERGE` 转交 [kdbxMergeController.beginWithUri]（进入凭据补录，不立即合并）。
      */
     fun startImport(
         source: ImportSource,
         uri: Uri,
         policy: ImportConflictPolicy = ImportConflictPolicy.SKIP_EXISTING
     ) {
+        if (source == ImportSource.KDBX_MERGE) {
+            kdbxMergeController.beginWithUri(uri)
+            return
+        }
         if (mutableUiState.value is ImportUiState.Parsing) return
         val gen = ++generation
         mutableUiState.value = ImportUiState.Parsing(source, stage = ImportStage.READING)
@@ -93,6 +107,21 @@ class VaultImportController @Inject constructor(
                 mutableUiState.value = finalState
             }
         }
+    }
+
+    /** ISSUE-P3-384：提交第二库凭据并启动 `.kdbx` 并入（借用语义：本方法透传后由合并控制器清零）。 */
+    fun submitMergeCredentials(passwordChars: CharArray, keyFileData: ByteArray? = null) {
+        kdbxMergeController.submitCredentials(passwordChars, keyFileData)
+    }
+
+    /** ISSUE-P3-384：取消等待凭据 / 进行中的并入。 */
+    fun cancelMerge() {
+        kdbxMergeController.cancel()
+    }
+
+    /** ISSUE-P3-384：并入报告展示完毕后回到空闲。 */
+    fun resetMerge() {
+        kdbxMergeController.reset()
     }
 
     /**

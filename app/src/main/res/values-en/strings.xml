@@ -643,6 +643,21 @@
     <string name="dbset_src_bitwarden">Bitwarden (JSON)</string>
     <string name="dbset_src_keepass">KeePass / KeePassXC</string>
     <string name="dbset_src_browser">Browser export (CSV)</string>
+    <!-- ISSUE-P3-384 -->
+    <string name="dbset_src_kdbx_merge">Merge another .kdbx database</string>
+    <string name="kdbx_merge_credential_title">Second vault credentials</string>
+    <string name="kdbx_merge_credential_body">Merging: %1$s\nEnter the master password for that database (and key file if any). It is opened in memory only, merged with the current vault, then saved encrypted.</string>
+    <string name="kdbx_merge_credential_unknown_file">(unnamed file)</string>
+    <string name="kdbx_merge_credential_submit">Start merge</string>
+    <string name="kdbx_merge_credential_password">Second vault master password</string>
+    <string name="kdbx_merge_credential_keyfile">Second vault key file (optional)</string>
+    <string name="kdbx_merge_credential_pick_keyfile">Choose key file</string>
+    <string name="kdbx_merge_failed_no_vault">Open a vault first before merging another .kdbx</string>
+    <string name="kdbx_merge_failed_readonly">Current vault is read-only; cannot merge</string>
+    <string name="kdbx_merge_failed_conflict_window">Session tree changed during merge window; please retry</string>
+    <string name="kdbx_merge_failed_save">Failed to save merged vault</string>
+    <string name="import_error_kdbx_merge">Failed to merge another .kdbx</string>
+    <string name="import_report_kdbx_merge_skipped">Conflicting entries kept local: %1$d</string>
 
     <!-- ===== Settings home ===== -->
     <string name="set_section_system">System</string>
@@ -762,6 +777,17 @@
     <string name="sync_webdav_username_label">Username</string>
     <string name="sync_webdav_password_label">Password</string>
     <string name="sync_webdav_path_label">Remote file path</string>
+    <!-- ISSUE-P3-387 -->
+    <string name="sync_browse_btn">Browse remote directory</string>
+    <string name="sync_browse_title">Select remote file</string>
+    <string name="sync_browse_loading">Listing remote directory…</string>
+    <string name="sync_browse_empty">No entries in this directory (you can still type a path manually)</string>
+    <string name="sync_browse_failed">Failed to list remote directory; check config or enter the path manually</string>
+    <string name="sync_browse_load_more">Load more</string>
+    <string name="sync_browse_current_path">Current path: %1$s</string>
+    <string name="sync_browse_use_path">Use this path</string>
+    <string name="sync_browse_close">Close</string>
+    <string name="sync_browse_select_file_hint">Tap a .kdbx file to fill the remote path; tap a folder to navigate</string>
     <string name="sync_s3_endpoint_label">Endpoint</string>
     <string name="sync_s3_region_label">Region</string>
     <string name="sync_s3_bucket_label">Bucket</string>

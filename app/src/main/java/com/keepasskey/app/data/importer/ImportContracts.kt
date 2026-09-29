@@ -24,7 +24,13 @@ enum class ImportSource(val id: String, val displayName: String) {
     KEEPASS_XML("keepass_xml", "KeePass XML"),
     BITWARDEN_JSON("bitwarden_json", "Bitwarden JSON"),
     BROWSER_CSV("browser_csv", "Browser CSV"),
-    ONEPASSWORD_1PUX("onepassword_1pux", "1Password 1PUX");
+    ONEPASSWORD_1PUX("onepassword_1pux", "1Password 1PUX"),
+    /**
+     * ISSUE-P3-384：从另一 `.kdbx` 导入 / 并入当前库（完整库合并，非明文条目导入）。
+     * 不经 [EntryImporter]——由 [KdbxMergeController] 以第二库自身凭据在内存打开后
+     * 走 `KdbxMerger` 三方合并。
+     */
+    KDBX_MERGE("kdbx_merge", "KDBX merge");
 
     companion object {
         /** 按稳定 id 反查；未知 id 返回 null（fail-closed，调用方自行降级）。 */

@@ -44,6 +44,12 @@ internal object S3KeyCodec {
     }
 
     /**
+     * ISSUE-P3-387：查询参数值编码（SigV4 / URL 双侧同源，避免 `%` 被二次编码）。
+     * 保留集与 [awsUriEncode] / 官方 URI 规则一致。
+     */
+    fun encodeQueryValue(value: String): String = awsUriEncode(value)
+
+    /**
      * 依据寻址风格拼装对象访问 URL：
      * path 风格为 `endpoint/bucket/key`，virtual-host 风格为 `scheme://bucket.host/key`。
      * 无 scheme 的端点自动补 https://（全站强制 HTTPS）。

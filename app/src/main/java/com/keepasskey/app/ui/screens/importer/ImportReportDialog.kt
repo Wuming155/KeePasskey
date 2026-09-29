@@ -45,9 +45,45 @@ fun ImportReportDialog(state: ImportUiState, onDismiss: () -> Unit, onCancel: ()
     when (state) {
         ImportUiState.Idle -> Unit
         is ImportUiState.Parsing -> ImportProgressDialog(state, onCancel)
+        is ImportUiState.AwaitingMergeCredentials -> ImportMergeCredentialPrompt(
+            displayName = state.displayName,
+            onSubmit = { pwd, key -> /* 由宿主 ViewModel 提交，见 ImportMergeCredentialSheet */ },
+            onCancel = onCancel
+        )
         is ImportUiState.Done -> ImportResultDialog(state.outcome, onDismiss)
         is ImportUiState.Failed -> ImportFailureDialog(state.reason.messageRes, onDismiss)
     }
+}
+
+/**
+ * ISSUE-P3-384：第二库凭据补录提示（轻量占位——完整表单见 [ImportMergeCredentialSheet]）。
+ * 本函数仅在状态为 AwaitingMergeCredentials 时渲染说明与取消；提交经宿主接线。
+ */
+@Composable
+private fun ImportMergeCredentialPrompt(
+    displayName: String?,
+    onSubmit: (CharArray, ByteArray?) -> Unit,
+    onCancel: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(stringResource(R.string.kdbx_merge_credential_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(
+                        R.string.kdbx_merge_credential_body,
+                        displayName ?: stringResource(R.string.kdbx_merge_credential_unknown_file)
+                    ),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.btn_cancel)) }
+        }
+    )
 }
 
 /**
@@ -93,6 +129,7 @@ private fun ImportProgressDialog(state: ImportUiState.Parsing, onCancel: () -> U
 private fun importStageText(state: ImportUiState.Parsing): String = when (state.stage) {
     ImportStage.READING -> stringResource(R.string.import_progress_reading, importSourceLabel(state.source))
     ImportStage.PARSING -> stringResource(R.string.dbset_import_preparing, importSourceLabel(state.source))
+    ImportStage.MERGING -> stringResource(R.string.kdbx_merge_credential_submit)
     ImportStage.PERSISTING -> {
         val total = state.total
         if (total == null) {
@@ -225,6 +262,7 @@ private fun sourceLabelRes(source: ImportSource): Int = when (source) {
     ImportSource.BITWARDEN_JSON -> R.string.dbset_src_bitwarden
     ImportSource.KEEPASS_XML -> R.string.dbset_src_keepass
     ImportSource.BROWSER_CSV -> R.string.dbset_src_browser
+    ImportSource.KDBX_MERGE -> R.string.dbset_src_kdbx_merge
 }
 
 /** 警告稳定编码 → 资源文案（穷尽映射：新增编码漏配资源会在编译期暴露）。 */

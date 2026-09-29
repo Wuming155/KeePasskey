@@ -37,7 +37,13 @@ enum class ImportFailureReason(@StringRes val messageRes: Int) {
     IO(R.string.import_error_io),
 
     /** 落库失败（写入内存树或落盘失败）。 */
-    PERSIST(R.string.import_error_persist);
+    PERSIST(R.string.import_error_persist),
+
+    /**
+     * ISSUE-P3-384：KDBX 并入失败（第二库无法打开 / 合并窗口冲突 / 保存失败）。
+     * 与 [PERSIST] 分开：用户可读文案指向「并入」而非通用落库。
+     */
+    KDBX_MERGE(R.string.import_error_kdbx_merge);
 
     companion object {
         /**

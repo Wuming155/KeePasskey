@@ -2,6 +2,8 @@ package com.keepasskey.sync.webdav
 
 import androidx.annotation.VisibleForTesting
 import com.keepasskey.sync.model.RemoteFileMetadata
+import com.keepasskey.sync.model.RemoteListEntry
+import com.keepasskey.sync.model.RemoteListPage
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.model.isWeakEtag
@@ -198,6 +200,23 @@ class WebDavSyncProvider(
         }
     }
 
+    /**
+     * ISSUE-P3-387：WebDAV 远端目录浏览（PROPFIND Depth:1）。
+     * 实现下沉 [WebDavDirectoryList]；本方法仅委托（行数门禁）。
+     */
+    override suspend fun listRemoteDirectory(
+        remotePath: String,
+        cursor: String?,
+        pageSize: Int
+    ): Result<RemoteListPage> = WebDavDirectoryList.list(
+        serverUrl = serverUrl,
+        authHeader = authHeader,
+        remotePath = remotePath,
+        cursor = cursor,
+        pageSize = pageSize,
+        execute = { request -> executeTransientRetryable(retryable = true) { request } }
+    )
+
     override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
@@ -313,114 +332,20 @@ class WebDavSyncProvider(
         data: ByteArray,
         expectedEtag: String?,
         remoteExists: Boolean?
-    ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
-            val tmpPath = atomicTmpPath(remotePath, UUID.randomUUID().toString())
-            val tmpUploadResult = upload(tmpPath, data, expectedEtag = null)
-            if (tmpUploadResult.isFailure) {
-                throw tmpUploadResult.exceptionOrNull() ?: SyncException.NetworkError("上传临时文件失败")
-            }
-
-            val sourceUrl = WebDavUrlCodec.buildUrl(serverUrl, tmpPath)
-            val destUrl = WebDavUrlCodec.buildUrl(serverUrl, remotePath)
-
-            val overwriteFlag = if (!expectedEtag.isNullOrBlank()) {
-                // If tagged list 已在服务端原子校验目标 ETag，Overwrite: T 仅表示允许替换
-                "T"
-            } else {
-                // 无期望 ETag：需要「目标是否已存在」来区分真首传与无 ETag 服务器的覆盖上传。
-                // ISSUE-P3-180：优先采用调用方**已探明**的结论（首传路径上游已用 getMetadata
-                // 得出「不存在」），仅在未知（null）时才现探一次 PROPFIND——原实现恒探一次，
-                // 使首传路径多一个 RTT。
-                val exists = remoteExists ?: getMetadata(remotePath).isSuccess
-                if (exists) "T" else "F"
-            }
-
-            fun createMoveRequest(withPrecondition: Boolean = true): Request {
-                val moveBuilder = Request.Builder()
-                    .url(sourceUrl)
-                    .method("MOVE", null)
-                    .header("Authorization", authHeader)
-                    .header("Destination", destUrl)
-
-                // 409/423 兜底重试：目标已被 DELETE，If 预条件恒失败，改走无预条件 + Overwrite:T
-                if (withPrecondition && !expectedEtag.isNullOrBlank()) {
-                    // RFC 4918 Section 10.4: tagged list If 头把 ETag 预条件绑定到 MOVE 目标资源。
-                    // ISSUE-P1-275 AC②：经 formatHeaderEtag 保留弱校验标记（`([W/"abc"])`）——
-                    // RFC 4918 §10.4.4 允许服务器对 If 头用弱或强比较，回传服务器签发的原形态
-                    // （弱存储标签 × 弱比较）才可匹配；剥标记的强形态只在弱比较服务器上恰好同义。
-                    moveBuilder.header("Overwrite", overwriteFlag)
-                    moveBuilder.header("If", "<$destUrl> ([${WebDavUrlCodec.formatHeaderEtag(expectedEtag)}])")
-                } else {
-                    moveBuilder.header("Overwrite", overwriteFlag)
-                }
-                return moveBuilder.build()
-            }
-
-            var moveResponse: Response? = null
-            var moveSuccess = false
-            var conflictError: SyncException.ConflictError? = null
-            var overwriteConflictCode: Int? = null
-            var lastMoveCode = 0
-
-            for (attempt in 0..1) {
-                try {
-                    // ISSUE-P3-298 ③：MOVE 携带目标 ETag 预条件（If tagged list）时允许传输级重试，
-                    // 预条件服务端逐次重验；无预条件 MOVE（Overwrite: T/F 无 If 头）恒单次
-                    val resp = executeTransientRetryable(
-                        retryable = !expectedEtag.isNullOrBlank()
-                    ) { createMoveRequest() }
-                    lastMoveCode = resp.code
-                    if (resp.code == WebDavMoveOverwritePolicy.HTTP_PRECONDITION_FAILED) {
-                        val currentMeta = getMetadata(remotePath).getOrNull()
-                        conflictError = SyncException.ConflictError(
-                            remoteEtag = currentMeta?.etag.orEmpty(),
-                            localExpectedEtag = expectedEtag.orEmpty(),
-                            message = WebDavMoveOverwritePolicy.preconditionFailureMessage()
-                        )
-                        resp.close()
-                        break
-                    }
-                    if (resp.isSuccessful || resp.code == 201 || resp.code == 204) {
-                        moveResponse = resp
-                        moveSuccess = true
-                        break
-                    }
-                    // ISSUE-P2-381：409/423 = 服务器对 MOVE 覆盖已有目标的拒绝形态
-                    // （仅靠 Overwrite:T 不可靠）。先 DELETE 目标再单次无预条件重试。
-                    if (WebDavMoveOverwritePolicy.isOverwriteConflict(resp.code)) {
-                        val conflictCode = resp.code
-                        overwriteConflictCode = conflictCode
-                        resp.close()
-                        if (attempt == 0) {
-                            WebDavMoveOverwritePolicy.logOverwriteConflict(conflictCode)
-                            delete(remotePath)
-                            continue
-                        }
-                        break
-                    }
-                    resp.close()
-                } catch (e: Exception) {
-                    if (attempt == 1) throw e
-                }
-            }
-
-            if (!moveSuccess) {
-                // 回滚并清理临时文件
-                delete(tmpPath)
-                if (conflictError != null) {
-                    throw conflictError
-                }
-                // ISSUE-P2-381 AC②：409/423 与 412 分开报错文案
-                throw WebDavMoveOverwritePolicy.protocolErrorFor(overwriteConflictCode, lastMoveCode)
-            }
-
-            val finalEtag = moveResponse?.header("ETag")?.cleanEtag()
-            moveResponse?.close()
-
-            finalEtag?.ifBlank { null } ?: getMetadata(remotePath).getOrThrow().etag
+    ): Result<String> = WebDavUploadAtomic.run(
+        serverUrl = serverUrl,
+        authHeader = authHeader,
+        remotePath = remotePath,
+        data = data,
+        expectedEtag = expectedEtag,
+        remoteExists = remoteExists,
+        upload = { path, bytes, etag -> upload(path, bytes, etag) },
+        getMetadata = { path -> getMetadata(path) },
+        delete = { path -> delete(path) },
+        execute = { retryable, requestFactory ->
+            executeTransientRetryable(retryable = retryable) { requestFactory() }
         }
-    }
+    )
 
     override suspend fun delete(remotePath: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
