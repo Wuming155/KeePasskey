@@ -35,7 +35,7 @@ internal fun RemoteBrowseSection(
     RemoteBrowseDialog(
         state = browseState,
         onSelectFile = onSelectFile,
-        // ISSUE-P3-395：宿主按借用语义清零入参，表单数组必须传 copyOf
+        // ISSUE-P3-395/396：宿主清零入参故传 copyOf；下钻传 entry.path（即目录本身，不再取父目录）
         onNavigate = { entry ->
             if (provider == CloudSyncProvider.WEBDAV) {
                 onBrowseWebDav(webdavUrl, webdavUsername, webdavPasswordChars.copyOf(), entry.path, null)

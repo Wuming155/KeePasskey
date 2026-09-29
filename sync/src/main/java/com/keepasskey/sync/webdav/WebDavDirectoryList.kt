@@ -111,13 +111,7 @@ internal object WebDavDirectoryList {
         }
         if (decoded.trimEnd('/') == selfDecoded.trimEnd('/')) return null
 
-        val path = when {
-            decoded.startsWith(serverUrl.trimEnd('/')) -> {
-                normalizeBrowsePath(decoded.removePrefix(serverUrl.trimEnd('/')))
-            }
-            decoded.startsWith("/") -> normalizeBrowsePath(decoded)
-            else -> normalizeBrowsePath("$dirPath/$decoded")
-        }
+        val path = relativeResourcePath(decoded, serverUrl, dirPath) ?: return null
         if (path.isBlank()) return null
         val name = path.substringAfterLast('/')
         if (name.isBlank()) return null
@@ -132,6 +126,47 @@ internal object WebDavDirectoryList {
 
     internal fun normalizeBrowsePath(remotePath: String): String =
         remotePath.trim().trim('/')
+
+    /**
+     * 把 PROPFIND href 还原为**相对 WebDAV 端点**的资源路径。
+     *
+     * 服务器常见三种形态：
+     * - 完整 URL：`https://host/dav/files/user/vaults/`
+     * - 绝对路径（含端点 path 前缀）：`/remote.php/dav/files/user/vaults/`
+     * - 相对集合：`vaults/`
+     *
+     * 绝对路径若未剥离端点 path 前缀，会与 `WebDavUrlCodec.buildUrl` 再拼一次 ⇒
+     * 下钻 / 选中 / 同步全部 404（ISSUE-P3-396）。
+     */
+    internal fun relativeResourcePath(href: String, serverUrl: String, dirPath: String): String? {
+        val decoded = href.trim()
+        if (decoded.isEmpty()) return null
+        val base = serverUrl.trimEnd('/')
+        if (decoded.startsWith(base)) {
+            return normalizeBrowsePath(decoded.substring(base.length))
+        }
+        if (decoded.startsWith("/")) {
+            val withoutSlashes = decoded.trim('/')
+            val sp = serverUrlPath(serverUrl)?.trim('/')
+            if (!sp.isNullOrEmpty()) {
+                if (withoutSlashes == sp) return ""
+                if (withoutSlashes.startsWith("$sp/")) {
+                    return normalizeBrowsePath(withoutSlashes.substring(sp.length + 1))
+                }
+            }
+            return normalizeBrowsePath(withoutSlashes)
+        }
+        return normalizeBrowsePath(if (dirPath.isEmpty()) decoded else "$dirPath/$decoded")
+    }
+
+    /** 从 serverUrl 取 path 组件（如 `/remote.php/dav/files/user`）；解析失败返回 null。 */
+    internal fun serverUrlPath(serverUrl: String): String? {
+        return try {
+            java.net.URI(serverUrl).path?.trimEnd('/')?.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /** Depth:1 PROPFIND 报文（与 Provider 原文一致）。 */
     internal const val PROPFIND_XML: String = """<?xml version="1.0" encoding="utf-8" ?>

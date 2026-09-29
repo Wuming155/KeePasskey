@@ -249,12 +249,12 @@ fun CloudSyncScreen(
                                 onRemotePathChange = { webdavRemotePath = it },
                                 onBrowseRemote = {
                                     showBrowseDialog = true
-                                    // ISSUE-P3-395：宿主按借用语义清零入参，表单数组必须传 copyOf
+                                    // ISSUE-P3-395/396：宿主清零入参故传 copyOf；路径字段可能是文件，浏览其父目录
                                     onBrowseWebDav(
                                         webdavUrl,
                                         webdavUsername,
                                         webdavPasswordChars.copyOf(),
-                                        webdavRemotePath,
+                                        com.keepasskey.app.sync.parentDirectoryPath(webdavRemotePath),
                                         null
                                     )
                                 }
@@ -289,14 +289,14 @@ fun CloudSyncScreen(
                                 onUsePathStyleChange = { s3UsePathStyle = it },
                                 onBrowseRemote = {
                                     showBrowseDialog = true
-                                    // ISSUE-P3-395：宿主按借用语义清零入参，表单数组必须传 copyOf
+                                    // ISSUE-P3-395/396：对象键可能是文件，浏览其父目录
                                     onBrowseS3(
                                         s3Endpoint,
                                         s3Bucket,
                                         s3Region,
                                         s3AccessKeyChars.copyOf(),
                                         s3SecretKeyChars.copyOf(),
-                                        s3ObjectKey,
+                                        com.keepasskey.app.sync.parentDirectoryPath(s3ObjectKey),
                                         s3UsePathStyle,
                                         null
                                     )

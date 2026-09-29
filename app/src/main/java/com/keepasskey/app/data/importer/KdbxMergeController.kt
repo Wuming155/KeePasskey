@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.sync.SyncSessionState
+import com.keepasskey.app.sync.eraseDiscardedDatabase
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.orFallback
 import com.keepasskey.app.ui.screens.importer.ImportStage
@@ -212,16 +213,21 @@ class KdbxMergeController @Inject constructor(
 
     /**
      * 在会话互斥锁内完成「空底版三方合并 → 校验-采用 → 原子保存」。
-     * 第二库敏感树在 finally 中 `clearSensitiveData()`。
      *
-     * ISSUE-P3-395：装配/计数/警告组装下沉 [KdbxMergeOutcomeFactory]，本文件保持 <400 行。
+     * ISSUE-P3-395：装配/计数/警告组装下沉 [KdbxMergeOutcomeFactory]。
+     * ISSUE-P3-397：对端树擦除必须按**身份集合**走 [eraseDiscardedDatabase]——
+     * 合并树对单侧独有对象复用对端 `ProtectedString` 实例，裸 `clearSensitiveData()`
+     * 会清零会话库仍在引用的字段（§9.6 #19 同型）。
      */
     private suspend fun mergeUnderSessionLock(otherDb: KdbxDatabase): KdbxResult<ImportOutcome> {
         val localDb = databaseSession.databaseFlow.value
-            ?: return KdbxResult.Failure(
+        if (localDb == null) {
+            otherDb.clearSensitiveData()
+            return KdbxResult.Failure(
                 IllegalStateException("无活动数据库"),
                 strings.get(R.string.kdbx_merge_failed_no_vault)
             )
+        }
         if (databaseSession.isReadOnly) {
             otherDb.clearSensitiveData()
             return KdbxResult.Failure(
@@ -229,6 +235,7 @@ class KdbxMergeController @Inject constructor(
                 strings.get(R.string.kdbx_merge_failed_readonly)
             )
         }
+        var adoptedDb: KdbxDatabase? = null
         try {
             val (baseLite, localLite, remoteLite) =
                 KdbxMergeOutcomeFactory.buildMergeLites(localDb, otherDb)
@@ -239,20 +246,24 @@ class KdbxMergeController @Inject constructor(
                 merged = merged
             )
 
+            val replacement = localDb.copy(
+                rootGroup = merged.mergedRoot,
+                deletedObjects = merged.mergedDeletedObjects,
+                customIcons = merged.mergedCustomIcons
+            )
             val adopted = databaseSession.adoptDatabaseIfUnchanged(
                 expectedAtCycleStart = localDb,
-                replacement = localDb.copy(
-                    rootGroup = merged.mergedRoot,
-                    deletedObjects = merged.mergedDeletedObjects,
-                    customIcons = merged.mergedCustomIcons
-                )
+                replacement = replacement
             )
             if (!adopted) {
+                // 未采用：merged 与 otherDb 均无存活别名于会话树
+                eraseDiscardedDatabase(otherDb, live = localDb)
                 return KdbxResult.Failure(
                     IllegalStateException("合并窗口内会话树已变化"),
                     strings.get(R.string.kdbx_merge_failed_conflict_window)
                 )
             }
+            adoptedDb = replacement
 
             val saveResult = databaseSession.save()
             if (saveResult is KdbxResult.Failure) {
@@ -268,8 +279,8 @@ class KdbxMergeController @Inject constructor(
             )
             return KdbxResult.Success(outcome)
         } finally {
-            // 第二库敏感树必须销毁（AC①：内存路径，不落中间文件）
-            otherDb.clearSensitiveData()
+            // ISSUE-P3-397：存活侧 = 采用后的会话树（与 SyncConflictAutoMerge 同口径）
+            eraseDiscardedDatabase(otherDb, live = adoptedDb ?: databaseSession.databaseFlow.value)
         }
     }
 
