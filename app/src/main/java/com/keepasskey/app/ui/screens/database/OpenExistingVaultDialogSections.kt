@@ -163,7 +163,8 @@ internal fun WebdavVaultSourceForm(
             value = webdavUrl,
             onValueChange = onWebdavUrlChange,
             label = { Text(stringResource(R.string.picker_webdav_url_label)) },
-            placeholder = { Text("https://example.com/dav/passwords.kdbx") },
+            placeholder = { Text(com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL_PLACEHOLDER) },
+            supportingText = { Text(stringResource(R.string.sync_webdav_url_hint_nutstore)) },
             leadingIcon = { Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(18.dp)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()

@@ -76,11 +76,11 @@ data class SettingsUiState(
 
     // 2. 云端多协议同步与文件处理 (Cloud Sync & File Handling)
     val syncProvider: CloudSyncProvider = CloudSyncProvider.WEBDAV,
-    // WebDAV 专属字段（M2 整改：默认值一律空串，杜绝示例凭据被静默保存为真实凭据）
-    // Wave 15 整改：webdavPassword 明文不再进 UiState/StateFlow（经 ViewModel CharArray 预填通道承载）
-    val webdavUrl: String = "",
+    // WebDAV 专属字段（M2 整改：凭据不进 UiState；Wave 15 密码经 CharArray 预填通道）
+    // URL / 远程路径默认预填坚果云端点，减少重复输入（已保存配置仍优先恢复）
+    val webdavUrl: String = com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL,
     val webdavUsername: String = "",
-    val webdavRemotePath: String = "/keepasskey.kdbx",
+    val webdavRemotePath: String = com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH,
     // S3 兼容协议专属字段（M2 整改：默认值一律空串）
     // Wave 15 整改：s3SecretKey 明文不再进 UiState/StateFlow（经 ViewModel CharArray 预填通道承载）；
     // ISSUE-P2-01：s3AccessKey 同步改造——AccessKey ID 亦不再以 String 驻留 UiState/StateFlow，

@@ -50,7 +50,8 @@ internal fun OpenExistingVaultDialog(
     }
 
     // WebDAV 字段（Wave 15 假桩清零：仅保留有消费者的展示名称与 URL，凭据统一在同步设置中配置）
-    var webdavUrl by remember { mutableStateOf("") }
+    // 默认预填坚果云端点，避免重复输入示例 URL
+    var webdavUrl by remember { mutableStateOf(com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL) }
     var webdavName by remember { mutableStateOf("") }
 
     // S3 兼容字段（同上）

@@ -110,12 +110,16 @@ fun CloudSyncScreen(
 
     var dropdownExpanded by remember { mutableStateOf(false) }
 
-    var webdavUrl by remember(uiState.webdavUrl) { mutableStateOf(uiState.webdavUrl) }
+    var webdavUrl by remember(uiState.webdavUrl) {
+        mutableStateOf(uiState.webdavUrl.ifBlank { com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL })
+    }
     var webdavUsername by remember(uiState.webdavUsername) { mutableStateOf(uiState.webdavUsername) }
     // Wave 15 整改：密码以 CharArray 本地承载（显示用 String 仅存活于 SecurePasswordField 组件内部），
     // 离开组合时立即擦除
     var webdavPasswordChars by remember { mutableStateOf(CharArray(0)) }
-    var webdavRemotePath by remember(uiState.webdavRemotePath) { mutableStateOf(uiState.webdavRemotePath) }
+    var webdavRemotePath by remember(uiState.webdavRemotePath) {
+        mutableStateOf(uiState.webdavRemotePath.ifBlank { com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH })
+    }
     var webdavPasswordVisible by remember { mutableStateOf(false) }
     var showBrowseDialog by remember { mutableStateOf(false) }
 

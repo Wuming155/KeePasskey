@@ -37,9 +37,9 @@ internal class SettingsSyncController(
         // （经 CharArray 一次性预填通道下发，保存后即擦除）
         // ISSUE-P2-01：s3AccessKey 同步改造——AccessKey ID 亦不再以 String 驻留本状态流，
         // 与 SecretKey 同走 CharArray 一次性预填通道
-        val webdavUrl: String = "",
+        val webdavUrl: String = com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL,
         val webdavUsername: String = "",
-        val webdavRemotePath: String = "/keepasskey.kdbx",
+        val webdavRemotePath: String = com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH,
         val s3Endpoint: String = "",
         val s3Bucket: String = "",
         val s3Region: String = "auto",
@@ -138,9 +138,12 @@ internal class SettingsSyncController(
         syncStateFlow.update { cur ->
             cur.copy(
                 provider = savedProvider,
-                webdavUrl = savedWebDav?.url ?: cur.webdavUrl,
+                // 已保存配置优先；无配置时预填坚果云端点，避免每次重敲示例 URL
+                webdavUrl = savedWebDav?.url?.takeIf { it.isNotBlank() }
+                    ?: com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL,
                 webdavUsername = savedWebDav?.username ?: cur.webdavUsername,
-                webdavRemotePath = savedWebDav?.remotePath ?: cur.webdavRemotePath,
+                webdavRemotePath = savedWebDav?.remotePath?.takeIf { it.isNotBlank() }
+                    ?: com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH,
                 s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
                 s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
                 s3Region = savedS3?.region ?: cur.s3Region,

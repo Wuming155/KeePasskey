@@ -143,7 +143,8 @@ class SyncCredentialsStore @Inject constructor(
 
         val url = prefs.getString(KEY_WEBDAV_URL, null) ?: return null
         val username = prefs.getString(KEY_WEBDAV_USERNAME, "") ?: ""
-        val remotePath = prefs.getString(KEY_WEBDAV_REMOTE_PATH, "/keepasskey.kdbx") ?: "/keepasskey.kdbx"
+        val remotePath = prefs.getString(KEY_WEBDAV_REMOTE_PATH, com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH)
+            ?: com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH
         val iv = prefs.getString(KEY_WEBDAV_PASSWORD_IV, null)
         val cipher = prefs.getString(KEY_WEBDAV_PASSWORD_CIPHER, null)
 
