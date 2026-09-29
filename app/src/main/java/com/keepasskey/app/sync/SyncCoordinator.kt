@@ -217,6 +217,8 @@ open class SyncCoordinator @Inject constructor(
         }
         publishSyncEvents()
         _lastOutcome.value = outcome
+        // ISSUE-P3-381：远端 ETag 探测基线不在本周期直接读引擎 cache（internal）；
+        // 探测协调器在首次探测成功时自行回写基线（ResumeSyncProbeCoordinator）。
         debugLog.info(SYNC_LOG_TAG, "同步结束: ${describeOutcome(outcome)}")
         return outcome
     }
@@ -291,6 +293,33 @@ open class SyncCoordinator @Inject constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * ISSUE-P3-381：回前台 / 网络恢复探测用——解析远端库路径（未配置时返回 null）。
+     * 与 [SyncProviderResolver.resolveRemotePath] 同源；默认文件名取活动库名或常量兜底。
+     */
+    fun resolveRemotePathForProbe(): String? {
+        val activeName = databaseSession.currentFile?.name
+            ?: return if (isSyncConfigured()) null else null
+        if (!isSyncConfigured()) return null
+        return try {
+            providers.resolveRemotePath(activeName)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * ISSUE-P3-381：上次同步周期记录的远端 ETag（探测比对基线）；从未同步返回空串。
+     */
+    fun lastRemoteEtagForProbe(): String {
+        return session.lastRemoteEtag
+    }
+
+    /** 上次同步周期后的远端 ETag 回写（同步收尾时由调用方/本协调器更新）。 */
+    fun rememberRemoteEtagForProbe(etag: String) {
+        session.lastRemoteEtag = etag
     }
 
     /**

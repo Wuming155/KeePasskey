@@ -11,6 +11,8 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.security.AutoLockSessionGuard
+import com.keepasskey.app.security.VaultFileBaselineHolder
+import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -58,7 +60,11 @@ class RealVaultRepository @Inject constructor(
     private val totpPreferencesSource: TotpPreferencesSource,
     // ISSUE-P3-366 AC②：保存（KDF 派生 + 整库重序列化）期间挂锁（保存是本仓库
     // 会话落盘的唯一出口），Hilt 注入守护单例——与同步挂点共享同一挂锁闸
-    private val autoLockGuard: AutoLockSessionGuard
+    private val autoLockGuard: AutoLockSessionGuard,
+    // ISSUE-P2-378：外部修改基线与漂移处置协调器
+    // 默认 null 仅为既有单测构造点兼容（Hilt 生产路径注入真实单例）
+    private val baselineHolder: VaultFileBaselineHolder? = null,
+    private val driftCoordinator: VaultFileDriftCoordinator? = null
 ) : VaultRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -79,7 +85,9 @@ class RealVaultRepository @Inject constructor(
         databaseSession = databaseSession,
         catalog = catalog,
         refresh = ::refreshDatabases,
-        selectDatabase = ::selectDatabase
+        selectDatabase = ::selectDatabase,
+        // ISSUE-P2-378 AC①：打开成功后留存基线
+        baselineHolder = baselineHolder
     )
     private val entryWriter = VaultEntryWriteCoordinator(strings, databaseSession, entryMapper) { persistSession() }
     private val secretReader = VaultEntrySecretReader(
@@ -106,6 +114,8 @@ class RealVaultRepository @Inject constructor(
                 refreshDatabases()
             }
         }
+        // ISSUE-P2-378：基线持有者注册锁观察者（锁定/关库时清空基线）
+        baselineHolder?.register()
     }
 
     private suspend fun refreshDatabases() {
@@ -392,18 +402,61 @@ class RealVaultRepository @Inject constructor(
      * begin/end 成对（漏配对会令挂锁永不恢复）；挂起期间的锁定触发延迟至保存结束补执行。
      */
     private suspend fun persistSession(): KdbxResult<Unit> {
+        // ISSUE-P2-378 AC②：保存前外部修改漂移检测——漂移即 fail-closed 中止覆盖，
+        // 唤起 UI 三选（放弃 / 重载 / 合并），禁止静默整树覆盖
+        val pathId = databaseSession.currentPathIdentifier.orEmpty()
+        val localFile = databaseSession.currentFile
+        val drifted = driftCoordinator?.checkDrift(
+            pathIdentifier = pathId,
+            localFile = localFile
+        ) == true
+        if (drifted) {
+            driftCoordinator?.requestPrompt(pathIdentifier = pathId)
+            debugLog.error(TAG, "保存中止：库文件已被外部修改")
+            return KdbxResult.Failure(
+                IllegalStateException("Vault file modified externally"),
+                strings.get(R.string.ext_mod_save_aborted)
+            )
+        }
         autoLockGuard.beginLongTask()
         try {
             val result = databaseSession.save()
-            // ISSUE-P2-90：落库即作废 TOTP 缓存——会话流的失效通知是异步的，
-            // 此处同步作废可消除「刚改完 TOTP 种子 / 周期、同一周期内仍读到旧码」的竞态窗口
             secretReader.invalidateTotpCache()
+            if (result is KdbxResult.Success) {
+                driftCoordinator?.refreshBaselineAfterPersist(
+                    pathIdentifier = pathId,
+                    localFile = localFile
+                )
+            }
             if (result is KdbxResult.Failure) {
                 debugLog.error(TAG, "数据库保存失败: ${result.error.javaClass.simpleName}")
             }
             return result
         } finally {
             autoLockGuard.endLongTask()
+        }
+    }
+
+    /**
+     * ISSUE-P2-378：用户对漂移提示的三选处置。
+     *
+     * - [com.keepasskey.app.security.ExternalModificationChoice.ABANDON_SAVE]：仅关闭提示，
+     *   不写盘（调用方本次保存已中止）；内存改动保留。
+     * - RELOAD_FROM_DISK / MERGE_AND_SAVE：委托 [VaultFileDriftResolve]（失败如实上浮且保留内存改动）。
+     */
+    override suspend fun applyExternalModificationChoice(
+        choice: com.keepasskey.app.security.ExternalModificationChoice
+    ): KdbxResult<Unit> {
+        return when (choice) {
+            com.keepasskey.app.security.ExternalModificationChoice.ABANDON_SAVE -> {
+                driftCoordinator?.dismiss()
+                KdbxResult.Success(Unit)
+            }
+
+            com.keepasskey.app.security.ExternalModificationChoice.RELOAD_FROM_DISK,
+            com.keepasskey.app.security.ExternalModificationChoice.MERGE_AND_SAVE -> {
+                VaultFileDriftResolve(databaseSession, strings, driftCoordinator).resolve(choice)
+            }
         }
     }
 

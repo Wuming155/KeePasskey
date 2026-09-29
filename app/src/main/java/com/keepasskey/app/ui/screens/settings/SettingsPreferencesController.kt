@@ -143,6 +143,8 @@ internal class SettingsPreferencesController(
                         it.copy(
                             databaseName = header.databaseName,
                             defaultUsername = header.defaultUsername,
+                            // ISSUE-P3-385：库级描述随 Meta 一并下发（编辑对话框预填）
+                            databaseDescription = db.databaseDescription,
                             encryptionAlgorithm = header.encryptionAlgorithm,
                             kdfAlgorithm = header.kdfAlgorithm,
                             argon2Iterations = header.argon2Iterations,

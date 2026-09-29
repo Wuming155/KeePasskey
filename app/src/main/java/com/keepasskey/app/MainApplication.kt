@@ -71,6 +71,10 @@ class MainApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var syncCacheEvictor: SyncCacheEvictor
 
+    // ISSUE-P3-381：回前台 / 网络恢复远端探测（策略层节流 + 锁定态跳过，不直接 syncNow）
+    @Inject
+    lateinit var resumeSyncProbeCoordinator: com.keepasskey.app.sync.ResumeSyncProbeCoordinator
+
     /**
      * 「彻底退出应用」前的**易失缓存清理**（ISSUE-P3-116）。
      *
@@ -128,6 +132,9 @@ class MainApplication : Application(), Configuration.Provider {
         // 的独立冷启动入口，守护（ProcessLifecycleOwner + 熄屏广播）必须在进程创建时注册，
         // 保证任意入口冷启动后熄屏熔断与后台超时锁定均全程生效（幂等守卫保留）。
         autoLockManager.initialize()
+        // ISSUE-P3-381：回前台 / 网络恢复远端探测挂点（须在 autoLockManager.initialize 之后）
+        runCatching { resumeSyncProbeCoordinator.initialize() }
+            .onFailure { AppLog.w(TAG, "回前台探测初始化失败", it) }
         // TASK-08 整改：冷启动按持久化偏好恢复周期后台同步调度
         // （默认关闭，未开启时行为与既往完全一致）
         //

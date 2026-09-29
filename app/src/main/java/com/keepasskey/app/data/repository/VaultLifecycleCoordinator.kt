@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import com.keepasskey.app.R
+import com.keepasskey.app.security.VaultFileBaselineHolder
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultRemovalKind
@@ -35,7 +36,12 @@ internal class VaultLifecycleCoordinator(
     private val databaseSession: DatabaseSession,
     private val catalog: VaultDatabaseCatalog,
     private val refresh: suspend () -> Unit,
-    private val selectDatabase: suspend (String) -> Unit
+    private val selectDatabase: suspend (String) -> Unit,
+    /**
+     * ISSUE-P2-378 AC①：打开成功后留存外部修改基线。
+     * 缺省空实现保持既有单测构造点兼容；生产由 RealVaultRepository 注入 holder。
+     */
+    private val baselineHolder: VaultFileBaselineHolder? = null
 ) {
 
     /**
@@ -95,6 +101,11 @@ internal class VaultLifecycleCoordinator(
         }
 
         if (result is KdbxResult.Success) {
+            // ISSUE-P2-378 AC①：打开成功后留存基线（本地 File 直读；SAF 用元数据构造）
+            baselineHolder?.capture(
+                pathIdentifier = activeDb.path,
+                file = if (activeDb.path.startsWith("content://")) null else File(activeDb.path)
+            )
             refresh()
         }
         return result

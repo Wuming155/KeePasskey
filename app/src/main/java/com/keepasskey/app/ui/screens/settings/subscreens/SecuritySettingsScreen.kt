@@ -66,6 +66,11 @@ fun SecuritySettingsScreen(
     onUnlockLockoutMaxChange: (Int) -> Unit = {},
     onLockWhenScreenOffToggle: (Boolean) -> Unit = {},
     onLockWhenNavigateBackToggle: (Boolean) -> Unit = {},
+    // ISSUE-P2-379：前台闲置自动锁定
+    onAutoLockForegroundToggle: (Boolean) -> Unit = {},
+    onAutoLockForegroundTimeoutChange: (Int) -> Unit = {},
+    // ISSUE-P3-381：回前台 / 网络恢复远端探测
+    onSyncProbeOnResumeToggle: (Boolean) -> Unit = {},
     onClearPasswordOnLeaveToggle: (Boolean) -> Unit = {},
     onRememberKeyFileLocationToggle: (Boolean) -> Unit = {},
     onShowKillAppOptionToggle: (Boolean) -> Unit = {},
@@ -186,6 +191,30 @@ fun SecuritySettingsScreen(
                             onCheckedChange = onAutoLockToggle
                         )
 
+                        // ISSUE-P2-379：前台闲置自动锁定（与后台超时并列的独立安全网）
+                        SecuritySwitchRow(
+                            icon = Icons.Default.LockClock,
+                            title = stringResource(R.string.sec_fg_lock_title),
+                            subtitle = stringResource(R.string.sec_fg_lock_sub),
+                            checked = uiState.autoLockForegroundEnabled,
+                            onCheckedChange = onAutoLockForegroundToggle
+                        )
+                        if (uiState.autoLockForegroundEnabled) {
+                            SecurityChoiceChips(
+                                title = stringResource(R.string.sec_fg_lock_dialog_desc),
+                                options = AUTO_LOCK_TIMEOUT_CHOICES,
+                                selectedValue = uiState.autoLockForegroundTimeoutSeconds,
+                                onSelect = onAutoLockForegroundTimeoutChange
+                            )
+                        } else {
+                            Text(
+                                text = stringResource(R.string.sec_fg_lock_disabled_risk_notice),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp)
+                            )
+                        }
+
                         SecuritySwitchRow(
                             icon = Icons.Default.LockClock,
                             title = stringResource(R.string.sec_screen_off_title),
@@ -201,6 +230,15 @@ fun SecuritySettingsScreen(
                             subtitle = stringResource(R.string.sec_nav_back_sub),
                             checked = uiState.lockWhenNavigateBack,
                             onCheckedChange = onLockWhenNavigateBackToggle
+                        )
+
+                        // ISSUE-P3-381：回前台 / 网络恢复远端探测（轻量探测，不自动同步）
+                        SecuritySwitchRow(
+                            icon = Icons.Default.LockClock,
+                            title = stringResource(R.string.sec_sync_probe_title),
+                            subtitle = stringResource(R.string.sec_sync_probe_sub),
+                            checked = uiState.syncProbeOnResumeEnabled,
+                            onCheckedChange = onSyncProbeOnResumeToggle
                         )
 
                         SecurityChoiceChips(
@@ -410,17 +448,23 @@ internal fun SecuritySettingsScreenPreview() {
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 biometricEnabled = true,
                 autoLockBackground = true,
+                autoLockForegroundEnabled = true,
+                syncProbeOnResumeEnabled = true,
                 flagSecureEnabled = true,
                 autoClearClipboard = true,
                 unlockThrottleEnabled = true,
                 autoLockTimeoutSeconds = 300,
+                autoLockForegroundTimeoutSeconds = 300,
                 clipboardTimeoutSeconds = 30
             ),
             onBackClick = {},
             onBiometricToggle = { _, _ -> },
             onAutoLockToggle = {},
             onFlagSecureToggle = {},
-            onAutoClearClipboardToggle = {}
+            onAutoClearClipboardToggle = {},
+            onAutoLockForegroundToggle = {},
+            onAutoLockForegroundTimeoutChange = {},
+            onSyncProbeOnResumeToggle = {}
         )
     }
 }

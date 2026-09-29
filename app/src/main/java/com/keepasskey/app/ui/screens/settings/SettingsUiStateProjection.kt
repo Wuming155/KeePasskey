@@ -102,6 +102,8 @@ internal fun buildSettingsUiState(
     // 1. 密码库与加密设置
     databaseName = dbState.databaseName,
     databaseDefaultUsername = dbState.defaultUsername,
+    // ISSUE-P3-385：库级描述投影（编辑对话框预填）
+    databaseDescription = dbState.databaseDescription,
     // ISSUE-P3-59：文件路径真实下发（活动库记录）
     databasePath = dbState.databasePath,
     encryptionAlgorithm = dbState.encryptionAlgorithm,
@@ -237,6 +239,9 @@ internal fun buildSettingsUiState(
     lastHealthScanTime = healthState.lastHealthScanTime,
     isHealthScanning = healthState.isHealthScanning,
     hasHealthScanned = healthState.hasScanned,
+    // ISSUE-P3-382：重复条目只读报告
+    duplicateGroupCount = healthState.duplicateGroupCount,
+    duplicateEntryCount = healthState.duplicateEntryCount,
 
     // 8. 调试日志
     debugLogEnabled = extState.debugLogEnabled,
@@ -276,6 +281,7 @@ internal fun databaseConfigFromHeader(db: KdbxDatabase): DatabaseConfigUiState {
     return DatabaseConfigUiState(
         databaseName = db.databaseName,
         defaultUsername = db.defaultUserName,
+        databaseDescription = db.databaseDescription,
         encryptionAlgorithm = cipherLabel,
         kdfAlgorithm = kdfLabel,
         argon2Iterations = if (kdf is KdfParameters.Argon2) kdf.iterations else 0L,
@@ -292,6 +298,8 @@ internal data class DatabaseConfigUiState(
     val defaultUsername: String,
     /** 文件路径（ISSUE-P3-59：取自活动库记录；无活动库时为空，UI 显示「未设置」占位） */
     val databasePath: String = "",
+    /** ISSUE-P3-385：库级描述（Meta.databaseDescription，供编辑对话框预填） */
+    val databaseDescription: String = "",
     val encryptionAlgorithm: String,
     val kdfAlgorithm: String,
     val argon2Iterations: Long,

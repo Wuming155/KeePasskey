@@ -42,6 +42,13 @@ class SyncSessionState @Inject constructor() {
     // 由 clearPendingConflictSession() 按身份集合判定擦除。
     var lastSyncedDb: KdbxDatabase? = null
 
+    /**
+     * ISSUE-P3-381：上次同步周期记录的远端 ETag（回前台探测的比对基线）。
+     * 会话锁定时随 [clear] 一并清空。
+     */
+    @Volatile
+    var lastRemoteEtag: String = ""
+
     // 允许单元测试注入模拟 Provider 与测试路径（禁止生产代码赋值）
     @VisibleForTesting
     var testSyncProvider: SyncProvider? = null
@@ -63,5 +70,6 @@ class SyncSessionState @Inject constructor() {
     fun clear() {
         lastSyncedDb = null
         lastSyncEngine = null
+        lastRemoteEtag = ""
     }
 }

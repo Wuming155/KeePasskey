@@ -45,6 +45,8 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             onEncryptionAlgorithmChange = settingsViewModel::setEncryptionAlgorithm,
             onKdfAlgorithmChange = settingsViewModel::setKdfAlgorithm,
             onArgon2ParametersChange = settingsViewModel::setArgon2Parameters,
+            // ISSUE-P3-385：库级 Meta 编辑（库名 / 描述 / 默认用户名）接线
+            onDatabaseMetaChange = settingsViewModel::setDatabaseMeta,
             // M6 整改：真实 KDF 基准接线
             kdfBenchmarkState = kdfBenchmarkState,
             onRunKdfBenchmark = settingsViewModel::runKdfBenchmark,
@@ -190,6 +192,11 @@ internal fun NavGraphBuilder.settingsSecurityRoute(navController: NavHostControl
             onUnlockLockoutMaxChange = settingsViewModel::setUnlockLockoutMaxSeconds,
             onLockWhenScreenOffToggle = settingsViewModel::setLockWhenScreenOff,
             onLockWhenNavigateBackToggle = settingsViewModel::setLockWhenNavigateBack,
+            // ISSUE-P2-379：前台闲置自动锁定 UI 接线
+            onAutoLockForegroundToggle = settingsViewModel::setAutoLockForegroundEnabled,
+            onAutoLockForegroundTimeoutChange = settingsViewModel::setAutoLockForegroundTimeoutSeconds,
+            // ISSUE-P3-381：回前台远端探测开关 UI 接线
+            onSyncProbeOnResumeToggle = settingsViewModel::setSyncProbeOnResumeEnabled,
             onClearPasswordOnLeaveToggle = settingsViewModel::setClearPasswordOnLeave,
             onRememberKeyFileLocationToggle = settingsViewModel::setRememberKeyFileLocation,
             onShowKillAppOptionToggle = settingsViewModel::setShowKillAppOption

@@ -690,6 +690,41 @@
     <string name="sec_nav_back_title">返回键锁定</string>
     <string name="sec_nav_back_sub">在主页按下返回键时立即锁定</string>
     <string name="sec_autolock_time_title">自动锁定倒计时</string>
+    <!-- ISSUE-P2-379：前台闲置自动锁定（与后台超时并列的独立安全网） -->
+    <string name="sec_fg_lock_title">前台闲置自动锁定</string>
+    <string name="sec_fg_lock_sub">前台无操作超时后自动锁定密码库；锁定态交互不刷新计时</string>
+    <string name="sec_fg_lock_dialog_desc">选择前台无操作时的自动锁定等待时长；时钟回拨按立即过期处理</string>
+    <string name="sec_fg_lock_disabled_risk_notice">已关闭前台闲置自动锁定：切回前台且长时间无操作时，密码库将保持解锁状态。建议保持开启</string>
+    <!-- ISSUE-P3-381：回前台 / 网络恢复远端探测 -->
+    <string name="sec_sync_probe_title">回前台探测远端变化</string>
+    <string name="sec_sync_probe_sub">切回前台或网络恢复时轻量探测云端是否有更新（不自动同步）</string>
+    <string name="sync_probe_remote_changed">检测到云端密码库可能有更新，请前往同步页面手动同步</string>
+    <string name="sync_probe_unchanged">云端密码库与上次同步一致</string>
+    <string name="sync_probe_failed">远端探测失败：%1$s</string>
+    <!-- ISSUE-P2-378：外部修改检测三选 -->
+    <string name="ext_mod_dialog_title">密码库文件已被外部修改</string>
+    <string name="ext_mod_dialog_body">当前打开的库文件在磁盘上被其他程序修改。为避免静默覆盖，需要你选择如何处理。</string>
+    <string name="ext_mod_choice_abandon">放弃本次保存</string>
+    <string name="ext_mod_choice_reload">重载磁盘版本</string>
+    <string name="ext_mod_choice_merge">合并后保存</string>
+    <string name="ext_mod_reload_failed">重载失败：%1$s（已保留当前内存改动）</string>
+    <string name="ext_mod_merge_failed">合并失败：%1$s（已保留当前内存改动）</string>
+    <string name="ext_mod_save_aborted">已中止保存：磁盘文件已被外部修改</string>
+    <string name="ext_mod_merge_hint_fallback">「合并」走既有 KdbxMerger 三方合并；「重载」丢弃未保存的内存改动；「放弃」不写盘并保留当前会话。</string>
+    <!-- ISSUE-P3-382：健康检查重复条目报告 -->
+    <string name="health_duplicate_title">重复条目</string>
+    <string name="health_duplicate_sub">%1$d 组同 URL / 同账号条目；合并请逐条在条目编辑或删除中处理</string>
+    <string name="health_duplicate_none">未发现重复条目（判据：同 URL + 同账号）</string>
+    <string name="health_duplicate_group_count">共 %1$d 组</string>
+    <string name="health_duplicate_merge_hint">本页只提供只读重复报告。合并请在密码库条目页逐条确认后使用编辑或删除管线（不与同步合并混用）</string>
+    <!-- ISSUE-P3-385：库级 Meta 编辑 -->
+    <string name="dbset_meta_edit_title">编辑库级信息</string>
+    <string name="dbset_field_db_desc">数据库描述</string>
+    <string name="dbset_meta_save">保存</string>
+    <string name="dbset_meta_cancel">取消</string>
+    <string name="dbset_meta_saved">库级信息已更新并保存</string>
+    <string name="dbset_meta_edit_hint">修改库名 / 描述 / 默认用户名后立即写入 KDBX Meta 并落盘。合并时这些字段以本地为准（PD-35）</string>
+    <string name="dbset_new_entry_prefill_hint">新建条目时用户名将预填为库默认用户名</string>
     <string name="sec_throttle_title">解锁失败重试限制</string>
     <string name="sec_throttle_sub">连续多次输错主密码后临时锁定，抵御暴力破解（关闭后可无限次重试）</string>
     <string name="sec_throttle_time_title">最长锁定时长</string>

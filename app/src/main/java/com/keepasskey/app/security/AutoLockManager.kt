@@ -70,8 +70,32 @@ class AutoLockManager @Inject constructor(
     private var lastInteractionAtMillis: Long = System.currentTimeMillis()
     private var foregroundLockJob: Job? = null
 
+    /**
+     * ISSUE-P3-381：回前台监听器集合。进程 onStart（含冷启动补偿判定之后）时逐个回调，
+     * 供 [com.keepasskey.app.sync.ResumeSyncProbeCoordinator] 挂远端探测。
+     */
+    private val foregroundResumeListeners = mutableListOf<() -> Unit>()
+
     /** 后台延迟锁定任务；到点即锁，取消路径覆盖 onStart / onUnlockSuccess / triggerLock / 设置变更 */
     private var backgroundLockJob: Job? = null
+
+    /**
+     * ISSUE-P3-381：注册回前台监听（幂等重复注册由调用方负责；进程级单例生命周期）。
+     */
+    fun addOnForegroundResumeListener(listener: () -> Unit) {
+        synchronized(foregroundResumeListeners) {
+            if (listener !in foregroundResumeListeners) {
+                foregroundResumeListeners += listener
+            }
+        }
+    }
+
+    /** ISSUE-P3-381：注销回前台监听 */
+    fun removeOnForegroundResumeListener(listener: () -> Unit) {
+        synchronized(foregroundResumeListeners) {
+            foregroundResumeListeners -= listener
+        }
+    }
 
     /**
      * ISSUE-P2-379：前台闲置计时。交互刷新语义由 [onUserInteraction] 承担；
@@ -198,7 +222,14 @@ class AutoLockManager @Inject constructor(
             // ISSUE-P2-379：回前台后以当前时刻为交互播种，重启前台闲置计时
             lastInteractionAtMillis = System.currentTimeMillis()
             if (!sessionLocked) scheduleForegroundIdleLock()
+            // ISSUE-P3-381：回前台探测挂点（策略层节流由 ResumeSyncProbePolicy 承担）
+            notifyForegroundResumeListeners()
         }
+    }
+
+    private fun notifyForegroundResumeListeners() {
+        val listeners = synchronized(foregroundResumeListeners) { foregroundResumeListeners.toList() }
+        listeners.forEach { runCatching { it() } }
     }
 
     /**

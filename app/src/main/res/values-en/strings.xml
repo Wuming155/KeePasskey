@@ -677,6 +677,41 @@
     <string name="sec_nav_back_title">Lock on back button</string>
     <string name="sec_nav_back_sub">Lock immediately when back is pressed on the home screen</string>
     <string name="sec_autolock_time_title">Auto-lock countdown</string>
+    <!-- ISSUE-P2-379: foreground idle auto-lock -->
+    <string name="sec_fg_lock_title">Foreground idle auto-lock</string>
+    <string name="sec_fg_lock_sub">Lock the vault after inactivity in the foreground; interaction while locked does not refresh the timer</string>
+    <string name="sec_fg_lock_dialog_desc">Choose how long to wait before auto-locking after foreground inactivity; clock rollback is treated as expired</string>
+    <string name="sec_fg_lock_disabled_risk_notice">Foreground idle auto-lock is off: the vault stays unlocked if you return to the app without interacting. Keep it on if possible</string>
+    <!-- ISSUE-P3-381: resume / network recovery remote probe -->
+    <string name="sec_sync_probe_title">Probe remote on resume</string>
+    <string name="sec_sync_probe_sub">Lightweight remote check after returning to the app or network recovery (does not auto-sync)</string>
+    <string name="sync_probe_remote_changed">The cloud vault may have updates — open Sync to pull them manually</string>
+    <string name="sync_probe_unchanged">Cloud vault matches the last sync</string>
+    <string name="sync_probe_failed">Remote probe failed: %1$s</string>
+    <!-- ISSUE-P2-378: external modification three-choice -->
+    <string name="ext_mod_dialog_title">Vault file was modified externally</string>
+    <string name="ext_mod_dialog_body">The open vault file changed on disk. Choose how to proceed to avoid silent overwrite.</string>
+    <string name="ext_mod_choice_abandon">Abandon this save</string>
+    <string name="ext_mod_choice_reload">Reload from disk</string>
+    <string name="ext_mod_choice_merge">Merge then save</string>
+    <string name="ext_mod_reload_failed">Reload failed: %1$s (in-memory edits kept)</string>
+    <string name="ext_mod_merge_failed">Merge failed: %1$s (in-memory edits kept)</string>
+    <string name="ext_mod_save_aborted">Save aborted: vault file was modified externally</string>
+    <string name="ext_mod_merge_hint_fallback">Merge uses the existing KdbxMerger three-way path; Reload discards unsaved in-memory edits; Abandon skips the write and keeps the current session.</string>
+    <!-- ISSUE-P3-382: health check duplicate report -->
+    <string name="health_duplicate_title">Duplicate entries</string>
+    <string name="health_duplicate_sub">%1$d groups share URL + username; merge them one by one via entry edit or delete</string>
+    <string name="health_duplicate_none">No duplicates found (same URL + username)</string>
+    <string name="health_duplicate_group_count">%1$d groups</string>
+    <string name="health_duplicate_merge_hint">This page is a read-only duplicate report. Merge via entry edit/delete after confirming each case (do not mix with sync merge)</string>
+    <!-- ISSUE-P3-385: database meta editing -->
+    <string name="dbset_meta_edit_title">Edit database info</string>
+    <string name="dbset_field_db_desc">Database description</string>
+    <string name="dbset_meta_save">Save</string>
+    <string name="dbset_meta_cancel">Cancel</string>
+    <string name="dbset_meta_saved">Database info updated and saved</string>
+    <string name="dbset_meta_edit_hint">Name / description / default username are written to KDBX Meta and saved immediately. On merge these fields stay local (PD-35)</string>
+    <string name="dbset_new_entry_prefill_hint">New entries prefill the username from the database default</string>
     <string name="sec_throttle_title">Unlock retry throttling</string>
     <string name="sec_throttle_sub">Temporarily lock the vault after repeated wrong master passwords to resist brute force (turn off for unlimited retries)</string>
     <string name="sec_throttle_time_title">Maximum lockout duration</string>

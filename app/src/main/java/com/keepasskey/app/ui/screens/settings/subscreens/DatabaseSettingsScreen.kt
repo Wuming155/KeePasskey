@@ -41,6 +41,8 @@ fun DatabaseSettingsScreen(
     onEncryptionAlgorithmChange: (String) -> Unit = {},
     onKdfAlgorithmChange: (String) -> Unit = {},
     onArgon2ParametersChange: (iterations: Long, memoryMb: Long, parallelism: Int) -> Unit = { _, _, _ -> },
+    // ISSUE-P3-385：库级 Meta（库名 / 描述 / 默认用户名）编辑回调
+    onDatabaseMetaChange: (databaseName: String?, databaseDescription: String?, defaultUserName: String?) -> Unit = { _, _, _ -> },
     // M6 整改：真实 KDF 基准状态与触发（原按钮仅展示假完成消息）
     kdfBenchmarkState: KdfBenchmarkUiState? = null,
     onRunKdfBenchmark: () -> Unit = {},
@@ -87,6 +89,8 @@ fun DatabaseSettingsScreen(
     var showChildDbDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    // ISSUE-P3-385：库级 Meta 编辑对话框
+    var showMetaDialog by remember { mutableStateOf(false) }
     // ISSUE-P2-10 (ZT-15)：明文 XML 导出的待确认目标（SAF 选定后、写盘前强制二次确认）
     var pendingPlaintextXmlUri by remember { mutableStateOf<Uri?>(null) }
     var showPlaintextXmlConfirm by remember { mutableStateOf(false) }
@@ -162,7 +166,9 @@ fun DatabaseSettingsScreen(
             item {
                 DatabaseBasicCard(
                     uiState = uiState,
-                    onRecycleBinToggle = onRecycleBinToggle
+                    onRecycleBinToggle = onRecycleBinToggle,
+                    // ISSUE-P3-385：库级 Meta 可编辑入口
+                    onMetaEditClick = { showMetaDialog = true }
                 )
             }
 
@@ -231,6 +237,20 @@ fun DatabaseSettingsScreen(
             currentAlgorithm = uiState.encryptionAlgorithm,
             onSelect = onEncryptionAlgorithmChange,
             onDismiss = { showCipherDialog = false }
+        )
+    }
+
+    // ISSUE-P3-385：库级 Meta 编辑对话框（库名 / 描述 / 默认用户名，写 Meta + 立即落盘）
+    if (showMetaDialog) {
+        DatabaseMetaEditDialog(
+            databaseName = uiState.databaseName,
+            databaseDescription = uiState.databaseDescription,
+            defaultUserName = uiState.databaseDefaultUsername,
+            onSave = { name, desc, user ->
+                onDatabaseMetaChange(name, desc, user)
+                showMetaDialog = false
+            },
+            onDismiss = { showMetaDialog = false }
         )
     }
 

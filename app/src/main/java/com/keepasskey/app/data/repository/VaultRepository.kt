@@ -43,6 +43,14 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
+     * ISSUE-P2-378：用户对「库文件被外部修改」三选提示的处置。
+     * 默认实现为空操作（测试替身沿用）；生产实现 `RealVaultRepository` 委托漂移协调器。
+     */
+    suspend fun applyExternalModificationChoice(
+        choice: com.keepasskey.app.security.ExternalModificationChoice
+    ): com.keepasskey.core.result.KdbxResult<Unit> = com.keepasskey.core.result.KdbxResult.Success(Unit)
+
+    /**
      * ISSUE-P3-368 AC①：打开 / 保存链路进度（Flow 形态）。
      * 0..1 为确定进度；null = 无进行中操作或分段不确定段（KDF 派生等不可细分段）。
      * 事件只承载数值，不携带流 / 字节 / 密钥引用。

@@ -39,6 +39,7 @@ import com.keepasskey.app.ui.screens.settings.SettingsViewModel
 import com.keepasskey.app.ui.screens.vault.AppTerminationPolicy
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
+import kotlinx.coroutines.launch
 
 /**
  * KeePasskey 界面总入口与全局路由宿主。
@@ -112,6 +113,10 @@ fun KeePasskeyApp() {
 
             val autoLockManager = (context as? com.keepasskey.app.MainActivity)?.autoLockManager
 
+            // ISSUE-P2-378：外部修改三选全局对话框状态
+            val externalModificationPending by settingsViewModel.externalModificationPending
+                .collectAsStateWithLifecycle()
+
             // 三处全局导航守卫与副作用（组合位置仍在 Scaffold 之前，BackHandler 优先级语义不变）
             AppShellNavigationEffects(
                 navController = navController,
@@ -133,7 +138,11 @@ fun KeePasskeyApp() {
                 autoLockManager = autoLockManager
             )
 
-
+            // ISSUE-P2-378：库文件被外部修改后的三选对话框（挂点下沉 ExternalModificationDialogHost）
+            ExternalModificationDialogHost(
+                pending = externalModificationPending,
+                onChoice = { settingsViewModel.applyExternalModificationChoice(it) }
+            )
         }
     }
 }

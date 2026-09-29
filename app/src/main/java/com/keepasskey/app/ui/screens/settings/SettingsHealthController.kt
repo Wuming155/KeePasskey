@@ -39,7 +39,12 @@ internal class SettingsHealthController(
      * lambda 注入；ISSUE-P3-257 下沉时新增）。默认空实现仅为既有单测构造点兼容，
      * 生产接线由 `SettingsThinOrchestrationTest` / `OneTapInteractionWiringTest` 锁定。
      */
-    private val setBreachCheckEnabled: (Boolean) -> Unit = {}
+    private val setBreachCheckEnabled: (Boolean) -> Unit = {},
+    /**
+     * ISSUE-P3-382：库内重复条目扫描通道（由 ViewModel 注入 `SettingsDatabaseMetaController.scanDuplicateEntries`）。
+     * 默认空实现保持既有单测构造点兼容；缺失时重复报告恒 0（不谎报）。
+     */
+    private val scanDuplicates: () -> List<Pair<Int, Int>> = { emptyList() }
 ) {
 
     internal data class HealthCheckUiState(
@@ -57,7 +62,10 @@ internal class SettingsHealthController(
         val isHealthScanning: Boolean,
         /** ISSUE-P3-61：是否已完成过一次扫描——未扫描时审计行徽标必须保持中性「未扫描」，
          *  不得以「安全 / 需注意」这类有数据才能支撑的结论误导用户 */
-        val hasScanned: Boolean = false
+        val hasScanned: Boolean = false,
+        /** ISSUE-P3-382：库内重复条目只读报告（扫描时顺带产出） */
+        val duplicateGroupCount: Int = 0,
+        val duplicateEntryCount: Int = 0
     )
 
     private val healthStateFlow = MutableStateFlow(initialState())
@@ -74,7 +82,9 @@ internal class SettingsHealthController(
         breachCheckStatus = BreachCheckStatus.DISABLED,
         breachCheckMessage = "",
         lastHealthScanTime = strings.get(R.string.health_status_not_scanned),
-        isHealthScanning = false
+        isHealthScanning = false,
+        duplicateGroupCount = 0,
+        duplicateEntryCount = 0
     )
 
     fun rescanHealth() {
@@ -94,6 +104,11 @@ internal class SettingsHealthController(
                 val weakCount = issues.count { it.riskLevel == PasswordRiskLevel.WEAK }
                 val reusedCount = issues.count { it.riskLevel == PasswordRiskLevel.REUSED }
                 val expiredCount = issues.count { it.riskLevel == PasswordRiskLevel.EXPIRED }
+
+                // ISSUE-P3-382：库内重复条目只读扫描（默认判据「同 URL + 同账号」）
+                val dupGroups = scanDuplicates()
+                val dupGroupCount = dupGroups.size
+                val dupEntryCount = dupGroups.sumOf { it.second }
 
                 // TASK-47：泄露检测由开关门控；关闭态不发起任何网络请求
                 val breachOutcome = runBreachCheck(entries)
@@ -150,7 +165,10 @@ internal class SettingsHealthController(
                         breachCheckStatus = breachOutcome.status,
                         breachCheckMessage = breachOutcome.errorMessage.orEmpty(),
                         lastHealthScanTime = lastScanText,
-                        hasScanned = true
+                        hasScanned = true,
+                        // ISSUE-P3-382：重复条目只读报告随扫描一并产出
+                        duplicateGroupCount = dupGroupCount,
+                        duplicateEntryCount = dupEntryCount
                     )
                 }
             } catch (e: Exception) {

@@ -98,8 +98,10 @@ class OneTapInteractionWiringTest {
             screen.contains("SecurityClickableRow(")
         )
         assertEquals(
-            "三处单值设置（自动锁定超时 / 最长锁定时长 / 剪贴板清空倒计时）都应走就地选择控件",
-            3,
+            // ISSUE-P2-379：前台闲置超时档同样就地化后，安全设置页共 4 处
+            //（后台超时 / 前台闲置超时 / 解锁节流最长锁定 / 剪贴板保留时长）
+            "四处单值设置（后台自动锁定 / 前台闲置 / 最长锁定时长 / 剪贴板清空倒计时）都应走就地选择控件",
+            4,
             Regex("SecurityChoiceChips\\(").findAll(screen).count()
         )
         listOf("AutoLockTimeoutDialog", "ClipboardTimeoutDialog", "LockoutMaxDurationDialog").forEach { gone ->

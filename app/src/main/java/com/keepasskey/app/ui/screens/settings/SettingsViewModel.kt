@@ -76,7 +76,9 @@ class SettingsViewModel @Inject constructor(
     // ISSUE-P2-212：开启生物识别当场验证通道；缺失时开启动作 fail-closed
     private val biometricAuthManager: BiometricAuthManager? = null,
     // ISSUE-P2-212：封印凭据存在性判定（决定「立即可用」还是「下次解锁后登记」）
-    private val biometricCredentialStorage: BiometricCredentialStorage? = null
+    private val biometricCredentialStorage: BiometricCredentialStorage? = null,
+    // ISSUE-P2-378：外部修改漂移协调器（null 仅纯 JVM 单测；生产 Hilt 注入 @Singleton）
+    private val vaultFileDriftCoordinator: com.keepasskey.app.security.VaultFileDriftCoordinator? = null
 ) : ViewModel() {
 
     companion object {
@@ -160,20 +162,6 @@ class SettingsViewModel @Inject constructor(
         }
     )
 
-    private val healthController = SettingsHealthController(
-        vaultRepository = vaultRepository,
-        breachCheckCoordinator = breachCheckCoordinator,
-        strings = strings,
-        breachCheckEnabled = { extendedPreferences.settings.value.breachCheckEnabled },
-        scope = viewModelScope,
-        // ISSUE-P3-257：开启泄露检测并就地扫描的偏好持久化回调（形态同 extendedPreferences 的 lambda 注入）
-        setBreachCheckEnabled = { extendedPreferences.setBreachCheckEnabled(it) }
-    )
-
-    private val exportController = SettingsExportController(
-        vaultRepository, debugLogBuffer, appContext, strings, viewModelScope
-    )
-
     private val preferences = SettingsPreferencesController(
         settingsRepository = settingsRepository,
         vaultRepository = vaultRepository,
@@ -184,6 +172,33 @@ class SettingsViewModel @Inject constructor(
         // ISSUE-P2-19 / P3-59：活动库会话（真实文件头/默认用户名下发）；单测可为 null
         databaseSession = databaseSession,
         scope = viewModelScope
+    )
+
+    // ISSUE-P2-379 / P2-378 / P3-381 / P3-382 / P3-385：新增门面与外部修改待决状态
+    // （声明在 preferences 之后，避免属性初始化顺序 NPE）
+    private val issueWiring = SettingsIssueWiring(
+        vaultRepository = vaultRepository,
+        vaultFileDriftCoordinator = vaultFileDriftCoordinator,
+        preferencesController = preferences
+    )
+
+    private val healthController = SettingsHealthController(
+        vaultRepository = vaultRepository,
+        breachCheckCoordinator = breachCheckCoordinator,
+        strings = strings,
+        breachCheckEnabled = { extendedPreferences.settings.value.breachCheckEnabled },
+        scope = viewModelScope,
+        // ISSUE-P3-257：开启泄露检测并就地扫描的偏好持久化回调（形态同 extendedPreferences 的 lambda 注入）
+        setBreachCheckEnabled = { extendedPreferences.setBreachCheckEnabled(it) },
+        // ISSUE-P3-382：库内重复条目扫描——每组一条 (0, 条目数)，组数=列表长度、条目数=second 之和
+        scanDuplicates = {
+            preferences.databaseMetaController.scanDuplicateEntries()
+                .map { group -> 0 to group.entries.size }
+        }
+    )
+
+    private val exportController = SettingsExportController(
+        vaultRepository, debugLogBuffer, appContext, strings, viewModelScope
     )
 
     private val kdfBenchmarkController = SettingsKdfBenchmarkController(
@@ -259,6 +274,12 @@ class SettingsViewModel @Inject constructor(
                 )
             }
         }
+        // ISSUE-P2-378：观察漂移待决提示并下发到 UI（全局三选对话框）
+        vaultFileDriftCoordinator?.let { coord ->
+            viewModelScope.launch {
+                coord.pending.collect { issueWiring::publishPending }
+            }
+        }
     }
 
     // ===== 外观与语言（仓库直写） =====
@@ -275,6 +296,27 @@ class SettingsViewModel @Inject constructor(
     fun setBiometricEnabled(enabled: Boolean, activity: FragmentActivity? = null) =
         biometricGate.setEnabled(enabled, activity)
     fun setAutoLockBackground(enabled: Boolean) = preferences.setAutoLockBackground(enabled)
+    /** ISSUE-P2-379：前台闲置自动锁定开关 */
+    fun setAutoLockForegroundEnabled(enabled: Boolean) = issueWiring.setAutoLockForegroundEnabled(enabled)
+    /** ISSUE-P2-379：前台闲置超时秒数 */
+    fun setAutoLockForegroundTimeoutSeconds(seconds: Int) = issueWiring.setAutoLockForegroundTimeoutSeconds(seconds)
+    /** ISSUE-P3-381：回前台 / 网络恢复远端探测开关 */
+    fun setSyncProbeOnResumeEnabled(enabled: Boolean) = issueWiring.setSyncProbeOnResumeEnabled(enabled)
+    /** ISSUE-P3-385：库级 Meta（库名 / 描述 / 默认用户名）编辑并立即落盘 */
+    fun setDatabaseMeta(databaseName: String?, databaseDescription: String?, defaultUserName: String?) =
+        issueWiring.setDatabaseMeta(databaseName, databaseDescription, defaultUserName)
+    /** ISSUE-P3-382：库内重复条目只读扫描 */
+    fun scanDuplicateEntries() = issueWiring.scanDuplicateEntries()
+    /** ISSUE-P2-378：外部修改三选处置 */
+    suspend fun applyExternalModificationChoice(
+        choice: com.keepasskey.app.security.ExternalModificationChoice
+    ) = issueWiring.applyExternalModificationChoice(choice)
+    /** ISSUE-P2-378：待决外部修改提示（KeePasskeyApp 全局对话框消费） */
+    val externalModificationPending: StateFlow<com.keepasskey.app.security.VaultFileDriftPrompt?>
+        get() = issueWiring.pending
+    /** ISSUE-P3-385：密码库设置页 Meta 编辑反馈 */
+    val databaseMetaFeedback: StateFlow<String?> get() = issueWiring.databaseMetaFeedback
+    fun clearDatabaseMetaFeedback() = issueWiring.clearDatabaseMetaFeedback()
     fun setFlagSecureEnabled(enabled: Boolean) = preferences.setFlagSecureEnabled(enabled)
     fun setAutoClearClipboard(enabled: Boolean) = preferences.setAutoClearClipboard(enabled)
 
@@ -300,33 +342,24 @@ class SettingsViewModel @Inject constructor(
     fun verifyConnectionThenSync() = syncController.verifyConnectionThenSync()
     fun clearSyncFeedbackMessage() = syncController.clearSyncFeedbackMessage()
 
-    // ===== 密码库与加密配置 =====
     fun setEncryptionAlgorithm(algorithm: String) = preferences.setEncryptionAlgorithm(algorithm)
     fun setKdfAlgorithm(kdf: String) = preferences.setKdfAlgorithm(kdf)
     fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) = preferences.setArgon2Parameters(iterations, memoryMb, parallelism)
-    /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文 / 不落强度值以外的信息）。 */
     fun noteWeakMasterPasswordConfirmed() {
         debugLogBuffer.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（改密）")
     }
-
-    // ===== M6 整改：KDF 设备自适应基准真实接线 =====
-    /** KDF 基准实时状态（运行中 / 推荐参数 / 失败原因） */
     val kdfBenchmark: StateFlow<KdfBenchmarkUiState> get() = kdfBenchmarkController.state
-    /** 运行真实 KDF 基准测试（Dispatchers.Default，不阻塞主线程） */
     fun runKdfBenchmark() = kdfBenchmarkController.run()
     fun setAutoLockTimeout(seconds: Int) = preferences.setAutoLockTimeout(seconds)
     fun setClipboardTimeout(seconds: Int) = preferences.setClipboardTimeout(seconds)
-    // ISSUE-P3-68：解锁失败重试节流开关与最长锁定时长
     fun setUnlockThrottleEnabled(enabled: Boolean) = preferences.setUnlockThrottleEnabled(enabled)
     fun setUnlockLockoutMaxSeconds(seconds: Int) = preferences.setUnlockLockoutMaxSeconds(seconds)
-    // ISSUE-P2-228：三条通道开关改由扩展偏好承载（持久化 + 真实消费方），门面方法名不变
     fun setCredentialProviderEnabled(enabled: Boolean) = extendedPreferences.setCredentialProviderEnabled(enabled)
     fun setPasskeySupportEnabled(enabled: Boolean) = extendedPreferences.setPasskeySupportEnabled(enabled)
     fun setAutofillServiceEnabled(enabled: Boolean) = extendedPreferences.setAutofillServiceEnabled(enabled)
     fun setAutofillLegacyAccessibilityEnabled(enabled: Boolean) =
         extendedPreferences.setAutofillLegacyAccessibilityEnabled(enabled)
     fun setRecycleBinEnabled(enabled: Boolean) = preferences.setRecycleBinEnabled(enabled)
-    // ISSUE-P3-65：TAN 序列号 / 数据库 UUID 两开关的假 setter 已移除——UI 入口如实禁用
 
     // ===== 列表显示（仓库直写） =====
     fun setShowUsernameInList(enabled: Boolean) = preferences.setShowUsernameInList(enabled)
@@ -348,65 +381,37 @@ class SettingsViewModel @Inject constructor(
 
     // ===== KP2A 扩展：表单自动填充与体验 =====
     fun setOfferSaveCredentials(enabled: Boolean) = extendedPreferences.setOfferSaveCredentials(enabled)
-
-    // ISSUE-P3-376：候选呈现面两开关
-    fun setAutofillManualPickerEnabled(enabled: Boolean) =
-        extendedPreferences.setAutofillManualPickerEnabled(enabled)
-
-    fun setAutofillOfferCreateEntry(enabled: Boolean) =
-        extendedPreferences.setAutofillOfferCreateEntry(enabled)
+    fun setAutofillManualPickerEnabled(enabled: Boolean) = extendedPreferences.setAutofillManualPickerEnabled(enabled)
+    fun setAutofillOfferCreateEntry(enabled: Boolean) = extendedPreferences.setAutofillOfferCreateEntry(enabled)
     fun setInlineSuggestionsEnabled(enabled: Boolean) = extendedPreferences.setInlineSuggestionsEnabled(enabled)
     fun setAutoReturnFromQuery(enabled: Boolean) = extendedPreferences.setAutoReturnFromQuery(enabled)
     fun setAutofillCopyTotp(enabled: Boolean) = extendedPreferences.setAutofillCopyTotp(enabled)
     fun setAutofillShowTotpNotification(enabled: Boolean) = extendedPreferences.setAutofillShowTotpNotification(enabled)
-
     fun setSkipDalVerification(enabled: Boolean) = extendedPreferences.setSkipDalVerification(enabled)
     fun setOverrideNoAutofill(enabled: Boolean) = extendedPreferences.setOverrideNoAutofill(enabled)
-    // ISSUE-P3-42：会话授权宽限开关
     fun setAutofillSessionGrantEnabled(enabled: Boolean) = extendedPreferences.setAutofillSessionGrantEnabled(enabled)
 
-    // ===== TASK-44：自动填充黑名单（真实条目生命周期） =====
-    /** 自动填充黑名单快照（按包名升序）；独立于 [uiState] 下发。 */
+    // ===== TASK-44：自动填充黑名单 =====
     val autofillBlockedPackages: StateFlow<List<String>> = preferences.autofillBlockedPackages
-
-    /** 加入黑名单。@return true=新增成功 */
     fun blockAutofillPackage(packageName: String): Boolean = preferences.blockAutofillPackage(packageName)
-
-    /** 移出黑名单。@return true=移除成功 */
     fun unblockAutofillPackage(packageName: String): Boolean = preferences.unblockAutofillPackage(packageName)
 
-    // ===== CM 通道：特权浏览器白名单（让 Chrome / Firefox 之外的浏览器也能用通行密钥） =====
-
-    /** ISSUE-P3-257：安装扫描 / 启停编排已下沉 [SettingsPrivilegedBrowserController]。 */
+    // ===== CM 通道：特权浏览器白名单 =====
     private val privilegedBrowserController = SettingsPrivilegedBrowserController(
         store = passkeyPrivilegedBrowserStore,
         scope = viewModelScope
     )
-
-    /** 已安装浏览器候选 + 启用状态；独立于 [uiState] 下发。 */
-    val privilegedBrowsers:
-        StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>>
+    val privilegedBrowsers: StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>>
         get() = privilegedBrowserController.privilegedBrowsers
-
     fun refreshPrivilegedBrowsers() = privilegedBrowserController.refresh()
-
     fun setPrivilegedBrowserEnabled(packageName: String, enabled: Boolean) =
         privilegedBrowserController.setEnabled(packageName, enabled)
 
-    // ===== ISSUE-P3-43：保存侧独立黑名单 + 字段签名级屏蔽 =====
-    /** 「不再提示保存」名单快照（按包名升序）。 */
+    // ===== ISSUE-P3-43：保存侧黑名单 + 字段签名级屏蔽 =====
     val autofillSaveBlockedPackages: StateFlow<List<String>> = preferences.autofillSaveBlockedPackages
-
-    /** 加入「不再提示保存」名单。@return true=新增成功 */
     fun blockSavePackage(packageName: String): Boolean = preferences.blockSavePackage(packageName)
-
-    /** 移出「不再提示保存」名单。@return true=移除成功 */
     fun unblockSavePackage(packageName: String): Boolean = preferences.unblockSavePackage(packageName)
-
-    /** 已屏蔽字段签名的条数（签名不可逆，故只下发计数）。 */
     val autofillBlockedFieldCount: StateFlow<Int> = preferences.autofillBlockedFieldCount
-
-    /** 清除全部字段级屏蔽（单语句委托；`ISSUE-P3-250` 待消化清单第一项）。 */
     fun clearBlockedFields() { preferences.clearBlockedFields() }
 
     // ===== KP2A 扩展：显示与外观交互 =====
@@ -417,33 +422,24 @@ class SettingsViewModel @Inject constructor(
     fun setShowGroupInEntry(enabled: Boolean) = extendedPreferences.setShowGroupInEntry(enabled)
     fun setListDensity(density: ListDensity) = extendedPreferences.setListDensity(density)
     fun setAutoActivateSearchOnOpen(enabled: Boolean) = extendedPreferences.setAutoActivateSearchOnOpen(enabled)
-    /** ISSUE-P3-309：全文搜索匹配档（默认子串口径；分词档收紧短查询误报） */
     fun setSearchMatchMode(mode: SearchMatchMode) = extendedPreferences.setSearchMatchMode(mode)
 
     // ===== KP2A 扩展：文件处理与高级同步策略 =====
     fun setUseOfflineCache(enabled: Boolean) = extendedPreferences.setUseOfflineCache(enabled)
     fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) = extendedPreferences.setPeriodicBackgroundSyncEnabled(enabled)
-
     fun setPeriodicBackgroundSyncInterval(minutes: Int) = extendedPreferences.setPeriodicBackgroundSyncInterval(minutes)
-
     fun setCreateBackupBeforeSave(enabled: Boolean) = extendedPreferences.setCreateBackupBeforeSave(enabled)
     fun setCheckRemoteChangesBeforeSave(enabled: Boolean) = extendedPreferences.setCheckRemoteChangesBeforeSave(enabled)
-
     fun setConflictResolution(resolution: ConflictResolution) = extendedPreferences.setConflictResolution(resolution)
-
     fun setWebdavChunkedUpload(enabled: Boolean) = extendedPreferences.setWebdavChunkedUpload(enabled)
     fun setWebdavChunkSizeMb(sizeMb: Int) = extendedPreferences.setWebdavChunkSizeMb(sizeMb)
 
     // ===== KP2A 扩展：TOTP 规范映射 =====
-    fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) = extendedPreferences.updateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
+    fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) =
+        extendedPreferences.updateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
 
     // ===== TASK-47：已泄露密码检测（联网，默认关闭） =====
     fun setBreachCheckEnabled(enabled: Boolean) = extendedPreferences.setBreachCheckEnabled(enabled)
-
-    /**
-     * 开启泄露检测并**就地扫描一次**。实现随 `ISSUE-P3-257` 迁于
-     * [SettingsHealthController.enableBreachCheckAndScan]（本侧仅单语句委托）。
-     */
     fun enableBreachCheckAndScan() = healthController.enableBreachCheckAndScan()
 
     // ===== KP2A 扩展：调试日志 =====
@@ -453,33 +449,15 @@ class SettingsViewModel @Inject constructor(
     fun clearDebugLogs() = preferences.clearDebugLogs()
 
     // ===== 导出/模板/调试日志委托 [SettingsExportController] =====
-    /** SAF 调试日志导出结果反馈（成功/失败），由 Screen 层消费后清除 */
     val debugExportFeedback: StateFlow<UiMessage?> get() = exportController.debugExportFeedback
-
     fun exportDebugLogs(targetUri: Uri) = exportController.exportDebugLogs(targetUri)
     fun clearDebugExportFeedback() = exportController.clearDebugExportFeedback()
-
-    /** 导出/模板动作结果反馈（成功/失败），由 Screen 层消费后清除 */
     val exportFeedback: StateFlow<UiMessage?> get() = exportController.exportFeedback
-
     fun clearExportFeedback() = exportController.clearExportFeedback()
-
-    /** 导出当前数据库为 KDBX 完整副本并写入 SAF 目标 Uri */
     fun exportKdbxTo(targetUri: Uri) = exportController.exportKdbxTo(targetUri)
-
-    /**
-     * 导出当前数据库为 KeePass 2.x 兼容明文 XML 并写入 SAF 目标 Uri。
-     * ISSUE-P3-110：必须携带由 [ExportConfirmationPolicy.confirm] 二次确认后签发的令牌。
-     */
     fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportVaultXmlTo(targetUri, ticket)
-
-    /** ISSUE-P3-73：导出通用明文 CSV；ISSUE-P3-110：令牌要求同 [exportVaultXmlTo]。 */
     fun exportVaultCsvTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportVaultCsvTo(targetUri, ticket)
-
-    /** 导出会话绑定的密钥文件；ISSUE-P3-128：令牌要求同 [exportVaultXmlTo]（同属 PLAINTEXT 风险等级）。 */
     fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportKeyFileTo(targetUri, ticket)
-
-    /** 安装条目模板库（真实创建「模板」分组与 5 个模板条目） */
     fun installEntryTemplates() = exportController.installEntryTemplates()
 
     // ===== 健康检查委托 [SettingsHealthController] =====

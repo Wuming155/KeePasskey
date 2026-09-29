@@ -202,18 +202,40 @@ internal fun SettingsToggleRow(
 @Composable
 internal fun DatabaseBasicCard(
     uiState: SettingsUiState,
-    onRecycleBinToggle: (Boolean) -> Unit
+    onRecycleBinToggle: (Boolean) -> Unit,
+    // ISSUE-P3-385：库级 Meta 可编辑入口（库名 / 描述 / 默认用户名）
+    onMetaEditClick: () -> Unit = {}
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_name), value = ifBlankOrUnset(uiState.databaseName))
+            DatabaseFieldRow(
+                label = stringResource(R.string.dbset_field_db_name),
+                value = ifBlankOrUnset(uiState.databaseName),
+                onClick = onMetaEditClick
+            )
+            // ISSUE-P3-385：库描述随 Meta 编辑面一并呈现（可点击进入编辑）
+            DatabaseFieldRow(
+                label = stringResource(R.string.dbset_field_db_desc),
+                value = ifBlankOrUnset(uiState.databaseDescription),
+                onClick = onMetaEditClick
+            )
             // ISSUE-P3-59：文件路径/默认用户名真实下发，空值显示「未设置」占位（此前恒空白）
             DatabaseFieldRow(label = stringResource(R.string.dbset_field_db_path), value = ifBlankOrUnset(uiState.databasePath))
-            DatabaseFieldRow(label = stringResource(R.string.dbset_field_default_user), value = ifBlankOrUnset(uiState.databaseDefaultUsername))
+            DatabaseFieldRow(
+                label = stringResource(R.string.dbset_field_default_user),
+                value = ifBlankOrUnset(uiState.databaseDefaultUsername),
+                onClick = onMetaEditClick
+            )
             DatabaseFieldRow(label = stringResource(R.string.dbset_field_compression), value = ifBlankOrUnset(uiState.compressionAlgorithm))
+            // ISSUE-P3-385：新建条目预填说明
+            Text(
+                text = stringResource(R.string.dbset_new_entry_prefill_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             SettingsToggleRow(
                 title = stringResource(R.string.dbset_recycle_bin_title),

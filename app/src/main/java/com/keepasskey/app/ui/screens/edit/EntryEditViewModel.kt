@@ -171,6 +171,14 @@ class EntryEditViewModel @Inject constructor(
         if (searchPrefill != null && entryId == null && templateId == null) {
             _uiState.update { it.copy(title = searchPrefill, url = if (searchPrefill.contains("://")) searchPrefill else it.url) }
         }
+        // ISSUE-P3-385 AC②：新建条目消费库 Meta defaultUserName 预填用户名。
+        // 搜索词预填优先生效（若已给出标题/URL，用户名仍可由库默认补齐，二者不冲突）。
+        if (entryId == null && templateId == null) {
+            val dbDefaultUser = databaseSession?.databaseFlow?.value?.defaultUserName.orEmpty()
+            if (dbDefaultUser.isNotBlank() && _uiState.value.username.isBlank()) {
+                _uiState.update { it.copy(username = dbDefaultUser) }
+            }
+        }
         viewModelScope.launch {
             vaultRepository.getGroups().collect { groups ->
                 _uiState.update { it.copy(availableGroups = groups) }
