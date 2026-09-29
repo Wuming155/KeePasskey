@@ -1273,6 +1273,7 @@
     <string name="import_warn_group_name_missing">Account and vault names are both empty; items were placed in the root group</string>
     <!-- ISSUE-P3-312 item 1: CSV formula injection risk (warn only, source value untouched) -->
     <string name="import_warn_formula_injection">A field starts with = + - @ or a tab; if this CSV is later opened in a spreadsheet app, that cell may be executed as a formula (the imported value was not rewritten, please review it yourself)</string>
+    <string name="import_warn_kdbx_merge_no_remote_unique">The other database has no entries or groups unique to this vault, and there are no same-UUID conflicts (if the second file is an export copy of the current vault, this is expected empty-base UUID three-way merge behaviour, not a failure)</string>
 
     <!-- ===== ISSUE-P3-17: overflow-menu action for showKillAppOption ===== -->
     <string name="sec_kill_app_action">Exit app completely</string>

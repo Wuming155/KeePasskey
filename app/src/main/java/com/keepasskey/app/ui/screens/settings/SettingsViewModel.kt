@@ -101,7 +101,16 @@ class SettingsViewModel @Inject constructor(
         appContext = appContext
     )
     private val importPresenter = features.importPresenter
-    private val remoteBrowseHost = SettingsRemoteBrowseHost(debugLogBuffer, viewModelScope)
+    // ISSUE-P3-395：浏览凭据回退注入——表单密码被保存流程清零后，与「测试连接」同源读已保存凭据
+    private val remoteBrowseHost = SettingsRemoteBrowseHost(
+        debugLogBuffer,
+        viewModelScope,
+        savedWebDavPassword = { syncCredentialsStore.loadWebDavConfig()?.password },
+        loadS3Snapshot = {
+            val s3 = syncCredentialsStore.loadS3Config()
+            s3?.accessKey to s3?.secretKey
+        }
+    )
 
     /** 导入 / 并入 / 浏览状态（动作为成员方法，见下方）。 */
     val importState: StateFlow<ImportUiState> get() = importPresenter.state

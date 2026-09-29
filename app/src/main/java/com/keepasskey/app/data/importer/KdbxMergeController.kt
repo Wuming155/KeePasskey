@@ -14,7 +14,6 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.session.DatabaseSession
-import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayInputStream
@@ -214,6 +213,8 @@ class KdbxMergeController @Inject constructor(
     /**
      * 在会话互斥锁内完成「空底版三方合并 → 校验-采用 → 原子保存」。
      * 第二库敏感树在 finally 中 `clearSensitiveData()`。
+     *
+     * ISSUE-P3-395：装配/计数/警告组装下沉 [KdbxMergeOutcomeFactory]，本文件保持 <400 行。
      */
     private suspend fun mergeUnderSessionLock(otherDb: KdbxDatabase): KdbxResult<ImportOutcome> {
         val localDb = databaseSession.databaseFlow.value
@@ -229,41 +230,15 @@ class KdbxMergeController @Inject constructor(
             )
         }
         try {
-            val localLite = KdbxDatabaseLite(
-                rootGroup = localDb.rootGroup,
-                deletedObjects = localDb.deletedObjects,
-                customIcons = localDb.customIcons
-            )
-            // base = 空根（UUID 与 local 根相同）：对端独有对象视为新增；
-            // 同 UUID 冲突由 KdbxMerger 产出 conflict 清单，此处 KEEP_LOCAL。
-            val emptyRoot = localDb.rootGroup.copy(
-                entries = emptyList(),
-                subgroups = emptyList()
-            )
-            val baseLite = KdbxDatabaseLite(
-                rootGroup = emptyRoot,
-                deletedObjects = emptyList(),
-                customIcons = emptyList()
-            )
-            val remoteLite = KdbxDatabaseLite(
-                rootGroup = otherDb.rootGroup,
-                deletedObjects = otherDb.deletedObjects,
-                customIcons = otherDb.customIcons
-            )
+            val (baseLite, localLite, remoteLite) =
+                KdbxMergeOutcomeFactory.buildMergeLites(localDb, otherDb)
             val merged = KdbxMerger.mergeDatabases(baseLite, localLite, remoteLite)
+            val delta = KdbxMergeOutcomeFactory.mergeDelta(
+                localRoot = localDb.rootGroup,
+                localCustomIcons = localDb.customIcons,
+                merged = merged
+            )
 
-            val localEntryIds = localDb.rootGroup.allEntries().map { it.id }.toSet()
-            val localGroupIds = localDb.rootGroup.allGroups().map { it.id }.toSet()
-            val mergedEntryIds = merged.mergedRoot.allEntries().map { it.id }.toSet()
-            val mergedGroupIds = merged.mergedRoot.allGroups().map { it.id }.toSet()
-            val entriesAdded = (mergedEntryIds - localEntryIds).size
-            val groupsAdded = (mergedGroupIds - localGroupIds).size
-            // KEEP_LOCAL：冲突条目在合并树中保留的是本地实例 ⇒ 以「对端独有且被并入」计数
-            val conflicts = merged.conflicts.size
-            val customIconsBefore = localDb.customIcons.map { it.uuid }.toSet()
-            val customIconsAdded = merged.mergedCustomIcons.count { it.uuid !in customIconsBefore }
-
-            // 校验-采用（与同步合并同一原语）
             val adopted = databaseSession.adoptDatabaseIfUnchanged(
                 expectedAtCycleStart = localDb,
                 replacement = localDb.copy(
@@ -285,28 +260,11 @@ class KdbxMergeController @Inject constructor(
                 return KdbxResult.Failure(saveResult.error, strings.get(R.string.kdbx_merge_failed_save))
             }
 
-            val warnings = mutableListOf<ImportWarning>()
-            if (conflicts > 0) {
-                warnings += ImportWarning(
-                    location = "kdbx-merge",
-                    reason = "conflicts_kept_local:$conflicts"
-                )
-            }
-            val outcome = ImportOutcome(
-                source = ImportSource.KDBX_MERGE,
-                parsed = entriesAdded + groupsAdded + conflicts,
-                sourceSkipped = 0,
-                imported = entriesAdded,
-                updated = 0,
-                skipped = conflicts,
-                failed = 0,
-                movedToRecycleBin = 0,
-                warnings = warnings
-            )
-            // 附带非敏感诊断计数（经 warnings reason 携带，报告 UI 可展示）
+            val outcome = KdbxMergeOutcomeFactory.mergeOutcome(delta)
             debugLog.info(
                 TAG,
-                "KDBX 并入完成 entriesAdded=$entriesAdded groupsAdded=$groupsAdded conflicts=$conflicts icons=$customIconsAdded"
+                "KDBX 并入完成 entriesAdded=${delta.entriesAdded} groupsAdded=${delta.groupsAdded} " +
+                    "conflicts=${delta.conflicts} icons=${delta.customIconsAdded}"
             )
             return KdbxResult.Success(outcome)
         } finally {

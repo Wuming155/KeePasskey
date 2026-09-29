@@ -290,6 +290,8 @@ internal fun warningReasonRes(reason: ImportWarningReason): Int = when (reason) 
     ImportWarningReason.GROUP_NAME_MISSING -> R.string.import_warn_group_name_missing
     // ISSUE-P3-312 项 1：CSV 公式注入风险（导入侧只告警不中和）
     ImportWarningReason.FORMULA_INJECTION_RISK -> R.string.import_warn_formula_injection
+    // ISSUE-P3-395：.kdbx 并入 0 新增时的语义提示（非失败）
+    ImportWarningReason.KDBX_MERGE_NO_REMOTE_UNIQUE -> R.string.import_warn_kdbx_merge_no_remote_unique
 }
 
 /** 假数据预览（「Screen 可用假数据独立渲染」的验收要求；不含任何真实条目字段）。 */

@@ -35,13 +35,14 @@ internal fun RemoteBrowseSection(
     RemoteBrowseDialog(
         state = browseState,
         onSelectFile = onSelectFile,
+        // ISSUE-P3-395：宿主按借用语义清零入参，表单数组必须传 copyOf
         onNavigate = { entry ->
             if (provider == CloudSyncProvider.WEBDAV) {
-                onBrowseWebDav(webdavUrl, webdavUsername, webdavPasswordChars, entry.path, null)
+                onBrowseWebDav(webdavUrl, webdavUsername, webdavPasswordChars.copyOf(), entry.path, null)
             } else {
                 onBrowseS3(
                     s3Endpoint, s3Bucket, s3Region,
-                    s3AccessKeyChars, s3SecretKeyChars,
+                    s3AccessKeyChars.copyOf(), s3SecretKeyChars.copyOf(),
                     entry.path, s3UsePathStyle, null
                 )
             }
@@ -50,13 +51,13 @@ internal fun RemoteBrowseSection(
             val cursor = listing?.nextCursor
             if (provider == CloudSyncProvider.WEBDAV) {
                 onBrowseWebDav(
-                    webdavUrl, webdavUsername, webdavPasswordChars,
+                    webdavUrl, webdavUsername, webdavPasswordChars.copyOf(),
                     listing?.directoryPath.orEmpty(), cursor
                 )
             } else {
                 onBrowseS3(
                     s3Endpoint, s3Bucket, s3Region,
-                    s3AccessKeyChars, s3SecretKeyChars,
+                    s3AccessKeyChars.copyOf(), s3SecretKeyChars.copyOf(),
                     listing?.directoryPath.orEmpty().ifEmpty { s3ObjectKey },
                     s3UsePathStyle,
                     cursor

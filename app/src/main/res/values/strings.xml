@@ -1389,6 +1389,7 @@
     <string name="import_warn_group_name_missing">账户名与保险库名均为空，条目已落至根分组</string>
     <!-- ISSUE-P3-312 项 1：CSV 公式注入风险（只告警、不改写源值） -->
     <string name="import_warn_formula_injection">字段以 = + - @ 或制表符开头，若日后在表格软件中打开该 CSV，此单元格可能被当作公式执行（导入未改写该值，请自行核对）</string>
+    <string name="import_warn_kdbx_merge_no_remote_unique">对端没有当前库独有的条目或分组，且无同 UUID 冲突（若第二库是当前库的导出副本，则此结果符合空底版 UUID 三方合并语义，不是失败）</string>
 
     <!-- ===== ISSUE-P3-17：showKillAppOption 溢出菜单入口动作 ===== -->
     <!-- 原实现误用 sec_kill_app_title（「锁定时清杀进程内存」，语义不符），此处补齐专用动作文案 -->

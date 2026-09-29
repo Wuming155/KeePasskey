@@ -76,7 +76,17 @@ enum class ImportWarningReason(val code: String) {
      * 导入侧**只告警不改写**：以撇号前缀中和会改坏源值本身（口令 / 用户名首字符即被污染），
      * 代价高于收益；处置权交给用户。
      */
-    FORMULA_INJECTION_RISK("FORMULA_INJECTION_RISK");
+    FORMULA_INJECTION_RISK("FORMULA_INJECTION_RISK"),
+
+    // ===== ISSUE-P3-395：.kdbx 并入语义提示（非失败）=====
+
+    /**
+     * `.kdbx` 并入完成后，对端**没有**当前库独有条目/分组，且无同 UUID 冲突。
+     *
+     * 典型场景：第二库是当前库自身的导出副本（UUID 全同 ⇒ 三方合并无远端独有对象）。
+     * 属**预期语义**（空底版 UUID 三方：只并入对端独有对象），不是失败。
+     */
+    KDBX_MERGE_NO_REMOTE_UNIQUE("KDBX_MERGE_NO_REMOTE_UNIQUE");
 
     companion object {
         /** 按稳定编码反查；未知编码返回 null（UI 层回退为「未知警告」资源文案）。 */
