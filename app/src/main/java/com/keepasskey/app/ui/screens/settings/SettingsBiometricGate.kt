@@ -13,8 +13,9 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * 生物识别开关的「开启前当场验证」编排（§280 自 [SettingsViewModel] 拆出，纯结构性）。
  *
- * 持有活动库 id 跟踪、开关即时状态与 [BiometricEnableCoordinator]；
- * 公开语义（开启须验证 / 关闭即撤销）原样保留在协调器。
+ * 持有活动库 id 跟踪、开关即时状态、[BiometricEnableCoordinator] 与改密重封印协调器
+ * （ISSUE-P2-398，装配收敛于此以守行数分档闸门）；公开语义（开启须验证 / 关闭即撤销 /
+ * 改密成功后重封印）原样保留在各协调器。
  */
 internal class SettingsBiometricGate(
     scope: CoroutineScope,
@@ -22,7 +23,9 @@ internal class SettingsBiometricGate(
     biometricAuthManager: BiometricAuthManager?,
     biometricCredentialStorage: BiometricCredentialStorage?,
     strings: StringsProvider,
-    debugLog: DebugLogBuffer
+    debugLog: DebugLogBuffer,
+    /** ISSUE-P2-398：改密重封印的密钥文件因子来源（会话导出通道；null 仅纯 JVM 单测注入） */
+    private val sessionKeyFileBytes: () -> ByteArray? = { null }
 ) {
     /** 活动库 id（封印凭据就绪判定的数据源）；随仓库库列表流更新 */
     private var activeDatabaseId: String? = null
@@ -45,8 +48,23 @@ internal class SettingsBiometricGate(
         state = toggleState
     )
 
+    // ISSUE-P2-398：改密成功后以新密码重封印活动库快速解锁凭据（复用本类的活动库跟踪）
+    private val resealCoordinator = BiometricResealCoordinator(
+        settingsRepository = settingsRepository,
+        activeDbId = { activeDatabaseId },
+        sessionKeyFileBytes = sessionKeyFileBytes,
+        biometricAuthManager = biometricAuthManager,
+        biometricCredentialStorage = biometricCredentialStorage,
+        strings = strings,
+        debugLog = debugLog
+    )
+
     fun setEnabled(enabled: Boolean, activity: FragmentActivity? = null) =
         coordinator.setEnabled(enabled, activity)
+
+    /** ISSUE-P2-398：改密任务成功后的重封印挂点（前置不满足即空操作，详见协调器 KDoc） */
+    suspend fun resealAfterMasterKeyChange(activity: FragmentActivity?, newPasswordChars: CharArray) =
+        resealCoordinator.resealAfterMasterKeyChange(activity, newPasswordChars)
 }
 
 /**

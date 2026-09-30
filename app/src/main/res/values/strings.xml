@@ -698,6 +698,8 @@
     <string name="sec_biometric_verify_title">启用生物识别解锁</string>
     <string name="sec_biometric_verify_subtitle">请验证指纹或面容，以确认由本人启用</string>
     <string name="sec_biometric_enable_unavailable">本机没有可用的指纹或面容（未录入），无法启用生物识别解锁</string>
+    <string name="sec_biometric_reseal_title">更新生物识别解锁凭据</string>
+    <string name="sec_biometric_reseal_subtitle">主密码已更改，请验证指纹或面容，以更新免密解锁凭据</string>
     <string name="sec_biometric_enable_pending_seal">已启用；请先用主密码解锁一次以完成凭据登记，此后即可用指纹或面容解锁</string>
     <string name="sec_section_autolock">自动锁定</string>
     <string name="sec_bg_lock_title">后台自动锁定</string>

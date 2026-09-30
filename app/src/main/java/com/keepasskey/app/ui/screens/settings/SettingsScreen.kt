@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
 import android.content.res.Configuration
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -37,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -71,6 +73,10 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // ISSUE-P2-398：改密成功后的重封印弹窗宿主。经 `LocalActivity` 直取（而非
+    // `LocalContext.current as? Activity`）——后者触发 AndroidLint `ContextCastToActivity`，
+    // 且 LocalActivity 已由宿主 Activity 精确提供（与 SecuritySettingsScreen 同一口径）
+    val hostActivity = LocalActivity.current as? FragmentActivity
 
     SettingsContent(
         uiState = uiState,
@@ -83,7 +89,7 @@ fun SettingsScreen(
         onNavigateToTotp = onNavigateToTotp,
         onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
-        onChangeMasterPassword = { viewModel.changeMasterPassword(it) },
+        onChangeMasterPassword = { viewModel.changeMasterPassword(it, hostActivity) },
         onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
         onMasterKeyChangeFeedbackShown = viewModel::clearMasterKeyChangeFeedback,
         onBackClick = onBackClick,

@@ -135,11 +135,25 @@ class SettingsViewModel @Inject constructor(
     ) = remoteBrowseHost.browseS3(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle, cursor)
     fun dismissRemoteBrowse() = remoteBrowseHost.dismiss()
 
-    // ===== 更换主密钥任务态（ISSUE-P2-354 AC③） =====
-    private val masterKeyChange = SettingsMasterKeyChangeController(vaultRepository, viewModelScope)
+    // ===== 生物识别开关「开启前当场验证」 + 更换主密钥任务态（P2-354 / P2-398 重封印挂点） =====
+    private val biometricGate = SettingsBiometricGate(
+        scope = viewModelScope,
+        settingsRepository = settingsRepository,
+        biometricAuthManager = biometricAuthManager,
+        biometricCredentialStorage = biometricCredentialStorage,
+        strings = strings,
+        debugLog = debugLogBuffer,
+        // ISSUE-P2-398：改密重封印载荷的密钥文件因子来源（复用会话导出通道）
+        sessionKeyFileBytes = { databaseSession?.exportKeyFileBytes() }
+    )
 
-    /** P0-3 整改 + ISSUE-P2-354 AC③：提交更换主密钥（数组所有权移交；忙态并发第二次被拒并清零入参）。 */
-    fun changeMasterPassword(newPasswordChars: CharArray) = masterKeyChange.submit(newPasswordChars)
+    /** 开关动作即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
+    private val biometricToggleState = biometricGate.toggleState
+    private val masterKeyChange =
+        SettingsMasterKeyChangeController(vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange)
+
+    /** P0-3 / P2-354：提交换密（所有权移交、忙守卫清零入参）；P2-398：成功后经宿主 Activity 重封印 */
+    fun changeMasterPassword(newPasswordChars: CharArray, activity: FragmentActivity? = null) = masterKeyChange.submit(newPasswordChars, activity)
 
     /** ISSUE-P2-354 AC③：换密回执经 Snackbar 展示后清除（一次性消息语义）。 */
     fun clearMasterKeyChangeFeedback() = masterKeyChange.clearFeedback()
@@ -226,19 +240,6 @@ class SettingsViewModel @Inject constructor(
     private val kdfBenchmarkController = SettingsKdfBenchmarkController(
         appContext = appContext, strings = strings, scope = viewModelScope
     )
-
-    // ===== 生物识别开关「开启前当场验证」 =====
-    private val biometricGate = SettingsBiometricGate(
-        scope = viewModelScope,
-        settingsRepository = settingsRepository,
-        biometricAuthManager = biometricAuthManager,
-        biometricCredentialStorage = biometricCredentialStorage,
-        strings = strings,
-        debugLog = debugLogBuffer
-    )
-
-    /** 开关开启动作的即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
-    private val biometricToggleState = biometricGate.toggleState
 
     // ===== 同步状态流与凭据明文预填通道由 [SettingsSyncController] 承载 =====
     val webdavPasswordPrefill: StateFlow<CharArray?> get() = syncController.webdavPasswordPrefill

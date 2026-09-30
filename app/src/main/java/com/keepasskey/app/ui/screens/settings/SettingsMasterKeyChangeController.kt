@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
@@ -35,10 +36,17 @@ internal data class MasterKeyChangeTaskState(
  *   都由本类的 `finally` 负责擦除；
  * - **回执**：结果经 [state] 的 `feedback` 下发（`SettingsContent` 既有 Snackbar 路径展示后
  *   由 `clearFeedback` 清除），对话框据 busy 回落自行关闭。
+ *
+ * ISSUE-P2-398：**改密成功后**追加生物识别封印凭据重封印（[resealAfterChange]，可空 =
+ * 未装配 / 单测），同任务内串行执行——此时新密码仍在入参数组中存活（`finally` 才清零），
+ * 是唯一能以新密码重封印的窗口；重封印任何失败都 fail-safe（不影响已成功的改密回执），
+ * 且不改变 busy 语义（对话框在 BiometricPrompt 收起后才回落）。
  */
 internal class SettingsMasterKeyChangeController(
     private val repository: VaultRepository,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    /** ISSUE-P2-398：改密成功后的重封印挂点（activity 宿主由 UI 层透传；null 时不重封印） */
+    private val resealAfterChange: (suspend (FragmentActivity?, CharArray) -> Unit)? = null
 ) {
 
     private val mutableState = MutableStateFlow(MasterKeyChangeTaskState())
@@ -47,7 +55,7 @@ internal class SettingsMasterKeyChangeController(
     val state: StateFlow<MasterKeyChangeTaskState> = mutableState.asStateFlow()
 
     /** 提交新主口令（[newPasswordChars] 所有权移交本方法，见类 KDoc 的擦除契约）。 */
-    fun submit(newPasswordChars: CharArray) {
+    fun submit(newPasswordChars: CharArray, activity: FragmentActivity? = null) {
         if (mutableState.value.isChanging) {
             newPasswordChars.fill('0')
             return
@@ -63,6 +71,9 @@ internal class SettingsMasterKeyChangeController(
                             is KdbxResult.Failure -> UiMessage(R.string.op_failed, listOf(result.message))
                         }
                     )
+                }
+                if (result is KdbxResult.Success) {
+                    resealAfterChange?.invoke(activity, newPasswordChars)
                 }
             } finally {
                 newPasswordChars.fill('0')

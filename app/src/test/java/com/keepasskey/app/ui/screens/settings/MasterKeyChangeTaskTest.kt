@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.breach.BreachRangeClient
@@ -27,6 +28,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -115,6 +117,49 @@ class MasterKeyChangeTaskTest {
         assertNull("回执展示后必须可清除（一次性消息语义）", viewModel.uiState.value.masterKeyChangeFeedback)
     }
 
+    // ── ISSUE-P2-398：改密成功后的重封印挂点 ────────────────────────────
+
+    @Test
+    fun `换密成功后触发重封印且宿主与新密码快照透传`() = runTest {
+        val repository = FakeVaultRepository()
+        val resealCalls = mutableListOf<Pair<FragmentActivity?, CharArray>>()
+        var intactAtReseal = false
+        val controller = SettingsMasterKeyChangeController(repository, this) { activity, chars ->
+            intactAtReseal = chars.all { it != '0' }
+            resealCalls.add(activity to chars.copyOf())
+        }
+
+        val password = "Reseal-New-Pass#1".toCharArray()
+        controller.submit(password, HOST_ACTIVITY)
+        advanceUntilIdle()
+
+        assertEquals("成功路径必须恰好触发一次重封印", 1, resealCalls.size)
+        assertEquals("宿主 Activity 必须透传（BiometricPrompt 依赖）", HOST_ACTIVITY, resealCalls.single().first)
+        assertArrayEquals("重封印必须拿到新密码内容", "Reseal-New-Pass#1".toCharArray(), resealCalls.single().second)
+        assertTrue("重封印窗口内入参尚未被 finally 清零（唯一能以新密码重封印的时机）", intactAtReseal)
+        assertTrue("任务收尾必须清零入参", password.all { it == '0' })
+    }
+
+    @Test
+    fun `换密失败不触发重封印`() = runTest {
+        val fake = FakeVaultRepository()
+        val repository = object : VaultRepository by fake {
+            override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> =
+                KdbxResult.Failure(IllegalStateException("boom"), "改密失败")
+        }
+        var resealCalls = 0
+        val controller = SettingsMasterKeyChangeController(repository, this) { _, _ ->
+            resealCalls++
+        }
+
+        val password = "Should-Not-Reseal".toCharArray()
+        controller.submit(password, HOST_ACTIVITY)
+        advanceUntilIdle()
+
+        assertEquals("失败路径不得触发重封印（封印载荷只承载当前有效密码）", 0, resealCalls)
+        assertTrue(password.all { it == '0' })
+    }
+
     private suspend fun buildViewModel(repository: VaultRepository): SettingsViewModel {
         val context = InMemorySharedPreferences().context()
         val settingsRepository = FakeSettingsRepository().apply {
@@ -152,5 +197,8 @@ class MasterKeyChangeTaskTest {
 
     private companion object {
         val TEST_STRINGS = StringsProvider { _, _ -> "" }
+
+        /** JVM 可构造的宿主替身：仅作引用透传判据，不触达真实 BiometricPrompt */
+        val HOST_ACTIVITY: FragmentActivity? = null
     }
 }
