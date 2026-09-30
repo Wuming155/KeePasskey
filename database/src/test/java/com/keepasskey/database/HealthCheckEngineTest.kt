@@ -228,7 +228,7 @@ class HealthCheckEngineTest {
         )
     }
 
-    // ---- ISSUE-P3-407：通行密钥空密码不得误判为弱密码 ----
+    // ---- ISSUE-P3-408：空密码一律不判弱密码；弱口令仍判 WEAK ----
 
     private fun passkeyEntryOf(
         title: String,
@@ -260,56 +260,43 @@ class HealthCheckEngineTest {
     }
 
     @Test(timeout = 10_000)
-    fun `通行密钥条目空密码不判弱密码`() {
-        val passkey = passkeyEntryOf("GitHub Passkey", password = null)
+    fun `空密码一律不判弱密码——含普通条目与通行密钥`() {
+        val plainEmpty = entryOf("Legacy Empty", "")
+        val passkeyEmpty = passkeyEntryOf("GitHub Passkey", password = null)
+        val nullPassword = entryOf("Null Password", null)
 
-        val issues = HealthCheckEngine.analyzeEntries(listOf(passkey))
+        val issues = HealthCheckEngine.analyzeEntries(listOf(plainEmpty, passkeyEmpty, nullPassword))
 
         assertFalse(
-            "通行密钥无传统密码属正常形态，空密码不得报 WEAK",
-            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "GitHub Passkey" }
+            "空密码语义是「不需要密码」，不得报 WEAK",
+            issues.any {
+                it.riskLevel == PasswordRiskLevel.WEAK &&
+                    it.title in setOf("Legacy Empty", "GitHub Passkey", "Null Password")
+            }
         )
     }
 
     @Test(timeout = 10_000)
-    fun `普通条目空密码仍判弱密码`() {
-        val empty = entryOf("Legacy Empty", "")
+    fun `已填写的弱口令仍判弱密码`() {
+        val weak = entryOf("Legacy Weak", "123456")
 
-        val issues = HealthCheckEngine.analyzeEntries(listOf(empty))
+        val issues = HealthCheckEngine.analyzeEntries(listOf(weak))
 
         assertTrue(
-            "非 passkey 空密码仍必须报 WEAK（不得连带放宽）",
-            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Legacy Empty" }
+            "非空弱口令仍必须报 WEAK（强度审计只针对已填写口令）",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Legacy Weak" }
         )
     }
 
     @Test(timeout = 10_000)
-    fun `通行密钥若设置了密码仍参与强度评估`() {
+    fun `通行密钥若设置了弱密码仍参与强度评估`() {
         val weakPasskey = passkeyEntryOf("Passkey With Weak Password", password = "123456")
 
         val issues = HealthCheckEngine.analyzeEntries(listOf(weakPasskey))
 
         assertTrue(
-            "passkey 条目一旦设置密码，弱口令判定不得被 passkey 身份豁免",
+            "passkey 条目一旦设置弱口令，强度判定不得被身份豁免",
             issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Passkey With Weak Password" }
-        )
-    }
-
-    @Test(timeout = 10_000)
-    fun `不完整 passkey schema 也不把空密码判弱`() {
-        val partial = passkeyEntryOf(
-            title = "Partial Passkey",
-            password = null,
-            customKeys = listOf(
-                PasskeyData.KPEX_FIELD_RELYING_PARTY
-            )
-        )
-
-        val issues = HealthCheckEngine.analyzeEntries(listOf(partial))
-
-        assertFalse(
-            "半成品 passkey（仅 RP 键）同样不得被空密码误报 WEAK",
-            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Partial Passkey" }
         )
     }
 
@@ -327,11 +314,11 @@ class HealthCheckEngineTest {
         val issues = HealthCheckEngine.analyzeEntries(listOf(expiredPasskey))
 
         assertTrue(
-            "跳过空密码弱判定后，EXPIRED 时效检查仍须生效",
+            "空密码跳过弱判定后，EXPIRED 时效检查仍须生效",
             issues.any { it.riskLevel == PasswordRiskLevel.EXPIRED && it.title == "Expired Passkey" }
         )
         assertFalse(
-            "过期 passkey 不得同时因空密码报 WEAK",
+            "过期 passkey 不得因空密码报 WEAK",
             issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Expired Passkey" }
         )
     }

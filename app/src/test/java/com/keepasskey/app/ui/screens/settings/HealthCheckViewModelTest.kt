@@ -63,11 +63,19 @@ class HealthCheckViewModelTest {
     @Test
     fun `默认态为未扫描，触发扫描后真实计算审计分数与弱密码复用统计`() = runTest(testDispatcher) {
         // 构造测试数据：
-        // 1 个空密码（弱密码）
+        // 1 个弱口令（非空，如 "123456"）——空密码按 ISSUE-P3-408 不再计入弱密码
         val entryWeak1 = KdbxEntry(
             id = KdbxUuid.random(),
             fields = mapOf(
                 KdbxConstants.Fields.TITLE to ProtectedString("Weak Entry 1", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("123456", false)
+            )
+        )
+        // 1 个空密码条目——不判弱（不需要密码）
+        val entryEmpty = KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Empty Entry", false),
                 KdbxConstants.Fields.PASSWORD to ProtectedString("", false)
             )
         )
@@ -101,7 +109,7 @@ class HealthCheckViewModelTest {
         val credentialsStore = com.keepasskey.app.sync.SyncCredentialsStore(fakeContext, null)
         val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer(), TEST_STRINGS)
 
-        val testRepo = TestAuditVaultRepository(listOf(entryWeak1, entryReused1, entryReused2))
+        val testRepo = TestAuditVaultRepository(listOf(entryWeak1, entryEmpty, entryReused1, entryReused2))
         // TASK-12/08：补注入扩展偏好持久化仓库（null 上下文=内存语义）与周期同步调度器
         val extendedStore = com.keepasskey.app.data.repository.ExtendedSettingsStore(null)
         val periodicScheduler = com.keepasskey.app.sync.PeriodicSyncScheduler(fakeContext, extendedStore)
@@ -151,7 +159,7 @@ class HealthCheckViewModelTest {
         assertFalse(scannedHealth.isHealthScanning)
 
         // 审计结果断言：
-        // weakCount: 1 (entryWeak1)
+        // weakCount: 1 (entryWeak1「123456」)；空密码条目不计弱（ISSUE-P3-408）
         // reusedCount: 2 (entryReused1 和 entryReused2 均属于复用 issue)
         assertEquals(1, scannedHealth.weakPasswordCount)
         assertEquals(2, scannedHealth.reusedPasswordCount)
@@ -162,6 +170,10 @@ class HealthCheckViewModelTest {
         }
         assertEquals(1, weakIssues.size)
         assertEquals("Weak Entry 1", weakIssues.first().title)
+        assertFalse(
+            "空密码条目不得出现在弱密码明细中（ISSUE-P3-408）",
+            weakIssues.any { it.title == "Empty Entry" }
+        )
         val reusedIssues = scannedHealth.healthIssues.filter {
             it.risk == com.keepasskey.app.ui.screens.settings.HealthIssueRiskUi.REUSED
         }

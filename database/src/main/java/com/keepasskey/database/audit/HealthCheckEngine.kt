@@ -2,7 +2,6 @@ package com.keepasskey.database.audit
 
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
-import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.crypto.strength.PasswordStrengthEvaluator
 import com.keepasskey.database.fieldref.FieldReferenceCharExpansion
 import java.nio.CharBuffer
@@ -106,7 +105,13 @@ object HealthCheckEngine {
         return ReuseIndex(countByHash, hashByEntryId)
     }
 
-    /** 第二趟：逐条目产出「时效 / 空密码 / 弱口令 / 重用」四类问题 */
+    /**
+     * 第二趟：逐条目产出「时效 / 弱口令 / 重用」问题。
+     *
+     * ISSUE-P3-408（用户裁决）：**空密码不计入弱密码**——空密码语义是「本条目不需要密码」
+     * （通行密钥 / 资料条目等常见形态），不是弱密码。强度评估只针对已填写的口令；
+     * 复用索引本就跳过空密码（`buildReuseIndex` 的 `length > 0` 前置条件）。
+     */
     private fun analyzeEntry(
         entry: KdbxEntry,
         index: ReuseIndex,
@@ -126,12 +131,8 @@ object HealthCheckEngine {
 
         val passProtected = entry.password
         if (passProtected == null || passProtected.length == 0) {
-            // ISSUE-P3-407：通行密钥条目本无传统密码（WebAuthn 私钥走自定义字段），
-            // 空密码是正常形态，不得再判为弱密码误报。形状短路只扫 schema 键名，
-            // 不读取/解密字段值，符合敏感数据铁律与 ISSUE-P3-171 的零解密口径。
-            if (!hasPasskeySchemaFields(entry)) {
-                issues.add(issueOf(entry, PasswordRiskLevel.WEAK, "该条目未设置密码或密码为空"))
-            }
+            // ISSUE-P3-408：空密码 = 不需要密码，不产出 WEAK；也不进入后续强度评估。
+            // （§377 曾只豁免 passkey schema——现按用户命题放宽为**一律**不判弱。）
             return
         }
 
@@ -187,17 +188,6 @@ object HealthCheckEngine {
             )
         }
     }
-
-    /**
-     * 形状短路：条目自定义字段是否携带 passkey schema 键（KPEX / v1 / 本仓扩展）。
-     *
-     * ISSUE-P3-407：只扫键名、不物化值——绝大多数普通条目无 passkey 字段，零额外解密成本；
-     * 判定口径与 UI 侧 `isPasskey` 同源（`PasskeyData.isPasskeyFieldKey`）。
-     * 不完整 schema（例如仅 RP 尚未写入私钥）也视作 passkey 相关条目，
-     * 空密码不判弱，避免半成品通行密钥被健康检查误报。
-     */
-    private fun hasPasskeySchemaFields(entry: KdbxEntry): Boolean =
-        entry.customFields.any { field -> PasskeyData.isPasskeyFieldKey(field.key) }
 
     /**
      * CharArray → UTF-8 字节（敏感中间量不落 String，手法同 `ProtectedString` 的自有编码通道）：
