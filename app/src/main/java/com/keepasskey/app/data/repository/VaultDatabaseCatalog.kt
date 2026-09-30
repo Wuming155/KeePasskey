@@ -116,6 +116,48 @@ internal class VaultDatabaseCatalog(
     }
 
     /**
+     * 单条已知库登记 → 列表投影（自 `buildDatabaseList` 抽出，纯结构性改动）。
+     *
+     * `content://` 来源逐次向 Provider 查询文件大小（失败按缺省 32KB 回落），
+     * 其余按本地文件实际长度计。
+     */
+    private suspend fun knownEntryToInfo(ext: KnownDatabaseEntry): VaultDatabaseInfo {
+        val sizeKb = if (ext.path.startsWith("content://")) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val uri = Uri.parse(ext.path)
+                    context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (sizeIndex >= 0 && cursor.moveToFirst()) {
+                            (cursor.getLong(sizeIndex) / 1024).coerceAtLeast(1)
+                        } else null
+                    } ?: 32L
+                } catch (t: Throwable) {
+                    AppLog.w(TAG, "查询外部库大小失败，按缺省 32KB 回落", t)
+                    32L
+                }
+            }
+        } else {
+            val f = File(ext.path)
+            if (f.exists()) (f.length() / 1024).coerceAtLeast(1) else 32L
+        }
+        return VaultDatabaseInfo(
+            id = ext.id,
+            name = ext.name,
+            path = ext.path,
+            isRemote = ext.isRemote,
+            syncType = ext.syncType,
+            lastOpenedAt = strings.get(R.string.repo_last_opened_ready),
+            fileSizeFormatted = "$sizeKb KB",
+            isActive = false,
+            encryptionPreset = "AES-256 + Argon2id",
+            // ISSUE-P3-230：`content://` 库缺持久化读授权时，重启后打不开——列表给出
+            // 可辨识状态与重授入口（查询失败按「未知」处理，不误报）
+            lacksPersistedPermission = lacksPersistedPermission(ext.path)
+        )
+    }
+
+    /**
      * 构建「已知外部库 + 沙盒内部 `*.kdbx`」的合并列表并标定活动态。
      *
      * 副作用（与拆分前一致）：当已有条目均未被标为活动时，把首条写回为活动库 ID。
@@ -128,56 +170,33 @@ internal class VaultDatabaseCatalog(
             } ?: emptyArray()
         }
 
-        val internalEntries = kdbxFiles.map { file ->
-            val sizeKb = (file.length() / 1024).coerceAtLeast(1)
-            VaultDatabaseInfo(
-                id = file.name,
-                name = file.name,
-                path = file.absolutePath,
-                isRemote = false,
-                syncType = strings.get(R.string.repo_sync_type_local_device),
-                lastOpenedAt = strings.get(R.string.repo_last_opened_ready),
-                fileSizeFormatted = "$sizeKb KB",
-                isActive = false,
-                encryptionPreset = "AES-256 + Argon2id"
-            )
-        }
+        val knownExternal = loadKnownDatabases().map { knownEntryToInfo(it) }
 
-        val knownExternal = loadKnownDatabases().map { ext ->
-            val sizeKb = if (ext.path.startsWith("content://")) {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val uri = Uri.parse(ext.path)
-                        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                            if (sizeIndex >= 0 && cursor.moveToFirst()) {
-                                (cursor.getLong(sizeIndex) / 1024).coerceAtLeast(1)
-                            } else null
-                        } ?: 32L
-                    } catch (t: Throwable) {
-                        AppLog.w(TAG, "查询外部库大小失败，按缺省 32KB 回落", t)
-                        32L
-                    }
-                }
-            } else {
-                val f = File(ext.path)
-                if (f.exists()) (f.length() / 1024).coerceAtLeast(1) else 32L
+        // ISSUE-P3-404：云端导入的库文件物理落地在本沙盒（`CloudVaultImporter` 下载副本），
+        // 目录扫描会为同一文件再产出一笔「本地设备存储」条目——「密码库管理」出现两张卡
+        // 指向同一物理库（登记条目 id=绝对路径、扫描条目 id=文件名，末尾 `distinctBy` 挡不住）。
+        // 对齐 keepass2android 的单条目口径：登记表条目对同一本地路径恒优先，扫描侧先剔除，
+        // 云端卡片成为该库唯一展示，本地副本只是它的落地实现细节。
+        val registeredLocalPaths = knownExternal
+            .filter { !it.path.startsWith("content://") }
+            .mapNotNull { ext -> runCatching { File(ext.path).canonicalPath }.getOrNull() }
+            .toSet()
+        val internalEntries = kdbxFiles
+            .filter { file -> runCatching { file.canonicalPath }.getOrNull() !in registeredLocalPaths }
+            .map { file ->
+                val sizeKb = (file.length() / 1024).coerceAtLeast(1)
+                VaultDatabaseInfo(
+                    id = file.name,
+                    name = file.name,
+                    path = file.absolutePath,
+                    isRemote = false,
+                    syncType = strings.get(R.string.repo_sync_type_local_device),
+                    lastOpenedAt = strings.get(R.string.repo_last_opened_ready),
+                    fileSizeFormatted = "$sizeKb KB",
+                    isActive = false,
+                    encryptionPreset = "AES-256 + Argon2id"
+                )
             }
-            VaultDatabaseInfo(
-                id = ext.id,
-                name = ext.name,
-                path = ext.path,
-                isRemote = ext.isRemote,
-                syncType = ext.syncType,
-                lastOpenedAt = strings.get(R.string.repo_last_opened_ready),
-                fileSizeFormatted = "$sizeKb KB",
-                isActive = false,
-                encryptionPreset = "AES-256 + Argon2id",
-                // ISSUE-P3-230：`content://` 库缺持久化读授权时，重启后打不开——列表给出
-                // 可辨识状态与重授入口（查询失败按「未知」处理，不误报）
-                lacksPersistedPermission = lacksPersistedPermission(ext.path)
-            )
-        }
 
         // 合并外部库与沙盒内部库
         val combined = (knownExternal + internalEntries).distinctBy { it.id }

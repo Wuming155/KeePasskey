@@ -594,6 +594,51 @@ class RealVaultRepositoryTest {
         assertTrue("新导入的数据库应自动设为当前激活态", databases[0].isActive)
     }
 
+    /**
+     * ISSUE-P3-404：云端导入的库文件物理落地沙盒（`CloudVaultImporter` 下载副本），
+     * 目录扫描不得再为同一文件发一张「本地设备存储」卡——「密码库管理」必须只显示
+     * 云端条目这一张卡（keepass2android 单条目口径：本地副本是落地实现细节）。
+     */
+    @Test
+    fun `云端导入登记的沙盒库文件不再被目录扫描重复登记为本地库`() = runTest {
+        val storageDir = tempFolder.newFolder("cloud_copy_dir")
+        val cloudCopy = File(storageDir, "cloud_vault.kdbx")
+        cloudCopy.writeBytes(byteArrayOf(0x03, 0xD9.toByte(), 0xA2.toByte(), 0x9A.toByte()))
+        val repository = newRepository(DatabaseSession(), storageDir)
+
+        val importResult = repository.importExternalDatabase(
+            "cloud_vault.kdbx", cloudCopy.absolutePath, "WebDAV 云存储"
+        )
+        assertTrue("云端导入登记应成功", importResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        val databases = repository.getDatabases().first()
+        assertEquals("同一物理文件只允许一张卡", 1, databases.size)
+        assertTrue("存留卡应为云端条目", databases[0].isRemote)
+        assertTrue("云端条目应自动设为当前激活态", databases[0].isActive)
+    }
+
+    /** ISSUE-P3-404 回归面：去重只作用于「已登记路径」，未登记的沙盒库照常列出 */
+    @Test
+    fun `未登记的沙盒库文件仍照常列出不受云端去重影响`() = runTest {
+        val storageDir = tempFolder.newFolder("mixed_vault_dir")
+        val kdbxSignature = byteArrayOf(0x03, 0xD9.toByte(), 0xA2.toByte(), 0x9A.toByte())
+        File(storageDir, "cloud_vault.kdbx").writeBytes(kdbxSignature)
+        File(storageDir, "plain_local.kdbx").writeBytes(kdbxSignature)
+        val repository = newRepository(DatabaseSession(), storageDir)
+
+        val importResult = repository.importExternalDatabase(
+            "cloud_vault.kdbx", File(storageDir, "cloud_vault.kdbx").absolutePath, "兼容 S3 对象存储"
+        )
+        assertTrue("云端导入登记应成功", importResult is com.keepasskey.core.result.KdbxResult.Success)
+
+        val databases = repository.getDatabases().first()
+        assertEquals("云端登记一张 + 未登记本地一张", 2, databases.size)
+        val cloud = databases.single { it.isRemote }
+        val local = databases.single { !it.isRemote }
+        assertEquals("cloud_vault.kdbx", cloud.name)
+        assertEquals("plain_local.kdbx", local.name)
+    }
+
     @Test
     fun `外部物理数据库文件通过 unlockActiveDatabase 正确解锁且不复制到内部目录`() = runTest {
         val storageDir = tempFolder.newFolder("internal_storage")
