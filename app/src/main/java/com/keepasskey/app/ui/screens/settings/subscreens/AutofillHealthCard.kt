@@ -136,9 +136,9 @@ private fun HealthIssueRow(issue: AutofillHealthIssue) {
     val systemSettingsIntent = remember(issue, context) {
         when (issue) {
             AutofillHealthIssue.SYSTEM_NOT_ENABLED -> SystemSettingsNavigation.autofillServiceIntent(context)
-            // ISSUE-P2-405：legacy 无障碍通道半接通 → 本服务详情页（回落通用无障碍设置页）
+            // ISSUE-P2-405：legacy 半接通 → 直接走通用无障碍页（点开关路径同款；详情页可选增强）
             AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED ->
-                SystemSettingsNavigation.accessibilityDetailsIntent(context)
+                SystemSettingsNavigation.accessibilityIntent(context)
             AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED,
             AutofillHealthIssue.CREDENTIAL_PROVIDER_STATE_UNKNOWN ->
                 SystemSettingsNavigation.credentialProviderIntent(context)
@@ -153,7 +153,17 @@ private fun HealthIssueRow(issue: AutofillHealthIssue) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f)
         )
-        if (systemSettingsIntent != null) {
+        if (issue == AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED) {
+            // 点击即跳系统无障碍页（与开关「打开」路径同口径，ISSUE-P2-405 真机反馈收口）
+            TextButton(
+                onClick = { SystemSettingsNavigation.openLegacyAccessibilitySettings(context) }
+            ) {
+                Text(
+                    text = stringResource(R.string.system_settings_open),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        } else if (systemSettingsIntent != null) {
             TextButton(
                 onClick = { SystemSettingsNavigation.launchSafely(context, systemSettingsIntent) }
             ) {

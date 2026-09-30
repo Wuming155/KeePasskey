@@ -70,6 +70,22 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- ISSUE-P2-405：系统设置快捷入口。Android 11+ 包可见性下，未声明的 Settings action
+             在 resolveActivity / startActivity 会命中过滤（ActivityNotFoundException 或恒 null），
+             导致「打开无障碍设置」按钮与开关跳转静默失效——这正是用户反馈的「点了没用」形态。
+             声明口径：最小 action 签名，不用 QUERY_ALL_PACKAGES。 -->
+        <intent>
+            <action android:name="android.settings.ACCESSIBILITY_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.ACCESSIBILITY_DETAILS_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.REQUEST_SET_AUTOFILL_SERVICE" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.CREDENTIAL_PROVIDER" />
+        </intent>
     </queries>
 
     <application

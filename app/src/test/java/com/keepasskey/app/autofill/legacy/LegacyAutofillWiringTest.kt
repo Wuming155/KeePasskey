@@ -134,7 +134,7 @@ class LegacyAutofillWiringTest {
             navSource.contains("fun openLegacyAccessibilitySettings(")
         )
         assertTrue(
-            "优先本服务详情页（ACTION_ACCESSIBILITY_DETAILS_SETTINGS 字面量）",
+            "必须可跳本服务详情页（ACTION_ACCESSIBILITY_DETAILS_SETTINGS 字面量）",
             navSource.contains("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
         )
         assertTrue(
@@ -142,8 +142,21 @@ class LegacyAutofillWiringTest {
             navSource.contains("android.settings.extra.COMPONENT_NAME")
         )
         assertTrue(
-            "详情页不可解析时必须回落通用无障碍设置页",
-            navSource.contains("accessibilityIntent(context)")
+            "详情页失败后必须无条件回落通用无障碍设置页（用户目标：点一下必跳）",
+            navSource.contains("Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)")
+        )
+        assertTrue(
+            "通用无障碍路径不得被 resolveActivity 前置否决（否则按钮在、点了没反应）",
+            !navSource.contains(
+                "fun accessibilityIntent(context: Context): Intent? =\n" +
+                    "        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)\n" +
+                    "            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)\n" +
+                    "            .takeIf { it.resolveActivity(context.packageManager) != null }"
+            )
+        )
+        assertTrue(
+            "清单必须声明 ACCESSIBILITY_SETTINGS queries（Android 11+ 包可见性）",
+            manifestSource.contains("android.settings.ACCESSIBILITY_SETTINGS")
         )
     }
 
@@ -160,7 +173,7 @@ class LegacyAutofillWiringTest {
         assertTrue(
             "健康卡必须把该项映射到无障碍设置入口",
             healthCardSource.contains("LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED") &&
-                healthCardSource.contains("accessibilityDetailsIntent")
+                healthCardSource.contains("openLegacyAccessibilitySettings")
         )
         assertTrue(
             "半接通不得污染框架 AutofillService 通道可用性判定",

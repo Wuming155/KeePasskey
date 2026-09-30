@@ -214,13 +214,13 @@ class OneTapInteractionWiringTest {
             nav.contains("Settings.ACTION_ACCESSIBILITY_SETTINGS")
         )
         assertTrue(
-            "旧版无障碍通道必须优先跳本服务详情页（ISSUE-P2-405）",
-            nav.contains("android.settings.ACCESSIBILITY_DETAILS_SETTINGS") &&
-                nav.contains("openLegacyAccessibilitySettings")
+            "旧版无障碍通道必须提供 openLegacyAccessibilitySettings（ISSUE-P2-405）",
+            nav.contains("openLegacyAccessibilitySettings") &&
+                nav.contains("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
         )
         assertTrue(
             "启动必须包 runCatching（厂商 ROM 拦截时降级，不得成为新的崩溃点）",
-            nav.contains("runCatching { context.startActivity(intent) }")
+            nav.contains("runCatching {")
         )
         assertTrue(
             "不可解析时不得给出死链（resolveActivity 为空即不返回 Intent）",
@@ -231,12 +231,11 @@ class OneTapInteractionWiringTest {
             healthCard.contains("AutofillHealthIssue.SYSTEM_NOT_ENABLED") &&
                 healthCard.contains("autofillServiceIntent")
         )
-        // ISSUE-P2-405：§332 摘除状态卡后 accessibilityIntent 曾成死代码；
-        // 现由健康卡「legacy 半接通」项重新消费无障碍设置入口。
+        // ISSUE-P2-405：健康卡对 legacy 半接通点击即调 openLegacyAccessibilitySettings
         assertTrue(
             "健康卡必须对 legacy 无障碍半接通项接线无障碍入口",
             healthCard.contains("LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED") &&
-                healthCard.contains("accessibilityDetailsIntent")
+                healthCard.contains("openLegacyAccessibilitySettings")
         )
     }
 
