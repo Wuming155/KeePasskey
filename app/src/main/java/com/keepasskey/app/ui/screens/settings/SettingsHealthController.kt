@@ -45,11 +45,23 @@ internal class SettingsHealthController(
      */
     private val setBreachCheckEnabled: (Boolean) -> Unit = {},
     /**
-     * ISSUE-P3-382：库内重复条目扫描通道（由 ViewModel 注入 `SettingsDatabaseMetaController.scanDuplicateEntries`）。
+     * ISSUE-P3-382 / P3-409：库内重复条目扫描通道。
+     * ISSUE-P3-409：不再压成 `(0, size)` 丢弃条目，而是透出可点击的明细（组数 + 每条受影响条目）。
      * 默认空实现保持既有单测构造点兼容；缺失时重复报告恒 0（不谎报）。
      */
-    private val scanDuplicates: () -> List<Pair<Int, Int>> = { emptyList() }
+    private val scanDuplicates: () -> DuplicateScanResult = { DuplicateScanResult.EMPTY }
 ) {
+
+    /** 重复条目扫描结果（ISSUE-P3-409：组/条目计数 + 条目级明细，供审计行下挂列表） */
+    internal data class DuplicateScanResult(
+        val groupCount: Int,
+        val entryCount: Int,
+        val issues: List<HealthIssueUi>
+    ) {
+        companion object {
+            val EMPTY = DuplicateScanResult(0, 0, emptyList())
+        }
+    }
 
     internal data class HealthCheckUiState(
         val healthScore: Int,
@@ -73,7 +85,9 @@ internal class SettingsHealthController(
         val healthIssues: List<HealthIssueUi> = emptyList(),
         /** ISSUE-P3-382：库内重复条目只读报告（扫描时顺带产出） */
         val duplicateGroupCount: Int = 0,
-        val duplicateEntryCount: Int = 0
+        val duplicateEntryCount: Int = 0,
+        /** ISSUE-P3-409：重复条目明细（同 URL+账号），点击进条目详情便于清理 */
+        val duplicateIssues: List<HealthIssueUi> = emptyList()
     )
 
     /** 一次扫描算出的汇总结果（与 UI 状态解耦，便于把 rescanHealth 控制在函数行数阈值内） */
@@ -90,7 +104,8 @@ internal class SettingsHealthController(
         val breachCheckMessage: String,
         val lastHealthScanTime: String,
         val duplicateGroupCount: Int,
-        val duplicateEntryCount: Int
+        val duplicateEntryCount: Int,
+        val duplicateIssues: List<HealthIssueUi>
     )
 
     private val healthStateFlow = MutableStateFlow(initialState())
@@ -111,7 +126,8 @@ internal class SettingsHealthController(
         isHealthScanning = false,
         healthIssues = emptyList(),
         duplicateGroupCount = 0,
-        duplicateEntryCount = 0
+        duplicateEntryCount = 0,
+        duplicateIssues = emptyList()
     )
 
     fun rescanHealth() {
@@ -129,7 +145,7 @@ internal class SettingsHealthController(
                 }
                 val summary = buildHealthScanSummary(
                     issues = issues,
-                    dupGroups = scanDuplicates(),
+                    duplicateScan = scanDuplicates(),
                     breachOutcome = runBreachCheck(entries)
                 )
                 applyHealthScanSummary(summary)
@@ -164,7 +180,8 @@ internal class SettingsHealthController(
                 lastHealthScanTime = summary.lastHealthScanTime,
                 hasScanned = true,
                 duplicateGroupCount = summary.duplicateGroupCount,
-                duplicateEntryCount = summary.duplicateEntryCount
+                duplicateEntryCount = summary.duplicateEntryCount,
+                duplicateIssues = summary.duplicateIssues
             )
         }
     }
@@ -173,10 +190,11 @@ internal class SettingsHealthController(
      * 由引擎明细 + 重复扫描 + 泄露检测结果装配一次扫描的汇总。
      *
      * ISSUE-P3-405：`healthIssues` 保留条目级明细；`expiredPasswordCount` 从「只进文案」升为独立计数。
+     * ISSUE-P3-409：`duplicateIssues` 透出重复条目明细，与弱密码同构可点。
      */
     private fun buildHealthScanSummary(
         issues: List<EntryHealthIssue>,
-        dupGroups: List<Pair<Int, Int>>,
+        duplicateScan: DuplicateScanResult,
         breachOutcome: BreachCheckOutcome
     ): HealthScanSummary {
         val weakCount = issues.count { it.riskLevel == PasswordRiskLevel.WEAK }
@@ -244,8 +262,9 @@ internal class SettingsHealthController(
             breachCheckStatus = breachOutcome.status,
             breachCheckMessage = breachOutcome.errorMessage.orEmpty(),
             lastHealthScanTime = lastScanText,
-            duplicateGroupCount = dupGroups.size,
-            duplicateEntryCount = dupGroups.sumOf { it.second }
+            duplicateGroupCount = duplicateScan.groupCount,
+            duplicateEntryCount = duplicateScan.entryCount,
+            duplicateIssues = duplicateScan.issues
         )
     }
 

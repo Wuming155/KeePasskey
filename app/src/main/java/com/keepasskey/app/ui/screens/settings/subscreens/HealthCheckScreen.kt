@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -66,10 +67,6 @@ internal fun HealthCheckContent(
     onEntryClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // ISSUE-P3-405：按风险过滤明细，供各审计行下挂受影响条目列表
-    val weakIssues = uiState.healthIssues.filter { it.risk == HealthIssueRiskUi.WEAK }
-    val reusedIssues = uiState.healthIssues.filter { it.risk == HealthIssueRiskUi.REUSED }
-    val expiredIssues = uiState.healthIssues.filter { it.risk == HealthIssueRiskUi.EXPIRED }
     LazyColumn(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -84,77 +81,101 @@ internal fun HealthCheckContent(
                 onRescanClick = onRescanClick
             )
         }
-        item {
-            Text(
-                text = stringResource(R.string.health_section_audit),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-            )
-        }
-        item {
-            HealthCountAuditRow(
-                title = stringResource(R.string.health_weak_title),
-                subtitle = stringResource(R.string.health_weak_sub),
-                hasScanned = uiState.hasHealthScanned,
-                violationCount = uiState.weakPasswordCount,
-                issues = weakIssues,
-                onIssueClick = onEntryClick
-            )
-        }
-        item {
-            HealthCountAuditRow(
-                title = stringResource(R.string.health_reuse_title),
-                subtitle = stringResource(R.string.health_reuse_sub, uiState.reusedPasswordCount),
-                hasScanned = uiState.hasHealthScanned,
-                violationCount = uiState.reusedPasswordCount,
-                issues = reusedIssues,
-                onIssueClick = onEntryClick
-            )
-        }
-        // ISSUE-P3-405：过期凭据审计行——此前仅出现在汇总文案，用户无独立入口知悉哪些条目过期
-        item {
-            HealthCountAuditRow(
-                title = stringResource(R.string.health_expired_title),
-                subtitle = stringResource(R.string.health_expired_sub),
-                hasScanned = uiState.hasHealthScanned,
-                violationCount = uiState.expiredPasswordCount,
-                issues = expiredIssues,
-                onIssueClick = onEntryClick
-            )
-        }
-        // ISSUE-P3-382：库内重复条目只读报告入口（合并走条目编辑/删除管线）
-        item {
-            HealthCountAuditRow(
-                title = stringResource(R.string.health_duplicate_title),
-                subtitle = if (uiState.hasHealthScanned && uiState.duplicateGroupCount > 0) {
-                    stringResource(R.string.health_duplicate_sub, uiState.duplicateGroupCount)
-                } else if (uiState.hasHealthScanned) {
-                    stringResource(R.string.health_duplicate_none)
-                } else {
-                    stringResource(R.string.health_duplicate_merge_hint)
-                },
-                hasScanned = uiState.hasHealthScanned,
-                violationCount = if (uiState.hasHealthScanned) uiState.duplicateGroupCount else 0
-            )
-        }
-        item {
-            HealthBreachAuditRow(
-                status = uiState.breachCheckStatus,
-                compromisedCount = uiState.compromisedPasswordCount ?: 0,
-                breachMessage = uiState.breachCheckMessage,
-                title = stringResource(R.string.health_leak_title)
-            )
-        }
-        item {
-            BreachCheckToggleRow(
-                enabled = uiState.breachCheckEnabled,
-                onToggle = onBreachCheckToggle,
-                isScanning = uiState.isHealthScanning
-            )
-        }
+        HealthCheckAuditSectionItems(
+            uiState = uiState,
+            onEntryClick = onEntryClick,
+            onBreachCheckToggle = onBreachCheckToggle
+        )
         item { HealthTipsCard() }
         item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}
+
+/**
+ * 安全审计段落（弱/复用/过期/重复/泄露/开关）。
+ * ISSUE-P3-409 拆分：`HealthCheckContent` 曾达 101 行触发 `long_functions` 红线，审计行装配独立成段。
+ */
+private fun LazyListScope.HealthCheckAuditSectionItems(
+    uiState: SettingsUiState,
+    onEntryClick: (String) -> Unit,
+    onBreachCheckToggle: (Boolean) -> Unit
+) {
+    item {
+        Text(
+            text = stringResource(R.string.health_section_audit),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+        )
+    }
+    item {
+        HealthCountAuditRow(
+            title = stringResource(R.string.health_weak_title),
+            subtitle = stringResource(R.string.health_weak_sub),
+            hasScanned = uiState.hasHealthScanned,
+            violationCount = uiState.weakPasswordCount,
+            issues = uiState.healthIssues.filter {
+                it.risk == HealthIssueRiskUi.WEAK
+            },
+            onIssueClick = onEntryClick
+        )
+    }
+    item {
+        HealthCountAuditRow(
+            title = stringResource(R.string.health_reuse_title),
+            subtitle = stringResource(R.string.health_reuse_sub, uiState.reusedPasswordCount),
+            hasScanned = uiState.hasHealthScanned,
+            violationCount = uiState.reusedPasswordCount,
+            issues = uiState.healthIssues.filter {
+                it.risk == HealthIssueRiskUi.REUSED
+            },
+            onIssueClick = onEntryClick
+        )
+    }
+    item {
+        HealthCountAuditRow(
+            title = stringResource(R.string.health_expired_title),
+            subtitle = stringResource(R.string.health_expired_sub),
+            hasScanned = uiState.hasHealthScanned,
+            violationCount = uiState.expiredPasswordCount,
+            issues = uiState.healthIssues.filter {
+                it.risk == HealthIssueRiskUi.EXPIRED
+            },
+            onIssueClick = onEntryClick
+        )
+    }
+    // ISSUE-P3-382 / P3-409：库内重复条目只读报告（合并走条目编辑/删除管线）；
+    // 明细列表与弱密码同构，点击进条目详情便于清理
+    item {
+        HealthCountAuditRow(
+            title = stringResource(R.string.health_duplicate_title),
+            subtitle = if (uiState.hasHealthScanned && uiState.duplicateGroupCount > 0) {
+                stringResource(R.string.health_duplicate_sub, uiState.duplicateGroupCount)
+            } else if (uiState.hasHealthScanned) {
+                stringResource(R.string.health_duplicate_none)
+            } else {
+                stringResource(R.string.health_duplicate_merge_hint)
+            },
+            hasScanned = uiState.hasHealthScanned,
+            violationCount = if (uiState.hasHealthScanned) uiState.duplicateGroupCount else 0,
+            issues = uiState.duplicateIssues,
+            onIssueClick = onEntryClick
+        )
+    }
+    item {
+        HealthBreachAuditRow(
+            status = uiState.breachCheckStatus,
+            compromisedCount = uiState.compromisedPasswordCount ?: 0,
+            breachMessage = uiState.breachCheckMessage,
+            title = stringResource(R.string.health_leak_title)
+        )
+    }
+    item {
+        BreachCheckToggleRow(
+            enabled = uiState.breachCheckEnabled,
+            onToggle = onBreachCheckToggle,
+            isScanning = uiState.isHealthScanning
+        )
     }
 }
 

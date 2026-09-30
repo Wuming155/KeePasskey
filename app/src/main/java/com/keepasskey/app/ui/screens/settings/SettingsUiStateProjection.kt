@@ -248,9 +248,10 @@ internal fun buildSettingsUiState(
     lastHealthScanTime = healthState.lastHealthScanTime,
     isHealthScanning = healthState.isHealthScanning,
     hasHealthScanned = healthState.hasScanned,
-    // ISSUE-P3-382：重复条目只读报告
+    // ISSUE-P3-382 / P3-409：重复条目只读报告 + 明细
     duplicateGroupCount = healthState.duplicateGroupCount,
     duplicateEntryCount = healthState.duplicateEntryCount,
+    duplicateIssues = healthState.duplicateIssues,
 
     // 8. 调试日志
     debugLogEnabled = extState.debugLogEnabled,

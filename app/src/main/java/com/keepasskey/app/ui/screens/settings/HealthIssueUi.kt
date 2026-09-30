@@ -6,14 +6,16 @@ import com.keepasskey.database.audit.PasswordRiskLevel
 enum class HealthIssueRiskUi {
     WEAK,
     REUSED,
-    EXPIRED
+    EXPIRED,
+    /** 同 URL + 同账号的重复条目（ISSUE-P3-409，供清理导航；合并仍走编辑/删除管线） */
+    DUPLICATE
 }
 
 /**
- * 健康检查「问题条目」UI 投影（ISSUE-P3-405）。
+ * 健康检查「问题条目」UI 投影（ISSUE-P3-405 / P3-409）。
  *
- * 引擎侧 [com.keepasskey.database.audit.EntryHealthIssue] 已含明细，此前控制器只保留计数；
- * 本类型把明细带到 UI，使用户能知道**哪些**条目是弱密码 / 复用 / 过期。
+ * 引擎侧 [com.keepasskey.database.audit.EntryHealthIssue] 与重复扫描明细都投影到本类型，
+ * 使用户能知道**哪些**条目是弱密码 / 复用 / 过期 / 重复。
  * 只保留非敏感字段（标题 / 用户名 / 风险 / 原因），绝不携带口令本身。
  */
 data class HealthIssueUi(

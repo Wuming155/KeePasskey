@@ -226,10 +226,9 @@ class SettingsViewModel @Inject constructor(
         scope = viewModelScope,
         // ISSUE-P3-257：开启泄露检测并就地扫描的偏好持久化回调（形态同 extendedPreferences 的 lambda 注入）
         setBreachCheckEnabled = { extendedPreferences.setBreachCheckEnabled(it) },
-        // ISSUE-P3-382：库内重复条目扫描——每组一条 (0, 条目数)，组数=列表长度、条目数=second 之和
+        // ISSUE-P3-382 / P3-409：库内重复条目——明细映射在 SettingsDatabaseMetaController，此处仅委托
         scanDuplicates = {
-            preferences.databaseMetaController.scanDuplicateEntries()
-                .map { group -> 0 to group.entries.size }
+            preferences.databaseMetaController.scanDuplicateHealthIssues(strings)
         }
     )
 

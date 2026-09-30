@@ -227,9 +227,11 @@ data class SettingsUiState(
     val isHealthScanning: Boolean = false,
     /** ISSUE-P3-61：是否已完成过一次扫描（未扫描时审计行徽标保持中性「未扫描」） */
     val hasHealthScanned: Boolean = false,
-    // ISSUE-P3-382：库内重复条目只读报告（健康检查面入口）
+    // ISSUE-P3-382 / P3-409：库内重复条目只读报告（健康检查面入口）+ 条目级明细
     val duplicateGroupCount: Int = 0,
     val duplicateEntryCount: Int = 0,
+    /** ISSUE-P3-409：重复条目明细（同 URL+账号），与弱密码同构可点进条目详情 */
+    val duplicateIssues: List<HealthIssueUi> = emptyList(),
 
     // 8. 调试日志与系统诊断 (Debug & Diagnostics)
     val debugLogEnabled: Boolean = false, // KP2A: 启用调试日志

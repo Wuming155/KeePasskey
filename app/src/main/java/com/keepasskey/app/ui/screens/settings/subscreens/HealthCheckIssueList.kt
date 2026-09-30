@@ -91,6 +91,7 @@ internal fun HealthIssueRow(
         HealthIssueRiskUi.WEAK -> stringResource(R.string.health_issue_risk_weak)
         HealthIssueRiskUi.REUSED -> stringResource(R.string.health_issue_risk_reused)
         HealthIssueRiskUi.EXPIRED -> stringResource(R.string.health_issue_risk_expired)
+        HealthIssueRiskUi.DUPLICATE -> stringResource(R.string.health_issue_risk_duplicate)
     }
     Row(
         modifier = modifier

@@ -72,4 +72,34 @@ internal class SettingsDatabaseMetaController(
         }
         return DuplicateEntryScanner.scan(entries)
     }
+
+    /**
+     * ISSUE-P3-409：重复条目扫描 → 健康检查明细投影（组/条目计数 + 可点击条目列表）。
+     * 映射逻辑放在本控制器，避免 `SettingsViewModel` 因注入体膨胀触发 tier1 行数闸门。
+     */
+    fun scanDuplicateHealthIssues(
+        strings: com.keepasskey.app.ui.model.StringsProvider
+    ): SettingsHealthController.DuplicateScanResult {
+        val groups = scanDuplicateEntries()
+        val issues = groups.flatMap { group ->
+            val othersInGroup = group.entries.size - 1
+            group.entries.map { entry ->
+                HealthIssueUi(
+                    entryId = entry.id.toHexString(),
+                    title = entry.title,
+                    username = entry.userName,
+                    risk = HealthIssueRiskUi.DUPLICATE,
+                    description = strings.get(
+                        com.keepasskey.app.R.string.health_issue_duplicate_desc,
+                        othersInGroup
+                    )
+                )
+            }
+        }
+        return SettingsHealthController.DuplicateScanResult(
+            groupCount = groups.size,
+            entryCount = issues.size,
+            issues = issues
+        )
+    }
 }

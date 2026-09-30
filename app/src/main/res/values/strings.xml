@@ -1145,6 +1145,8 @@
     <string name="health_issue_risk_weak">弱密码</string>
     <string name="health_issue_risk_reused">密码复用</string>
     <string name="health_issue_risk_expired">已过期</string>
+    <string name="health_issue_risk_duplicate">重复条目</string>
+    <string name="health_issue_duplicate_desc">与另外 %1$d 个条目重复（同 URL + 同账号）</string>
     <string name="health_issue_title_fallback">未命名条目</string>
     <string name="health_leak_title">泄露密码</string>
     <string name="health_leak_sub_clean">已与公开泄露库比对，未发现本库密码</string>

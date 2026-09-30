@@ -1095,6 +1095,8 @@
     <string name="health_issue_risk_weak">Weak password</string>
     <string name="health_issue_risk_reused">Reused password</string>
     <string name="health_issue_risk_expired">Expired</string>
+    <string name="health_issue_risk_duplicate">Duplicate</string>
+    <string name="health_issue_duplicate_desc">Duplicates %1$d other entr(ies) with the same URL and username</string>
     <string name="health_issue_title_fallback">Untitled entry</string>
     <string name="health_leak_title">Breached passwords</string>
     <string name="health_leak_sub_clean">Compared against public breach corpora; no vault password found</string>
