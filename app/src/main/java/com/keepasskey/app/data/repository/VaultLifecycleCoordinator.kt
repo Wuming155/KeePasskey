@@ -77,6 +77,16 @@ internal class VaultLifecycleCoordinator(
         } else {
             val targetFile = File(activeDb.path)
             if (!targetFile.exists()) {
+                // ISSUE-P2-399：远端登记条目（历史遗留：path 为 URL）在本地没有对应文件，
+                // 绝不能落入下方「文件缺失即新建空库」分支——那会以主密码新建的空库顶替云端库，
+                // 且一旦同步凭据在位还会被自动同步整库上传、覆盖云端真库（数据丢失级故障）。
+                // 一律 fail-closed 显式失败，引导用户重新走「打开已有密码库」云端入口完成下载。
+                if (activeDb.isRemote) {
+                    return KdbxResult.Failure(
+                        IllegalStateException("云端库尚未下载到本机: ${activeDb.path}"),
+                        strings.get(R.string.repo_cloud_vault_not_downloaded)
+                    )
+                }
                 if (keyFileData != null) {
                     return KdbxResult.Failure(
                         IllegalArgumentException("数据库文件不存在: ${targetFile.absolutePath}"),

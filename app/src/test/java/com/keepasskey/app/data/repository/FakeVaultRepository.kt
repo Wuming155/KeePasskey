@@ -151,7 +151,15 @@ class FakeVaultRepository(
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
+    /**
+     * ISSUE-P2-399：最近一次 `importExternalDatabase` 实际收到的 (name, path, syncType)
+     * 三元组（仅测试观测点）。供「云端导入成功后按本地路径登记且保持云端标签」类断言使用。
+     */
+    var lastImport: Triple<String, String, String>? = null
+        private set
+
     override suspend fun importExternalDatabase(name: String, path: String, syncType: String): com.keepasskey.core.result.KdbxResult<Unit> {
+        lastImport = Triple(name, path, syncType)
         val newDb = VaultDatabaseInfo(
             id = "db_${System.currentTimeMillis()}",
             name = name,

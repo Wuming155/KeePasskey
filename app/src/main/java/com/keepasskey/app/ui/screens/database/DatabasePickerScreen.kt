@@ -120,7 +120,7 @@ fun DatabasePickerContent(
     ) -> Unit,
     onOpenExistingClick: () -> Unit,
     onCloseOpenSourceDialog: () -> Unit,
-    onImportFromSource: (source: OpenVaultSourceType, name: String, path: String) -> Unit,
+    onImportFromSource: (submission: OpenVaultSubmission) -> Unit,
     // ISSUE-P1-241：第二个参数即该动作的**真实对象**（应用私有库 = 真删文件 / 外部库 = 只摘登记），
     // 与确认弹窗所用文案同一枚判据，数据层据此决定是否删除物理文件
     onRemoveDatabase: (String, VaultRemovalKind) -> Unit,
@@ -147,7 +147,7 @@ fun DatabasePickerContent(
         val target = pendingRestore
         pendingRestore = null
         if (uri != null && target != null) {
-            onImportFromSource(OpenVaultSourceType.LOCAL, target.name, uri.toString())
+            onImportFromSource(OpenVaultSubmission.Local(name = target.name, path = uri.toString()))
         }
     }
 

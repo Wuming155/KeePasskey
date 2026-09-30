@@ -14,8 +14,4 @@ object WebDavDefaults {
 
     /** 默认远程库文件名（相对端点；用户可改为 `<邮箱>/keepasskey.kdbx` 等形态）。 */
     const val DEFAULT_REMOTE_PATH: String = "keepasskey.kdbx"
-
-    /** 打开远端库对话框的完整 URL 占位（含邮箱与库文件名示意）。 */
-    const val NUTSTORE_URL_PLACEHOLDER: String =
-        "https://dav.jianguoyun.com/dav/user@example.com/keepasskey.kdbx"
 }

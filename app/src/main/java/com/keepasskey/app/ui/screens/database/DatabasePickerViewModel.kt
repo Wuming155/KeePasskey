@@ -33,6 +33,7 @@ sealed interface DatabasePickerEvent {
     data class DatabaseSelected(val id: String) : DatabasePickerEvent
 }
 
+
 /**
  * 生成型密钥文件的一次性交付状态（ISSUE-P3-21 验收 2）。
  *
@@ -60,7 +61,9 @@ class DatabasePickerViewModel @Inject constructor(
     // 生产 DI 注入 @ApplicationContext（与 SettingsViewModel 同一既有范式）
     @ApplicationContext private val appContext: Context? = null,
     // ISSUE-P2-288：弱主口令「显式二次确认」留痕通道。nullable 仅为单测构造；生产 DI 恒注入
-    private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer? = null
+    private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer? = null,
+    // ISSUE-P2-399：云端打开导入器（下载远端库 → 落凭据）。nullable 仅为单测构造；生产 DI 恒注入
+    private val cloudVaultImporter: com.keepasskey.app.sync.CloudVaultImporter? = null
 ) : ViewModel() {
 
     /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文）。 */
@@ -253,36 +256,85 @@ class DatabasePickerViewModel @Inject constructor(
     }
 
     /**
-     * 导入并登记外部来源的密码库（见 [OpenVaultSourceType]）。
+     * 导入并登记外部来源的密码库（见 [OpenVaultSourceType] / [OpenVaultSubmission]）。
+     *
+     * ISSUE-P2-399：云端来源（WebDAV / S3）不再是「只登记不连接」的假桩——先经
+     * `CloudVaultImporter` 用所填凭据把远端库下载到本地（下载成功才落凭据），再按
+     * **本地文件路径**走既有 [importLocalDatabase] 登记出口；此后该库与
+     * 「本地打开 → 同步配置补全」手工链路完全同构（解锁、自动同步均复用既有机制）。
      *
      * ISSUE-P2-87 / ISSUE-P3-248 说明：本方法成功后**不在本页**做工作因子提示，且**当前也没有
      * 任何别的地方替它提示**——这是如实口径，不是设计选择：
      *
-     * 1. 本页会随 [DatabasePickerEvent.DatabaseSelected] 立即被 `popBackStack()` 退栈
-     *    （`KeePasskeyNavGraph.kt` 的 `onDatabaseSelected`）：Snackbar 往往来不及渲染，
-     *    而承载它的 ViewModel 也会随之清除。故本页确实不适合承载该提示。
-     * 2. **但「交给退栈落点代为提示」这条路并不成立**（2026-09-21 复核更正）：
-     *    `UnlockViewModel.importExternalDatabase` 的**唯一调用点是解锁页自身的导入按钮**
-     *    （`UnlockScreen.kt:119`），选择器这条路径只调 `vaultRepository.importExternalDatabase`
-     *    （本文件 [importDatabaseFromSource]），**从不写** `UnlockUiState.infoMessage`，
-     *    也就不会在解锁页产生任何提示。
-     * 3. 结论：**「从来源打开（本地文件）」路径当前没有任何弱因子提示**。该残余已登记
-     *    `docs/architecture/已知工程限界.md` §8（不是修复，是留痕）。
-     *
-     * `ASSESS` 阶段的既有取舍（弱因子提示置于导入落点、不阻断导入）与**「不要在本页另加提示通道」
-     * 依然有效**，但真实原因是第 1 条「本页会立即退栈」，而非「落点会代为提示」。
+     * 为什么本页不做该提示（2026-09-21 复核更正后的如实口径）：本页会随
+     * [DatabasePickerEvent.DatabaseSelected] 立即被 `popBackStack()` 退栈（Snackbar 来不及渲染且 VM 随之清除），
+     * 而「交给退栈落点代为提示」并不成立——`UnlockViewModel.importExternalDatabase` 的唯一
+     * 调用点是解锁页自身的导入按钮，选择器路径只走本文件 [importLocalDatabase]，从不写
+     * `UnlockUiState.infoMessage`。故「从来源打开」路径当前没有任何弱因子提示，该残余已登记
+     * `docs/architecture/已知工程限界.md` §8（不是修复，是留痕）。
      */
-    fun importDatabaseFromSource(source: OpenVaultSourceType, name: String, path: String) {
+    fun importDatabaseFromSource(submission: OpenVaultSubmission) {
         viewModelScope.launch {
-            val result = vaultRepository.importExternalDatabase(name, path, syncType = source.label)
-            if (result is KdbxResult.Success) {
-                val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
-                showOpenSourceDialogFlow.value = false
-                publishPickerMessage(UiMessage(R.string.db_picker_msg_opened))
-                _events.emit(DatabasePickerEvent.DatabaseSelected(fileName))
-            } else {
-                publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+            when (submission) {
+                is OpenVaultSubmission.Local -> importLocalDatabase(submission)
+                is OpenVaultSubmission.Cloud -> importCloudDatabase(submission.request)
             }
+        }
+    }
+
+    /** 本地库：登记（`content://` 持久化授权 / 文件路径）并置为活动库（原实现原样保留） */
+    private suspend fun importLocalDatabase(
+        submission: OpenVaultSubmission.Local,
+        syncType: String = OpenVaultSourceType.LOCAL.label
+    ) {
+        val result = vaultRepository.importExternalDatabase(
+            submission.name,
+            submission.path,
+            syncType = syncType
+        )
+        if (result is KdbxResult.Success) {
+            val fileName = if (submission.name.endsWith(".kdbx", ignoreCase = true)) {
+                submission.name
+            } else {
+                "${submission.name}.kdbx"
+            }
+            showOpenSourceDialogFlow.value = false
+            publishPickerMessage(UiMessage(R.string.db_picker_msg_opened))
+            _events.emit(DatabasePickerEvent.DatabaseSelected(fileName))
+        } else {
+            publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+        }
+    }
+
+    /**
+     * 云端库（ISSUE-P2-399）：先下载后登记。
+     *
+     * 请求侧凭据 `CharArray` 的擦除责任在 `CloudVaultImporter`（任何结果路径用毕擦除）；
+     * 导入成功后以**本地文件路径**走 [importLocalDatabase] 同一登记出口，`syncType`
+     * 仍按来源落「WebDAV 云存储 / 兼容 S3 对象存储」标签（卡片云徽章与解锁页「云端库」状态照常呈现）。
+     */
+    private suspend fun importCloudDatabase(request: com.keepasskey.app.sync.CloudVaultImportRequest) {
+        val importer = cloudVaultImporter
+        if (importer == null) {
+            publishPickerMessage(
+                UiMessage(R.string.op_failed, listOf("CloudVaultImporter unavailable"), isError = true)
+            )
+            return
+        }
+        when (val result = importer.import(request)) {
+            is com.keepasskey.app.sync.CloudVaultImportResult.Success -> {
+                val local = java.io.File(result.localPath)
+                val syncType = when (request) {
+                    is com.keepasskey.app.sync.CloudVaultImportRequest.WebDav -> OpenVaultSourceType.WEBDAV.label
+                    is com.keepasskey.app.sync.CloudVaultImportRequest.S3 -> OpenVaultSourceType.S3_COMPATIBLE.label
+                }
+                importLocalDatabase(
+                    OpenVaultSubmission.Local(name = local.nameWithoutExtension, path = result.localPath),
+                    syncType = syncType
+                )
+            }
+            is com.keepasskey.app.sync.CloudVaultImportResult.Failure ->
+                publishPickerMessage(result.message)
         }
     }
 
@@ -310,53 +362,13 @@ class DatabasePickerViewModel @Inject constructor(
         userMessageFlow.value = null
     }
 
-    /** 建库密钥文件因子的解析结果（ISSUE-P3-21） */
-    private sealed interface KeyFileFactorResolution {
-
-        /**
-         * [generated] 标记是否为「生成型」因子（决定是否需要一次性交付提示）；
-         * [borrowedKeyFileBytes] 为借用给数据层的字节副本，调用方用毕必须清零。
-         */
-        class Resolved(
-            val factor: CreateKeyFileFactor,
-            val generated: Boolean,
-            val borrowedKeyFileBytes: ByteArray? = null
-        ) : KeyFileFactorResolution
-
-        /** 因子无法成立（既有密钥文件读取失败等）：显式失败，不得降级为其它因子 */
-        class Failed(val message: UiMessage) : KeyFileFactorResolution
-    }
-
     /**
-     * 解析建库密钥文件因子：无密钥文件 / 生成型 / 用户选定既有文件。
-     *
-     * 既有文件路径**没有任何降级分支**：读不到就失败，绝不改用生成型（那会产出一个
-     * 用户手上没有对应密钥文件的库）。
+     * 解析建库密钥文件因子（无密钥文件 / 生成型 / 用户选定既有文件）。
+     * ISSUE-P2-399 批次：自本类下沉至 `DatabaseKeyFileFactorResolver`（纯结构性搬移，
+     * 语义与失败分支零变化），本类只保留调用点。
      */
-    private suspend fun resolveKeyFileFactor(keyFile: Boolean, sourceUri: String?): KeyFileFactorResolution {
-        if (!keyFile) {
-            return KeyFileFactorResolution.Resolved(CreateKeyFileFactor.None, generated = false)
-        }
-        if (sourceUri.isNullOrBlank()) {
-            return KeyFileFactorResolution.Resolved(CreateKeyFileFactor.Generate, generated = true)
-        }
-        val access = keyFileAccess
-            ?: return KeyFileFactorResolution.Failed(UiMessage(R.string.unlock_keyfile_read_failed))
-        return when (val outcome = access.read(sourceUri)) {
-            is KeyFileReadResult.Success -> KeyFileFactorResolution.Resolved(
-                factor = CreateKeyFileFactor.Existing(outcome.bytes),
-                generated = false,
-                // 字节所有权已移交因子；清零责任随借用契约留给 createDatabase 的调用收尾
-                borrowedKeyFileBytes = outcome.bytes
-            )
-            // 「读不到」分型（空文件 / 超限 / 流异常）一律显式反馈，绝不静默忽略
-            KeyFileReadResult.Empty,
-            KeyFileReadResult.TooLarge,
-            KeyFileReadResult.Unreadable -> KeyFileFactorResolution.Failed(
-                UiMessage(R.string.unlock_keyfile_read_failed)
-            )
-        }
-    }
+    private suspend fun resolveKeyFileFactor(keyFile: Boolean, sourceUri: String?): KeyFileFactorResolution =
+        DatabaseKeyFileFactorResolver.resolve(keyFile, sourceUri, keyFileAccess)
 
     /** 建议的密钥文件名：与密码库同名（`.kdbx` → `.keyx`），与设置页导出通道命名习惯一致 */
     private fun suggestedKeyFileName(vaultName: String): String {

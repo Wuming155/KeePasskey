@@ -20,6 +20,21 @@ enum class OpenVaultSourceType(
 }
 
 /**
+ * 「打开已有 KDBX 密码库」对话框的提交载荷（ISSUE-P2-399）。
+ *
+ * 本地库只带路径；云端库携带完整连接凭据（[com.keepasskey.app.sync.CloudVaultImportRequest]，
+ * 凭据 `CharArray` 为借用语义：对话框传副本后即交出，由导入链路用毕擦除）。
+ */
+sealed interface OpenVaultSubmission {
+
+    /** 本地库：SAF 选择器选定的 uri 或文件路径 */
+    data class Local(val name: String, val path: String) : OpenVaultSubmission
+
+    /** 云端库：WebDAV / S3 完整凭据，由 [com.keepasskey.app.sync.CloudVaultImporter] 消费 */
+    data class Cloud(val request: com.keepasskey.app.sync.CloudVaultImportRequest) : OpenVaultSubmission
+}
+
+/**
  * 密码库选择与管理页面 UI 状态
  */
 data class DatabasePickerUiState(

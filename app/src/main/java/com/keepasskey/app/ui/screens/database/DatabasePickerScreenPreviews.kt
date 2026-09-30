@@ -54,7 +54,7 @@ internal fun DatabasePickerContentPreview() {
             onCreateDatabase = { _, _, _, _, _, _ -> },
             onOpenExistingClick = {},
             onCloseOpenSourceDialog = {},
-            onImportFromSource = { _, _, _ -> },
+            onImportFromSource = { _ -> },
             onRemoveDatabase = { _, _ -> },
             keyFileDelivery = KeyFileDeliveryState.PendingSave(
                 suggestedFileName = "预览密钥文件.keyx"

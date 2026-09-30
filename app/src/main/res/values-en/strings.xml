@@ -1379,6 +1379,7 @@
     <string name="repo_saf_write_failed">Writing to the chosen location failed, so creation was cancelled</string>
     <string name="repo_no_active_database">Select or create a vault first</string>
     <string name="repo_file_missing_with_keyfile">Database file not found; cannot open with a composite key</string>
+    <string name="repo_cloud_vault_not_downloaded">This cloud vault has not been downloaded to this device and cannot be unlocked. Reconnect it via the cloud tab of \"Open an existing vault\", or check the sync configuration</string>
     <string name="repo_db_locked">Database is locked</string>
     <string name="repo_invalid_group_id">Invalid group ID</string>
     <string name="repo_group_not_found">Group not found</string>
@@ -1507,10 +1508,13 @@
     <string name="picker_browse_file">Browse with the system file picker</string>
     <string name="picker_webdav_desc">Connect to a private WebDAV server (Nextcloud / Nutstore / Synology) to open a remote vault:</string>
     <string name="picker_vault_display_name">Vault display name</string>
-    <string name="picker_webdav_url_label">Full WebDAV server path (URL)</string>
+    <string name="picker_webdav_url_label">WebDAV server address (URL)</string>
     <string name="picker_s3_desc">Connect to an AWS S3-compatible bucket (Cloudflare R2 / MinIO) to open an existing vault:</string>
     <string name="picker_s3_endpoint_label">S3 endpoint URL</string>
-    <string name="picker_s3_bucket_label">Bucket name and path</string>
+    <string name="picker_s3_bucket_label">Bucket name</string>
+    <string name="picker_cloud_remote_missing">Failed to open from cloud: the remote file does not exist or the path is incorrect. Check the remote path and credentials</string>
+    <string name="picker_cloud_download_failed">Failed to open from cloud: could not download the remote vault. Check your network connection and credentials, then retry</string>
+    <string name="picker_cloud_local_conflict">A local vault file with the same name already exists. Choose a different display name and retry</string>
     <string name="picker_open_and_load">Open and load</string>
     <string name="picker_keyfile_toggle">Enable a key file (optional)</string>
     <string name="picker_keyfile_toggle_desc">Combine the master password with a physical key file for genuine two-factor authentication</string>

@@ -21,9 +21,14 @@ class WebDavDefaultsTest {
         assertEquals("keepasskey.kdbx", WebDavDefaults.DEFAULT_REMOTE_PATH)
     }
 
+    /**
+     * ISSUE-P2-399：云端打开对话框改为「URL + 独立远端路径」模型后，
+     * 旧「完整 URL 占位」常量已无消费方，随生产代码一并退役（测试资产修改已登记批次文档）。
+     */
     @Test
-    fun `打开库占位含坚果云完整形态`() {
-        assertTrue(WebDavDefaults.NUTSTORE_URL_PLACEHOLDER.startsWith(WebDavDefaults.NUTSTORE_URL))
-        assertTrue(WebDavDefaults.NUTSTORE_URL_PLACEHOLDER.endsWith(".kdbx"))
+    fun `默认端点与默认远程路径可拼接为完整远端形态`() {
+        val full = WebDavDefaults.NUTSTORE_URL + "user@example.com/" + WebDavDefaults.DEFAULT_REMOTE_PATH
+        assertTrue(full.startsWith("https://"))
+        assertTrue(full.endsWith(".kdbx"))
     }
 }

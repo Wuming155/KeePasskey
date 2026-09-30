@@ -270,15 +270,12 @@ internal class SettingsSyncController(
 
     /**
      * Wave 14 全站强制 HTTPS：端点归一化与校验。
+     * ISSUE-P2-399：实现抽出至 [HttpsEndpointPolicy] 单点（云端打开链路共用同一语义），此处委托。
      * 空串原样返回（允许清空配置）；无 scheme 输入自动补 https://；
      * 显式非 https scheme（http:// 等）返回 null 表示拒绝保存。
      */
-    private fun normalizeHttpsEndpoint(raw: String): String? {
-        val trimmed = raw.trim()
-        if (trimmed.isEmpty()) return trimmed
-        val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
-        return if (withScheme.startsWith("https://", ignoreCase = true)) withScheme else null
-    }
+    private fun normalizeHttpsEndpoint(raw: String): String? =
+        com.keepasskey.app.sync.HttpsEndpointPolicy.normalize(raw)
 
     /**
      * ISSUE-P3-272：自动同步总开关改走进阶偏好统一通道（内存快照 + 持久化原子完成）——

@@ -19,10 +19,14 @@
     <string name="picker_browse_file">启动系统文件选择器定位</string>
     <string name="picker_webdav_desc">连接私有 WebDAV 服务器 (Nextcloud / 坚果云 / 群晖) 打开远端库：</string>
     <string name="picker_vault_display_name">密码库展示名称</string>
-    <string name="picker_webdav_url_label">WebDAV 服务器完整路径 (URL)</string>
+    <string name="picker_webdav_url_label">WebDAV 服务器地址 (URL)</string>
     <string name="picker_s3_desc">连接兼容 AWS S3 规范的对象存储桶 (Cloudflare R2 / MinIO) 打开已有库：</string>
     <string name="picker_s3_endpoint_label">S3 Endpoint 接入端点 URL</string>
-    <string name="picker_s3_bucket_label">存储桶名称 (Bucket) 及路径</string>
+    <string name="picker_s3_bucket_label">存储桶名称 (Bucket)</string>
+    <!-- ISSUE-P2-399：云端打开链路的失败分型文案 -->
+    <string name="picker_cloud_remote_missing">云端打开失败：远端文件不存在或路径不正确，请检查远端路径与凭据</string>
+    <string name="picker_cloud_download_failed">云端打开失败：无法下载远端密码库，请检查网络连接与凭据后重试</string>
+    <string name="picker_cloud_local_conflict">本地已存在同名密码库文件，请换一个展示名称后重试</string>
     <string name="picker_open_and_load">打开并加载</string>
     <string name="picker_keyfile_toggle">启用文件密钥 (KeyFile / 可选项)</string>
     <string name="picker_keyfile_toggle_desc">主密码结合物理密钥文件，构成真正的双重鉴权</string>

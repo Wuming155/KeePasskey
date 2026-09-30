@@ -42,9 +42,11 @@ class DatabasePickerViewModelTest {
         MainDispatcherGuard.tearDown()
     }
 
-    private fun TestScope.createViewModel(): Pair<DatabasePickerViewModel, FakeVaultRepository> {
+    private fun TestScope.createViewModel(
+        cloudVaultImporter: com.keepasskey.app.sync.CloudVaultImporter? = null
+    ): Pair<DatabasePickerViewModel, FakeVaultRepository> {
         val repo = FakeVaultRepository()
-        val viewModel = DatabasePickerViewModel(repo)
+        val viewModel = DatabasePickerViewModel(repo, cloudVaultImporter = cloudVaultImporter)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -104,15 +106,98 @@ class DatabasePickerViewModelTest {
         assertTrue(viewModel.uiState.value.showOpenSourceDialog)
 
         viewModel.importDatabaseFromSource(
-            OpenVaultSourceType.LOCAL,
-            "external_vault.kdbx",
-            "content://com.android.providers.downloads.documents/document/123"
+            OpenVaultSubmission.Local(
+                name = "external_vault.kdbx",
+                path = "content://com.android.providers.downloads.documents/document/123"
+            )
         )
         testScheduler.runCurrent()
 
         assertFalse(viewModel.uiState.value.showOpenSourceDialog)
         assertNotNull(viewModel.uiState.value.userMessage)
         assertEquals(R.string.db_picker_msg_opened, viewModel.uiState.value.userMessage?.resId)
+    }
+
+    // ===== ISSUE-P2-399：云端打开链路 =====
+
+    /** 假导入器：返回预置结果并模拟借用语义（消费请求凭据后擦除） */
+    private class FakeCloudVaultImporter(
+        private val result: com.keepasskey.app.sync.CloudVaultImportResult
+    ) : com.keepasskey.app.sync.CloudVaultImporter {
+        var lastRequest: com.keepasskey.app.sync.CloudVaultImportRequest? = null
+
+        override suspend fun import(
+            request: com.keepasskey.app.sync.CloudVaultImportRequest
+        ): com.keepasskey.app.sync.CloudVaultImportResult {
+            lastRequest = request
+            when (request) {
+                is com.keepasskey.app.sync.CloudVaultImportRequest.WebDav -> request.password.fill('0')
+                is com.keepasskey.app.sync.CloudVaultImportRequest.S3 -> {
+                    request.accessKey.fill('0')
+                    request.secretKey.fill('0')
+                }
+            }
+            return result
+        }
+    }
+
+    @Test
+    fun `云端导入成功后按本地路径登记并保持云端来源标签`() = runTest {
+        val importer = FakeCloudVaultImporter(
+            com.keepasskey.app.sync.CloudVaultImportResult.Success("/data/files/cloud_vault.kdbx")
+        )
+        val (viewModel, repo) = createViewModel(importer)
+
+        viewModel.importDatabaseFromSource(
+            OpenVaultSubmission.Cloud(
+                com.keepasskey.app.sync.CloudVaultImportRequest.WebDav(
+                    name = "cloud_vault",
+                    url = "https://dav.example.com/dav/",
+                    username = "user@example.com",
+                    password = "pwd".toCharArray(),
+                    remotePath = "mailbox/keepasskey.kdbx"
+                )
+            )
+        )
+        testScheduler.runCurrent()
+
+        // 导入器收到原始请求
+        assertTrue(importer.lastRequest is com.keepasskey.app.sync.CloudVaultImportRequest.WebDav)
+        // 登记出口收到本地路径，且 syncType 保持 WebDAV 云端标签（卡片云徽章 / 解锁页「云端库」口径）
+        assertEquals(
+            Triple("cloud_vault", "/data/files/cloud_vault.kdbx", "WebDAV 云存储"),
+            repo.lastImport
+        )
+        assertFalse(viewModel.uiState.value.showOpenSourceDialog)
+    }
+
+    @Test
+    fun `云端导入失败如实上浮且不登记`() = runTest {
+        val importer = FakeCloudVaultImporter(
+            com.keepasskey.app.sync.CloudVaultImportResult.Failure(
+                com.keepasskey.app.ui.model.UiMessage(R.string.picker_cloud_download_failed)
+            )
+        )
+        val (viewModel, repo) = createViewModel(importer)
+
+        viewModel.importDatabaseFromSource(
+            OpenVaultSubmission.Cloud(
+                com.keepasskey.app.sync.CloudVaultImportRequest.S3(
+                    name = "s3_vault",
+                    endpoint = "https://acct.r2.cloudflarestorage.com",
+                    bucket = "my-vault",
+                    region = "auto",
+                    accessKey = "AK".toCharArray(),
+                    secretKey = "SK".toCharArray(),
+                    objectKey = "keepasskey.kdbx",
+                    usePathStyle = false
+                )
+            )
+        )
+        testScheduler.runCurrent()
+
+        assertEquals(R.string.picker_cloud_download_failed, viewModel.uiState.value.userMessage?.resId)
+        assertNull(repo.lastImport)
     }
 
     @Test

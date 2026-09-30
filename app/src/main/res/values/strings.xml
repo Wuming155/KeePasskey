@@ -1248,6 +1248,7 @@
     <string name="repo_saf_write_failed">写入所选位置失败，已取消创建</string>
     <string name="repo_no_active_database">请先选择或创建密码库</string>
     <string name="repo_file_missing_with_keyfile">数据库文件不存在，无法以复合密钥打开</string>
+    <string name="repo_cloud_vault_not_downloaded">云端库尚未下载到本机，无法解锁。请重新经「打开已有密码库」的云端入口完成连接，或检查同步配置</string>
     <string name="repo_db_locked">数据库未解锁</string>
     <string name="repo_invalid_group_id">无效的分组 ID</string>
     <string name="repo_group_not_found">分组不存在</string>

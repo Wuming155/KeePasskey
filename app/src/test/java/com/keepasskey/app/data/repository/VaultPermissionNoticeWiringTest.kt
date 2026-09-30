@@ -76,8 +76,10 @@ class VaultPermissionNoticeWiringTest {
             screen.contains("onRestoreAccess = {")
         )
         assertTrue(
+            // ISSUE-P2-399：导入入口改为 OpenVaultSubmission 载荷后，重授仍复用同一导入路径
+            // （本地来源包成 OpenVaultSubmission.Local，不新开登记分支）
             "[$PICKER_SCREEN] 重授未复用既有导入路径（onImportFromSource）——不得新开登记分支",
-            screen.contains("onImportFromSource(OpenVaultSourceType.LOCAL")
+            screen.contains("onImportFromSource(OpenVaultSubmission.Local(")
         )
     }
 

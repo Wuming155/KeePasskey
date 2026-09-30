@@ -4,6 +4,8 @@ import com.keepasskey.app.data.repository.RealSettingsRepository
 import com.keepasskey.app.data.repository.RealVaultRepository
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.sync.CloudVaultImporter
+import com.keepasskey.app.sync.RealCloudVaultImporter
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -32,4 +34,11 @@ abstract class RepositoryModule {
     abstract fun bindSettingsRepository(
         realSettingsRepository: RealSettingsRepository
     ): SettingsRepository
+
+    /** ISSUE-P2-399：云端打开导入器（下载远端库 → 落凭据 → 回本地路径供登记） */
+    @Binds
+    @Singleton
+    abstract fun bindCloudVaultImporter(
+        realCloudVaultImporter: RealCloudVaultImporter
+    ): CloudVaultImporter
 }
