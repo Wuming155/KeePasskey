@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -96,6 +97,11 @@ fun DatabasePickerScreen(
         onCloseOpenSourceDialog = viewModel::closeOpenSourceDialog,
         onImportFromSource = viewModel::importDatabaseFromSource,
         onRemoveDatabase = viewModel::removeDatabase,
+        // ISSUE-P3-400：远端目录浏览（对话框「浏览远端目录」与设置页共用同一控制器单例）
+        browseState = viewModel.remoteBrowseState,
+        onBrowseWebDav = viewModel::browseRemoteWebDav,
+        onBrowseS3 = viewModel::browseRemoteS3,
+        onDismissBrowse = viewModel::dismissRemoteBrowse,
         modifier = modifier
     )
 }
@@ -128,6 +134,11 @@ fun DatabasePickerContent(
     keyFileDelivery: KeyFileDeliveryState = KeyFileDeliveryState.None,
     onSaveKeyFile: (Uri) -> Unit = {},
     onKeyFileDeliveryDismissed: () -> Unit = {},
+    // ISSUE-P3-400：远端目录浏览（状态与动作均经 ViewModel 透传）
+    browseState: kotlinx.coroutines.flow.StateFlow<com.keepasskey.app.sync.RemoteBrowseUiState> = kotlinx.coroutines.flow.MutableStateFlow(com.keepasskey.app.sync.RemoteBrowseUiState.Idle),
+    onBrowseWebDav: (String, String, CharArray, String, String?) -> Unit = { _, _, _, _, _ -> },
+    onBrowseS3: (String, String, String, CharArray, CharArray, String, Boolean, String?) -> Unit = { _, _, _, _, _, _, _, _ -> },
+    onDismissBrowse: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var dbToRemove by remember { mutableStateOf<VaultDatabaseInfo?>(null) }
@@ -316,7 +327,11 @@ fun DatabasePickerContent(
     if (uiState.showOpenSourceDialog) {
         OpenExistingVaultDialog(
             onDismiss = onCloseOpenSourceDialog,
-            onConfirm = onImportFromSource
+            onConfirm = onImportFromSource,
+            browseState = browseState.collectAsState().value,
+            onBrowseWebDav = onBrowseWebDav,
+            onBrowseS3 = onBrowseS3,
+            onDismissBrowse = onDismissBrowse
         )
     }
 

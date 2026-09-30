@@ -35,6 +35,23 @@ sealed interface OpenVaultSubmission {
 }
 
 /**
+ * 生成型密钥文件的一次性交付状态（ISSUE-P3-21 验收 2；ISSUE-P3-400 批次自 ViewModel 同包迁入）。
+ *
+ * 勾选「生成附属密钥文件」建库时，密钥文件是复合密钥的第二因子：**丢失即永久无法解锁**，
+ * 且它不会再次被生成（会话锁定后内存缓存即刻清零），故建库成功必须立即强制交付。
+ * 本状态只承载**非密钥元数据**（建议文件名）；密钥文件字节始终留在数据层与 SAF 写入端，
+ * 绝不进入 UiState / StateFlow / 日志。
+ */
+sealed interface KeyFileDeliveryState {
+
+    /** 无待交付密钥文件 */
+    data object None : KeyFileDeliveryState
+
+    /** 库已按「主密码 + 密钥文件」建成，密钥文件尚未交付用户——必须显式保存或显式放弃 */
+    data class PendingSave(val suggestedFileName: String) : KeyFileDeliveryState
+}
+
+/**
  * 密码库选择与管理页面 UI 状态
  */
 data class DatabasePickerUiState(

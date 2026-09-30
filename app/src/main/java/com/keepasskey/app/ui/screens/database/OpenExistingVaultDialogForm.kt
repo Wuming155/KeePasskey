@@ -9,6 +9,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.sync.CloudVaultImportRequest
+import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
+import com.keepasskey.app.ui.screens.settings.subscreens.RemoteBrowseSection
 
 /**
  * `OpenExistingVaultDialog` 的表单体与提交组装（ISSUE-P2-399 自对话框本体下沉，
@@ -18,7 +20,7 @@ import com.keepasskey.app.sync.CloudVaultImportRequest
  * 对话框本体留存原数组供导入失败时重试，离开组合时统一擦除。
  */
 
-/** 表单体：来源说明 + 来源切换 Chip + 按来源渲染对应表单段落（段落组件见 Sections 文件） */
+/** 表单体：来源说明 + 来源切换 Chip + 按来源渲染对应表单段落 + 远端目录浏览（段落组件见 Sections 文件） */
 @Composable
 internal fun OpenVaultFormBody(
     selectedSource: OpenVaultSourceType,
@@ -26,7 +28,14 @@ internal fun OpenVaultFormBody(
     local: LocalVaultFormState,
     webdav: WebdavVaultFormState,
     s3: S3VaultFormState,
-    onBrowse: () -> Unit
+    onBrowse: () -> Unit,
+    showBrowseDialog: Boolean,
+    onShowBrowseDialog: () -> Unit,
+    onHideBrowseDialog: () -> Unit,
+    browseState: com.keepasskey.app.sync.RemoteBrowseUiState,
+    onBrowseWebDav: (String, String, CharArray, String, String?) -> Unit,
+    onBrowseS3: (String, String, String, CharArray, CharArray, String, Boolean, String?) -> Unit,
+    onDismissBrowse: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OpenVaultSourceHint()
@@ -45,10 +54,63 @@ internal fun OpenVaultFormBody(
                 onBrowse = onBrowse
             )
 
-            OpenVaultSourceType.WEBDAV -> WebdavVaultSourceForm(state = webdav)
+            OpenVaultSourceType.WEBDAV -> WebdavVaultSourceForm(
+                state = webdav,
+                // 与 CloudSyncScreen 同口径：开弹窗同时用表单凭据发起首次列举（浏览其父目录）
+                onBrowseRemote = {
+                    onShowBrowseDialog()
+                    onBrowseWebDav(
+                        webdav.url, webdav.username, webdav.passwordChars.copyOf(),
+                        com.keepasskey.app.sync.parentDirectoryPath(webdav.remotePath), null
+                    )
+                }
+            )
 
-            OpenVaultSourceType.S3_COMPATIBLE -> S3VaultSourceForm(state = s3)
+            OpenVaultSourceType.S3_COMPATIBLE -> S3VaultSourceForm(
+                state = s3,
+                onBrowseRemote = {
+                    onShowBrowseDialog()
+                    onBrowseS3(
+                        s3.endpoint, s3.bucket, s3.region,
+                        s3.accessKeyChars.copyOf(), s3.secretKeyChars.copyOf(),
+                        com.keepasskey.app.sync.parentDirectoryPath(s3.objectKey), s3.usePathStyle, null
+                    )
+                }
+            )
         }
+
+        // ISSUE-P3-400：远端目录浏览（ISSUE-P3-387 装配段复用；表单凭据优先，选中文件回填路径）
+        RemoteBrowseSection(
+            visible = showBrowseDialog,
+            provider = when (selectedSource) {
+                OpenVaultSourceType.S3_COMPATIBLE -> CloudSyncProvider.S3_COMPATIBLE
+                else -> CloudSyncProvider.WEBDAV
+            },
+            browseState = browseState,
+            webdavUrl = webdav.url,
+            webdavUsername = webdav.username,
+            webdavPasswordChars = webdav.passwordChars,
+            webdavRemotePath = webdav.remotePath,
+            s3Endpoint = s3.endpoint,
+            s3Bucket = s3.bucket,
+            s3Region = s3.region,
+            s3AccessKeyChars = s3.accessKeyChars,
+            s3SecretKeyChars = s3.secretKeyChars,
+            s3ObjectKey = s3.objectKey,
+            s3UsePathStyle = s3.usePathStyle,
+            onBrowseWebDav = onBrowseWebDav,
+            onBrowseS3 = onBrowseS3,
+            onSelectFile = { entry ->
+                if (selectedSource == OpenVaultSourceType.S3_COMPATIBLE) {
+                    s3.objectKey = entry.path
+                } else {
+                    webdav.remotePath = entry.path
+                }
+                onHideBrowseDialog()
+                onDismissBrowse()
+            },
+            onDismissBrowse = onDismissBrowse
+        )
     }
 }
 

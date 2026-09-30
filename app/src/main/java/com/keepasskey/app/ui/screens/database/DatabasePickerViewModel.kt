@@ -33,24 +33,6 @@ sealed interface DatabasePickerEvent {
     data class DatabaseSelected(val id: String) : DatabasePickerEvent
 }
 
-
-/**
- * 生成型密钥文件的一次性交付状态（ISSUE-P3-21 验收 2）。
- *
- * 勾选「生成附属密钥文件」建库时，密钥文件是复合密钥的第二因子：**丢失即永久无法解锁**，
- * 且它不会再次被生成（会话锁定后内存缓存即刻清零），故建库成功必须立即强制交付。
- * 本状态只承载**非密钥元数据**（建议文件名）；密钥文件字节始终留在数据层与 SAF 写入端，
- * 绝不进入 UiState / StateFlow / 日志。
- */
-sealed interface KeyFileDeliveryState {
-
-    /** 无待交付密钥文件 */
-    data object None : KeyFileDeliveryState
-
-    /** 库已按「主密码 + 密钥文件」建成，密钥文件尚未交付用户——必须显式保存或显式放弃 */
-    data class PendingSave(val suggestedFileName: String) : KeyFileDeliveryState
-}
-
 @HiltViewModel
 class DatabasePickerViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
@@ -63,15 +45,17 @@ class DatabasePickerViewModel @Inject constructor(
     // ISSUE-P2-288：弱主口令「显式二次确认」留痕通道。nullable 仅为单测构造；生产 DI 恒注入
     private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer? = null,
     // ISSUE-P2-399：云端打开导入器（下载远端库 → 落凭据）。nullable 仅为单测构造；生产 DI 恒注入
-    private val cloudVaultImporter: com.keepasskey.app.sync.CloudVaultImporter? = null
+    private val cloudVaultImporter: com.keepasskey.app.sync.CloudVaultImporter? = null,
+    // ISSUE-P3-400：远端目录浏览控制器（打开对话框「浏览远端目录」共用设置页同一单例）。
+    // nullable 仅为单测构造；生产 DI 恒注入
+    private val remoteBrowseController: com.keepasskey.app.sync.RemoteBrowseController? = null
 ) : ViewModel() {
 
-    /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文）。 */
+    /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文） */
     fun noteWeakMasterPasswordConfirmed() {
         debugLog?.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（建库）")
     }
-
-    // ISSUE-P3-359 AC④：放宽 internal 供同包 publishPickerMessage 双写（见该文件 KDoc）
+    // ISSUE-P3-359 AC④：放宽 internal 供同包 publishPickerMessage 双写
     internal val userMessageFlow = MutableStateFlow<UiMessage?>(null)
     private val showCreateDialogFlow = MutableStateFlow(false)
     private val showOpenSourceDialogFlow = MutableStateFlow(false)
@@ -130,19 +114,11 @@ class DatabasePickerViewModel @Inject constructor(
     /**
      * 创建新密码库（ISSUE-P3-21：复合密钥第二因子真实接线，对齐官方 `CompositeKey` 三分支）。
      *
-     * 因子语义：
-     * - [keyFile] = false → **仅主密码**建库；
-     * - [keyFile] = true 且 [keyFileSourceUri] 为空 → **主密码 + 生成型密钥文件**：数据层生成
-     *   符合 KeePass 2.x 规范的密钥文件并绑定进会话，成功后必须经一次性提示交付用户；
-     * - [keyFile] = true 且 [keyFileSourceUri] 非空 → **主密码 + 用户选定的既有密钥文件**：
-     *   经 [KeyFileAccess] 读取真实字节参与复合密钥。
-     *   读取失败（空文件 / 超限 / 提供方拒绝）一律**显式失败且不创建库**——绝不静默降级为
-     *   「生成型」或「仅主密码」，否则用户以为在用旧密钥文件、实际因子已被替换。
-     *
-     * 主密码副本在 `finally` 中显式擦除；借用给数据层的密钥文件字节副本在数据层用毕后立即擦除。
-     *
-     * ISSUE-P2-85：[preset] 为类型化加密预设（外层算法 + KDF），由向导直接传入枚举，
-     * 不再经过「字符串标签」这一可静默失配的中转。
+     * 因子语义：[keyFile] = false → 仅主密码；= true 且 [keyFileSourceUri] 为空 → 主密码 +
+     * **生成型**密钥文件（成功后必须经一次性提示交付用户）；= true 且 uri 非空 → 主密码 +
+     * **用户选定的既有**密钥文件——读取失败（空文件 / 超限 / 提供方拒绝）一律**显式失败且
+     * 不创建库**，绝不静默降级（否则用户以为在用旧密钥文件、实际因子已被替换）。
+     * 主密码副本在 `finally` 擦除；ISSUE-P2-85：[preset] 为类型化加密预设，不经字符串标签中转。
      */
     fun createDatabase(
         name: String,
@@ -202,10 +178,8 @@ class DatabasePickerViewModel @Inject constructor(
 
     /**
      * 把生成型密钥文件写入用户选定的 SAF 目标（ISSUE-P3-21 验收 2）。
-     *
-     * 复用**既有导出通道** [VaultRepository.exportKeyFileBytes]（建库时会话已按借用语义克隆
-     * 缓存该密钥文件，见 `DatabaseSession.create`）：本方法只做「取字节 → 写 SAF → 擦副本」，
-     * 不新造第二条密钥文件生成/读取路径。写盘成功即关闭一次性提示。
+     * 复用既有导出通道 [VaultRepository.exportKeyFileBytes]：只做「取字节 → 写 SAF → 擦副本」，
+     * 不新造第二条密钥文件生成/读取路径；写盘成功即关闭一次性提示。
      */
     fun saveGeneratedKeyFileTo(targetUri: Uri) {
         viewModelScope.launch {
@@ -245,33 +219,69 @@ class DatabasePickerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 用户显式选择「暂不保存密钥文件」：关闭一次性提示。
-     *
-     * 不清除会话内的密钥文件缓存（用户仍可在设置页「导出密钥文件」补存），
-     * 但提示正文已如实声明「未保存将无法解锁」的后果，不存在误导性默认。
-     */
+    /** 用户显式选择「暂不保存密钥文件」：关闭一次性提示（不清会话缓存，可经设置页导出补存） */
     fun dismissKeyFileDelivery() {
         keyFileDeliveryFlow.value = KeyFileDeliveryState.None
     }
 
-    /**
-     * 导入并登记外部来源的密码库（见 [OpenVaultSourceType] / [OpenVaultSubmission]）。
+    // ISSUE-P3-400：对话框「浏览远端目录」复用设置页同一控制器单例（表单凭据优先，无已保存回退）
+
+    private val idleRemoteBrowseState = MutableStateFlow<com.keepasskey.app.sync.RemoteBrowseUiState>(com.keepasskey.app.sync.RemoteBrowseUiState.Idle)
+
+    /** 浏览对话框状态（未注入控制器时恒 Idle，仅供单测构造路径） */
+    val remoteBrowseState: StateFlow<com.keepasskey.app.sync.RemoteBrowseUiState>
+        get() = remoteBrowseController?.state ?: idleRemoteBrowseState
+
+    /** 浏览 WebDAV 目录：[password] 为借用语义副本（UI 传 copyOf），协程结束即擦 */
+    fun browseRemoteWebDav(url: String, username: String, password: CharArray, directoryPath: String, cursor: String?) {
+        val controller = remoteBrowseController ?: return
+        viewModelScope.launch {
+            try {
+                controller.browseWebDav(url, username, password, directoryPath, cursor)
+            } finally {
+                password.fill('0')
+            }
+        }
+    }
+
+    /** 浏览 S3 目录：AK/SK 借用语义同上 */
+    fun browseRemoteS3(
+        endpoint: String,
+        bucket: String,
+        region: String,
+        accessKey: CharArray,
+        secretKey: CharArray,
+        directoryPath: String,
+        usePathStyle: Boolean,
+        cursor: String?
+    ) {
+        val controller = remoteBrowseController ?: return
+        viewModelScope.launch {
+            try {
+                controller.browseS3(endpoint, bucket, region, accessKey, secretKey, directoryPath, usePathStyle, cursor)
+            } finally {
+                accessKey.fill('0')
+                secretKey.fill('0')
+            }
+        }
+    }
+
+    /** 关闭浏览对话框并复位浏览状态 */
+    fun dismissRemoteBrowse() {
+        remoteBrowseController?.reset()
+    }
+
+    /** 导入并登记外部来源的密码库（见 [OpenVaultSourceType] / [OpenVaultSubmission]）。
      *
-     * ISSUE-P2-399：云端来源（WebDAV / S3）不再是「只登记不连接」的假桩——先经
-     * `CloudVaultImporter` 用所填凭据把远端库下载到本地（下载成功才落凭据），再按
-     * **本地文件路径**走既有 [importLocalDatabase] 登记出口；此后该库与
-     * 「本地打开 → 同步配置补全」手工链路完全同构（解锁、自动同步均复用既有机制）。
+     * ISSUE-P2-399：云端来源不再是「只登记不连接」的假桩——先经 `CloudVaultImporter` 用所填
+     * 凭据把远端库下载到本地（下载成功才落凭据），再按**本地文件路径**走既有
+     * [importLocalDatabase] 登记出口，与「本地打开 → 同步配置补全」手工链路完全同构。
      *
-     * ISSUE-P2-87 / ISSUE-P3-248 说明：本方法成功后**不在本页**做工作因子提示，且**当前也没有
-     * 任何别的地方替它提示**——这是如实口径，不是设计选择：
-     *
-     * 为什么本页不做该提示（2026-09-21 复核更正后的如实口径）：本页会随
-     * [DatabasePickerEvent.DatabaseSelected] 立即被 `popBackStack()` 退栈（Snackbar 来不及渲染且 VM 随之清除），
-     * 而「交给退栈落点代为提示」并不成立——`UnlockViewModel.importExternalDatabase` 的唯一
-     * 调用点是解锁页自身的导入按钮，选择器路径只走本文件 [importLocalDatabase]，从不写
-     * `UnlockUiState.infoMessage`。故「从来源打开」路径当前没有任何弱因子提示，该残余已登记
-     * `docs/architecture/已知工程限界.md` §8（不是修复，是留痕）。
+     * ISSUE-P2-87 / ISSUE-P3-248（如实口径）：本方法成功后**不在本页**做工作因子提示，且
+     * 没有任何弱因子提示通道——本页会随 [DatabasePickerEvent.DatabaseSelected] 立即被
+     * `popBackStack()` 退栈（Snackbar 来不及渲染），而「交给落点代为提示」并不成立：
+     * 选择器路径只走本文件 [importLocalDatabase]，从不写 `UnlockUiState.infoMessage`。
+     * 该残余已登记 `docs/architecture/已知工程限界.md` §8（不是修复，是留痕）。
      */
     fun importDatabaseFromSource(submission: OpenVaultSubmission) {
         viewModelScope.launch {
@@ -307,11 +317,9 @@ class DatabasePickerViewModel @Inject constructor(
     }
 
     /**
-     * 云端库（ISSUE-P2-399）：先下载后登记。
-     *
-     * 请求侧凭据 `CharArray` 的擦除责任在 `CloudVaultImporter`（任何结果路径用毕擦除）；
-     * 导入成功后以**本地文件路径**走 [importLocalDatabase] 同一登记出口，`syncType`
-     * 仍按来源落「WebDAV 云存储 / 兼容 S3 对象存储」标签（卡片云徽章与解锁页「云端库」状态照常呈现）。
+     * 云端库（ISSUE-P2-399）：先下载后登记。凭据 `CharArray` 擦除责任在 `CloudVaultImporter`；
+     * 成功后以本地文件路径走 [importLocalDatabase] 同一出口，`syncType` 保持云端标签
+     * （卡片云徽章与解锁页「云端库」状态照常呈现）。
      */
     private suspend fun importCloudDatabase(request: com.keepasskey.app.sync.CloudVaultImportRequest) {
         val importer = cloudVaultImporter
@@ -374,9 +382,7 @@ class DatabasePickerViewModel @Inject constructor(
     private fun suggestedKeyFileName(vaultName: String): String {
         val base = if (vaultName.endsWith(KEY_FILE_EXTENSION_SOURCE, ignoreCase = true)) {
             vaultName.dropLast(KEY_FILE_EXTENSION_SOURCE.length)
-        } else {
-            vaultName
-        }
+        } else vaultName
         return base.ifBlank { DEFAULT_KEY_FILE_BASE } + KEY_FILE_EXTENSION
     }
 

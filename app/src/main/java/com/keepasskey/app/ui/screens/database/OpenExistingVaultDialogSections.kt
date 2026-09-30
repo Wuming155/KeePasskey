@@ -142,9 +142,9 @@ internal fun LocalVaultFilePicker(localName: String, onBrowse: () -> Unit) {
     }
 }
 
-/** WebDAV 来源表单（ISSUE-P2-399：补齐用户名 / 密码 / 远端路径，与同步配置页同一字段模型） */
+/** WebDAV 来源表单（ISSUE-P2-399：补齐用户名 / 密码 / 远端路径；ISSUE-P3-400：浏览远端目录入口，无 supporting 长提示） */
 @Composable
-internal fun WebdavVaultSourceForm(state: WebdavVaultFormState) {
+internal fun WebdavVaultSourceForm(state: WebdavVaultFormState, onBrowseRemote: () -> Unit = {}) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = stringResource(R.string.picker_webdav_desc),
@@ -166,7 +166,6 @@ internal fun WebdavVaultSourceForm(state: WebdavVaultFormState) {
             onValueChange = { state.url = it },
             label = { Text(stringResource(R.string.picker_webdav_url_label)) },
             placeholder = { Text(com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL) },
-            supportingText = { Text(stringResource(R.string.sync_webdav_url_hint_nutstore)) },
             leadingIcon = { Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(18.dp)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
@@ -197,28 +196,29 @@ internal fun WebdavVaultSourceForm(state: WebdavVaultFormState) {
             leadingIcon = Icons.Default.Lock,
             modifier = Modifier.fillMaxWidth()
         )
-        Text(
-            text = stringResource(R.string.sync_webdav_password_hint_nutstore),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
         OutlinedTextField(
             value = state.remotePath,
             onValueChange = { state.remotePath = it },
             label = { Text(stringResource(R.string.sync_webdav_path_label)) },
             placeholder = { Text(stringResource(R.string.sync_webdav_path_placeholder_nutstore)) },
-            supportingText = { Text(stringResource(R.string.sync_webdav_path_hint_nutstore)) },
             leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
+
+        // ISSUE-P3-400：浏览远端目录（与同步配置页同一能力；选中文件后回填远端路径）
+        OutlinedButton(
+            onClick = onBrowseRemote,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.sync_browse_btn))
+        }
     }
 }
 
-/** S3 兼容来源表单（ISSUE-P2-399：补齐 Region / AccessKey / SecretKey / ObjectKey / path-style） */
+/** S3 兼容来源表单（ISSUE-P2-399：补齐 Region / AccessKey / SecretKey / ObjectKey / path-style；ISSUE-P3-400：浏览入口 + 短标签防换行） */
 @Composable
-internal fun S3VaultSourceForm(state: S3VaultFormState) {
+internal fun S3VaultSourceForm(state: S3VaultFormState, onBrowseRemote: () -> Unit = {}) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = stringResource(R.string.picker_s3_desc),
@@ -249,10 +249,11 @@ internal fun S3VaultSourceForm(state: S3VaultFormState) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // ISSUE-P3-400：picker 侧用短 ASCII 标签——半宽框内长 CJK 标签会换行导致两框高度不一
             OutlinedTextField(
                 value = state.bucket,
                 onValueChange = { state.bucket = it },
-                label = { Text(stringResource(R.string.picker_s3_bucket_label)) },
+                label = { Text("Bucket") },
                 placeholder = { Text("my-vault") },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
@@ -261,7 +262,7 @@ internal fun S3VaultSourceForm(state: S3VaultFormState) {
             OutlinedTextField(
                 value = state.region,
                 onValueChange = { state.region = it },
-                label = { Text(stringResource(R.string.sync_s3_region_label)) },
+                label = { Text("Region") },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
             )
@@ -281,6 +282,14 @@ internal fun S3VaultSourceForm(state: S3VaultFormState) {
         )
 
         S3VaultPathStyleSwitch(state)
+
+        // ISSUE-P3-400：S3 浏览远端目录（选中文件后回填 Object Key）
+        OutlinedButton(
+            onClick = onBrowseRemote,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.sync_browse_btn))
+        }
     }
 }
 
