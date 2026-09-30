@@ -154,7 +154,7 @@ internal fun WebdavVaultSourceForm(state: WebdavVaultFormState, onBrowseRemote: 
 
         OutlinedTextField(
             value = state.name,
-            onValueChange = { state.name = it },
+            onValueChange = { state.editName(it) },
             label = { Text(stringResource(R.string.picker_vault_display_name)) },
             placeholder = { Text("cloud_vault.kdbx") },
             singleLine = true,
@@ -198,7 +198,7 @@ internal fun WebdavVaultSourceForm(state: WebdavVaultFormState, onBrowseRemote: 
         )
         OutlinedTextField(
             value = state.remotePath,
-            onValueChange = { state.remotePath = it },
+            onValueChange = { state.applyRemotePath(it) },
             label = { Text(stringResource(R.string.sync_webdav_path_label)) },
             placeholder = { Text(stringResource(R.string.sync_webdav_path_placeholder_nutstore)) },
             leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp)) },
@@ -228,7 +228,7 @@ internal fun S3VaultSourceForm(state: S3VaultFormState, onBrowseRemote: () -> Un
 
         OutlinedTextField(
             value = state.name,
-            onValueChange = { state.name = it },
+            onValueChange = { state.editName(it) },
             label = { Text(stringResource(R.string.picker_vault_display_name)) },
             placeholder = { Text("s3_vault.kdbx") },
             singleLine = true,
@@ -273,7 +273,7 @@ internal fun S3VaultSourceForm(state: S3VaultFormState, onBrowseRemote: () -> Un
 
         OutlinedTextField(
             value = state.objectKey,
-            onValueChange = { state.objectKey = it },
+            onValueChange = { state.applyObjectKey(it) },
             label = { Text(stringResource(R.string.sync_s3_objectkey_label)) },
             placeholder = { Text("passwords/master_vault.kdbx") },
             leadingIcon = { Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, modifier = Modifier.size(18.dp)) },

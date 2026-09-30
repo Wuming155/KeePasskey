@@ -102,9 +102,9 @@ internal fun OpenVaultFormBody(
             onBrowseS3 = onBrowseS3,
             onSelectFile = { entry ->
                 if (selectedSource == OpenVaultSourceType.S3_COMPATIBLE) {
-                    s3.objectKey = entry.path
+                    s3.applyObjectKey(entry.path)
                 } else {
-                    webdav.remotePath = entry.path
+                    webdav.applyRemotePath(entry.path)
                 }
                 onHideBrowseDialog()
                 onDismissBrowse()

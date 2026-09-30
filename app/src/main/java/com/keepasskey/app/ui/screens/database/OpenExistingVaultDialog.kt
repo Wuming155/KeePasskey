@@ -142,7 +142,8 @@ internal class LocalVaultFormState {
 }
 
 /**
- * WebDAV 来源表单快照状态（ISSUE-P2-399：URL 与远端路径分离，与同步配置页同一模型）。
+ * WebDAV 来源表单快照状态（ISSUE-P2-399：URL 与远端路径分离，与同步配置页同一模型；
+ * ISSUE-P3-401：展示名默认取远端路径末段文件名）。
  * [passwordChars] 以 `CharArray` 承载（显示用 String 仅存活于 SecurePasswordField 组件内部）；
  * 默认预填坚果云端点，避免重复输入示例 URL。
  */
@@ -153,6 +154,25 @@ internal class WebdavVaultFormState {
     var passwordChars by mutableStateOf(CharArray(0))
     var passwordVisible by mutableStateOf(false)
     var remotePath by mutableStateOf(WebDavDefaults.DEFAULT_REMOTE_PATH)
+    private var nameEdited by mutableStateOf(false)
+
+    init {
+        applyRemotePath(remotePath)
+    }
+
+    /** 用户手动编辑展示名（此后路径变化不再自动覆盖；清空视为放弃手动值） */
+    fun editName(value: String) {
+        name = value
+        nameEdited = value.isNotEmpty()
+    }
+
+    /** 远端路径变化（手输或浏览点选）：展示名未被手动编辑时自动取路径末段文件名 */
+    fun applyRemotePath(path: String) {
+        remotePath = path
+        if (!nameEdited) {
+            remoteFileName(path)?.let { name = it }
+        }
+    }
 
     /** 离开组合 / 关窗时擦除敏感驻留（借用语义收口） */
     fun wipeSensitive() {
@@ -160,7 +180,7 @@ internal class WebdavVaultFormState {
     }
 }
 
-/** S3 兼容来源表单快照状态（ISSUE-P2-399：补齐 Region / AccessKey / SecretKey / ObjectKey / path-style） */
+/** S3 兼容来源表单快照状态（ISSUE-P2-399：补齐 Region / AccessKey / SecretKey / ObjectKey / path-style；ISSUE-P3-401：展示名默认取 ObjectKey 末段文件名） */
 internal class S3VaultFormState {
     var name by mutableStateOf("")
     var endpoint by mutableStateOf("")
@@ -172,6 +192,25 @@ internal class S3VaultFormState {
     var secretKeyVisible by mutableStateOf(false)
     var objectKey by mutableStateOf("keepasskey.kdbx")
     var usePathStyle by mutableStateOf(false)
+    private var nameEdited by mutableStateOf(false)
+
+    init {
+        applyObjectKey(objectKey)
+    }
+
+    /** 用户手动编辑展示名（语义同 [WebdavVaultFormState.editName]） */
+    fun editName(value: String) {
+        name = value
+        nameEdited = value.isNotEmpty()
+    }
+
+    /** ObjectKey 变化（手输或浏览点选）：展示名未被手动编辑时自动取路径末段文件名 */
+    fun applyObjectKey(key: String) {
+        objectKey = key
+        if (!nameEdited) {
+            remoteFileName(key)?.let { name = it }
+        }
+    }
 
     /** 离开组合 / 关窗时擦除敏感驻留（借用语义收口） */
     fun wipeSensitive() {
@@ -179,3 +218,7 @@ internal class S3VaultFormState {
         secretKeyChars.fill('0')
     }
 }
+
+/** 从远端路径取末段文件名作为展示名默认值（空路径 / 纯斜杠返回 null） */
+private fun remoteFileName(path: String): String? =
+    path.trim().trim('/').substringAfterLast('/').takeIf { it.isNotBlank() }
