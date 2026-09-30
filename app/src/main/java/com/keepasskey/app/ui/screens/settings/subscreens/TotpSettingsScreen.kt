@@ -15,8 +15,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentPasteGo
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -55,6 +57,8 @@ import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
  * 两步验证与 TOTP 高级规范映射设置页 (对应 KeePass2Android TrayTOTP 插件兼容设置)
+ *
+ * ISSUE-P3-412：TOTP 填充联动开关自自动填充页迁入本页，入口与配置同域。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +66,8 @@ fun TotpSettingsScreen(
     uiState: SettingsUiState,
     onBackClick: () -> Unit,
     onUpdateTotpFieldMapping: (seedField: String, settingsField: String, stepSeconds: Int, digits: Int) -> Unit = { _, _, _, _ -> },
+    onAutofillCopyTotpToggle: (Boolean) -> Unit = {},
+    onAutofillShowTotpNotificationToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
 
@@ -269,7 +275,41 @@ fun TotpSettingsScreen(
                 }
             }
 
-            // 4. 说明卡片
+            // 4. 自动填充联动（ISSUE-P3-412：与本页 TOTP 入口同域）
+            item {
+                Text(
+                    text = stringResource(R.string.autofill_section_totp),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        AutofillSwitchRow(
+                            icon = Icons.Default.ContentPasteGo,
+                            title = stringResource(R.string.autofill_copy_totp_title),
+                            subtitle = stringResource(R.string.autofill_copy_totp_sub),
+                            checked = uiState.autofillCopyTotp,
+                            onCheckedChange = onAutofillCopyTotpToggle
+                        )
+                        AutofillSwitchRow(
+                            icon = Icons.Default.NotificationsActive,
+                            title = stringResource(R.string.autofill_totp_notif_title),
+                            subtitle = stringResource(R.string.autofill_totp_notif_sub),
+                            checked = uiState.autofillShowTotpNotification,
+                            onCheckedChange = onAutofillShowTotpNotificationToggle
+                        )
+                    }
+                }
+            }
+
+            // 5. 说明卡片
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),

@@ -152,9 +152,6 @@ internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostControl
             onAutoClearClipboardToggle = settingsViewModel::setAutoClearClipboard,
             onOfferSaveCredentialsToggle = settingsViewModel::setOfferSaveCredentials,
             onInlineSuggestionsToggle = settingsViewModel::setInlineSuggestionsEnabled,
-            onAutoReturnFromQueryToggle = settingsViewModel::setAutoReturnFromQuery,
-            onAutofillCopyTotpToggle = settingsViewModel::setAutofillCopyTotp,
-            onAutofillShowTotpNotificationToggle = settingsViewModel::setAutofillShowTotpNotification,
             onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
             onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill,
             onAutofillSessionGrantToggle = settingsViewModel::setAutofillSessionGrantEnabled,
@@ -265,7 +262,10 @@ internal fun NavGraphBuilder.settingsTotpRoute(navController: NavHostController)
         TotpSettingsScreen(
             uiState = settingsState,
             onBackClick = { navController.popBackStack() },
-            onUpdateTotpFieldMapping = settingsViewModel::updateTotpFieldMapping
+            onUpdateTotpFieldMapping = settingsViewModel::updateTotpFieldMapping,
+            // ISSUE-P3-412：TOTP 填充联动开关与本页入口同域
+            onAutofillCopyTotpToggle = settingsViewModel::setAutofillCopyTotp,
+            onAutofillShowTotpNotificationToggle = settingsViewModel::setAutofillShowTotpNotification
         )
     }
 }

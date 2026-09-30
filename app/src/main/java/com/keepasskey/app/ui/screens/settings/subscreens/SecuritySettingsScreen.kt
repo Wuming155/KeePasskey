@@ -35,12 +35,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.activity.compose.LocalActivity
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
@@ -384,38 +382,7 @@ fun SecuritySettingsScreen(
                 }
             }
 
-            // 5. 架构说明
-            item {
-                BentoCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(R.string.sec_arch_title),
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        Text(
-                            text = stringResource(R.string.sec_arch_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 18.sp
-                        )
-                    }
-                }
-            }
-
+            // ISSUE-P3-412：架构说明属说明非控制项，已迁至关于页（AboutSettingsScreen）
             item {
                 Spacer(modifier = Modifier.height(24.dp))
             }

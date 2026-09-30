@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.settings
 
-import android.content.res.Configuration
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,23 +37,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.fragment.app.FragmentActivity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
-import com.keepasskey.app.ui.theme.KeePasskeyTheme
+import com.keepasskey.app.ui.components.SystemSettingsNavigation
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
  * 2026 现代化高阶设置主页（Route）
- * 摆脱传统老旧感，结合柔和色调、卡片式归类与层级结构
+ *
+ * ISSUE-P3-410/411：按同类项目 IA 重分桶——改主密码归安全与凭据；
+ * 调试与关于分离（生产包不展示调试）；顶部增加状态摘要与系统自动填充深链。
  */
 @Composable
 fun SettingsScreen(
@@ -73,9 +75,6 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // ISSUE-P2-398：改密成功后的重封印弹窗宿主。经 `LocalActivity` 直取（而非
-    // `LocalContext.current as? Activity`）——后者触发 AndroidLint `ContextCastToActivity`，
-    // 且 LocalActivity 已由宿主 Activity 精确提供（与 SecuritySettingsScreen 同一口径）
     val hostActivity = LocalActivity.current as? FragmentActivity
 
     SettingsContent(
@@ -90,7 +89,7 @@ fun SettingsScreen(
         onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
         onChangeMasterPassword = { viewModel.changeMasterPassword(it, hostActivity) },
-        onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
+        onWeakPasswordConfirmed = viewModel::noteWeakMasterPasswordConfirmed,
         onMasterKeyChangeFeedbackShown = viewModel::clearMasterKeyChangeFeedback,
         onBackClick = onBackClick,
         showBackButton = showBackButton,
@@ -118,17 +117,16 @@ fun SettingsContent(
     onChangeMasterPassword: (CharArray) -> Unit = { chars -> chars.fill('0') },
     /** ISSUE-P2-288：弱主口令显式确认后的留痕回调（不落明文） */
     onWeakPasswordConfirmed: () -> Unit = {},
-    /** ISSUE-P2-354 AC③：换密反馈经 Snackbar 展示后的一次性清除 */
+    /** ISSUE-P2-354 AC③：换密结果反馈经 Snackbar 展示后的一次性清除 */
     onMasterKeyChangeFeedbackShown: () -> Unit = {},
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val securityColors = LocalSecurityColors.current
+    val context = LocalContext.current
     var showMasterKeyDialog by remember { mutableStateOf(false) }
 
-    // ISSUE-P2-354 AC③ + ISSUE-P3-359 AC④：换密结果反馈（成功/失败）转发全局通道——
-    // 反馈存于 uiState，发出即交外壳唯一宿主呈现（切 Tab 离开也不丢），回执后一次性清位
     uiState.masterKeyChangeFeedback?.let { feedback ->
         LaunchedEffect(feedback) {
             AppSnackbarChannel.trySend(AppSnackbarEvent(feedback))
@@ -176,7 +174,75 @@ fun SettingsContent(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 分类 1: 密码库与存储 (Vault & Storage)
+            ModernSectionHeader(title = stringResource(R.string.settings_status_title))
+            SettingsGroupCard {
+                SettingsStatusRow(
+                    icon = Icons.Default.Fingerprint,
+                    iconTint = securityColors.passkey,
+                    title = stringResource(R.string.settings_status_biometric),
+                    value = stringResource(
+                        if (uiState.biometricEnabled) {
+                            R.string.settings_status_biometric_on
+                        } else {
+                            R.string.settings_status_biometric_off
+                        }
+                    ),
+                    onClick = onNavigateToSecurity
+                )
+                SettingsItemDivider()
+                SettingsStatusRow(
+                    icon = Icons.AutoMirrored.Filled.Assignment,
+                    iconTint = MaterialTheme.colorScheme.secondary,
+                    title = stringResource(R.string.settings_status_autofill),
+                    value = stringResource(
+                        if (uiState.autofillServiceEnabled) {
+                            R.string.settings_status_autofill_on
+                        } else {
+                            R.string.settings_status_autofill_off
+                        }
+                    ),
+                    onClick = onNavigateToAutofill,
+                    trailingActionLabel = stringResource(R.string.settings_status_autofill_open_system),
+                    onTrailingAction = {
+                        val intent = SystemSettingsNavigation.autofillServiceIntent(context)
+                        if (intent != null) {
+                            SystemSettingsNavigation.launchSafely(context, intent)
+                        }
+                    }
+                )
+                SettingsItemDivider()
+                SettingsStatusRow(
+                    icon = Icons.Default.CloudSync,
+                    iconTint = MaterialTheme.colorScheme.tertiary,
+                    title = stringResource(R.string.settings_status_sync),
+                    value = uiState.syncStatusText.ifEmpty {
+                        stringResource(R.string.settings_status_sync_unknown)
+                    },
+                    onClick = onNavigateToSync
+                )
+            }
+
+            // 安全与凭据（ISSUE-P3-410：改主密码归位，不再与存储混排）
+            ModernSectionHeader(title = stringResource(R.string.settings_cat_security))
+            SettingsGroupCard {
+                ModernSettingsRow(
+                    icon = Icons.Default.Fingerprint,
+                    iconTint = securityColors.passkey,
+                    title = stringResource(R.string.settings_security),
+                    subtitle = stringResource(R.string.settings_security_sub),
+                    onClick = onNavigateToSecurity
+                )
+                SettingsItemDivider()
+                ModernSettingsRow(
+                    icon = Icons.Default.VpnKey,
+                    iconTint = securityColors.warning,
+                    title = stringResource(R.string.settings_change_master_key),
+                    subtitle = stringResource(R.string.settings_change_master_key_sub),
+                    onClick = { showMasterKeyDialog = true }
+                )
+            }
+
+            // 库与同步
             ModernSectionHeader(title = stringResource(R.string.settings_cat_storage))
             SettingsGroupCard {
                 ModernSettingsRow(
@@ -196,34 +262,6 @@ fun SettingsContent(
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
-                    icon = Icons.Default.VpnKey,
-                    iconTint = securityColors.warning,
-                    title = stringResource(R.string.settings_change_master_key),
-                    subtitle = stringResource(R.string.settings_change_master_key_sub),
-                    onClick = { showMasterKeyDialog = true }
-                )
-            }
-
-            // 分类 2: 设备安全与两步验证 (Security & Authentication)
-            ModernSectionHeader(title = stringResource(R.string.settings_cat_security))
-            SettingsGroupCard {
-                ModernSettingsRow(
-                    icon = Icons.Default.Fingerprint,
-                    iconTint = securityColors.passkey,
-                    title = stringResource(R.string.settings_security),
-                    subtitle = stringResource(R.string.settings_security_sub),
-                    onClick = onNavigateToSecurity
-                )
-                SettingsItemDivider()
-                ModernSettingsRow(
-                    icon = Icons.Default.Password,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = stringResource(R.string.set_totp_entry_title),
-                    subtitle = stringResource(R.string.set_totp_entry_sub),
-                    onClick = onNavigateToTotp
-                )
-                SettingsItemDivider()
-                ModernSettingsRow(
                     icon = Icons.Default.HealthAndSafety,
                     iconTint = securityColors.success,
                     title = stringResource(R.string.settings_health),
@@ -232,7 +270,7 @@ fun SettingsContent(
                 )
             }
 
-            // 分类 3: 自动填充与个性化偏好 (Autofill & Preferences)
+            // 填充与验证码
             ModernSectionHeader(title = stringResource(R.string.settings_cat_preferences))
             SettingsGroupCard {
                 ModernSettingsRow(
@@ -244,6 +282,18 @@ fun SettingsContent(
                 )
                 SettingsItemDivider()
                 ModernSettingsRow(
+                    icon = Icons.Default.Password,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = stringResource(R.string.set_totp_entry_title),
+                    subtitle = stringResource(R.string.set_totp_entry_sub),
+                    onClick = onNavigateToTotp
+                )
+            }
+
+            // 界面与显示
+            ModernSectionHeader(title = stringResource(R.string.settings_cat_display))
+            SettingsGroupCard {
+                ModernSettingsRow(
                     icon = Icons.Default.Palette,
                     iconTint = MaterialTheme.colorScheme.tertiary,
                     title = stringResource(R.string.settings_theme),
@@ -254,17 +304,9 @@ fun SettingsContent(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // 分类 4: 系统维护与关于 (System, Maintenance & About)
+            // 关于与维护（ISSUE-P3-410：调试仅 debug 构建，生产包不展示）
             ModernSectionHeader(title = stringResource(R.string.set_section_system))
             SettingsGroupCard {
-                ModernSettingsRow(
-                    icon = Icons.Default.BugReport,
-                    iconTint = securityColors.warning,
-                    title = stringResource(R.string.debug_title),
-                    subtitle = stringResource(R.string.set_debug_entry_sub),
-                    onClick = onNavigateToDebug
-                )
-                SettingsItemDivider()
                 ModernSettingsRow(
                     icon = Icons.Default.Info,
                     iconTint = MaterialTheme.colorScheme.primary,
@@ -272,67 +314,29 @@ fun SettingsContent(
                     subtitle = stringResource(R.string.set_about_entry_sub, uiState.appVersion),
                     onClick = onNavigateToAbout
                 )
+                if (BuildConfig.DEBUG) {
+                    SettingsItemDivider()
+                    ModernSettingsRow(
+                        icon = Icons.Default.BugReport,
+                        iconTint = securityColors.warning,
+                        title = stringResource(R.string.debug_title),
+                        subtitle = stringResource(R.string.set_debug_entry_sub),
+                        onClick = onNavigateToDebug
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
 
-    // 现代主密钥更改对话框（ISSUE-P2-354 AC③：busy 下行自 uiState，完成才自行关闭）
     if (showMasterKeyDialog) {
         MasterKeyChangeDialog(
             kdfAlgorithm = uiState.kdfAlgorithm,
             isBusy = uiState.isChangingMasterKey,
             onChangeMasterPassword = onChangeMasterPassword,
-            onDismiss = { showMasterKeyDialog = false },
-            onWeakPasswordConfirmed = onWeakPasswordConfirmed
-        )
-    }
-}
-
-// P3-23：以下 Preview name 为 IDE 预览标注（仅开发期可见，非运行时 UI），保留原样
-@Preview(name = "浅色模式", showBackground = true)
-@Preview(name = "深色模式", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun SettingsContentPreview() {
-    KeePasskeyTheme {
-        SettingsContent(
-            uiState = SettingsUiState(),
-            onNavigateToDatabase = {},
-            onNavigateToSync = {},
-            onNavigateToAutofill = {},
-            onNavigateToSecurity = {},
-            onNavigateToTheme = {},
-            onNavigateToHealth = {},
-            onNavigateToTotp = {},
-            onNavigateToDebug = {},
-            onNavigateToAbout = {}
-        )
-    }
-}
-
-/**
- * `ISSUE-P3-340`：`showBackButton = true` 那一态此前从未被预览画过（默认 `false` 态才是）。
- * 单独开一个预览函数而不是在同一张图里叠两个整屏：整屏组件叠在一起会把各自的高度都压没，
- * 导出的 PNG 也就无从比对。
- */
-@Preview(name = "浅色模式-带返回键", showBackground = true)
-@Preview(name = "深色模式-带返回键", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun SettingsContentWithBackPreview() {
-    KeePasskeyTheme {
-        SettingsContent(
-            uiState = SettingsUiState(),
-            onNavigateToDatabase = {},
-            onNavigateToSync = {},
-            onNavigateToAutofill = {},
-            onNavigateToSecurity = {},
-            onNavigateToTheme = {},
-            onNavigateToHealth = {},
-            onNavigateToTotp = {},
-            onNavigateToDebug = {},
-            onNavigateToAbout = {},
-            showBackButton = true
+            onWeakPasswordConfirmed = onWeakPasswordConfirmed,
+            onDismiss = { showMasterKeyDialog = false }
         )
     }
 }

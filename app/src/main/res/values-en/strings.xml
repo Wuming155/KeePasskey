@@ -237,24 +237,35 @@
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
-    <string name="settings_cat_storage">Vault &amp; Storage</string>
+    <string name="settings_cat_storage">Vault &amp; Sync</string>
     <string name="settings_database">Database &amp; Encryption</string>
     <string name="settings_database_sub">KDBX 4 · Argon2 / AES-KDF · Encryption parameters &amp; Recycle Bin</string>
     <string name="settings_sync">Cloud Synchronization</string>
     <string name="settings_sync_sub">WebDAV &amp; S3 compatible multi-protocol sync</string>
-    <string name="settings_change_master_key">Change Master Key</string>
+    <string name="settings_change_master_key">Change Master Password</string>
     <string name="settings_change_master_key_sub">Reset master password and key derivation settings</string>
-    <string name="settings_cat_security">Security &amp; Audit</string>
+    <string name="settings_cat_security">Security &amp; Credentials</string>
     <string name="settings_security">Device Unlock &amp; Security</string>
     <string name="settings_security_sub">Biometrics, background auto-lock, screenshot protection</string>
     <string name="settings_health">Health Check &amp; Audit</string>
     <string name="settings_health_sub">Weak passwords, reuse detection, breach checking</string>
-    <string name="settings_cat_preferences">Autofill &amp; Preferences</string>
+    <string name="settings_cat_preferences">Fill &amp; Codes</string>
     <string name="settings_autofill">Autofill &amp; Passkey</string>
     <string name="settings_autofill_sub">System credential provider, Passkeys, clipboard protection</string>
-    <string name="settings_theme">Appearance &amp; Theme</string>
-    <string name="settings_theme_sub">Theme mode, language preference, list display options</string>
+    <string name="settings_cat_display">Interface &amp; Display</string>
+    <string name="settings_theme">Interface &amp; Display</string>
+    <string name="settings_theme_sub">Theme, language, list and search display options</string>
     <string name="settings_about">About KeePasskey</string>
+    <string name="settings_status_title">Status</string>
+    <string name="settings_status_biometric">Biometric unlock</string>
+    <string name="settings_status_biometric_on">On</string>
+    <string name="settings_status_biometric_off">Off</string>
+    <string name="settings_status_autofill">Autofill service</string>
+    <string name="settings_status_autofill_on">Enabled in app</string>
+    <string name="settings_status_autofill_off">Disabled in app</string>
+    <string name="settings_status_autofill_open_system">Open system settings</string>
+    <string name="settings_status_sync">Last sync</string>
+    <string name="settings_status_sync_unknown">Not synced yet</string>
     <string name="settings_language">Language</string>
     <string name="settings_lang_system">Follow System</string>
     <string name="settings_lang_zh">简体中文 (Simplified Chinese)</string>
@@ -665,9 +676,9 @@
     <string name="import_report_kdbx_merge_skipped">Conflicting entries kept local: %1$d</string>
 
     <!-- ===== Settings home ===== -->
-    <string name="set_section_system">System</string>
+    <string name="set_section_system">About &amp; Maintenance</string>
     <string name="set_totp_entry_title">Two-factor (TOTP) settings</string>
-    <string name="set_totp_entry_sub">Manage OTP algorithm, period and refresh policy</string>
+    <string name="set_totp_entry_sub">Manage OTP algorithm, period and autofill linkage</string>
     <string name="debug_title">Developer diagnostics</string>
     <string name="set_debug_entry_sub">Inspect internal state and diagnostics</string>
     <string name="set_about_entry_sub">Version %1$s</string>
@@ -998,7 +1009,7 @@
     <!-- ISSUE-P3-18 honesty fix: the previous copy promised a quick-copy action, but this
          notification carries NO copy action (code + remaining seconds only, auto-expiring). -->
     <string name="autofill_totp_notif_sub">Show the entry code in the notification bar after an autofill confirmation; it disappears when the code expires</string>
-    <string name="autofill_section_capture">Capture</string>
+    <string name="autofill_section_capture">Advanced &amp; Compatibility</string>
     <string name="autofill_save_prompt_title">New password prompt</string>
     <string name="autofill_save_prompt_sub">Ask to save when a new or changed password is detected</string>
     <string name="autofill_override_title">Override app filling</string>

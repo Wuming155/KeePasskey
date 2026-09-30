@@ -13,14 +13,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentPasteGo
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
@@ -143,12 +141,15 @@ internal fun AutofillProviderCard(
     }
 }
 
-/** 2. 体验与输入法协同 (KP2A 特性) 分区卡。 */
+/**
+ * 2. 体验与输入法协同分区卡。
+ *
+ * ISSUE-P3-412：已移除「填充后自动返回」预留假开关（本应用填充走系统框架，无查询界面停留可开关）。
+ */
 @Composable
 internal fun AutofillUxCard(
     uiState: SettingsUiState,
     onInlineSuggestionsToggle: (Boolean) -> Unit,
-    onAutoReturnFromQueryToggle: (Boolean) -> Unit,
     onAutoClearClipboardToggle: (Boolean) -> Unit
 ) {
     BentoCard(
@@ -165,58 +166,11 @@ internal fun AutofillUxCard(
             )
 
             AutofillSwitchRow(
-                icon = Icons.AutoMirrored.Filled.Undo,
-                title = stringResource(R.string.autofill_auto_return_title),
-                // ISSUE-P3-03 (43b)：本应用自动填充走系统框架，确认后必然返回原应用，
-                // 无「查询界面停留」可开关，本轮未接线 → 如实标注并禁用交互（杜绝假开关）。
-                subtitle = stringResource(
-                    R.string.settings_pref_reserved_suffix,
-                    stringResource(R.string.autofill_auto_return_sub)
-                ),
-                checked = uiState.autoReturnFromQuery,
-                onCheckedChange = onAutoReturnFromQueryToggle,
-                enabled = false
-            )
-
-            AutofillSwitchRow(
                 icon = Icons.Default.ContentPasteGo,
                 title = stringResource(R.string.autofill_clear_clipboard_title),
                 subtitle = stringResource(R.string.autofill_clear_clipboard_sub),
                 checked = uiState.autoClearClipboard,
                 onCheckedChange = onAutoClearClipboardToggle
-            )
-        }
-    }
-}
-
-/** 3. 两步验证与 TOTP 联动 (KP2A 特性) 分区卡。 */
-@Composable
-internal fun AutofillTotpCard(
-    uiState: SettingsUiState,
-    onAutofillCopyTotpToggle: (Boolean) -> Unit,
-    onAutofillShowTotpNotificationToggle: (Boolean) -> Unit
-) {
-    BentoCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            AutofillSwitchRow(
-                icon = Icons.Default.ContentPasteGo,
-                title = stringResource(R.string.autofill_copy_totp_title),
-                subtitle = stringResource(R.string.autofill_copy_totp_sub),
-                checked = uiState.autofillCopyTotp,
-                onCheckedChange = onAutofillCopyTotpToggle
-            )
-
-            AutofillSwitchRow(
-                icon = Icons.Default.NotificationsActive,
-                title = stringResource(R.string.autofill_totp_notif_title),
-                // ISSUE-P3-18：通知通道与 POST_NOTIFICATIONS 已落地，本开关真实控制
-                // 自动填充确认后的验证码通知 → 移除「（预留，暂未生效）」标识
-                subtitle = stringResource(R.string.autofill_totp_notif_sub),
-                checked = uiState.autofillShowTotpNotification,
-                onCheckedChange = onAutofillShowTotpNotificationToggle
             )
         }
     }

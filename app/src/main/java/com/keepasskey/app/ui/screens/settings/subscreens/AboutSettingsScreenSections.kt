@@ -138,6 +138,36 @@ internal fun AboutPrivacyCard() {
     }
 }
 
+/**
+ * 安全架构说明卡（ISSUE-P3-412）。
+ * 由安全设置页迁入：属说明而非控制项，关于页才是一致落点。
+ */
+@Composable
+internal fun AboutArchitectureCard() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.sec_arch_title),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Text(
+            text = stringResource(R.string.sec_arch_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 18.sp
+        )
+    }
+}
+
 /** 规格行（§187 随「技术规格」段一并迁入本文件，仍为 `private`：仅被 [AboutSpecSection] 使用） */
 @Composable
 private fun AboutSpecRow(
