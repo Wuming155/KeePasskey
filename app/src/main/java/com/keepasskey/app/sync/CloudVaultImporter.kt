@@ -95,6 +95,11 @@ class RealCloudVaultImporter @Inject constructor(
     override suspend fun import(request: CloudVaultImportRequest): CloudVaultImportResult {
         // 借用语义收口：任何结果路径（含所有早退失败分支）都必须擦除请求侧凭据。
         // commit 路径 store 已封印并擦过，此处重复 fill 无害。
+        // ISSUE-P2-403：入口即快照凭据——下载是秒级网络操作，期间任何外部路径对请求侧数组的
+        // 擦除（如 UI 离场收口）都不得影响提交封印的内容；快照随本函数 finally 统一擦除。
+        val passwordSnapshot = if (request is CloudVaultImportRequest.WebDav) request.password.copyOf() else CharArray(0)
+        val accessKeySnapshot = (request as? CloudVaultImportRequest.S3)?.accessKey?.copyOf() ?: CharArray(0)
+        val secretKeySnapshot = (request as? CloudVaultImportRequest.S3)?.secretKey?.copyOf() ?: CharArray(0)
         try {
             if (request.name.isBlank()) {
                 return CloudVaultImportResult.Failure(downloadFailed())
@@ -136,7 +141,7 @@ class RealCloudVaultImporter @Inject constructor(
                         }
                     }
                     // 先提交凭据再改名：凭据封印失败时不留下「库已登记但同步配置缺失」的半状态
-                    if (!commitCredentials(request)) {
+                    if (!commitCredentials(request, passwordSnapshot, accessKeySnapshot, secretKeySnapshot)) {
                         return CloudVaultImportResult.Failure(
                             UiMessage(R.string.sync_config_save_failed, isError = true)
                         )
@@ -154,6 +159,9 @@ class RealCloudVaultImporter @Inject constructor(
             }
         } finally {
             wipeCredentials(request)
+            passwordSnapshot.fill('0')
+            accessKeySnapshot.fill('0')
+            secretKeySnapshot.fill('0')
         }
     }
 
@@ -162,11 +170,16 @@ class RealCloudVaultImporter @Inject constructor(
      * 端点在此处再过一次 [HttpsEndpointPolicy] 归一化（与 Provider 构造同语义），保证
      * 落盘值与同步配置页保存口径一致（无 scheme 自动补 https://）。
      */
-    private fun commitCredentials(request: CloudVaultImportRequest): Boolean = when (request) {
+    private fun commitCredentials(
+        request: CloudVaultImportRequest,
+        passwordSnapshot: CharArray,
+        accessKeySnapshot: CharArray,
+        secretKeySnapshot: CharArray
+    ): Boolean = when (request) {
         is CloudVaultImportRequest.WebDav -> {
             val normalizedUrl = HttpsEndpointPolicy.normalize(request.url) ?: return false
             val saved = syncCredentialsStore.saveWebDavConfig(
-                normalizedUrl, request.username, request.password, request.remotePath.trim()
+                normalizedUrl, request.username, passwordSnapshot, request.remotePath.trim()
             )
             if (saved) syncCredentialsStore.saveProvider(CloudSyncProvider.WEBDAV)
             saved
@@ -175,7 +188,7 @@ class RealCloudVaultImporter @Inject constructor(
             val normalizedEndpoint = HttpsEndpointPolicy.normalize(request.endpoint) ?: return false
             val saved = syncCredentialsStore.saveS3Config(
                 normalizedEndpoint, request.bucket, request.region,
-                request.accessKey, request.secretKey, request.objectKey, request.usePathStyle
+                accessKeySnapshot, secretKeySnapshot, request.objectKey, request.usePathStyle
             )
             if (saved) syncCredentialsStore.saveProvider(CloudSyncProvider.S3_COMPATIBLE)
             saved

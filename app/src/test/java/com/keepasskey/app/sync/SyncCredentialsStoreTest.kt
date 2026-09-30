@@ -182,6 +182,28 @@ class SyncCredentialsStoreTest {
         loaded.password.fill('0')
     }
 
+    // ===== ISSUE-P2-403：全零串（借用语义擦除指纹）拒绝封印 =====
+
+    @Test
+    fun `WebDAV 全零串密码拒绝封印且不写任何键`() {
+        val before = memoryStorage.toMap()
+        val saved = store.saveWebDavConfig(
+            "https://dav.example.com/dav/", "user@example.com", "0000".toCharArray(), "keepasskey.kdbx"
+        )
+        assertFalse("全零串必须被拒绝: $saved", saved)
+        assertEquals("存储不得被写入", before, memoryStorage.toMap())
+    }
+
+    @Test
+    fun `S3 全零串密钥拒绝封印`() {
+        val saved = store.saveS3Config(
+            "https://acct.r2.cloudflarestorage.com", "my-vault", "auto",
+            "0000".toCharArray(), "0000".toCharArray(), "keepasskey.kdbx", usePathStyle = true
+        )
+        assertFalse("全零串密钥必须被拒绝: $saved", saved)
+        assertNull(memoryStorage["sync_provider"])
+    }
+
     @Test
     fun `Provider 切换与 clear 行为`() {
         store.saveProvider(CloudSyncProvider.S3_COMPATIBLE)

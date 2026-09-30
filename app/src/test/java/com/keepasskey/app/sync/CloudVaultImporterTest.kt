@@ -63,10 +63,11 @@ class CloudVaultImporterTest {
     /** 内存键值面直查别名（对齐 SyncCredentialsStoreTest 口径） */
     private val storage: MutableMap<String, Any?> get() = prefsFake.storage
 
-    /** 假 Provider：download 把 [content] 写进 sink（[failDownload] 时模拟网络失败） */
+    /** 假 Provider：download 把 [content] 写进 sink（[failDownload] 时模拟网络失败；[onDownload] 供用例注入下载期副作用） */
     private class FakeProvider(
         private val content: ByteArray = "FAKE_KDBX".toByteArray(),
-        private val failDownload: Boolean = false
+        private val failDownload: Boolean = false,
+        private val onDownload: () -> Unit = {}
     ) : SyncProvider {
         var downloadedPath: String? = null
         var clearedCredentials = false
@@ -80,6 +81,7 @@ class CloudVaultImporterTest {
             if (failDownload) return Result.failure(
                 com.keepasskey.sync.model.SyncException.NetworkError("网络不可达")
             )
+            onDownload()
             downloadedPath = remotePath
             sink.write(content)
             return Result.success(Unit)
@@ -119,6 +121,8 @@ class CloudVaultImporterTest {
         assertEquals("https://dav.example.com/dav/", saved?.url)
         assertEquals("user@example.com", saved?.username)
         assertEquals("mailbox/keepasskey.kdbx", saved?.remotePath)
+        // ISSUE-P2-402 后续：密码往返必须原样（封印的是输入内容，不是擦除后的 '0' 串）
+        assertArrayEquals("webdav-pass".toCharArray(), saved?.password)
         // 请求侧凭据用毕擦除（借用语义）
         assertTrue(request.password.all { it == '0' })
         // 无临时残留
@@ -190,8 +194,29 @@ class CloudVaultImporterTest {
         assertEquals("my-vault", saved?.bucket)
         assertEquals("backups/keepasskey.kdbx", saved?.objectKey)
         assertTrue(saved?.usePathStyle == true)
+        // ISSUE-P2-402 后续：AK/SK 往返必须原样
+        assertArrayEquals("AKID".toCharArray(), saved?.accessKey)
+        assertArrayEquals("SK".toCharArray(), saved?.secretKey)
         assertTrue(request.accessKey.all { it == '0' })
         assertTrue(request.secretKey.all { it == '0' })
+    }
+
+    /**
+     * ISSUE-P2-403（真机缺陷复现器）：下载窗口期请求侧凭据被外部路径擦成 '0'
+     * （借用语义擦除指纹）时，提交封印必须仍使用**入口快照**的原内容——
+     * 整改前该场景会把全零串封进存储，导致后续同步 401、设置页预填整串 0。
+     */
+    @Test
+    fun `下载期间请求侧凭据被擦除仍按入口快照封印`() = runTest {
+        val request = webDavRequest()
+        val provider = FakeProvider(onDownload = { request.password.fill('0') })
+        importer.providerFactory = CloudVaultProviderFactory { provider }
+
+        val result = importer.import(request)
+        assertTrue(result is CloudVaultImportResult.Success)
+        val saved = store.loadWebDavConfig()
+        assertEquals("user@example.com", saved?.username)
+        assertArrayEquals("webdav-pass".toCharArray(), saved?.password)
     }
 
     @Test

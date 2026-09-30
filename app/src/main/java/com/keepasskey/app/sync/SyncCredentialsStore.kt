@@ -111,6 +111,12 @@ class SyncCredentialsStore @Inject constructor(
         password: CharArray,
         remotePath: String
     ): Boolean {
+        // ISSUE-P2-403：非空但全 '0' 的凭据 = 擦除后误存的「擦零指纹」（真机实证：云端打开后
+        // 同步 401，设置页预填整串 0）——拒绝封印，绝不把垃圾密文落盘顶掉既有可用凭据
+        if (isAllZero(password)) {
+            debugLog?.warn(TAG, "拒绝封印 WebDAV 密码：内容为全零串（疑似擦除后误存）")
+            return false
+        }
         try {
             // 先封印再落盘：封印失败不得写入任何键（含 URL），避免半写状态
             val passwordIv: String?
@@ -185,6 +191,11 @@ class SyncCredentialsStore @Inject constructor(
         objectKey: String,
         usePathStyle: Boolean = false
     ): Boolean {
+        // ISSUE-P2-403：全零串拒绝封印（语义同 saveWebDavConfig）
+        if (isAllZero(accessKey) || isAllZero(secretKey)) {
+            debugLog?.warn(TAG, "拒绝封印 S3 密钥：内容为全零串（疑似擦除后误存）")
+            return false
+        }
         try {
             // 先封印再落盘：失败不得写入任何键
             val accessIv: String?
@@ -315,6 +326,12 @@ class SyncCredentialsStore @Inject constructor(
     /** 判定 iv + 密文二元组是否均已落盘（存在密文才意味着「曾成功封印过」，可用于区分空值与解封失败） */
     private fun isCipherTextPresent(ivBase64: String?, cipherBase64: String?): Boolean =
         !ivBase64.isNullOrBlank() && !cipherBase64.isNullOrBlank()
+
+    /** ISSUE-P2-403：非空且全 '0'（借用语义擦除指纹）；空串不算（空 = 保留既有语义） */
+    private fun isAllZero(chars: CharArray): Boolean =
+        chars.isNotEmpty() && chars.all { it == '0' }
+
+    private val TAG = "SyncCredentialsStore"
 
     companion object {
         const val PREFS_NAME = "sync_credentials_prefs"
