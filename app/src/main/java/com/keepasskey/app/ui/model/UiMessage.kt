@@ -45,10 +45,11 @@ data class UiMessage(
         const val CLEAR_HINT_MINUTES_THRESHOLD = 120
 
         /**
-         * 同步状态类反馈展示时长（毫秒）。用户 2026-09-30 真机反馈完成后提示偏长（≈4s），
-         * 收短为 2s；比 Material3 `SnackbarDuration.Short` 更短，宿主经延迟 dismiss 落地。
+         * 同步状态类反馈展示时长（毫秒）。用户 2026-09-30 真机反馈完成后提示偏长：
+         * 先收短 2s，实测仍嫌久，再收至 **1s**。比 Material3 `SnackbarDuration.Short` 更短，
+         * 宿主经延迟 dismiss 落地。
          */
-        const val SYNC_STATUS_DURATION_MS = 2_000L
+        const val SYNC_STATUS_DURATION_MS = 1_000L
     }
 }
 

@@ -25,8 +25,8 @@ class SyncSnackbarDurationWiringTest {
             model.contains("val durationMillis: Long? = null")
         )
         assertTrue(
-            "同步状态短档常量必须存在且为 2000ms",
-            model.contains("const val SYNC_STATUS_DURATION_MS = 2_000L")
+            "同步状态短档常量必须存在且为 1000ms（用户 2s→1s 收短后口径）",
+            model.contains("const val SYNC_STATUS_DURATION_MS = 1_000L")
         )
     }
 
