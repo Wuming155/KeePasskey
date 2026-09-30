@@ -55,6 +55,26 @@ class LegacyAutofillWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsComponents.kt"
         )
 
+    private val navSource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/ui/components/SystemSettingsNavigation.kt"
+        )
+
+    private val policySource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillHealthPolicy.kt"
+        )
+
+    private val probeSource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillHealthProbe.kt"
+        )
+
+    private val healthCardSource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillHealthCard.kt"
+        )
+
     // ========== AC②：持久化闭环，默认关闭 ==========
 
     @Test
@@ -94,6 +114,60 @@ class LegacyAutofillWiringTest {
         assertTrue(
             "服务必须真求值开关（否则关掉整条通道不生效——假开关复现）",
             serviceSource.contains("isAutofillLegacyAccessibilityEnabled()")
+        )
+    }
+
+    // ========== ISSUE-P2-405：开启时跳转系统无障碍授权 ==========
+
+    @Test
+    fun `开启开关时跳转系统无障碍设置`() {
+        assertTrue(
+            "设置页开启路径必须调用 SystemSettingsNavigation.openLegacyAccessibilitySettings",
+            componentsSource.contains("openLegacyAccessibilitySettings(")
+        )
+        assertTrue(
+            "开启分支必须挂在 enabled=true 上（不得关闭时也强跳）",
+            componentsSource.contains("if (enabled)")
+        )
+        assertTrue(
+            "SystemSettingsNavigation 必须提供旧版无障碍设置入口",
+            navSource.contains("fun openLegacyAccessibilitySettings(")
+        )
+        assertTrue(
+            "优先本服务详情页（ACTION_ACCESSIBILITY_DETAILS_SETTINGS 字面量）",
+            navSource.contains("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+        )
+        assertTrue(
+            "详情页必须携带本应用组件名（否则跳到无关页面）",
+            navSource.contains("android.settings.extra.COMPONENT_NAME")
+        )
+        assertTrue(
+            "详情页不可解析时必须回落通用无障碍设置页",
+            navSource.contains("accessibilityIntent(context)")
+        )
+    }
+
+    @Test
+    fun `健康卡对 legacy 半接通异常给出无障碍入口`() {
+        assertTrue(
+            "健康策略必须在「应用开关开 + 系统服务关」时列该项",
+            policySource.contains("legacyAccessibilityAppEnabled && !legacyAccessibilitySystemEnabled")
+        )
+        assertTrue(
+            "健康报告必须消费系统侧读数（否则半接通永远静默）",
+            probeSource.contains("isLegacyAccessibilitySystemEnabled()")
+        )
+        assertTrue(
+            "健康卡必须把该项映射到无障碍设置入口",
+            healthCardSource.contains("LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED") &&
+                healthCardSource.contains("accessibilityDetailsIntent")
+        )
+        assertTrue(
+            "半接通不得污染框架 AutofillService 通道可用性判定",
+            policySource.contains("legacyAccessibilitySystemEnabled") &&
+                !policySource.contains(
+                    "serviceDeclared && appEnabled && systemEnabled && legacyAccessibilitySystemEnabled"
+                )
         )
     }
 

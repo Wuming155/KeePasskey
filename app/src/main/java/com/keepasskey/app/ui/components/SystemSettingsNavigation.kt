@@ -1,8 +1,10 @@
 package com.keepasskey.app.ui.components
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import com.keepasskey.app.autofill.legacy.LegacyAutofillAccessibilityService
 
 /**
  * 系统设置快捷入口（本批立规）。
@@ -32,10 +34,41 @@ internal object SystemSettingsNavigation {
         Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
             .takeIf { it.resolveActivity(context.packageManager) != null }
 
-    /** 无障碍服务设置页。 */
+    /** 无障碍服务设置页（通用列表；ISSUE-P2-405 的回落落点）。 */
     fun accessibilityIntent(context: Context): Intent? =
         Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             .takeIf { it.resolveActivity(context.packageManager) != null }
+
+    /**
+     * 旧版无障碍自动填充服务的系统详情页（`ISSUE-P2-405`）。
+     *
+     * `android.settings.ACCESSIBILITY_DETAILS_SETTINGS` + `android.settings.extra.COMPONENT_NAME`
+     * （API 30+ 公开 action / extra 字面量；本仓 compileSdk SDK stub 未暴露同名 Kotlin
+     * 常量，故以命名常量承载字符串字面量，与「内部键无公开常量」的先例同口径）
+     * 可把用户直接带到本应用无障碍服务开关；ROM 不响应该 action 时回落 [accessibilityIntent]。
+     * 两者皆不可解析时返回 `null`，调用方静默降级（不得死链、不得伪造「已启用」）。
+     */
+    fun accessibilityDetailsIntent(context: Context): Intent? {
+        val details = Intent(ACTION_ACCESSIBILITY_DETAILS_SETTINGS).apply {
+            putExtra(
+                EXTRA_COMPONENT_NAME,
+                ComponentName(context, LegacyAutofillAccessibilityService::class.java)
+            )
+        }
+        return details.takeIf { it.resolveActivity(context.packageManager) != null }
+            ?: accessibilityIntent(context)
+    }
+
+    /**
+     * 打开旧版无障碍通道的系统设置落点（`ISSUE-P2-405`）。
+     *
+     * 供设置页开关「打开」路径调用：优先本服务详情页，回落通用无障碍设置页。
+     * 不可解析 / 启动失败返回 false（调用方不强制依赖成功）。
+     */
+    fun openLegacyAccessibilitySettings(context: Context): Boolean {
+        val intent = accessibilityDetailsIntent(context) ?: return false
+        return launchSafely(context, intent)
+    }
 
     /**
      * 凭据提供程序设置页（`ISSUE-P2-239`）。
@@ -54,4 +87,11 @@ internal object SystemSettingsNavigation {
     /** 启动系统设置页；无 Activity 处理 / 被 ROM 拦截一律返回 false（调用方据此降级为纯文案）。 */
     fun launchSafely(context: Context, intent: Intent): Boolean =
         runCatching { context.startActivity(intent) }.isSuccess
+
+    /** `android.settings.ACCESSIBILITY_DETAILS_SETTINGS`（API 30+） */
+    private const val ACTION_ACCESSIBILITY_DETAILS_SETTINGS =
+        "android.settings.ACCESSIBILITY_DETAILS_SETTINGS"
+
+    /** `android.settings.extra.COMPONENT_NAME`（API 30+） */
+    private const val EXTRA_COMPONENT_NAME = "android.settings.extra.COMPONENT_NAME"
 }

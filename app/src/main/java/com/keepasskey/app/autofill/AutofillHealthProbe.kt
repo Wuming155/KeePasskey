@@ -4,8 +4,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
 import android.view.autofill.AutofillManager
 import androidx.credentials.CredentialManager
+import com.keepasskey.app.autofill.legacy.LegacyAutofillAccessibilityService
 import com.keepasskey.app.passkey.CredentialProviderHealthProbe
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -29,13 +31,23 @@ class AutofillHealthProbe @Inject constructor(
     private val credentialProviderProbe: CredentialProviderHealthProbe
 ) {
 
-    /** 采集一次健康报告；[appEnabled] 由调用方从偏好状态传入 */
-    fun probe(appEnabled: Boolean): AutofillHealthReport = AutofillHealthPolicy.evaluate(
+    /**
+     * 采集一次健康报告。
+     *
+     * @param appEnabled 应用内「系统自动填充服务」开关（调用方从偏好状态传入）
+     * @param legacyAccessibilityAppEnabled 应用内「旧版自动填充服务（无障碍）」开关（`ISSUE-P2-405`）
+     */
+    fun probe(
+        appEnabled: Boolean,
+        legacyAccessibilityAppEnabled: Boolean
+    ): AutofillHealthReport = AutofillHealthPolicy.evaluate(
         serviceDeclared = isServiceDeclared(),
         appEnabled = appEnabled,
         systemEnabled = isSystemAutofillServiceEnabled(),
         credentialManagerAvailable = isCredentialManagerAvailable(),
-        credentialProviderRegistration = credentialProviderProbe.probe()
+        credentialProviderRegistration = credentialProviderProbe.probe(),
+        legacyAccessibilityAppEnabled = legacyAccessibilityAppEnabled,
+        legacyAccessibilitySystemEnabled = isLegacyAccessibilitySystemEnabled()
     )
 
     /** 服务是否在 Manifest 声明且带 `BIND_AUTOFILL_SERVICE` 权限 */
@@ -109,8 +121,33 @@ class AutofillHealthProbe @Inject constructor(
         false
     }
 
+    /**
+     * 系统是否已启用本应用的旧版无障碍自动填充服务（`ISSUE-P2-405`）。
+     *
+     * 以公开 `AccessibilityManager.getEnabledAccessibilityServiceList` 读取，并与
+     * [LegacyAutofillAccessibilityService] 的 `ComponentName` 精确比对。异常一律收敛为
+     * **未启用**（不谎报正常），日志不携带窗口内容或凭据信息。
+     */
+    private fun isLegacyAccessibilitySystemEnabled(): Boolean = try {
+        val am = context.getSystemService(AccessibilityManager::class.java) ?: return false
+        val expected = ComponentName(context, LegacyAutofillAccessibilityService::class.java)
+        // FEEDBACK_ALL_MASK（0xFFFFFFFF）等价字面量：SDK stub 未暴露 AccessibilityServiceInfo 时仍可编译
+        am.getEnabledAccessibilityServiceList(FEEDBACK_ALL_MASK)
+            .any { info ->
+                val ri = info.resolveInfo ?: return@any false
+                val cn = ComponentName(ri.serviceInfo.packageName, ri.serviceInfo.name)
+                cn == expected || cn.flattenToString() == expected.flattenToString()
+            }
+    } catch (t: Throwable) {
+        AppLog.w(TAG, "读取旧版无障碍服务系统启用态失败，按未启用处理", t)
+        false
+    }
+
     private companion object {
         const val TAG = "AutofillHealthProbe"
+
+        /** `AccessibilityServiceInfo.FEEDBACK_ALL_MASK`（全部反馈类型） */
+        const val FEEDBACK_ALL_MASK = -1
 
         /**
          * `Settings.Secure` 的自动填充服务键（AOSP 内部键，无公开常量——

@@ -1344,6 +1344,7 @@
     <string name="autofill_health_issue_service_missing">Autofill service is not declared correctly; reinstall the app</string>
     <string name="autofill_health_issue_app_disabled">The in-app "System autofill service" switch is turned off</string>
     <string name="autofill_health_issue_system_disabled">This app is not selected as the autofill service; enable it in system settings</string>
+    <string name="autofill_health_issue_legacy_a11y_system_disabled">The in-app "Legacy autofill service (accessibility)" switch is on, but this app accessibility service is not enabled in system settings; turn on KeePasskey accessibility there</string>
     <string name="autofill_health_issue_cm_unavailable">Credential Manager is unavailable</string>
     <!-- ISSUE-P2-239: see the same keys in values/strings.xml (CM channel registration: not
          registered = repair path; unknown = honestly unreadable, never rendered as "normal"). -->

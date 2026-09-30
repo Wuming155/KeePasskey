@@ -38,11 +38,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.components.SystemSettingsNavigation
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
@@ -76,6 +78,8 @@ internal fun AutofillProviderCard(
     // ISSUE-P3-376：「搜索全部条目…」手动选择器兜底数据集开关（默认开启）
     onAutofillManualPickerToggle: (Boolean) -> Unit
 ) {
+    // 回调不在 @Composable 上下文：Context 在组合期捕获（ISSUE-P2-405）
+    val context = LocalContext.current
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -108,12 +112,18 @@ internal fun AutofillProviderCard(
             // ISSUE-P3-324：旧版无障碍自动填充通道（参考 KeePassDX / keepass2android 的
             // 无障碍填充通道）。系统自动填充框架不可用的应用 / 设备上的兜底通道：
             // 服务在目标应用出现口令框时发通知，点按进选择器挑条目回填。
+            // ISSUE-P2-405：开启时跳转系统无障碍授权（双闸门的系统侧入口）；关闭只落偏好。
             AutofillSwitchRow(
                 icon = Icons.Default.Accessibility,
                 title = stringResource(R.string.autofill_legacy_accessibility_title),
                 subtitle = stringResource(R.string.autofill_legacy_accessibility_sub),
                 checked = uiState.autofillLegacyAccessibilityEnabled,
-                onCheckedChange = onAutofillLegacyAccessibilityToggle
+                onCheckedChange = { enabled ->
+                    onAutofillLegacyAccessibilityToggle(enabled)
+                    if (enabled) {
+                        SystemSettingsNavigation.openLegacyAccessibilitySettings(context)
+                    }
+                }
             )
 
             // ISSUE-P0-02：下发前二次确认为**默认强制**安全策略（库锁定必先解锁）。

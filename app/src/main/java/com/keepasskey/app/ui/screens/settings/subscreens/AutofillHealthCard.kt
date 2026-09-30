@@ -48,14 +48,18 @@ import com.keepasskey.app.ui.components.SystemSettingsNavigation
 @Composable
 fun AutofillHealthCard(
     appEnabled: Boolean,
+    legacyAccessibilityAppEnabled: Boolean,
     modifier: Modifier = Modifier,
     viewModel: AutofillHealthViewModel = hiltViewModel()
 ) {
     val report by viewModel.report.collectAsStateWithLifecycle()
 
     // 应用内开关变化即重新探测（系统侧状态变化在进入页面时重新采集）
-    LaunchedEffect(appEnabled) {
-        viewModel.refresh(appEnabled)
+    LaunchedEffect(appEnabled, legacyAccessibilityAppEnabled) {
+        viewModel.refresh(
+            appEnabled = appEnabled,
+            legacyAccessibilityAppEnabled = legacyAccessibilityAppEnabled
+        )
     }
 
     AutofillHealthCardContent(report = report, modifier = modifier)
@@ -132,6 +136,9 @@ private fun HealthIssueRow(issue: AutofillHealthIssue) {
     val systemSettingsIntent = remember(issue, context) {
         when (issue) {
             AutofillHealthIssue.SYSTEM_NOT_ENABLED -> SystemSettingsNavigation.autofillServiceIntent(context)
+            // ISSUE-P2-405：legacy 无障碍通道半接通 → 本服务详情页（回落通用无障碍设置页）
+            AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED ->
+                SystemSettingsNavigation.accessibilityDetailsIntent(context)
             AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED,
             AutofillHealthIssue.CREDENTIAL_PROVIDER_STATE_UNKNOWN ->
                 SystemSettingsNavigation.credentialProviderIntent(context)
@@ -164,6 +171,9 @@ private fun AutofillHealthIssue.labelRes(): Int = when (this) {
     AutofillHealthIssue.SERVICE_NOT_DECLARED -> R.string.autofill_health_issue_service_missing
     AutofillHealthIssue.APP_DISABLED -> R.string.autofill_health_issue_app_disabled
     AutofillHealthIssue.SYSTEM_NOT_ENABLED -> R.string.autofill_health_issue_system_disabled
+    // ISSUE-P2-405：应用内开关已开但系统侧无障碍服务未启用
+    AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED ->
+        R.string.autofill_health_issue_legacy_a11y_system_disabled
     AutofillHealthIssue.CREDENTIAL_MANAGER_UNAVAILABLE -> R.string.autofill_health_issue_cm_unavailable
     // ISSUE-P2-239：CM 通道系统登记的「未登记 / 未知」两态（后者不得并入「正常」）
     AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED ->
@@ -188,7 +198,9 @@ internal fun AutofillHealthCardPreview() {
                 appEnabled = true,
                 systemEnabled = true,
                 credentialManagerAvailable = true,
-                credentialProviderRegistration = CredentialProviderRegistration.REGISTERED
+                credentialProviderRegistration = CredentialProviderRegistration.REGISTERED,
+                legacyAccessibilityAppEnabled = true,
+                legacyAccessibilitySystemEnabled = true
             )
         )
     }
@@ -211,7 +223,10 @@ internal fun AutofillHealthCardIssuesPreview() {
                 systemEnabled = false,
                 credentialManagerAvailable = false,
                 // ISSUE-P2-239：异常预览覆盖 CM 通道「未登记」这一新增异常项
-                credentialProviderRegistration = CredentialProviderRegistration.NOT_REGISTERED
+                credentialProviderRegistration = CredentialProviderRegistration.NOT_REGISTERED,
+                // ISSUE-P2-405：异常预览覆盖 legacy 无障碍半接通
+                legacyAccessibilityAppEnabled = true,
+                legacyAccessibilitySystemEnabled = false
             )
         )
     }

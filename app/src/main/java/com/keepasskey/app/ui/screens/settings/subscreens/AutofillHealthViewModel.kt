@@ -25,8 +25,18 @@ class AutofillHealthViewModel @Inject constructor(
     /** null 表示尚未探测（首帧），UI 据此不渲染任何状态文案 */
     val report: StateFlow<AutofillHealthReport?> = _report.asStateFlow()
 
-    /** 重新探测；[appEnabled] 由 UI 从偏好状态传入（应用内开关） */
-    fun refresh(appEnabled: Boolean) {
-        _report.value = probe.probe(appEnabled)
+    /**
+     * 重新探测；两个开关均由 UI 从偏好状态传入（应用内开关，`ISSUE-P2-405`）。
+     *
+     * legacy 无障碍通道的**系统侧**启用态由探针自行读取，不在此传参。
+     */
+    fun refresh(
+        appEnabled: Boolean,
+        legacyAccessibilityAppEnabled: Boolean
+    ) {
+        _report.value = probe.probe(
+            appEnabled = appEnabled,
+            legacyAccessibilityAppEnabled = legacyAccessibilityAppEnabled
+        )
     }
 }

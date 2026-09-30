@@ -23,6 +23,15 @@ enum class AutofillHealthIssue {
      */
     SYSTEM_NOT_ENABLED,
 
+    /**
+     * 应用内「旧版自动填充服务（无障碍）」开关已开，但系统侧本应用无障碍服务未启用
+     * （`ISSUE-P2-405`）。
+     *
+     * 该通道是双闸门：只开应用内开关、系统侧未授权时服务根本不会收到事件，通道静默失效。
+     * 此项即把「半接通」显式化，并给出系统设置入口。
+     */
+    LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED,
+
     /** Credential Manager 通道不可用（依赖缺失 / 运行环境异常） */
     CREDENTIAL_MANAGER_UNAVAILABLE,
 
@@ -61,7 +70,19 @@ data class AutofillHealthReport(
      * 若给出 `= REGISTERED` 之类的缺省，任何漏传该参数的接线点都会静默渲染成「一切正常」——
      * 那正是本项要根治的失效形态。调用方必须显式交出探针读数。
      */
-    val credentialProviderRegistration: CredentialProviderRegistration
+    val credentialProviderRegistration: CredentialProviderRegistration,
+    /**
+     * 应用内「旧版自动填充服务（无障碍）」开关（`ISSUE-P2-405`）。
+     *
+     * **无默认值**：漏传即编译失败，堵死「半接通被静默渲染成正常」。
+     */
+    val legacyAccessibilityAppEnabled: Boolean,
+    /**
+     * 系统侧本应用无障碍服务启用态（`ISSUE-P2-405`）。
+     *
+     * **无默认值**：读取失败时探针收敛为 false，UI 不得谎报「系统已启用」。
+     */
+    val legacyAccessibilitySystemEnabled: Boolean
 ) {
 
     /** 全部检查项逐条列出（顺序即建议修复优先级） */
@@ -70,6 +91,10 @@ data class AutofillHealthReport(
             if (!serviceDeclared) add(AutofillHealthIssue.SERVICE_NOT_DECLARED)
             if (!appEnabled) add(AutofillHealthIssue.APP_DISABLED)
             if (!systemEnabled) add(AutofillHealthIssue.SYSTEM_NOT_ENABLED)
+            // ISSUE-P2-405：双闸门半接通——应用开关开但系统无障碍服务未启用
+            if (legacyAccessibilityAppEnabled && !legacyAccessibilitySystemEnabled) {
+                add(AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED)
+            }
             if (!credentialManagerAvailable) add(AutofillHealthIssue.CREDENTIAL_MANAGER_UNAVAILABLE)
             // ISSUE-P2-239：凭据提供者通道的两态各自成项——「未登记」给出修复指引、
             // 「未知」如实声明读不到（**不得**并入正常）
@@ -90,6 +115,9 @@ data class AutofillHealthReport(
      *
      * `ISSUE-P2-239` 同口径：系统未登记本应用只影响 **CM（保存 / 通行密钥）** 通道，
      * 传统 `AutofillService` 通道照常工作 ⇒ **不得**计入本判据（否则界面会给出错误的修复指引）。
+     *
+     * `ISSUE-P2-405` 同口径：legacy 无障碍通道是**可选兜底**，其系统侧未启用**不**污染
+     * 框架 `AutofillService` 通道的可用性判定。
      */
     val isLegacyAutofillOperational: Boolean
         get() = serviceDeclared && appEnabled && systemEnabled
@@ -109,13 +137,19 @@ object AutofillHealthPolicy {
         systemEnabled: Boolean,
         credentialManagerAvailable: Boolean,
         /** `ISSUE-P2-239`：由 [com.keepasskey.app.passkey.CredentialProviderHealthProbe] 采集 */
-        credentialProviderRegistration: CredentialProviderRegistration
+        credentialProviderRegistration: CredentialProviderRegistration,
+        /** `ISSUE-P2-405`：旧版无障碍通道应用内开关 */
+        legacyAccessibilityAppEnabled: Boolean,
+        /** `ISSUE-P2-405`：旧版无障碍通道系统侧启用态 */
+        legacyAccessibilitySystemEnabled: Boolean
     ): AutofillHealthReport = AutofillHealthReport(
         serviceDeclared = serviceDeclared,
         appEnabled = appEnabled,
         systemEnabled = systemEnabled,
         credentialManagerAvailable = credentialManagerAvailable,
-        credentialProviderRegistration = credentialProviderRegistration
+        credentialProviderRegistration = credentialProviderRegistration,
+        legacyAccessibilityAppEnabled = legacyAccessibilityAppEnabled,
+        legacyAccessibilitySystemEnabled = legacyAccessibilitySystemEnabled
     )
 
     /**

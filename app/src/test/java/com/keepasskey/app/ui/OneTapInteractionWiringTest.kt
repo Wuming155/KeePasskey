@@ -214,6 +214,11 @@ class OneTapInteractionWiringTest {
             nav.contains("Settings.ACTION_ACCESSIBILITY_SETTINGS")
         )
         assertTrue(
+            "旧版无障碍通道必须优先跳本服务详情页（ISSUE-P2-405）",
+            nav.contains("android.settings.ACCESSIBILITY_DETAILS_SETTINGS") &&
+                nav.contains("openLegacyAccessibilitySettings")
+        )
+        assertTrue(
             "启动必须包 runCatching（厂商 ROM 拦截时降级，不得成为新的崩溃点）",
             nav.contains("runCatching { context.startActivity(intent) }")
         )
@@ -226,9 +231,13 @@ class OneTapInteractionWiringTest {
             healthCard.contains("AutofillHealthIssue.SYSTEM_NOT_ENABLED") &&
                 healthCard.contains("autofillServiceIntent")
         )
-        // ISSUE-P3-324：原「无障碍状态卡」（SECURITY_COMPONENTS 内的 accessibilityIntent 消费点）
-        // 已随假提示摘除，判据不再指向该文件；无障碍设置页入口本身保留（旧版无障碍填充
-        // 通道的引导仍经 SystemSettingsNavigation 走官方 action）。
+        // ISSUE-P2-405：§332 摘除状态卡后 accessibilityIntent 曾成死代码；
+        // 现由健康卡「legacy 半接通」项重新消费无障碍设置入口。
+        assertTrue(
+            "健康卡必须对 legacy 无障碍半接通项接线无障碍入口",
+            healthCard.contains("LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED") &&
+                healthCard.contains("accessibilityDetailsIntent")
+        )
     }
 
     // ---------------------------------------------------------------- 防空扫

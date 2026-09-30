@@ -7,7 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [AutofillHealthPolicy] 单元测试（ISSUE-P3-41；`ISSUE-P2-239` 增补 CM 通道登记两态）。
+ * [AutofillHealthPolicy] 单元测试（ISSUE-P3-41；`ISSUE-P2-239` 增补 CM 通道登记两态；
+ * `ISSUE-P2-405` 增补 legacy 无障碍通道半接通项）。
  *
  * `ISSUE-P2-239` 的判定本身（存储形态 → 三态）由
  * [com.keepasskey.app.passkey.CredentialProviderRegistrationTest] 穷举；本类只锁定
@@ -15,15 +16,31 @@ import org.junit.Test
  */
 class AutofillHealthPolicyTest {
 
+    /**
+     * 默认 healthy 评估入口：legacy 无障碍两闸门默认全关（出厂/用户未开启），
+     * 既有用例语义不变；专项用例显式覆盖对应入参。
+     */
+    private fun evaluateHealthy(
+        serviceDeclared: Boolean = true,
+        appEnabled: Boolean = true,
+        systemEnabled: Boolean = true,
+        credentialManagerAvailable: Boolean = true,
+        credentialProviderRegistration: CredentialProviderRegistration = CredentialProviderRegistration.REGISTERED,
+        legacyAccessibilityAppEnabled: Boolean = false,
+        legacyAccessibilitySystemEnabled: Boolean = false
+    ): AutofillHealthReport = AutofillHealthPolicy.evaluate(
+        serviceDeclared = serviceDeclared,
+        appEnabled = appEnabled,
+        systemEnabled = systemEnabled,
+        credentialManagerAvailable = credentialManagerAvailable,
+        credentialProviderRegistration = credentialProviderRegistration,
+        legacyAccessibilityAppEnabled = legacyAccessibilityAppEnabled,
+        legacyAccessibilitySystemEnabled = legacyAccessibilitySystemEnabled
+    )
+
     @Test
     fun `全部正常时无异常项`() {
-        val report = AutofillHealthPolicy.evaluate(
-            serviceDeclared = true,
-            appEnabled = true,
-            systemEnabled = true,
-            credentialManagerAvailable = true,
-            credentialProviderRegistration = CredentialProviderRegistration.REGISTERED
-        )
+        val report = evaluateHealthy()
 
         assertTrue(report.isFullyOperational)
         assertTrue(report.isLegacyAutofillOperational)
@@ -32,13 +49,7 @@ class AutofillHealthPolicyTest {
 
     @Test
     fun `未声明服务时给出对应异常`() {
-        val report = AutofillHealthPolicy.evaluate(
-            serviceDeclared = false,
-            appEnabled = true,
-            systemEnabled = true,
-            credentialManagerAvailable = true,
-            credentialProviderRegistration = CredentialProviderRegistration.REGISTERED
-        )
+        val report = evaluateHealthy(serviceDeclared = false)
 
         assertEquals(listOf(AutofillHealthIssue.SERVICE_NOT_DECLARED), report.issues)
         assertFalse(report.isLegacyAutofillOperational)
@@ -46,12 +57,9 @@ class AutofillHealthPolicyTest {
 
     @Test
     fun `系统未启用与应用内关闭分别列出`() {
-        val report = AutofillHealthPolicy.evaluate(
-            serviceDeclared = true,
+        val report = evaluateHealthy(
             appEnabled = false,
-            systemEnabled = false,
-            credentialManagerAvailable = true,
-            credentialProviderRegistration = CredentialProviderRegistration.REGISTERED
+            systemEnabled = false
         )
 
         assertEquals(
@@ -63,13 +71,7 @@ class AutofillHealthPolicyTest {
 
     @Test
     fun `凭据管理器不可用不影响传统自动填充可用性`() {
-        val report = AutofillHealthPolicy.evaluate(
-            serviceDeclared = true,
-            appEnabled = true,
-            systemEnabled = true,
-            credentialManagerAvailable = false,
-            credentialProviderRegistration = CredentialProviderRegistration.REGISTERED
-        )
+        val report = evaluateHealthy(credentialManagerAvailable = false)
 
         assertFalse(report.isFullyOperational)
         assertTrue(report.isLegacyAutofillOperational)
@@ -96,11 +98,7 @@ class AutofillHealthPolicyTest {
      */
     @Test
     fun `系统未登记本应用时单独列出且不影响传统链路可用性`() {
-        val report = AutofillHealthPolicy.evaluate(
-            serviceDeclared = true,
-            appEnabled = true,
-            systemEnabled = true,
-            credentialManagerAvailable = true,
+        val report = evaluateHealthy(
             credentialProviderRegistration = CredentialProviderRegistration.NOT_REGISTERED
         )
 
@@ -123,11 +121,7 @@ class AutofillHealthPolicyTest {
      */
     @Test
     fun `登记状态未知时如实列出而非当作正常`() {
-        val report = AutofillHealthPolicy.evaluate(
-            serviceDeclared = true,
-            appEnabled = true,
-            systemEnabled = true,
-            credentialManagerAvailable = true,
+        val report = evaluateHealthy(
             credentialProviderRegistration = CredentialProviderRegistration.UNKNOWN
         )
 
@@ -142,13 +136,7 @@ class AutofillHealthPolicyTest {
     /** 已登记时不得出现 CM 通道任何异常项（正向反校：两态各自只在对应取值下出现） */
     @Test
     fun `已登记时不出现 CM 通道异常项`() {
-        val report = AutofillHealthPolicy.evaluate(
-            serviceDeclared = true,
-            appEnabled = true,
-            systemEnabled = true,
-            credentialManagerAvailable = true,
-            credentialProviderRegistration = CredentialProviderRegistration.REGISTERED
-        )
+        val report = evaluateHealthy()
 
         assertFalse(
             "已登记却仍报 CM 项 ⇒ 判定与报告映射脱节",
@@ -156,6 +144,65 @@ class AutofillHealthPolicyTest {
                 it == AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED ||
                     it == AutofillHealthIssue.CREDENTIAL_PROVIDER_STATE_UNKNOWN
             }
+        )
+    }
+
+    // ========== ISSUE-P2-405：legacy 无障碍双闸门半接通 ==========
+
+    @Test
+    fun `应用开关开而系统无障碍未启用时列出半接通异常`() {
+        val report = evaluateHealthy(
+            legacyAccessibilityAppEnabled = true,
+            legacyAccessibilitySystemEnabled = false
+        )
+
+        assertEquals(
+            listOf(AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED),
+            report.issues
+        )
+        assertFalse(report.isFullyOperational)
+        assertTrue(
+            "legacy 通道半接通不得污染框架 AutofillService 通道可用性",
+            report.isLegacyAutofillOperational
+        )
+    }
+
+    @Test
+    fun `legacy 两闸门全开时不列该项`() {
+        val report = evaluateHealthy(
+            legacyAccessibilityAppEnabled = true,
+            legacyAccessibilitySystemEnabled = true
+        )
+
+        assertTrue(report.issues.isEmpty())
+    }
+
+    @Test
+    fun `应用开关关闭时不因系统侧未启用而列该项`() {
+        val report = evaluateHealthy(
+            legacyAccessibilityAppEnabled = false,
+            legacyAccessibilitySystemEnabled = false
+        )
+
+        assertFalse(report.issues.any { it == AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED })
+    }
+
+    @Test
+    fun `框架通道异常与 legacy 半接通可同时列出且互不吞没`() {
+        val report = evaluateHealthy(
+            systemEnabled = false,
+            credentialProviderRegistration = CredentialProviderRegistration.NOT_REGISTERED,
+            legacyAccessibilityAppEnabled = true,
+            legacyAccessibilitySystemEnabled = false
+        )
+
+        assertEquals(
+            listOf(
+                AutofillHealthIssue.SYSTEM_NOT_ENABLED,
+                AutofillHealthIssue.LEGACY_ACCESSIBILITY_SYSTEM_NOT_ENABLED,
+                AutofillHealthIssue.CREDENTIAL_PROVIDER_NOT_REGISTERED
+            ),
+            report.issues
         )
     }
 

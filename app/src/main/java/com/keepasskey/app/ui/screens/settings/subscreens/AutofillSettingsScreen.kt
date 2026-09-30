@@ -76,8 +76,16 @@ fun AutofillSettingsScreen(
      * 默认值为生产实现 [AutofillHealthCard]（自持 ViewModel）；预览等无 Hilt 宿主的场景
      * 可传入无状态实现（见 [AutofillHealthCardContent] 的拆分说明），避免在预览面板中
      * 触发 `hiltViewModel()` 取用失败。
+     *
+     * `ISSUE-P2-405`：legacy 无障碍通道的**应用内开关**一并传入健康卡，用于展示
+     * 「开关已开 + 系统侧未启用」的半接通异常项。
      */
-    healthCard: @Composable () -> Unit = { AutofillHealthCard(appEnabled = uiState.autofillServiceEnabled) },
+    healthCard: @Composable () -> Unit = {
+        AutofillHealthCard(
+            appEnabled = uiState.autofillServiceEnabled,
+            legacyAccessibilityAppEnabled = uiState.autofillLegacyAccessibilityEnabled
+        )
+    },
     modifier: Modifier = Modifier
 ) {
     var showBlacklistDialog by remember { mutableStateOf(false) }

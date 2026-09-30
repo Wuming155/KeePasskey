@@ -169,7 +169,9 @@ class AutofillChannelSwitchWiringTest {
         val en = readSource("app/src/main/res/values-en/strings.xml")
         val legacyKeys = setOf(
             "autofill_legacy_accessibility_title",
-            "autofill_legacy_accessibility_sub"
+            "autofill_legacy_accessibility_sub",
+            // ISSUE-P2-405：legacy 通道健康异常文案（如实描述无障碍服务，属白名单例外）
+            "autofill_health_issue_legacy_a11y_system_disabled"
         )
 
         listOf(
