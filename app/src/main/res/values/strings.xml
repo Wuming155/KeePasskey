@@ -246,35 +246,24 @@
 
     <!-- 设置相关 -->
     <string name="settings_title">设置</string>
-    <string name="settings_cat_storage">库与同步</string>
+    <string name="settings_cat_storage">密码库与存储</string>
     <string name="settings_database">密码库与加密</string>
     <string name="settings_database_sub">KDBX 4 · Argon2 / AES-KDF · 加密参数与回收站</string>
     <string name="settings_sync">云端同步</string>
     <string name="settings_sync_sub">WebDAV、兼容 S3 存储多协议自动同步</string>
-    <string name="settings_change_master_key">更改主密码</string>
+    <string name="settings_change_master_key">更改主密钥</string>
     <string name="settings_change_master_key_sub">重设密码库主密码与安全派生凭据</string>
-    <string name="settings_cat_security">安全与凭据</string>
+    <string name="settings_cat_security">安全与审计</string>
     <string name="settings_security">设备解锁与安全策略</string>
     <string name="settings_security_sub">生物识别、后台自动锁定、防截屏录屏</string>
     <string name="settings_health">健康度检查与审计</string>
     <string name="settings_health_sub">弱密码、密码复用、数据泄露比对</string>
-    <string name="settings_cat_preferences">填充与验证码</string>
+    <string name="settings_cat_preferences">自动填充与个性化偏好</string>
     <string name="settings_autofill">自动填充与 Passkey</string>
     <string name="settings_autofill_sub">系统凭据提供者、通行密钥、剪贴板保护</string>
-    <string name="settings_cat_display">界面与显示</string>
-    <string name="settings_theme">界面与显示</string>
-    <string name="settings_theme_sub">主题、语言、列表与搜索显示设置</string>
+    <string name="settings_theme">外观与主题</string>
+    <string name="settings_theme_sub">深浅色主题、语言偏好、列表视图设置</string>
     <string name="settings_about">关于 KeePasskey</string>
-    <string name="settings_status_title">状态摘要</string>
-    <string name="settings_status_biometric">生物识别</string>
-    <string name="settings_status_biometric_on">已开启</string>
-    <string name="settings_status_biometric_off">未开启</string>
-    <string name="settings_status_autofill">自动填充服务</string>
-    <string name="settings_status_autofill_on">应用内已启用</string>
-    <string name="settings_status_autofill_off">应用内已关闭</string>
-    <string name="settings_status_autofill_open_system">去系统设置</string>
-    <string name="settings_status_sync">上次同步</string>
-    <string name="settings_status_sync_unknown">尚未同步</string>
     <string name="settings_language">界面语言</string>
     <string name="settings_lang_system">跟随系统</string>
     <string name="settings_lang_zh">简体中文</string>
@@ -686,9 +675,9 @@
     <string name="import_report_kdbx_merge_skipped">冲突条目保留本地：共 %1$d 条</string>
 
     <!-- ===== 设置主页 (SettingsScreen) ===== -->
-    <string name="set_section_system">关于与维护</string>
+    <string name="set_section_system">系统</string>
     <string name="set_totp_entry_title">双重认证 (TOTP) 设置</string>
-    <string name="set_totp_entry_sub">管理验证码算法、周期与自动填充联动</string>
+    <string name="set_totp_entry_sub">管理验证码算法、周期与刷新策略</string>
     <string name="debug_title">开发者调试</string>
     <string name="set_debug_entry_sub">查看内部运行状态与诊断信息</string>
     <string name="set_about_entry_sub">版本 %1$s</string>
@@ -1021,7 +1010,7 @@
     <!-- ISSUE-P3-18 诚实化修正：原文案承诺「在通知栏快捷复制」，但本轮通知**不含复制 action**
          （仅展示验证码与剩余秒数，到期自动消失）。文案已改为与实现一致。 -->
     <string name="autofill_totp_notif_sub">自动填充确认后在通知栏显示该条目的验证码，到期自动消失</string>
-    <string name="autofill_section_capture">高级与兼容策略</string>
+    <string name="autofill_section_capture">密码捕获</string>
     <string name="autofill_save_prompt_title">新密码保存提示</string>
     <string name="autofill_save_prompt_sub">检测到新注册或修改的密码时询问是否保存</string>
     <string name="autofill_override_title">覆盖应用填充</string>

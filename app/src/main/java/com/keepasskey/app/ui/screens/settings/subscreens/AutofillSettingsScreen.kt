@@ -47,6 +47,9 @@ fun AutofillSettingsScreen(
     // KP2A 扩展自动填充操作
     onOfferSaveCredentialsToggle: (Boolean) -> Unit = {},
     onInlineSuggestionsToggle: (Boolean) -> Unit = {},
+    onAutoReturnFromQueryToggle: (Boolean) -> Unit = {},
+    onAutofillCopyTotpToggle: (Boolean) -> Unit = {},
+    onAutofillShowTotpNotificationToggle: (Boolean) -> Unit = {},
     onSkipDalVerificationToggle: (Boolean) -> Unit = {},
     onOverrideNoAutofillToggle: (Boolean) -> Unit = {},
     // ISSUE-P3-42：会话授权宽限（默认关闭）
@@ -132,11 +135,25 @@ fun AutofillSettingsScreen(
                 AutofillUxCard(
                     uiState = uiState,
                     onInlineSuggestionsToggle = onInlineSuggestionsToggle,
+                    onAutoReturnFromQueryToggle = onAutoReturnFromQueryToggle,
                     onAutoClearClipboardToggle = onAutoClearClipboardToggle
                 )
             }
 
-            // ISSUE-P3-412：TOTP 填充联动迁至 TotpSettingsScreen；高级项归入页末分区
+            // 3. 两步验证与 TOTP 联动 (KP2A 特性)
+            item {
+                AutofillSectionHeader(R.string.autofill_section_totp)
+            }
+
+            item {
+                AutofillTotpCard(
+                    uiState = uiState,
+                    onAutofillCopyTotpToggle = onAutofillCopyTotpToggle,
+                    onAutofillShowTotpNotificationToggle = onAutofillShowTotpNotificationToggle
+                )
+            }
+
+            // 4. 智能识别、凭证保存与兼容策略 (KP2A 特性)
             item {
                 AutofillSectionHeader(R.string.autofill_section_capture)
             }

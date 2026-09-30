@@ -81,16 +81,6 @@ fun AboutSettingsScreen(
                 ) { AboutPrivacyCard() }
             }
 
-            // ISSUE-P3-412：安全架构说明从安全设置页迁入关于页
-            item {
-                BentoCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) {
-                    AboutArchitectureCard()
-                }
-            }
-
             item {
                 Spacer(modifier = Modifier.height(24.dp))
             }
