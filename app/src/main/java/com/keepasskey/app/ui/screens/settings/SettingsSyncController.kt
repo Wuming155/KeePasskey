@@ -28,6 +28,12 @@ internal class SettingsSyncController(
     private val scope: CoroutineScope
 ) {
 
+    fun isSyncConfigured(): Boolean = try {
+        syncCoordinator.isSyncConfigured()
+    } catch (_: Exception) {
+        false
+    }
+
     /** 同步配置状态（含表单回显与同步过程反馈） */
     internal data class SyncUiState(
         val provider: CloudSyncProvider = CloudSyncProvider.WEBDAV,
@@ -347,10 +353,8 @@ internal class SettingsSyncController(
     /**
      * 测试连接。
      *
-     * @param onResult 测试完成后的回调（参数为是否通过）。用于把「测试通过才继续下一步」这类
-     *   **顺序动作**的编排收在本层（如「保存并同步」：保存 → 测试 → 通过才同步）。
-     *   回调在**状态写入之后、同一协程内**执行，因此在回调里直接调用 [triggerSync]
-     *   不会撞上其 `isSyncing` 早退守卫（此刻已置回 false）。
+     * @param onResult 测试完成后的回调（参数为是否通过）。顺序编排入口（verifyConnectionThenSync）
+     *   在回调里再触发同步；本方法本身**不**自动同步，避免与编排层双跑。
      */
     fun testSyncConnection(onResult: ((Boolean) -> Unit)? = null) {
         if (syncStateFlow.value.isSyncing) return

@@ -276,7 +276,8 @@ class SettingsViewModel @Inject constructor(
     private val coldStartSyncGate = SettingsColdStartSyncGate(
         settingsRepository = settingsRepository,
         onTriggerSync = { triggerSync() },
-        scope = viewModelScope
+        scope = viewModelScope,
+        isSyncConfigured = { syncController.isSyncConfigured() }
     )
 
     init {

@@ -11,11 +11,16 @@ import kotlinx.coroutines.launch
  * 进程生命周期内仅触发一次「设置允许则自动同步」：软件被彻底杀死重启时标志复位，从而再次触发。
  * 标志刻意保持 **process-static**（伴生对象），与拆出前的 `SettingsViewModel.companion` 语义完全一致
  * ——ViewModel 实例重建既不会重复触发，也不会漏触发。
+ *
+ * 注意：仅在设置页 ViewModel 创建时检查；库列表解锁路径的自动同步另见
+ * `VaultListViewModel`（`autoSyncEnabled && isSyncConfigured`）。
  */
 internal class SettingsColdStartSyncGate(
     private val settingsRepository: SettingsRepository,
     private val onTriggerSync: () -> Unit,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    /** 判定「已配置云同步」；false 则不触发（避免无凭据空跑） */
+    private val isSyncConfigured: () -> Boolean = { true }
 ) {
 
     fun checkAndTrigger() {
@@ -23,6 +28,7 @@ internal class SettingsColdStartSyncGate(
         hasCheckedColdStartSync = true
         scope.launch {
             try {
+                if (!isSyncConfigured()) return@launch
                 if (settingsRepository.getSettings().first().syncOnColdStart) {
                     onTriggerSync()
                 }

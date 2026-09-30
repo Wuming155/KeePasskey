@@ -316,6 +316,8 @@
     <string name="sync_status_synced">Synced</string>
     <string name="sync_status_unverified">Not verified</string>
     <string name="sync_status_syncing">Syncing...</string>
+    <string name="sync_status_verified_only">Connection verified</string>
+    <string name="sync_last_time_verified_never">Connection verified · not synced yet</string>
     <string name="sort_option_default">Default order</string>
     <string name="sort_option_name_asc">By name · Ascending (A to Z)</string>
     <string name="sort_option_name_desc">By name · Descending (Z to A)</string>

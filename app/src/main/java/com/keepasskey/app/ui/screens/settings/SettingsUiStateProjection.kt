@@ -131,13 +131,20 @@ internal fun buildSettingsUiState(
     wifiOnlySync = syncState.wifiOnlySync,
     isSyncing = syncState.isSyncing,
     syncFeedbackMessage = syncState.syncFeedbackMessage,
-    syncLastTime = syncState.lastSyncTimeText.ifEmpty { strings.get(R.string.sync_last_time_never) },
+    syncLastTime = when {
+        syncState.lastSyncTimeText.isNotEmpty() -> syncState.lastSyncTimeText
+        // 测连成功但本会话尚未真正同步：与徽章「连接已验证」一致，不再写「尚未同步」造成矛盾
+        syncState.isConnectionVerified -> strings.get(R.string.sync_last_time_verified_never)
+        else -> strings.get(R.string.sync_last_time_never)
+    },
     isConnectionVerified = syncState.isConnectionVerified,
     // ISSUE-P2-285 AC②：凭据封印声明的实测硬件落位（单一真相源 = SyncCredentialsStore 探测）
     syncSealHardwareBacked = syncState.syncSealHardwareBacked,
+    // 徽章语义：真正同步过才叫「已同步」；仅测连成功叫「连接已验证」
     syncStatusText = when {
         syncState.isSyncing -> strings.get(R.string.sync_status_syncing)
-        syncState.isConnectionVerified -> strings.get(R.string.sync_status_synced)
+        syncState.lastSyncTimeText.isNotEmpty() -> strings.get(R.string.sync_status_synced)
+        syncState.isConnectionVerified -> strings.get(R.string.sync_status_verified_only)
         else -> strings.get(R.string.sync_status_unverified)
     },
     useOfflineCache = extState.useOfflineCache,

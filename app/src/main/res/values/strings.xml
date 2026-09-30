@@ -324,6 +324,8 @@
     <string name="sync_status_synced">已同步</string>
     <string name="sync_status_unverified">未验证</string>
     <string name="sync_status_syncing">正在同步...</string>
+    <string name="sync_status_verified_only">连接已验证</string>
+    <string name="sync_last_time_verified_never">连接已验证 · 尚未同步</string>
     <string name="sort_option_default">默认顺序</string>
     <string name="sort_option_name_asc">按名称排序 · 升序 (A → Z)</string>
     <string name="sort_option_name_desc">按名称排序 · 降序 (Z → A)</string>
