@@ -1,33 +1,24 @@
 package com.keepasskey.app.ui.screens.settings
 
-import com.keepasskey.app.sync.parentDirectoryPath
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
 /**
- * 远端目录浏览「返回上一级」接线守卫（仿安卓文件管理器 / Kp2a getParentPath）。
+ * 远端浏览对齐 keepass2android：面包屑 / kdbx 过滤 / 副文案接线守卫。
  */
-class RemoteBrowseBackUpWiringTest {
+class RemoteBrowseBreadcrumbWiringTest {
 
     @Test
-    fun `parentDirectoryPath 支持返回上一级`() {
-        assertEquals("folder", parentDirectoryPath("folder/sub"))
-        assertEquals("", parentDirectoryPath("folder"))
-        assertEquals("", parentDirectoryPath(""))
-        assertEquals("a/b", parentDirectoryPath("a/b/c"))
-        assertEquals("", parentDirectoryPath("/"))
-    }
-
-    @Test
-    fun `对话框与装配段必须接路径跳转`() {
+    fun `对话框与装配段使用面包屑与过滤`() {
         val dialog = readSource(DIALOG)
         val section = readSource(SECTION)
-        assertTrue(dialog.contains("onNavigateToPath"))
         assertTrue(dialog.contains("RemoteBrowseBreadcrumb"))
+        assertTrue(dialog.contains("sync_browse_kdbx_only"))
+        assertTrue(dialog.contains("RemoteBrowsePaths.visibleUnderKdbxOnly"))
+        assertTrue(dialog.contains("RemoteBrowsePaths.entrySubtitle"))
         assertTrue(section.contains("onNavigateToPath"))
-        assertTrue(section.contains("parentDirectoryPath") || section.contains("browseDirectory"))
+        assertTrue(section.contains("fun browseDirectory"))
     }
 
     private fun readSource(path: String): String {

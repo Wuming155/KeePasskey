@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -16,33 +18,38 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.sync.RemoteBrowsePaths
 import com.keepasskey.app.sync.RemoteBrowseUiState
 import com.keepasskey.sync.model.RemoteListEntry
 
 /**
- * ISSUE-P3-387：远端目录浏览对话框。
+ * 远端目录浏览对话框（对齐 keepass2android 文件选择器经验）。
  *
- * - 失败态**不伪装空目录**（如实展示错误，仍可手动填路径）；
- * - 分页：[RemoteBrowseUiState.Listing.truncated] 时提供「加载更多」；
- * - 选中 `.kdbx` 文件 → [onSelectFile] 回填远程路径；选中文件夹 → [onNavigate] 下钻；
- * - 非根目录时提供「返回上一级」（仿安卓文件管理器）；
- * - 导航时保留旧列表 + 加载指示，避免整表闪一下清空。
+ * - 失败态不伪装空目录；导航保留旧表 + 加载指示；
+ * - **面包屑**路径段可点跳转（仿安卓资源管理器 / Kp2a getParentPath）；
+ * - **默认只看**目录 + `.kdbx`（可切换显示全部）；
+ * - 文件行展示大小与修改时间（PROPFIND 已带）。
  */
 @Composable
 fun RemoteBrowseDialog(
     state: RemoteBrowseUiState,
     onSelectFile: (RemoteListEntry) -> Unit,
     onNavigate: (RemoteListEntry) -> Unit,
-    onNavigateUp: () -> Unit,
+    onNavigateToPath: (String) -> Unit,
     onLoadMore: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -63,11 +70,14 @@ fun RemoteBrowseDialog(
                         )
                     }
                     is RemoteBrowseUiState.Listing -> {
+                        var kdbxOnly by remember { mutableStateOf(true) }
                         RemoteBrowseListingBody(
                             state = state,
+                            kdbxOnly = kdbxOnly,
+                            onKdbxOnlyChange = { kdbxOnly = it },
                             onSelectFile = onSelectFile,
                             onNavigate = onNavigate,
-                            onNavigateUp = onNavigateUp,
+                            onNavigateToPath = onNavigateToPath,
                             onLoadMore = onLoadMore
                         )
                     }
@@ -81,18 +91,17 @@ fun RemoteBrowseDialog(
     )
 }
 
-/** Listing 分支体（自 [RemoteBrowseDialog] 拆出，行数门禁）。 */
 @Composable
 private fun RemoteBrowseListingBody(
     state: RemoteBrowseUiState.Listing,
+    kdbxOnly: Boolean,
+    onKdbxOnlyChange: (Boolean) -> Unit,
     onSelectFile: (RemoteListEntry) -> Unit,
     onNavigate: (RemoteListEntry) -> Unit,
-    onNavigateUp: () -> Unit,
+    onNavigateToPath: (String) -> Unit,
     onLoadMore: () -> Unit
 ) {
-    if (state.loading) {
-        BrowseLoadingIndicator()
-    }
+    if (state.loading) BrowseLoadingIndicator()
     if (state.lastError != null) {
         Text(
             text = stringResource(R.string.sync_browse_failed),
@@ -100,18 +109,36 @@ private fun RemoteBrowseListingBody(
             color = MaterialTheme.colorScheme.error
         )
     }
-    RemoteBrowsePathHeader(
+    RemoteBrowseBreadcrumb(
         directoryPath = state.directoryPath,
-        canGoUp = state.directoryPath.isNotEmpty() && !state.loading,
-        onNavigateUp = onNavigateUp
+        onNavigateToPath = onNavigateToPath
     )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = stringResource(R.string.sync_browse_kdbx_only),
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(checked = kdbxOnly, onCheckedChange = onKdbxOnlyChange)
+    }
     Text(
         text = stringResource(R.string.sync_browse_select_file_hint),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+    val visible = if (kdbxOnly) {
+        state.accumulated.filter { RemoteBrowsePaths.visibleUnderKdbxOnly(it.isDirectory, it.name) }
+    } else {
+        state.accumulated
+    }
     RemoteBrowseEntriesList(
-        state = state,
+        entries = visible,
+        truncated = state.truncated,
+        loading = state.loading,
         onSelectFile = onSelectFile,
         onNavigate = onNavigate,
         onLoadMore = onLoadMore
@@ -138,38 +165,47 @@ private fun BrowseLoadingIndicator() {
     }
 }
 
+/** 可点击面包屑（Kp2a getParentPath / 安卓资源管理器风格）。 */
 @Composable
-private fun RemoteBrowsePathHeader(
+private fun RemoteBrowseBreadcrumb(
     directoryPath: String,
-    canGoUp: Boolean,
-    onNavigateUp: () -> Unit
+    onNavigateToPath: (String) -> Unit
 ) {
+    val segments = remember(directoryPath) { RemoteBrowsePaths.breadcrumbSegments(directoryPath) }
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = stringResource(
-                R.string.sync_browse_current_path,
-                directoryPath.ifEmpty { "/" }
-            ),
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.weight(1f)
-        )
-        if (canGoUp) {
-            TextButton(onClick = onNavigateUp) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.sync_browse_cd_back_up),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(end = 4.dp)
-                )
+        segments.forEachIndexed { index, label ->
+            val isLast = index == segments.lastIndex
+            if (index > 0) {
                 Text(
-                    text = stringResource(R.string.sync_browse_back_up),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    text = "/",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
                 )
+            }
+            if (isLast) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            } else {
+                TextButton(
+                    onClick = { onNavigateToPath(RemoteBrowsePaths.breadcrumbPathAt(segments, index)) },
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
@@ -177,16 +213,18 @@ private fun RemoteBrowsePathHeader(
 
 @Composable
 private fun RemoteBrowseEntriesList(
-    state: RemoteBrowseUiState.Listing,
+    entries: List<RemoteListEntry>,
+    truncated: Boolean,
+    loading: Boolean,
     onSelectFile: (RemoteListEntry) -> Unit,
     onNavigate: (RemoteListEntry) -> Unit,
     onLoadMore: () -> Unit
 ) {
-    if (state.accumulated.isEmpty() && !state.loading) {
+    if (entries.isEmpty() && !loading) {
         Text(stringResource(R.string.sync_browse_empty))
         return
     }
-    if (state.accumulated.isEmpty()) {
+    if (entries.isEmpty()) {
         Text(
             text = stringResource(R.string.sync_browse_loading),
             style = MaterialTheme.typography.bodySmall,
@@ -195,7 +233,7 @@ private fun RemoteBrowseEntriesList(
         return
     }
     LazyColumn(modifier = Modifier.fillMaxWidth()) {
-        items(state.accumulated, key = { it.path }) { entry ->
+        items(entries, key = { it.path }) { entry ->
             BrowseEntryRow(
                 entry = entry,
                 onClick = {
@@ -205,11 +243,11 @@ private fun RemoteBrowseEntriesList(
             )
             HorizontalDivider()
         }
-        if (state.truncated) {
+        if (truncated) {
             item {
                 OutlinedButton(
                     onClick = onLoadMore,
-                    enabled = !state.loading,
+                    enabled = !loading,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp)
@@ -223,16 +261,26 @@ private fun RemoteBrowseEntriesList(
 
 @Composable
 private fun BrowseEntryRow(entry: RemoteListEntry, onClick: () -> Unit) {
+    val subtitle = RemoteBrowsePaths.entrySubtitle(entry.contentLength, entry.lastModifiedMillis)
     TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = if (entry.isDirectory) "📁 ${entry.name}" else "📄 ${entry.name}",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (entry.isDirectory) "📁 ${entry.name}" else "📄 ${entry.name}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }

@@ -809,6 +809,7 @@
     <string name="sync_browse_select_file_hint">点选 .kdbx 文件以回填远程路径；点选文件夹可继续下钻</string>
     <string name="sync_browse_back_up">返回上一级</string>
     <string name="sync_browse_cd_back_up">返回上一级目录</string>
+    <string name="sync_browse_kdbx_only">只看密码库文件</string>
     <string name="sync_s3_endpoint_label">服务端点 (Endpoint)</string>
     <string name="sync_s3_region_label">区域 (Region)</string>
     <string name="sync_s3_bucket_label">存储桶 (Bucket)</string>
