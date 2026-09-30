@@ -783,7 +783,7 @@
     <string name="sync_webdav_username_placeholder_nutstore">your@email.com</string>
     <string name="sync_webdav_password_hint_nutstore">Use the Nutstore WebDAV password from web security settings, not your account password</string>
     <string name="sync_webdav_path_placeholder_nutstore">keepasskey.kdbx</string>
-    <string name="sync_webdav_path_hint_nutstore">Relative to the WebDAV root; e.g. email/keepasskey.kdbx, or pick via Browse remote directory</string>
+    <string name="sync_webdav_path_hint_nutstore">Relative to the WebDAV root; for Nutstore use email/keepasskey.kdbx (e.g. abc@163.com/keepasskey.kdbx) or pick via Browse remote directory</string>
     <!-- ISSUE-P3-387 -->
     <string name="sync_browse_btn">Browse remote directory</string>
     <string name="sync_browse_title">Select remote file</string>

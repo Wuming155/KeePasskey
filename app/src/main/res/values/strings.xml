@@ -795,7 +795,7 @@
     <string name="sync_webdav_username_placeholder_nutstore">your@email.com</string>
     <string name="sync_webdav_password_hint_nutstore">密码须使用坚果云「WebDAV 专用密码」（网页版安全设置生成），不是登录密码</string>
     <string name="sync_webdav_path_placeholder_nutstore">keepasskey.kdbx</string>
-    <string name="sync_webdav_path_hint_nutstore">相对 WebDAV 根目录；可改为 邮箱/keepasskey.kdbx 等路径后「浏览远端目录」点选</string>
+    <string name="sync_webdav_path_hint_nutstore">相对 WebDAV 根目录；坚果云建议填「邮箱/keepasskey.kdbx」（如 abc@163.com/keepasskey.kdbx），或点「浏览远端目录」点选</string>
     <!-- ISSUE-P3-387：远端目录浏览选库 -->
     <string name="sync_browse_btn">浏览远端目录</string>
     <string name="sync_browse_title">选择远端文件</string>

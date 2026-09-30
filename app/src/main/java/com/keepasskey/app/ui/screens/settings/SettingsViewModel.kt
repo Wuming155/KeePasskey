@@ -286,8 +286,9 @@ class SettingsViewModel @Inject constructor(
         syncController.restoreSyncCredentials()
         // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
         sessionLockGuard.register()
-        // 离线开关联动：冷启动时把默认/持久化的离线偏好传导至同步协调器
-        syncCoordinator.setOfflineMode(extendedPreferences.settings.value.useOfflineCache)
+        // 注意：useOfflineCache（离线缓存）≠ SyncEngine 强制离线。
+        // 原先把缓存开关误接到 setOfflineMode(true) 会使同步引擎永不联网，
+        // 首传被标成「首次同步上传云端失败」——已移除误接（2026-10-30）。
         coldStartSyncGate.checkAndTrigger()
         // ISSUE-P2-212：跟踪活动库（开启生物识别开关时据此判定封印凭据是否就绪）
         viewModelScope.launch {

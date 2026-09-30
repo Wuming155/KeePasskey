@@ -136,10 +136,13 @@ internal class SettingsExtendedPreferencesController(
     fun setSearchMatchMode(mode: SearchMatchMode) = updateExtended { it.copy(searchMatchMode = mode) }
 
     // ========== KP2A 扩展：文件处理与高级同步策略 ==========
+    /**
+     * 离线缓存开关：断网时继续读写本地缓存副本。
+     * **不**映射为 `SyncEngine.isOffline`（强制不联网）——两者语义不同；
+     * 误接会使首传永远失败（见 ISSUE 关联修复 2026-10-30）。
+     */
     fun setUseOfflineCache(enabled: Boolean) {
         updateExtended { it.copy(useOfflineCache = enabled) }
-        // 离线开关联动：实时传导至同步引擎决策树（SyncEngine.isOffline）
-        syncCoordinator.setOfflineMode(enabled)
     }
 
     fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) {

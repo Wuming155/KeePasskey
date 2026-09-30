@@ -44,6 +44,8 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
                     session.lastSyncedDb = databaseSession.databaseFlow.value
                     SyncOutcome.UploadedLocal
                 }
+                // 离线 / 远端不可达：如实报 Offline，不得误标成「上传云端失败」
+                is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
                 else -> SyncOutcome.Error(strings.get(R.string.sync_error_first_upload_failed))
             }
         } else {
