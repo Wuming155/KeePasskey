@@ -31,21 +31,24 @@ sealed interface RemoteBrowseUiState {
         val nextCursor: String?,
         val truncated: Boolean,
         /** 上一页累积条目（分页续拉时合并展示）。 */
-        val accumulated: List<RemoteListEntry> = entries
+        val accumulated: List<RemoteListEntry> = entries,
+        /** 导航/续拉进行中：保持旧列表可见，避免整表闪一下（仿安卓文件管理器）。 */
+        val loading: Boolean = false,
+        /** 导航失败时的错误类型名；旧列表仍保留。 */
+        val lastError: String? = null
     ) : RemoteBrowseUiState
     data class Failed(val errorType: String) : RemoteBrowseUiState
 }
 
 /**
- * 远端目录浏览执行体（ISSUE-P3-387 / P3-396）。
+ * 远端目录浏览执行体（ISSUE-P3-387 / P3-396 / 导航防闪）。
  *
  * 口径：
  * - **PD-02 不变**：浏览仍走既有 Provider 构造期 SSRF / HTTPS 校验（同一端点相对路径）；
  * - **保守降级**：Provider 失败一律上浮失败态，**不**伪装空目录（kp2a 教训）；
  * - **表单优先**：浏览使用**当前表单**（可能尚未保存）的端点与凭据 clone；
- * - **目录路径语义（P3-396）**：[browseWebDav] / [browseS3] 的 path 参数是**要列举的目录路径本身**，
- *   **不再**在控制器内取父目录——下钻传 `entry.path`，分页续拉传 `directoryPath`；
- *   仅初始选库时由 UI 对可能为文件的 `remotePath` 取父目录（见 [parentDirectoryPath]）。
+ * - **目录路径语义（P3-396）**：path 参数是**要列举的目录路径本身**；
+ * - **导航防闪**：已有列表时下钻/上一级不先切空 Loading，而是 `Listing(loading=true)` 保留旧表。
  */
 @Singleton
 class RemoteBrowseController @Inject constructor(
@@ -60,7 +63,7 @@ class RemoteBrowseController @Inject constructor(
     /**
      * 浏览 [directoryPath] 目录（空串 = 端点根）。
      *
-     * @param cursor 上一页 nextCursor；null = 首页（会清空累积）
+     * @param cursor 上一页 nextCursor；null = 首页
      */
     suspend fun browseWebDav(
         url: String,
@@ -73,20 +76,18 @@ class RemoteBrowseController @Inject constructor(
             mutableState.value = RemoteBrowseUiState.Failed("InvalidEndpointError")
             return
         }
-        mutableState.value = RemoteBrowseUiState.Loading
-        if (cursor == null) accumulated = mutableListOf()
+        beginBrowseLoading()
         val provider = try {
             WebDavSyncProvider(
                 serverUrl = normalizeHttps(url),
                 username = username,
-                // 借用语义：Provider 构造期清零本 clone；本方法结束前再兜底
                 passwordChars = password.copyOf(),
                 networkOptions = SyncNetworkOptions(),
                 transferOptions = SyncTransferOptions.DISABLED
             )
         } catch (t: Throwable) {
             debugLog.warn(TAG, "WebDAV 浏览 Provider 构造失败: ${t.javaClass.simpleName}")
-            mutableState.value = RemoteBrowseUiState.Failed(t.javaClass.simpleName)
+            publishBrowseFailure(t.javaClass.simpleName)
             return
         }
         runAndPublish(provider, directoryPath, cursor)
@@ -106,8 +107,7 @@ class RemoteBrowseController @Inject constructor(
             mutableState.value = RemoteBrowseUiState.Failed("InvalidEndpointError")
             return
         }
-        mutableState.value = RemoteBrowseUiState.Loading
-        if (cursor == null) accumulated = mutableListOf()
+        beginBrowseLoading()
         val accessClone = accessKey.copyOf()
         val secretClone = secretKey.copyOf()
         val provider = try {
@@ -124,13 +124,39 @@ class RemoteBrowseController @Inject constructor(
             accessClone.fill('0')
             secretClone.fill('0')
             debugLog.warn(TAG, "S3 浏览 Provider 构造失败: ${t.javaClass.simpleName}")
-            mutableState.value = RemoteBrowseUiState.Failed(t.javaClass.simpleName)
+            publishBrowseFailure(t.javaClass.simpleName)
             return
         }
         try {
             runAndPublish(provider, directoryPath, cursor)
         } finally {
             provider.clearCredentials()
+        }
+    }
+
+    /**
+     * 导航/续拉开始：已有 Listing 时保留旧表 + `loading=true`，避免整表闪一下。
+     * 首次打开（无旧表）才进入纯 Loading。
+     */
+    private fun beginBrowseLoading() {
+        val previous = mutableState.value
+        if (previous is RemoteBrowseUiState.Listing) {
+            // 续拉时保留累积；下钻/上一级时累积将在成功后整体替换
+            mutableState.value = previous.copy(loading = true, lastError = null)
+        } else {
+            if (previous !is RemoteBrowseUiState.Listing) {
+                accumulated = mutableListOf()
+            }
+            mutableState.value = RemoteBrowseUiState.Loading
+        }
+    }
+
+    private fun publishBrowseFailure(errorType: String) {
+        val previous = mutableState.value as? RemoteBrowseUiState.Listing
+        if (previous != null && previous.loading) {
+            mutableState.value = previous.copy(loading = false, lastError = errorType)
+        } else {
+            mutableState.value = RemoteBrowseUiState.Failed(errorType)
         }
     }
 
@@ -151,14 +177,14 @@ class RemoteBrowseController @Inject constructor(
         when {
             effective.isFailure -> {
                 val err = effective.exceptionOrNull()
-                debugLog.warn(TAG, "远端目录浏览失败: ${err?.javaClass?.simpleName ?: "Unknown"}")
-                mutableState.value = RemoteBrowseUiState.Failed(
-                    err?.javaClass?.simpleName ?: "UnknownError"
-                )
+                val errorType = err?.javaClass?.simpleName ?: "UnknownError"
+                debugLog.warn(TAG, "远端目录浏览失败: $errorType")
+                publishBrowseFailure(errorType)
             }
             else -> {
                 val page = effective.getOrThrow()
                 val publishedPath = if (result.isFailure) "" else browsePath
+                // 成功才替换累积；失败/加载中不提前清表
                 if (cursor == null) accumulated = page.entries.toMutableList()
                 else accumulated.addAll(page.entries)
                 mutableState.value = RemoteBrowseUiState.Listing(
@@ -166,7 +192,9 @@ class RemoteBrowseController @Inject constructor(
                     entries = page.entries,
                     nextCursor = page.nextCursor,
                     truncated = page.truncated,
-                    accumulated = accumulated.toList()
+                    accumulated = accumulated.toList(),
+                    loading = false,
+                    lastError = null
                 )
             }
         }
