@@ -279,6 +279,9 @@
     <string name="vault_sync_remote_updated">Remote updates detected; local database refreshed</string>
     <string name="sync_s3_path_style_title">Path-Style Addressing</string>
     <string name="sync_s3_path_style_sub">Enable for commercial-cloud scenarios such as Cloudflare R2 or IP-direct endpoints; keep off for AWS</string>
+    <!-- ISSUE-P2-402: classify first-probe failures by exception type instead of blanket offline -->
+    <string name="sync_error_auth_failed">Sync failed: authentication rejected by the remote server (401/403). Check the username and WebDAV app password (or S3 access keys) in Settings → Cloud sync</string>
+    <string name="sync_error_remote_rejected">Sync failed: the remote server rejected the request (%1$s). This may be rate limiting (429/503) or a temporary error; retry later</string>
     <string name="sync_error_https_required">Save rejected: the %1$s endpoint must use HTTPS (starts with https://). Cleartext HTTP is prohibited to protect credential and vault traffic</string>
     <string name="vault_group_created">Folder "%1$s" created</string>
     <!-- Vault top-bar overflow menu: scan to add a verification-code entry -->

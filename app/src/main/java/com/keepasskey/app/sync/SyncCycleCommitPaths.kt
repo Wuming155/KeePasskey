@@ -24,6 +24,9 @@ import com.keepasskey.sync.provider.SyncProvider
  *
  * @return null 表示远端已存在（本步骤无结论，调用方继续后续决策）；非 null 即本步骤的同步结论。
  */
+/** ISSUE-P2-402：首传探测失败的日志标签（本文件此前无日志面，随误报修复引入） */
+private const val TAG = "SyncCycleCommitPaths"
+
 internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
     provider: SyncProvider,
     syncEngine: SyncEngine,
@@ -49,7 +52,26 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
                 else -> SyncOutcome.Error(strings.get(R.string.sync_error_first_upload_failed))
             }
         } else {
-            return SyncOutcome.Offline
+            // ISSUE-P2-402：非 404 失败不再一律误报「离线」——401/403 鉴权失败、429/503 限流、
+            // 超时等此前全部被标成 Offline（网络正常时同步失败也无从定位真实原因），
+            // 现按异常类型如实归类并留痕（远端路径为非敏感元数据，与 RemoteBrowse 日志同口径）。
+            com.keepasskey.core.log.AppLog.w(
+                TAG,
+                "首传探测失败: type=${ex?.javaClass?.simpleName}, remotePath=$remotePath"
+            )
+            return when (ex) {
+                is com.keepasskey.sync.model.SyncException.NetworkError -> SyncOutcome.Offline
+                is com.keepasskey.sync.model.SyncException.AuthenticationError -> SyncOutcome.Error(
+                    strings.get(R.string.sync_error_auth_failed)
+                )
+                else -> SyncOutcome.Error(
+                    strings.get(
+                        R.string.sync_error_remote_rejected,
+                        (ex as? com.keepasskey.sync.model.SyncException.ProtocolError)?.statusCode?.toString()
+                            ?: ex?.javaClass?.simpleName ?: "Unknown"
+                    )
+                )
+            }
         }
     }
     return null

@@ -70,6 +70,9 @@ class SyncCoordinatorTest {
         var lastExpectedEtag: String? = null
             private set
 
+        // ISSUE-P2-402：注入 getMetadata 的失败类型（探测期分类映射的行为级判据）
+        var metadataFailure: Throwable? = null
+
         // ISSUE-P1-275 AC③：接下来 N 次 upload 一律 412（模拟合并窗口内远端持续被他人修改）
         var forceConflictUploads: Int = 0
 
@@ -78,6 +81,7 @@ class SyncCoordinatorTest {
         }
 
         override suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata> {
+            metadataFailure?.let { return Result.failure(it) }
             if (!isReachable) return Result.failure(SyncException.NetworkError("Network error"))
             val item = remoteStorage[remotePath] ?: return Result.failure(
                 SyncException.FileNotFound("File not found: $remotePath")
@@ -202,6 +206,47 @@ class SyncCoordinatorTest {
 
         val outcome = coordinator.syncNow()
         assertTrue("断网且有本地缓存时应降级为 Offline: $outcome", outcome is SyncOutcome.Offline)
+    }
+
+    // ===== ISSUE-P2-402：首传探测（cached=false 的 getMetadata）失败按异常类型如实归类 =====
+
+    @Test
+    fun `首传探测鉴权失败归类为Error而非Offline`() = runTest(testDispatcher) {
+        val memoryProvider = MemorySyncProvider()
+        coordinator.testSyncProvider = memoryProvider
+        coordinator.testRemotePath = "/remote/vault_p2_402_auth.kdbx"
+        memoryProvider.metadataFailure = SyncException.AuthenticationError("401 Unauthorized")
+
+        val outcome = coordinator.syncNow()
+        assertTrue(
+            "鉴权失败必须报 Error（整改前一律误报 Offline）: $outcome",
+            outcome is SyncOutcome.Error
+        )
+    }
+
+    @Test
+    fun `首传探测限流失败归类为Error而非Offline`() = runTest(testDispatcher) {
+        val memoryProvider = MemorySyncProvider()
+        coordinator.testSyncProvider = memoryProvider
+        coordinator.testRemotePath = "/remote/vault_p2_402_rate.kdbx"
+        memoryProvider.metadataFailure = SyncException.ProtocolError(503, "Service Unavailable")
+
+        val outcome = coordinator.syncNow()
+        assertTrue(
+            "限流（503）必须报 Error（整改前一律误报 Offline）: $outcome",
+            outcome is SyncOutcome.Error
+        )
+    }
+
+    @Test
+    fun `首传探测网络错误仍归类为Offline`() = runTest(testDispatcher) {
+        val memoryProvider = MemorySyncProvider()
+        coordinator.testSyncProvider = memoryProvider
+        coordinator.testRemotePath = "/remote/vault_p2_402_net.kdbx"
+        memoryProvider.metadataFailure = SyncException.NetworkError("Connection reset")
+
+        val outcome = coordinator.syncNow()
+        assertTrue("真网络错误仍应报 Offline: $outcome", outcome is SyncOutcome.Offline)
     }
 
     @Test
