@@ -308,9 +308,21 @@ internal class SettingsSyncController(
 
             val outcome = syncCoordinator.syncNow()
             val feedback = when (outcome) {
-                is SyncOutcome.UpToDate -> UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
-                is SyncOutcome.UploadedLocal -> UiMessage(R.string.sync_feedback_uploaded, listOf(provider.protocol))
-                is SyncOutcome.MergedAndUploaded -> UiMessage(R.string.sync_feedback_merged, listOf(provider.protocol))
+                is SyncOutcome.UpToDate -> UiMessage(
+                    R.string.sync_feedback_done,
+                    listOf(provider.protocol),
+                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                )
+                is SyncOutcome.UploadedLocal -> UiMessage(
+                    R.string.sync_feedback_uploaded,
+                    listOf(provider.protocol),
+                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                )
+                is SyncOutcome.MergedAndUploaded -> UiMessage(
+                    R.string.sync_feedback_merged,
+                    listOf(provider.protocol),
+                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                )
                 is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
                 // ISSUE-P2-291 AC②：绑定拦截只提示，确认入口在库列表页（下拉刷新触发），
                 // 设置页不提供第二处「整库覆盖」闸门
@@ -366,7 +378,11 @@ internal class SettingsSyncController(
             val result = syncCoordinator.testConnection()
             val verified = result.isSuccess
             val feedback = if (verified) {
-                UiMessage(R.string.sync_feedback_done, listOf(provider.protocol))
+                UiMessage(
+                    R.string.sync_feedback_done,
+                    listOf(provider.protocol),
+                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                )
             } else {
                 UiMessage(
                     R.string.sync_feedback_error,

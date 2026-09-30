@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui
 
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -11,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.keepasskey.app.R
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -27,6 +29,9 @@ import kotlinx.coroutines.withContext
  *
  * 文案解析走外壳持有的本地化 [android.content.Context]（`LocalContext` 已由 `KeePasskeyApp` 的
  * `CompositionLocalProvider` 换成随语言切换的派生上下文），格式化参数按资源占位符就地展开。
+ *
+ * §373：无撤销动作时才尊重 [com.keepasskey.app.ui.model.UiMessage.durationMillis]
+ * （同步状态类反馈 ≈2s）；有撤销动作恒走 Material Long（≈10s），不得被收短。
  */
 @Composable
 internal fun AppGlobalSnackbarHost() {
@@ -53,7 +58,22 @@ internal fun AppGlobalSnackbarHost() {
                 } else {
                     null
                 }
-                val result = hostState.showSnackbar(message = text, actionLabel = undoLabel)
+                // §373：无撤销动作时才尊重自定义时长；有撤销动作恒走 Material Long
+                val overrideMs = if (undoLabel == null) message.durationMillis else null
+                val dismissJob = if (overrideMs != null) {
+                    launch {
+                        delay(overrideMs)
+                        hostState.currentSnackbarData?.dismiss()
+                    }
+                } else {
+                    null
+                }
+                val result = hostState.showSnackbar(
+                    message = text,
+                    actionLabel = undoLabel,
+                    duration = if (undoLabel != null) SnackbarDuration.Long else SnackbarDuration.Short
+                )
+                dismissJob?.cancel()
                 if (result == SnackbarResult.ActionPerformed) {
                     // NonCancellable：撤销（恢复落库）一旦开始，不得被「下一条消息替换本条」
                     // 的 showJob 取消打断——恢复是数据写入，中断会留下半截状态

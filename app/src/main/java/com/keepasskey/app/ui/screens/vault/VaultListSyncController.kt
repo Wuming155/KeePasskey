@@ -75,7 +75,12 @@ internal class VaultListSyncController(
             events.any { it is SyncCacheEvent.CouldntSaveToRemote } ->
                 onMessage(UiMessage(R.string.vault_sync_saved_locally))
             events.any { it is SyncCacheEvent.UpdatedCachedFileOnLoad } ->
-                onMessage(UiMessage(R.string.vault_sync_remote_updated))
+                onMessage(
+                    UiMessage(
+                        R.string.vault_sync_remote_updated,
+                        durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                    )
+                )
             else -> Unit
         }
     }
@@ -104,12 +109,22 @@ internal class VaultListSyncController(
         when (outcome) {
             is SyncOutcome.UpToDate -> {
                 lastSyncTimeMillisFlow.value = System.currentTimeMillis()
-                onMessage(UiMessage(R.string.vault_sync_completed))
+                onMessage(
+                    UiMessage(
+                        R.string.vault_sync_completed,
+                        durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                    )
+                )
             }
             is SyncOutcome.UploadedLocal,
             is SyncOutcome.MergedAndUploaded -> {
                 lastSyncTimeMillisFlow.value = System.currentTimeMillis()
-                onMessage(UiMessage(R.string.vault_sync_uploaded))
+                onMessage(
+                    UiMessage(
+                        R.string.vault_sync_uploaded,
+                        durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                    )
+                )
             }
             is SyncOutcome.ConflictNeedsUser -> {
                 onMessage(UiMessage(R.string.sync_feedback_conflict))
