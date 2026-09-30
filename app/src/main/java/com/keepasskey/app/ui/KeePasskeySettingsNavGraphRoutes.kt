@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,6 +86,9 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
 internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController) {
     composable(Screen.SettingsSync.route) {
         val settingsViewModel: SettingsViewModel = hiltViewModel()
+        // ISSUE-P2-406：仅同步页需要凭据预填 / 封印探测；水合在后台派发器执行，
+        // 不阻塞本页首帧组合（其余设置页零 Keystore 成本）
+        LaunchedEffect(Unit) { settingsViewModel.hydrateSyncUi() }
         val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
         // Wave 15 整改：同步凭据一次性预填通道（明文不进 UiState）
         val webdavPasswordPrefill by settingsViewModel.webdavPasswordPrefill.collectAsStateWithLifecycle()

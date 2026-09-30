@@ -8,6 +8,7 @@ import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.StringsProvider
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,7 +70,9 @@ internal class SettingsSyncController(
             wifiOnlySync = true,
             isSyncing = false,
             syncFeedbackMessage = null,
-            syncSealHardwareBacked = probeSealHardwareBacked()
+            // ISSUE-P2-406：构造期**禁止**探测 Keystore——导航组合线程上不得做硬件级查询；
+            // 实测值由 hydrate / save / restore 路径在后台派发器刷新（ISSUE-P2-285 语义不变）
+            syncSealHardwareBacked = false
         )
     )
 
@@ -84,6 +87,19 @@ internal class SettingsSyncController(
     /** ISSUE-P2-285：封印密钥可能在保存后新生成 / 轮换，保存成功路径后重测。 */
     private fun refreshSealHardwareBacked() {
         syncStateFlow.update { it.copy(syncSealHardwareBacked = probeSealHardwareBacked()) }
+    }
+
+    /**
+     * ISSUE-P2-406：同步 UI 水合（wifi 偏好回填 + 凭据预填恢复 + 封印等级探测）。
+     *
+     * **必须在后台派发器执行**：`restoreSyncCredentials` 含 Keystore AES-GCM 解密，
+     * 阻塞导航组合线程会表现为「点进设置二级页卡一下」。仅同步页需要；其余设置页零成本。
+     */
+    fun hydrate() {
+        scope.launch(Dispatchers.IO) {
+            updateWifiOnlySync(extendedSettingsStore.loadWifiOnlySync())
+            restoreSyncCredentials()
+        }
     }
 
     val state: StateFlow<SyncUiState> = syncStateFlow.asStateFlow()

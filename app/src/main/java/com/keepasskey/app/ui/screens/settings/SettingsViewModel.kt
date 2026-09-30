@@ -282,9 +282,7 @@ class SettingsViewModel @Inject constructor(
     )
 
     init {
-        // TASK-12 整改：wifiOnlySync 持久化恢复（周期同步网络约束的消费方）
-        syncController.updateWifiOnlySync(extendedSettingsStore.loadWifiOnlySync())
-        syncController.restoreSyncCredentials()
+        // ISSUE-P2-406：Keystore 解密/封印探测/wifi 回填不在 init 同步执行；见 hydrateSyncUi()
         // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
         sessionLockGuard.register()
         // 注意：useOfflineCache（离线缓存）≠ SyncEngine 强制离线。
@@ -359,6 +357,8 @@ class SettingsViewModel @Inject constructor(
     fun setWifiOnlySync(enabled: Boolean) = extendedPreferences.setWifiOnlySync(enabled)
     fun triggerSync() = syncController.triggerSync()
     fun testSyncConnection() = syncController.testSyncConnection()
+    /** ISSUE-P2-406：同步页水合（PD-23 单语句委托；体内后台派发器做 Keystore 解密） */
+    fun hydrateSyncUi() = syncController.hydrate()
 
     /**
      * 「保存并同步」顺序编排：保存成功 →（未验证时先）测试连接 → 通过则同步。

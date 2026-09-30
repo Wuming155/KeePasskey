@@ -33,8 +33,10 @@ import org.junit.Test
  * （`SessionLockGuard(databaseSession) { 清三条同步凭据预填通道 }`）此前无宿主直调用例。
  *
  * 被锁定的通道是 ISSUE-P2-01 / Wave 15 立下的「CharArray 一次性预填」面：WebDAV 口令、
- * S3 AccessKey ID、S3 SecretKey——三条都只经 `restoreSyncCredentials()`（VM `init` 内）填充，
- * 所以用例必须**先构造出已封印落盘的凭据**，否则断言会退化成「本来就是 null」的空断言。
+ * S3 AccessKey ID、S3 SecretKey——三条经 `SettingsViewModel.hydrateSyncUi()`（同步页水合，
+ * 后台派发器调用 `restoreSyncCredentials()`）填充（ISSUE-P2-406 起不再在 VM `init` 同步执行）。
+ * 所以用例必须**先构造出已封印落盘的凭据**，并在水合跑完后再读预填通道，否则断言会退化成
+ * 「本来就是 null」的空断言。
  *
  * 三层证据：
  * 1. 锁定后三条通道置空；
@@ -95,7 +97,18 @@ class SettingsSessionLockEraseTest {
 
         val viewModel = buildViewModel(session, credentialsStore)
 
-        // 预填通道由 VM 的 init 恢复；跑完 init 里排队的动作再读
+        // ISSUE-P2-406：预填通道由同步页水合（hydrateSyncUi → 真实 Dispatchers.IO）恢复；
+        // IO 线程不受 testScheduler 控制，须轮询等待预填就绪后再锁库
+        viewModel.hydrateSyncUi()
+        val deadlineMs = System.currentTimeMillis() + 5_000
+        while (
+            (viewModel.webdavPasswordPrefill.value == null ||
+                viewModel.s3AccessKeyPrefill.value == null ||
+                viewModel.s3SecretKeyPrefill.value == null) &&
+            System.currentTimeMillis() < deadlineMs
+        ) {
+            Thread.sleep(20)
+        }
         runCurrent()
         val webdavBefore = viewModel.webdavPasswordPrefill.value
         val accessBefore = viewModel.s3AccessKeyPrefill.value
