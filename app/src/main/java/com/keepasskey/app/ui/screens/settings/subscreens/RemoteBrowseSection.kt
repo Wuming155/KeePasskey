@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings.subscreens
 
 import androidx.compose.runtime.Composable
 import com.keepasskey.app.sync.RemoteBrowseUiState
+import com.keepasskey.app.sync.parentDirectoryPath
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.sync.model.RemoteListEntry
 
@@ -32,6 +33,11 @@ internal fun RemoteBrowseSection(
 ) {
     if (!visible) return
     val listing = browseState as? RemoteBrowseUiState.Listing
+
+    /** 当前目录 → 父目录；根目录返回空串（调用方应在 UI 上隐藏「返回上一级」）。 */
+    fun currentParentPath(): String =
+        parentDirectoryPath(listing?.directoryPath.orEmpty())
+
     RemoteBrowseDialog(
         state = browseState,
         onSelectFile = onSelectFile,
@@ -45,6 +51,20 @@ internal fun RemoteBrowseSection(
                     s3AccessKeyChars.copyOf(), s3SecretKeyChars.copyOf(),
                     entry.path, s3UsePathStyle, null
                 )
+            }
+        },
+        onNavigateUp = {
+            val parent = currentParentPath()
+            if (listing != null && listing.directoryPath.isNotEmpty()) {
+                if (provider == CloudSyncProvider.WEBDAV) {
+                    onBrowseWebDav(webdavUrl, webdavUsername, webdavPasswordChars.copyOf(), parent, null)
+                } else {
+                    onBrowseS3(
+                        s3Endpoint, s3Bucket, s3Region,
+                        s3AccessKeyChars.copyOf(), s3SecretKeyChars.copyOf(),
+                        parent, s3UsePathStyle, null
+                    )
+                }
             }
         },
         onLoadMore = {

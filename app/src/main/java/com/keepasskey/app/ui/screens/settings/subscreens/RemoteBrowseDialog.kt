@@ -7,13 +7,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -27,13 +31,15 @@ import com.keepasskey.sync.model.RemoteListEntry
  *
  * - 失败态**不伪装空目录**（如实展示错误，仍可手动填路径）；
  * - 分页：[RemoteBrowseUiState.Listing.truncated] 时提供「加载更多」；
- * - 选中 `.kdbx` 文件 → [onSelectFile] 回填远程路径；选中文件夹 → [onNavigate] 下钻。
+ * - 选中 `.kdbx` 文件 → [onSelectFile] 回填远程路径；选中文件夹 → [onNavigate] 下钻；
+ * - 非根目录时提供「返回上一级」（仿安卓文件管理器）。
  */
 @Composable
 fun RemoteBrowseDialog(
     state: RemoteBrowseUiState,
     onSelectFile: (RemoteListEntry) -> Unit,
     onNavigate: (RemoteListEntry) -> Unit,
+    onNavigateUp: () -> Unit,
     onLoadMore: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -54,13 +60,36 @@ fun RemoteBrowseDialog(
                         )
                     }
                     is RemoteBrowseUiState.Listing -> {
-                        Text(
-                            text = stringResource(
-                                R.string.sync_browse_current_path,
-                                state.directoryPath.ifEmpty { "/" }
-                            ),
-                            style = MaterialTheme.typography.labelMedium
-                        )
+                        val canGoUp = state.directoryPath.isNotEmpty()
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    R.string.sync_browse_current_path,
+                                    state.directoryPath.ifEmpty { "/" }
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (canGoUp) {
+                                TextButton(onClick = onNavigateUp) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = stringResource(R.string.sync_browse_cd_back_up),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(end = 4.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.sync_browse_back_up),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             text = stringResource(R.string.sync_browse_select_file_hint),
                             style = MaterialTheme.typography.bodySmall,
