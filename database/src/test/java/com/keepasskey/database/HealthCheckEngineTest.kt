@@ -1,9 +1,11 @@
 package com.keepasskey.database.audit
 
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -223,6 +225,114 @@ class HealthCheckEngineTest {
         assertFalse(
             "展开后的强口令不得判 WEAK（含展开产物为空的回归防护）",
             issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "StrongReferrer" }
+        )
+    }
+
+    // ---- ISSUE-P3-407：通行密钥空密码不得误判为弱密码 ----
+
+    private fun passkeyEntryOf(
+        title: String,
+        password: String? = null,
+        customKeys: List<String> = listOf(
+            PasskeyData.KPEX_FIELD_RELYING_PARTY,
+            PasskeyData.KPEX_FIELD_CREDENTIAL_ID,
+            PasskeyData.KPEX_FIELD_PRIVATE_KEY
+        ),
+        times: KdbxTimes = KdbxTimes()
+    ): KdbxEntry {
+        val fields = mutableMapOf<String, ProtectedString>(
+            KdbxConstants.Fields.TITLE to ProtectedString(title, isProtected = false)
+        )
+        if (password != null) {
+            fields[KdbxConstants.Fields.PASSWORD] = ProtectedString(password, isProtected = true)
+        }
+        return KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = fields,
+            customFields = customKeys.map { key ->
+                KdbxCustomField(
+                    key = key,
+                    value = ProtectedString("test-only-$key", isProtected = true)
+                )
+            },
+            times = times
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `通行密钥条目空密码不判弱密码`() {
+        val passkey = passkeyEntryOf("GitHub Passkey", password = null)
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(passkey))
+
+        assertFalse(
+            "通行密钥无传统密码属正常形态，空密码不得报 WEAK",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "GitHub Passkey" }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `普通条目空密码仍判弱密码`() {
+        val empty = entryOf("Legacy Empty", "")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(empty))
+
+        assertTrue(
+            "非 passkey 空密码仍必须报 WEAK（不得连带放宽）",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Legacy Empty" }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `通行密钥若设置了密码仍参与强度评估`() {
+        val weakPasskey = passkeyEntryOf("Passkey With Weak Password", password = "123456")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(weakPasskey))
+
+        assertTrue(
+            "passkey 条目一旦设置密码，弱口令判定不得被 passkey 身份豁免",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Passkey With Weak Password" }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `不完整 passkey schema 也不把空密码判弱`() {
+        val partial = passkeyEntryOf(
+            title = "Partial Passkey",
+            password = null,
+            customKeys = listOf(
+                PasskeyData.KPEX_FIELD_RELYING_PARTY
+            )
+        )
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(partial))
+
+        assertFalse(
+            "半成品 passkey（仅 RP 键）同样不得被空密码误报 WEAK",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Partial Passkey" }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `通行密钥空密码仍可报告过期条目`() {
+        val expiredPasskey = passkeyEntryOf(
+            title = "Expired Passkey",
+            password = null,
+            times = KdbxTimes(
+                expires = true,
+                expiryTime = Instant.now().minusSeconds(86_400)
+            )
+        )
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(expiredPasskey))
+
+        assertTrue(
+            "跳过空密码弱判定后，EXPIRED 时效检查仍须生效",
+            issues.any { it.riskLevel == PasswordRiskLevel.EXPIRED && it.title == "Expired Passkey" }
+        )
+        assertFalse(
+            "过期 passkey 不得同时因空密码报 WEAK",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Expired Passkey" }
         )
     }
 }
