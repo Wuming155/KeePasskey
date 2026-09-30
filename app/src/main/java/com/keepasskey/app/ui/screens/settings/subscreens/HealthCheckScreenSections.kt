@@ -1,8 +1,10 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -182,4 +185,40 @@ private fun HealthCheckScoreTexts(
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
+}
+
+/**
+ * 安全建议卡片（§191 自 `HealthCheckScreen` 原样下沉，正文与文案逐字未改）。
+ * ISSUE-P3-405 拆分：自 `HealthCheckComponents.kt` 移入本段落文件，压回 tier2 预算。
+ */
+@Composable
+internal fun HealthTipsCard() {
+    BentoCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.health_tips_title),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Text(
+                text = stringResource(R.string.health_tips_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 20.sp
+            )
+        }
+    }
 }

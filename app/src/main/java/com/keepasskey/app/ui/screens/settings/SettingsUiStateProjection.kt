@@ -239,6 +239,8 @@ internal fun buildSettingsUiState(
     healthMessage = healthState.healthMessage,
     weakPasswordCount = healthState.weakPasswordCount,
     reusedPasswordCount = healthState.reusedPasswordCount,
+    expiredPasswordCount = healthState.expiredPasswordCount,
+    healthIssues = healthState.healthIssues,
     compromisedPasswordCount = healthState.compromisedPasswordCount,
     breachCheckStatus = healthState.breachCheckStatus,
     breachCheckMessage = healthState.breachCheckMessage,

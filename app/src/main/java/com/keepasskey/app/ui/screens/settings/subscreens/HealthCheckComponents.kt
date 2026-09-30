@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
-import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -35,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.breach.BreachCheckStatus
-import com.keepasskey.app.ui.components.BentoCard
+import com.keepasskey.app.ui.screens.settings.HealthIssueUi
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
@@ -135,7 +134,7 @@ internal fun HealthAuditRowItem(
     modifier: Modifier = Modifier
 ) {
     // 「需注意」属 warning 语义，不用 error 红，避免与真正的错误/危险态混淆
-    val securityColors = com.keepasskey.app.ui.theme.LocalSecurityColors.current
+    val securityColors = LocalSecurityColors.current
     val warningBorder = securityColors.warning.copy(alpha = 0.35f)
     val warningChipBg = securityColors.warning.copy(alpha = 0.14f)
     val warningChipFg = securityColors.warning
@@ -206,7 +205,7 @@ internal fun HealthAuditRowItem(
 // 故预览本文件中同样可独立渲染且无需额外依赖的 BreachCheckToggleRow
 // 为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
 @androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@androidx.compose.ui.tooling.preview.Preview(name = "泄露密码检测开关行 - 深色", showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun HealthCheckComponentsPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
@@ -247,41 +246,59 @@ internal fun healthAuditTone(hasScanned: Boolean, violationCount: Int): HealthAu
 }
 
 /**
- * 弱口令 / 重复口令两条审计行的共用形态（§191 自 `HealthCheckScreen` 原样下沉，逻辑零变更）。
+ * 弱口令 / 重复口令 / 过期凭据审计行的共用形态（§191 自 `HealthCheckScreen` 原样下沉，逻辑零变更）。
  *
- * 刻意**不读** `SettingsUiState`：入参为已取出的标量，展示决策由 [healthAuditTone] 给出。
+ * ISSUE-P3-405：计数 > 0 且已扫描时，在行下追加**受影响条目列表**——只报计数用户无从得知「哪些是弱密码」。
+ * 明细展示件见同包 [HealthCheckIssueList.kt]。
+ *
+ * 刻意**不读** `SettingsUiState`：入参为已取出的标量与明细，展示决策由 [healthAuditTone] 给出。
  */
 @Composable
 internal fun HealthCountAuditRow(
     title: String,
     subtitle: String,
     hasScanned: Boolean,
-    violationCount: Int
+    violationCount: Int,
+    issues: List<HealthIssueUi> = emptyList(),
+    onIssueClick: (String) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val securityColors = LocalSecurityColors.current
     val tone = healthAuditTone(hasScanned, violationCount)
-    HealthAuditRowItem(
-        icon = when (tone) {
-            HealthAuditTone.NOT_SCANNED -> Icons.Default.Security
-            HealthAuditTone.WARNING -> Icons.Default.WarningAmber
-            HealthAuditTone.PASS -> Icons.Default.CheckCircle
-        },
-        iconTint = when (tone) {
-            HealthAuditTone.NOT_SCANNED -> MaterialTheme.colorScheme.outline
-            HealthAuditTone.WARNING -> securityColors.warning
-            HealthAuditTone.PASS -> securityColors.success
-        },
-        title = title,
-        subtitle = subtitle,
-        statusText = stringResource(
-            when (tone) {
-                HealthAuditTone.NOT_SCANNED -> R.string.health_status_not_scanned
-                HealthAuditTone.WARNING -> R.string.health_status_warn
-                HealthAuditTone.PASS -> R.string.health_status_pass
-            }
-        ),
-        isWarning = tone == HealthAuditTone.WARNING
-    )
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        HealthAuditRowItem(
+            icon = when (tone) {
+                HealthAuditTone.NOT_SCANNED -> Icons.Default.Security
+                HealthAuditTone.WARNING -> Icons.Default.WarningAmber
+                HealthAuditTone.PASS -> Icons.Default.CheckCircle
+            },
+            iconTint = when (tone) {
+                HealthAuditTone.NOT_SCANNED -> MaterialTheme.colorScheme.outline
+                HealthAuditTone.WARNING -> securityColors.warning
+                HealthAuditTone.PASS -> securityColors.success
+            },
+            title = title,
+            subtitle = subtitle,
+            statusText = stringResource(
+                when (tone) {
+                    HealthAuditTone.NOT_SCANNED -> R.string.health_status_not_scanned
+                    HealthAuditTone.WARNING -> R.string.health_status_warn
+                    HealthAuditTone.PASS -> R.string.health_status_pass
+                }
+            ),
+            isWarning = tone == HealthAuditTone.WARNING
+        )
+        // ISSUE-P3-405：仅在已扫描且确有明细时展示——未扫描 / 计数为 0 时列表为空，自然不出现
+        if (hasScanned && issues.isNotEmpty()) {
+            HealthIssueListCard(
+                issues = issues,
+                onIssueClick = onIssueClick
+            )
+        }
+    }
 }
 
 /**
@@ -343,39 +360,4 @@ internal fun HealthBreachAuditRow(
         statusText = leak.statusText,
         isWarning = leak.isWarning
     )
-}
-
-/**
- * 安全建议卡片（§191 自 `HealthCheckScreen` 原样下沉，正文与文案逐字未改）。
- */
-@Composable
-internal fun HealthTipsCard() {
-    BentoCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Security,
-                    // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.health_tips_title),
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            Text(
-                text = stringResource(R.string.health_tips_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 20.sp
-            )
-        }
-    }
 }

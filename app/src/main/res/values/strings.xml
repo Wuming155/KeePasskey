@@ -1138,6 +1138,14 @@
     <string name="health_reuse_title">重复密码</string>
     <string name="health_reuse_sub">%1$d 个条目复用了相同密码，一处泄露将殃及全部</string>
     <string name="health_status_warn">需注意</string>
+    <!-- ISSUE-P3-405：过期凭据审计行 + 问题条目列表（用户需知道「哪些」条目有问题） -->
+    <string name="health_expired_title">凭据过期</string>
+    <string name="health_expired_sub">条目声明的过期时间已过，建议更新密码或清除过期标记</string>
+    <string name="health_issue_list_title">受影响条目</string>
+    <string name="health_issue_risk_weak">弱密码</string>
+    <string name="health_issue_risk_reused">密码复用</string>
+    <string name="health_issue_risk_expired">已过期</string>
+    <string name="health_issue_title_fallback">未命名条目</string>
     <string name="health_leak_title">泄露密码</string>
     <string name="health_leak_sub_clean">已与公开泄露库比对，未发现本库密码</string>
     <string name="health_leak_sub_disabled">未启用：开启后重新扫描才会联网比对，当前不发起任何网络请求</string>

@@ -156,6 +156,24 @@ class HealthCheckViewModelTest {
         assertEquals(1, scannedHealth.weakPasswordCount)
         assertEquals(2, scannedHealth.reusedPasswordCount)
 
+        // ISSUE-P3-405：明细须随计数一并透出——用户要知道「哪些」条目是弱密码/复用
+        val weakIssues = scannedHealth.healthIssues.filter {
+            it.risk == com.keepasskey.app.ui.screens.settings.HealthIssueRiskUi.WEAK
+        }
+        assertEquals(1, weakIssues.size)
+        assertEquals("Weak Entry 1", weakIssues.first().title)
+        val reusedIssues = scannedHealth.healthIssues.filter {
+            it.risk == com.keepasskey.app.ui.screens.settings.HealthIssueRiskUi.REUSED
+        }
+        assertEquals(2, reusedIssues.size)
+        assertTrue(reusedIssues.any { it.title == "Site A" })
+        assertTrue(reusedIssues.any { it.title == "Site B" })
+        // 弱密码条目的 entryId 必须可回指原条目，供点击跳转详情
+        assertEquals(
+            entryWeak1.id.toHexString(),
+            weakIssues.first().entryId
+        )
+
         // score 公式: 100 - 1*5 - 2*10 = 75 分
         val expectedScore = 100 - (1 * 5) - (2 * 10)
         assertEquals(expectedScore, scannedHealth.healthScore)

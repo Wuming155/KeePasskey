@@ -211,6 +211,10 @@ data class SettingsUiState(
     val healthMessage: String = "",
     val weakPasswordCount: Int = 0,
     val reusedPasswordCount: Int = 0,
+    /** ISSUE-P3-405：已过期条目数（审计行与明细列表共用） */
+    val expiredPasswordCount: Int = 0,
+    /** ISSUE-P3-405：问题条目明细（弱/复用/过期），用户据此知道「哪些」条目有问题 */
+    val healthIssues: List<HealthIssueUi> = emptyList(),
     // TASK-47：泄露检测指标——null = 未检测（未启用 / 失败），绝不回填 0 冒充「未泄露」
     val compromisedPasswordCount: Int? = null,
     val breachCheckStatus: com.keepasskey.app.data.breach.BreachCheckStatus =

@@ -288,6 +288,12 @@ internal fun NavGraphBuilder.settingsHealthRoute(navController: NavHostControlle
                 } else {
                     settingsViewModel.setBreachCheckEnabled(false)
                 }
+            },
+            // ISSUE-P3-405：问题条目点击 → 条目详情（同一 NavHost，返回栈自然回到健康检查页）
+            onEntryClick = { entryId ->
+                navController.navigate(Screen.EntryDetail.createRoute(entryId)) {
+                    launchSingleTop = true
+                }
             }
         )
     }

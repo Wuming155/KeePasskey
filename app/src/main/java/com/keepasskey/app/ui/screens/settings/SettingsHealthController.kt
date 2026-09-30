@@ -1,11 +1,12 @@
 package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
-import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.breach.BreachCheckOutcome
+import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.breach.BreachCheckStatus
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.database.audit.EntryHealthIssue
 import com.keepasskey.database.audit.HealthCheckEngine
 import com.keepasskey.database.audit.PasswordRiskLevel
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,9 @@ import kotlinx.coroutines.withContext
  * - **开关门控**：[breachCheckEnabled] 为 false 时完全不触碰网络（关闭态零外联）；
  * - **失败如实上浮**：查询失败转 [BreachCheckStatus.FAILED] 并透出原因，绝不静默回落 0；
  * - **无值即无值**：未启用 / 未检测时计数为 null，由 UI 如实展示而非以 0 冒充「安全」。
+ *
+ * ISSUE-P3-405：扫描产出的问题**明细**（弱/复用/过期条目）随计数一并透出——
+ * 此前只 `count` 后丢弃 `EntryHealthIssue`，用户无从得知「哪些」条目有问题。
  */
 internal class SettingsHealthController(
     private val vaultRepository: VaultRepository,
@@ -53,6 +57,8 @@ internal class SettingsHealthController(
         val healthMessage: String,
         val weakPasswordCount: Int,
         val reusedPasswordCount: Int,
+        /** ISSUE-P3-405：已过期条目数（此前仅进汇总文案，无独立计数供审计行使用） */
+        val expiredPasswordCount: Int = 0,
         /** 命中泄露库的条目数；null = 未检测（未启用或失败），绝不回填 0 冒充「未泄露」 */
         val compromisedPasswordCount: Int?,
         val breachCheckStatus: BreachCheckStatus,
@@ -63,9 +69,28 @@ internal class SettingsHealthController(
         /** ISSUE-P3-61：是否已完成过一次扫描——未扫描时审计行徽标必须保持中性「未扫描」，
          *  不得以「安全 / 需注意」这类有数据才能支撑的结论误导用户 */
         val hasScanned: Boolean = false,
+        /** ISSUE-P3-405：扫描产出的问题条目明细（弱/复用/过期），供用户知道「哪些条目有问题」 */
+        val healthIssues: List<HealthIssueUi> = emptyList(),
         /** ISSUE-P3-382：库内重复条目只读报告（扫描时顺带产出） */
         val duplicateGroupCount: Int = 0,
         val duplicateEntryCount: Int = 0
+    )
+
+    /** 一次扫描算出的汇总结果（与 UI 状态解耦，便于把 rescanHealth 控制在函数行数阈值内） */
+    private data class HealthScanSummary(
+        val healthScore: Int,
+        val healthStatus: String,
+        val healthMessage: String,
+        val weakPasswordCount: Int,
+        val reusedPasswordCount: Int,
+        val expiredPasswordCount: Int,
+        val healthIssues: List<HealthIssueUi>,
+        val compromisedPasswordCount: Int?,
+        val breachCheckStatus: BreachCheckStatus,
+        val breachCheckMessage: String,
+        val lastHealthScanTime: String,
+        val duplicateGroupCount: Int,
+        val duplicateEntryCount: Int
     )
 
     private val healthStateFlow = MutableStateFlow(initialState())
@@ -78,11 +103,13 @@ internal class SettingsHealthController(
         healthMessage = strings.get(R.string.health_scan_hint_idle),
         weakPasswordCount = 0,
         reusedPasswordCount = 0,
+        expiredPasswordCount = 0,
         compromisedPasswordCount = null,
         breachCheckStatus = BreachCheckStatus.DISABLED,
         breachCheckMessage = "",
         lastHealthScanTime = strings.get(R.string.health_status_not_scanned),
         isHealthScanning = false,
+        healthIssues = emptyList(),
         duplicateGroupCount = 0,
         duplicateEntryCount = 0
     )
@@ -100,77 +127,12 @@ internal class SettingsHealthController(
                     val fetched = vaultRepository.getKdbxEntries()
                     fetched to HealthCheckEngine.analyzeEntries(fetched)
                 }
-
-                val weakCount = issues.count { it.riskLevel == PasswordRiskLevel.WEAK }
-                val reusedCount = issues.count { it.riskLevel == PasswordRiskLevel.REUSED }
-                val expiredCount = issues.count { it.riskLevel == PasswordRiskLevel.EXPIRED }
-
-                // ISSUE-P3-382：库内重复条目只读扫描（默认判据「同 URL + 同账号」）
-                val dupGroups = scanDuplicates()
-                val dupGroupCount = dupGroups.size
-                val dupEntryCount = dupGroups.sumOf { it.second }
-
-                // TASK-47：泄露检测由开关门控；关闭态不发起任何网络请求
-                val breachOutcome = runBreachCheck(entries)
-
-                val breachedCount = breachOutcome.breachedCount
-
-                val calculatedScore = (HEALTH_SCORE_BASE -
-                        weakCount * HEALTH_PENALTY_WEAK -
-                        reusedCount * HEALTH_PENALTY_REUSED -
-                        expiredCount * HEALTH_PENALTY_EXPIRED -
-                        breachedCount * HEALTH_PENALTY_BREACHED).coerceIn(0, 100)
-
-                val status = when {
-                    calculatedScore >= 90 -> strings.get(R.string.health_status_excellent)
-                    calculatedScore >= 70 -> strings.get(R.string.health_status_good)
-                    calculatedScore >= 50 -> strings.get(R.string.health_status_fair)
-                    else -> strings.get(R.string.health_status_needs_improvement)
-                }
-
-                val nowTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.getDefault())
-                    .format(java.time.LocalTime.now())
-                val lastScanText = "${strings.get(R.string.time_today)} $nowTime"
-
-                val message = when {
-                    breachedCount > 0 -> strings.get(
-                        R.string.health_msg_breach, breachedCount, weakCount, reusedCount
-                    )
-                    breachOutcome.status == BreachCheckStatus.FAILED -> strings.get(
-                        R.string.health_scan_failed, breachOutcome.errorMessage
-                            ?: strings.get(R.string.health_breach_error_unknown)
-                    )
-                    expiredCount > 0 -> strings.get(
-                        R.string.health_msg_expired, expiredCount, weakCount, reusedCount
-                    )
-                    weakCount == 0 && reusedCount == 0 -> strings.get(R.string.health_msg_clean)
-                    reusedCount > 0 && weakCount > 0 -> strings.get(
-                        R.string.health_msg_weak_and_reused, weakCount, reusedCount
-                    )
-                    reusedCount > 0 -> strings.get(R.string.health_msg_reused_only, reusedCount)
-                    else -> strings.get(R.string.health_msg_weak_only, weakCount)
-                }
-
-                healthStateFlow.update {
-                    it.copy(
-                        isHealthScanning = false,
-                        healthScore = calculatedScore,
-                        healthStatus = status,
-                        healthMessage = message,
-                        weakPasswordCount = weakCount,
-                        reusedPasswordCount = reusedCount,
-                        compromisedPasswordCount = if (breachOutcome.status == BreachCheckStatus.BREACHED ||
-                            breachOutcome.status == BreachCheckStatus.CLEAN
-                        ) breachedCount else null,
-                        breachCheckStatus = breachOutcome.status,
-                        breachCheckMessage = breachOutcome.errorMessage.orEmpty(),
-                        lastHealthScanTime = lastScanText,
-                        hasScanned = true,
-                        // ISSUE-P3-382：重复条目只读报告随扫描一并产出
-                        duplicateGroupCount = dupGroupCount,
-                        duplicateEntryCount = dupEntryCount
-                    )
-                }
+                val summary = buildHealthScanSummary(
+                    issues = issues,
+                    dupGroups = scanDuplicates(),
+                    breachOutcome = runBreachCheck(entries)
+                )
+                applyHealthScanSummary(summary)
             } catch (e: Exception) {
                 healthStateFlow.update {
                     it.copy(
@@ -180,6 +142,111 @@ internal class SettingsHealthController(
                 }
             }
         }
+    }
+
+    /**
+     * 把一次扫描的汇总结果写回状态流（ISSUE-P3-405：明细与过期计数一并落盘）。
+     */
+    private fun applyHealthScanSummary(summary: HealthScanSummary) {
+        healthStateFlow.update {
+            it.copy(
+                isHealthScanning = false,
+                healthScore = summary.healthScore,
+                healthStatus = summary.healthStatus,
+                healthMessage = summary.healthMessage,
+                weakPasswordCount = summary.weakPasswordCount,
+                reusedPasswordCount = summary.reusedPasswordCount,
+                expiredPasswordCount = summary.expiredPasswordCount,
+                healthIssues = summary.healthIssues,
+                compromisedPasswordCount = summary.compromisedPasswordCount,
+                breachCheckStatus = summary.breachCheckStatus,
+                breachCheckMessage = summary.breachCheckMessage,
+                lastHealthScanTime = summary.lastHealthScanTime,
+                hasScanned = true,
+                duplicateGroupCount = summary.duplicateGroupCount,
+                duplicateEntryCount = summary.duplicateEntryCount
+            )
+        }
+    }
+
+    /**
+     * 由引擎明细 + 重复扫描 + 泄露检测结果装配一次扫描的汇总。
+     *
+     * ISSUE-P3-405：`healthIssues` 保留条目级明细；`expiredPasswordCount` 从「只进文案」升为独立计数。
+     */
+    private fun buildHealthScanSummary(
+        issues: List<EntryHealthIssue>,
+        dupGroups: List<Pair<Int, Int>>,
+        breachOutcome: BreachCheckOutcome
+    ): HealthScanSummary {
+        val weakCount = issues.count { it.riskLevel == PasswordRiskLevel.WEAK }
+        val reusedCount = issues.count { it.riskLevel == PasswordRiskLevel.REUSED }
+        val expiredCount = issues.count { it.riskLevel == PasswordRiskLevel.EXPIRED }
+        // ISSUE-P3-405：明细随计数一并透出——此前只 count 后丢弃，用户无从得知「哪些」条目有问题
+        val issueItems = issues.map { issue ->
+            HealthIssueUi(
+                entryId = issue.entryId,
+                title = issue.title,
+                username = issue.username,
+                risk = issue.riskLevel.toHealthIssueRiskUi(),
+                description = issue.description
+            )
+        }
+
+        val breachedCount = breachOutcome.breachedCount
+        val calculatedScore = (HEALTH_SCORE_BASE -
+                weakCount * HEALTH_PENALTY_WEAK -
+                reusedCount * HEALTH_PENALTY_REUSED -
+                expiredCount * HEALTH_PENALTY_EXPIRED -
+                breachedCount * HEALTH_PENALTY_BREACHED).coerceIn(0, 100)
+
+        val status = when {
+            calculatedScore >= 90 -> strings.get(R.string.health_status_excellent)
+            calculatedScore >= 70 -> strings.get(R.string.health_status_good)
+            calculatedScore >= 50 -> strings.get(R.string.health_status_fair)
+            else -> strings.get(R.string.health_status_needs_improvement)
+        }
+
+        val nowTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm", java.util.Locale.getDefault())
+            .format(java.time.LocalTime.now())
+        val lastScanText = "${strings.get(R.string.time_today)} $nowTime"
+
+        val message = when {
+            breachedCount > 0 -> strings.get(
+                R.string.health_msg_breach, breachedCount, weakCount, reusedCount
+            )
+            breachOutcome.status == BreachCheckStatus.FAILED -> strings.get(
+                R.string.health_scan_failed, breachOutcome.errorMessage
+                    ?: strings.get(R.string.health_breach_error_unknown)
+            )
+            expiredCount > 0 -> strings.get(
+                R.string.health_msg_expired, expiredCount, weakCount, reusedCount
+            )
+            weakCount == 0 && reusedCount == 0 -> strings.get(R.string.health_msg_clean)
+            reusedCount > 0 && weakCount > 0 -> strings.get(
+                R.string.health_msg_weak_and_reused, weakCount, reusedCount
+            )
+            reusedCount > 0 -> strings.get(R.string.health_msg_reused_only, reusedCount)
+            else -> strings.get(R.string.health_msg_weak_only, weakCount)
+        }
+
+        return HealthScanSummary(
+            healthScore = calculatedScore,
+            healthStatus = status,
+            healthMessage = message,
+            weakPasswordCount = weakCount,
+            reusedPasswordCount = reusedCount,
+            expiredPasswordCount = expiredCount,
+            healthIssues = issueItems,
+            compromisedPasswordCount = if (breachOutcome.status == BreachCheckStatus.BREACHED ||
+                breachOutcome.status == BreachCheckStatus.CLEAN
+            ) breachedCount else null,
+            breachCheckStatus = breachOutcome.status,
+            breachCheckMessage = breachOutcome.errorMessage.orEmpty(),
+            lastHealthScanTime = lastScanText,
+            duplicateGroupCount = dupGroups.size,
+            duplicateEntryCount = dupGroups.sumOf { it.second }
+        )
     }
 
     /**

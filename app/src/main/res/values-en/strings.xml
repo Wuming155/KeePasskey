@@ -1088,6 +1088,14 @@
     <string name="health_reuse_title">Reused passwords</string>
     <string name="health_reuse_sub">%1$d entries share the same password; one leak endangers them all</string>
     <string name="health_status_warn">Attention</string>
+    <!-- ISSUE-P3-405: expired credentials audit row + affected entry list -->
+    <string name="health_expired_title">Expired credentials</string>
+    <string name="health_expired_sub">The entry\'s expiry time has passed. Update the password or clear the expiry flag</string>
+    <string name="health_issue_list_title">Affected entries</string>
+    <string name="health_issue_risk_weak">Weak password</string>
+    <string name="health_issue_risk_reused">Reused password</string>
+    <string name="health_issue_risk_expired">Expired</string>
+    <string name="health_issue_title_fallback">Untitled entry</string>
     <string name="health_leak_title">Breached passwords</string>
     <string name="health_leak_sub_clean">Compared against public breach corpora; no vault password found</string>
     <string name="health_leak_sub_disabled">Disabled: comparisons only run after you enable it — no request is sent while off</string>
