@@ -55,6 +55,11 @@ class LegacyAutofillWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsComponents.kt"
         )
 
+    private val legacySwitchSource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/LegacyAutofillAccessibilitySwitch.kt"
+        )
+
     private val navSource: String
         get() = readSource(
             "app/src/main/java/com/keepasskey/app/ui/components/SystemSettingsNavigation.kt"
@@ -122,12 +127,12 @@ class LegacyAutofillWiringTest {
     @Test
     fun `开启开关时跳转系统无障碍设置`() {
         assertTrue(
-            "设置页开启路径必须调用 SystemSettingsNavigation.openLegacyAccessibilitySettings",
-            componentsSource.contains("openLegacyAccessibilitySettings(")
+            "设置卡必须挂载 LegacyAutofillAccessibilitySwitchRow",
+            componentsSource.contains("LegacyAutofillAccessibilitySwitchRow")
         )
         assertTrue(
-            "开启分支必须挂在 enabled=true 上（不得关闭时也强跳）",
-            componentsSource.contains("if (enabled)")
+            "开关行必须调用 SystemSettingsNavigation.openLegacyAccessibilitySettings",
+            legacySwitchSource.contains("openLegacyAccessibilitySettings(")
         )
         assertTrue(
             "SystemSettingsNavigation 必须提供旧版无障碍设置入口",
@@ -146,17 +151,26 @@ class LegacyAutofillWiringTest {
             navSource.contains("Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)")
         )
         assertTrue(
-            "通用无障碍路径不得被 resolveActivity 前置否决（否则按钮在、点了没反应）",
-            !navSource.contains(
-                "fun accessibilityIntent(context: Context): Intent? =\n" +
-                    "        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)\n" +
-                    "            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)\n" +
-                    "            .takeIf { it.resolveActivity(context.packageManager) != null }"
-            )
-        )
-        assertTrue(
             "清单必须声明 ACCESSIBILITY_SETTINGS queries（Android 11+ 包可见性）",
             manifestSource.contains("android.settings.ACCESSIBILITY_SETTINGS")
+        )
+        // ISSUE-P2-405 真机反馈收口：系统未启用时不得写应用内开关（假开）
+        assertTrue(
+            "系统未启用时不得直接写开关，必须走 pending + resume 同步",
+            legacySwitchSource.contains("pendingEnable") &&
+                legacySwitchSource.contains("LegacyAccessibilitySystemState.isEnabled")
+        )
+        assertTrue(
+            "系统已启用时才允许直接写开关",
+            legacySwitchSource.contains("onEnabledChange(true)")
+        )
+        assertTrue(
+            "resume 后按系统真实状态写开关（false=未授权保持关闭）",
+            legacySwitchSource.contains("latestOnEnabledChange(systemEnabled)")
+        )
+        assertTrue(
+            "健康卡探针与开关共用系统启用态判定口径",
+            probeSource.contains("LegacyAccessibilitySystemState.isEnabled")
         )
     }
 
