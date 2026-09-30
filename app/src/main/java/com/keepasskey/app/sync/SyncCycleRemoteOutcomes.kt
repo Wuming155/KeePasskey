@@ -17,7 +17,7 @@ import com.keepasskey.sync.merge.SyncConflictStrategy
  * `strings` 五个成员由 `private` 放宽为 `internal`（仅同模块可见，公开 API 与行为零变化）。
  */
 
-/** `openRemote` 决策分支共享的上下文（9 项入参在分支间原样流转，聚合以免逐支透传） */
+/** `openRemote` 决策分支共享的上下文（10 项入参在分支间原样流转，聚合以免逐支透传） */
 internal data class RemoteSyncContext(
     val syncEngine: SyncEngine,
     val syncCache: SyncCache,
@@ -27,6 +27,12 @@ internal data class RemoteSyncContext(
     val baseSnapshotBytes: ByteArray?,
     val isDirty: Boolean,
     val hasLocalContentChanged: Boolean,
+    /**
+     * `ISSUE-P2-404`：内容变更三态。[hasLocalContentChanged] 是它的 Boolean 投影；
+     * 仅 [LocalContentChangeState.BASELINE_MISSING] 时 [hasLocalContentChanged] 的 `true`
+     * 是「基线缺失占位」而非证据，`handleRemoteSynced` 须以实际内容比较确证。
+     */
+    val localChangeState: LocalContentChangeState,
     val conflictStrategy: SyncConflictStrategy
 )
 
@@ -41,6 +47,31 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
         openResult.adoption?.accept()
         session.lastSyncedDb = databaseSession.databaseFlow.value
         return SyncOutcome.UpToDate
+    }
+    // ISSUE-P2-404：字节级短路在「基线/缓存双缺失」场景恒不命中——KDBX4 随机 IV 使内容
+    // 相同的两次序列化字节必然不同，而此刻 [RemoteSyncContext.localChangeState] 只是
+    // BASELINE_MISSING 保守占位，把旧 Boolean 口径的 `true` 当证据送进合并上传，
+    // 正是「每次锁库后再打开都误报本地修改并整库重传」的根源。远端字节已在本手，
+    // 先做内容级裁决：一致即按上方「两端一致」同款收尾（绝不进合并上传，kp2a 的
+    // FilesInSync 语义）；确有差异才落入下方合并路径（F1 语义保留）。
+    // 装配期缓存缺失 ⇒ 引擎必走 openUncached（带回执结算）⇒ adoption 非 null 是常态，
+    // `?.` 仅为跨分支共享本函数的防御。
+    if (!ctx.isDirty && ctx.localChangeState == LocalContentChangeState.BASELINE_MISSING) {
+        val remoteDb = codec.parseKdbxBytes(openResult.remoteBytes)
+        if (remoteDb != null) {
+            val remoteDiffers = try {
+                KdbxContentComparator.changed(ctx.localDbSnapshot, remoteDb)
+            } finally {
+                // 解析产物仅用于本次比较，比较后立即擦除（ISSUE-P3-119 同款纪律）；
+                // 不一致时的合并路径自行重新解析远端字节，此处不留悬空明文树
+                remoteDb.clearSensitiveData()
+            }
+            if (!remoteDiffers) {
+                openResult.adoption?.accept()
+                session.lastSyncedDb = databaseSession.databaseFlow.value
+                return SyncOutcome.UpToDate
+            }
+        }
     }
     if (ctx.isDirty || ctx.hasLocalContentChanged) {
         // ISSUE-P2-308：转入三方合并——远端字节已完整持有（openResult.remoteBytes），

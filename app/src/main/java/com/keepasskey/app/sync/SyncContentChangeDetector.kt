@@ -5,6 +5,27 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * 本地会话库相对基线的内容变更三态（`ISSUE-P2-404`）。
+ *
+ * 三态存在的必要性：旧 `Boolean` 口径把「内容级确证有变化」与「基线缺失的保守占位」
+ * 压扁成同一个 `true`，后者在 `handleRemoteSynced` 的字节级短路恒不命中（KDBX4 随机 IV）
+ * 时被当作真证据送进合并上传——这正是「每次打开都误报本地修改并整库重传」的根源。
+ */
+internal enum class LocalContentChangeState {
+    /** 内容级确证：与基线逐字段一致 */
+    UNCHANGED,
+
+    /** 内容级确证：存在差异（含缓存损坏无法解析的保守归类，按有变化处理） */
+    CHANGED,
+
+    /**
+     * 保守占位：内存基线与缓存快照双缺失（冷启动 + 锁库清缓存），变化与否**未知**。
+     * 消费方不得把它当「有变化」的证据；确证须以实际内容比较得出。
+     */
+    BASELINE_MISSING
+}
+
+/**
  * 本地会话库「是否存在未同步内容变更」的判定（ISSUE-P3-25 拆分自 `SyncCoordinator`，纯搬运）。
  *
  * 基线来源：[SyncSessionState.lastSyncedDb]（进程内存基线），缺失时回落解析缓存快照；
@@ -18,37 +39,48 @@ class SyncContentChangeDetector @Inject constructor(
 ) {
 
     /**
-     * 判定本地会话库是否存在未同步的内容变更（F5 修复）。
+     * 判定本地会话库相对基线的内容变更三态（F5 修复 + `ISSUE-P2-404` 三态化）。
      *
-     * - 进程内存基线（lastSyncedDb）可用时按全字段内容比较；
+     * - 进程内存基线（lastSyncedDb）可用时按全字段内容比较，返回确证结论；
      * - 冷启动后内存基线缺失时，绝不能直接判定「有变化」并重序列化覆盖缓存——
      *   KDBX4 随机 IV 使重序列化字节必然漂移，刷新 version 后引擎将把「无修改」
      *   误判为「本地赢」，触发无意义重传并前移远端 ETag，成为多设备协同的噪音源。
-     *   正确做法：把缓存快照解析为数据库后做内容级比较；
-     * - 缓存解析失败（损坏）按「有变化」保守处理：以会话库重建缓存——
+     *   正确做法：把缓存快照解析为数据库后做内容级比较，同样返回确证结论；
+     * - 基线与缓存**双缺失**（冷启动 + 锁库清缓存 `ISSUE-P1-07`）：返回
+     *   [LocalContentChangeState.BASELINE_MISSING] 保守占位——变化与否未知，
+     *   消费方（`handleRemoteSynced`）须以实际内容比较确证，不得当「有变化」证据消费；
+     * - 缓存解析失败（损坏）按 [LocalContentChangeState.CHANGED] 保守处理：以会话库重建缓存——
      *   会话库即本地真相，重建内容不会偏离用户数据。
      */
-    suspend fun resolveLocalContentChanged(
+    internal suspend fun resolveLocalContentChanged(
         currentDb: KdbxDatabase,
         cachedSnapshotBytes: ByteArray?
-    ): Boolean {
+    ): LocalContentChangeState {
         val reference = session.lastSyncedDb
         if (reference != null) {
-            return hasDatabaseContentChanged(currentDb, reference)
+            return if (hasDatabaseContentChanged(currentDb, reference)) {
+                LocalContentChangeState.CHANGED
+            } else {
+                LocalContentChangeState.UNCHANGED
+            }
         }
         if (cachedSnapshotBytes != null) {
-            val cachedDb = codec.parseKdbxBytes(cachedSnapshotBytes) ?: return true
+            val cachedDb = codec.parseKdbxBytes(cachedSnapshotBytes) ?: return LocalContentChangeState.CHANGED
             // ISSUE-P3-119：该解析产物**仅用于内容比较**，比较结束即被丢弃——必须显式擦除，
             // 否则整棵解密树（含 ≤ 落盘阈值的附件内联明文）只能静默等待 GC 回收
             // （`ISSUE-P3-258` 起 clearSensitiveData() 一并清零其二进制池）。
             // 此处的安全性依据：比较函数只读遍历，不向任何存活对象转移引用。
             return try {
-                hasDatabaseContentChanged(currentDb, cachedDb)
+                if (hasDatabaseContentChanged(currentDb, cachedDb)) {
+                    LocalContentChangeState.CHANGED
+                } else {
+                    LocalContentChangeState.UNCHANGED
+                }
             } finally {
                 cachedDb.clearSensitiveData()
             }
         }
-        return true
+        return LocalContentChangeState.BASELINE_MISSING
     }
 
     /**

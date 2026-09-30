@@ -186,6 +186,7 @@ class SyncCycleRunner @Inject constructor(
                 baseSnapshotBytes = ctx.baseSnapshotBytes,
                 isDirty = ctx.isDirty,
                 hasLocalContentChanged = ctx.hasLocalContentChanged,
+                localChangeState = ctx.localChangeState,
                 conflictStrategy = ctx.conflictStrategy
             )
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -277,6 +278,7 @@ class SyncCycleRunner @Inject constructor(
      *
      * @param localDbSnapshot ISSUE-P3-168 ①：与本次冲突涉及的本地字节内容等价的本地内存树，
      *   转三方合并时直接充当本地侧（免去一次「解析回树」的整库解密）。
+     * @param localChangeState `ISSUE-P2-404`：内容变更三态（见 [RemoteSyncContext]）。
      */
     private suspend fun handleOpenRemote(
         syncEngine: SyncEngine,
@@ -287,6 +289,7 @@ class SyncCycleRunner @Inject constructor(
         baseSnapshotBytes: ByteArray?,
         isDirty: Boolean,
         hasLocalContentChanged: Boolean,
+        localChangeState: LocalContentChangeState,
         conflictStrategy: SyncConflictStrategy
     ): SyncOutcome {
         val ctx = RemoteSyncContext(
@@ -298,6 +301,7 @@ class SyncCycleRunner @Inject constructor(
             baseSnapshotBytes = baseSnapshotBytes,
             isDirty = isDirty,
             hasLocalContentChanged = hasLocalContentChanged,
+            localChangeState = localChangeState,
             conflictStrategy = conflictStrategy
         )
         return try {

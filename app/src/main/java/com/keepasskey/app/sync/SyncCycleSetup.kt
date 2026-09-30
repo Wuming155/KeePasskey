@@ -37,6 +37,12 @@ internal data class SyncCycleContext(
     val localBytes: ByteArray,
     val baseSnapshotBytes: ByteArray?,
     val hasLocalContentChanged: Boolean,
+    /**
+     * `ISSUE-P2-404`：内容变更三态（[hasLocalContentChanged] 是它的 Boolean 投影，
+     * 供既有判定口径继续消费）。`BASELINE_MISSING` 不是「有变化」的证据——
+     * `handleRemoteSynced` 须以实际内容比较确证后再裁决。
+     */
+    val localChangeState: LocalContentChangeState,
     val currentDb: KdbxDatabase
 )
 
@@ -144,12 +150,6 @@ private suspend fun SyncCycleRunner.buildCycleContext(
 ): CycleSetup {
     val isCached = syncCache.isCached(remotePath)
     val cachedSnapshotBytes = if (isCached) syncCache.readCache(remotePath) else null
-    preferences.verbose(
-        settings,
-        "同步周期开始: cached=$isCached, dirty=${databaseSession.state.value}, " +
-            "远端比对=${settings.checkRemoteChangesBeforeSave}, 冲突策略=$conflictStrategy, " +
-            "分块上传=${settings.webdavChunkedUpload}(${settings.webdavChunkSizeMb}MB)"
-    )
     // A2 整改：三方合并的 base 必须取"最后确认与远端一致"的独立内容快照（basecache）。
     // 本地缓存会被工作副本反复覆盖，绝不能再兼任 base 内容来源——
     // 否则冲突会话中断后 base 会被本地修改版污染，后续合并退化为远端全胜
@@ -158,7 +158,15 @@ private suspend fun SyncCycleRunner.buildCycleContext(
     // 字节级污染判据救不了它——KDBX4 每次保存重生成 masterSeed / IV / KDF salt，
     // 同一内容的两次序列化字节必然不同，`contentEquals` 无从命中。
     val baseSnapshotBytes = syncCache.readBaseContent(remotePath)
-    val hasLocalContentChanged = changes.resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
+    val localChangeState = changes.resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
+    val hasLocalContentChanged = localChangeState != LocalContentChangeState.UNCHANGED
+    preferences.verbose(
+        settings,
+        "同步周期开始: cached=$isCached, dirty=${databaseSession.state.value}, " +
+            "localChange=$localChangeState, " +
+            "远端比对=${settings.checkRemoteChangesBeforeSave}, 冲突策略=$conflictStrategy, " +
+            "分块上传=${settings.webdavChunkedUpload}(${settings.webdavChunkSizeMb}MB)"
+    )
 
     // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存
     val localBytes = if (!isCached || hasLocalContentChanged) {
@@ -186,6 +194,7 @@ private suspend fun SyncCycleRunner.buildCycleContext(
             localBytes = localBytes,
             baseSnapshotBytes = baseSnapshotBytes,
             hasLocalContentChanged = hasLocalContentChanged,
+            localChangeState = localChangeState,
             currentDb = currentDb
         )
     )
