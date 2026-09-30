@@ -141,20 +141,28 @@ class RemoteBrowseController @Inject constructor(
     ) {
         val browsePath = directoryPath.normalizeBrowsePath()
         val result = provider.listRemoteDirectory(browsePath, cursor = cursor, pageSize = PAGE_SIZE)
+        // 配置路径列举失败且非分页续拉时：回退端点根（默认路径），避免「设了远程路径后浏览打不开」
+        val effective = if (result.isFailure && cursor == null && browsePath.isNotEmpty()) {
+            debugLog.warn(TAG, "列举 $browsePath 失败，回退默认路径（端点根）")
+            provider.listRemoteDirectory("", cursor = null, pageSize = PAGE_SIZE)
+        } else {
+            result
+        }
         when {
-            result.isFailure -> {
-                val err = result.exceptionOrNull()
+            effective.isFailure -> {
+                val err = effective.exceptionOrNull()
                 debugLog.warn(TAG, "远端目录浏览失败: ${err?.javaClass?.simpleName ?: "Unknown"}")
                 mutableState.value = RemoteBrowseUiState.Failed(
                     err?.javaClass?.simpleName ?: "UnknownError"
                 )
             }
             else -> {
-                val page = result.getOrThrow()
+                val page = effective.getOrThrow()
+                val publishedPath = if (result.isFailure) "" else browsePath
                 if (cursor == null) accumulated = page.entries.toMutableList()
                 else accumulated.addAll(page.entries)
                 mutableState.value = RemoteBrowseUiState.Listing(
-                    directoryPath = browsePath,
+                    directoryPath = publishedPath,
                     entries = page.entries,
                     nextCursor = page.nextCursor,
                     truncated = page.truncated,
@@ -183,12 +191,30 @@ class RemoteBrowseController @Inject constructor(
 }
 
 /**
- * 把「远端路径字段」映射为其**父目录**（路径字段可能是文件时，浏览应列文件所在目录）。
- * ISSUE-P3-396：下钻与分页续拉**不得**再对该函数结果二次取父目录。
+ * 把「远端路径字段」映射为浏览种子目录。
+ *
+ * - 完整 URL：取 path 组件后再取父目录；
+ * - 相对/绝对路径：取父目录（文件路径 → 所在目录；单段目录 → 端点根）。
+ *
+ * 设置远程路径后浏览失败时，控制器侧还会回退端点根（见 `runAndPublish`）。
  */
 internal fun parentDirectoryPath(remotePath: String): String {
-    val trimmed = remotePath.trim().trim('/')
-    if (trimmed.isEmpty()) return ""
-    val idx = trimmed.lastIndexOf('/')
-    return if (idx <= 0) "" else trimmed.substring(0, idx)
+    var path = remotePath.trim()
+    val nutstoreBase = WebDavDefaults.NUTSTORE_URL.trimEnd('/')
+    if (path.startsWith(nutstoreBase)) {
+        path = path.substring(nutstoreBase.length)
+    } else if (path.contains("://")) {
+        path = try {
+            java.net.URI(path).path.orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        // 通用 WebDAV：path 常含端点前缀（如 /dav/）；若能识别 Nutstore 形态再剥一次
+        if (path.startsWith("/dav/")) path = path.removePrefix("/dav")
+        else if (path == "/dav") path = ""
+    }
+    path = path.trim().trim('/')
+    if (path.isEmpty()) return ""
+    val idx = path.lastIndexOf('/')
+    return if (idx <= 0) "" else path.substring(0, idx)
 }

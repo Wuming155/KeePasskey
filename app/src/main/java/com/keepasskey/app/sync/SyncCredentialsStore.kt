@@ -101,6 +101,9 @@ class SyncCredentialsStore @Inject constructor(
     /**
      * Wave 15 整改：密码以 [CharArray] 借用语义提交，本方法内部转换为字节封印后立即擦除调用方数组；
      * 返回保存结果——先封印后落盘（Wave 15：封印失败时整体不 apply，杜绝「URL 已存但凭据未写入」的半写状态）。
+     *
+     * **空密码 = 保留已保存密码**：改远程路径/端点时表单密码常已被清零，若写入会抹掉已封印口令，
+     * 造成「只有刚输入密码才能测连」。仅密码非空时覆盖旧密文。
      */
     fun saveWebDavConfig(
         url: String,
@@ -109,25 +112,29 @@ class SyncCredentialsStore @Inject constructor(
         remotePath: String
     ): Boolean {
         try {
-            // 先封印：失败则整体不落盘（fail-fast）
-            val encrypted = if (password.isNotEmpty()) sealer.encrypt(password, customEncryptor) ?: return false else null
+            // 先封印再落盘：封印失败不得写入任何键（含 URL），避免半写状态
+            val passwordIv: String?
+            val passwordCipher: String?
+            if (password.isNotEmpty()) {
+                val encrypted = sealer.encrypt(password, customEncryptor) ?: return false
+                passwordIv = encrypted.first
+                passwordCipher = encrypted.second
+            } else {
+                passwordIv = null
+                passwordCipher = null
+            }
             val editor = prefs.edit()
+            if (passwordIv != null && passwordCipher != null) {
+                editor.putString(KEY_WEBDAV_PASSWORD_IV, passwordIv)
+                editor.putString(KEY_WEBDAV_PASSWORD_CIPHER, passwordCipher)
+            }
+            // 空密码：不写也不删密文键 ⇒ 保留已保存口令
             editor.putString(KEY_WEBDAV_URL, url)
             editor.putString(KEY_WEBDAV_USERNAME, username)
             editor.putString(KEY_WEBDAV_REMOTE_PATH, remotePath)
-            if (encrypted != null) {
-                editor.putString(KEY_WEBDAV_PASSWORD_IV, encrypted.first)
-                editor.putString(KEY_WEBDAV_PASSWORD_CIPHER, encrypted.second)
-            } else {
-                // 显式清除旧密文，避免「旧密码在清空后仍继续生效」的隐式行为
-                editor.remove(KEY_WEBDAV_PASSWORD_IV)
-                editor.remove(KEY_WEBDAV_PASSWORD_CIPHER)
-            }
             editor.apply()
             return true
         } finally {
-            // 借用语义：任何结果路径（成功/封印失败）均擦除调用方密码数组
-            // （对齐 saveS3Config 的 finally 擦除契约与 Wave 15 文档声明）
             password.fill('0')
         }
     }
@@ -167,7 +174,7 @@ class SyncCredentialsStore @Inject constructor(
 
     /**
      * Wave 15 整改：AccessKey/SecretKey 以 [CharArray] 借用语义提交，封印后立即擦除调用方数组；
-     * 返回保存结果——先封印后落盘（封印失败时整体不 apply，语义同 [saveWebDavConfig]）。
+     * 返回保存结果（语义同 [saveWebDavConfig]：**空密钥 = 保留已保存密钥**）。
      */
     fun saveS3Config(
         endpoint: String,
@@ -179,40 +186,47 @@ class SyncCredentialsStore @Inject constructor(
         usePathStyle: Boolean = false
     ): Boolean {
         try {
-            // 先封印：任一失败则整体不落盘（fail-fast）
-            // L4 整改：AccessKey 与 SecretKey 同样经 Keystore AES-256-GCM 加密落盘，不再明文存储
-            val encryptedAccessKey =
-                if (accessKey.isNotEmpty()) sealer.encrypt(accessKey, customEncryptor) ?: return false else null
-            val encryptedSecretKey =
-                if (secretKey.isNotEmpty()) sealer.encrypt(secretKey, customEncryptor) ?: return false else null
-
+            // 先封印再落盘：失败不得写入任何键
+            val accessIv: String?
+            val accessCipher: String?
+            if (accessKey.isNotEmpty()) {
+                val encrypted = sealer.encrypt(accessKey, customEncryptor) ?: return false
+                accessIv = encrypted.first
+                accessCipher = encrypted.second
+            } else {
+                accessIv = null
+                accessCipher = null
+            }
+            val secretIv: String?
+            val secretCipher: String?
+            if (secretKey.isNotEmpty()) {
+                val encrypted = sealer.encrypt(secretKey, customEncryptor) ?: return false
+                secretIv = encrypted.first
+                secretCipher = encrypted.second
+            } else {
+                secretIv = null
+                secretCipher = null
+            }
             val editor = prefs.edit()
+            if (accessIv != null && accessCipher != null) {
+                editor.putString(KEY_S3_ACCESS_KEY_IV, accessIv)
+                editor.putString(KEY_S3_ACCESS_KEY_CIPHER, accessCipher)
+            }
+            if (secretIv != null && secretCipher != null) {
+                editor.putString(KEY_S3_SECRET_IV, secretIv)
+                editor.putString(KEY_S3_SECRET_CIPHER, secretCipher)
+            }
+            // 空密钥：不写也不删密文键 ⇒ 保留已保存密钥
             editor.putString(KEY_S3_ENDPOINT, endpoint)
             editor.putString(KEY_S3_BUCKET, bucket)
             editor.putString(KEY_S3_REGION, region)
             editor.putString(KEY_S3_OBJECT_KEY, objectKey)
             editor.putBoolean(KEY_S3_USE_PATH_STYLE, usePathStyle)
-            // TASK-45：凭据变更 = 换端点/换桶，旧端点探测的时钟偏移立即作废（置未知，
-            // 下次同步 fail-closed 以本地时间签名并据首个响应 Date 头重新学习）
+            // TASK-45：端点/桶变更时钟偏移作废
             editor.remove(KEY_S3_CLOCK_OFFSET)
-            if (encryptedAccessKey != null) {
-                editor.putString(KEY_S3_ACCESS_KEY_IV, encryptedAccessKey.first)
-                editor.putString(KEY_S3_ACCESS_KEY_CIPHER, encryptedAccessKey.second)
-            } else {
-                editor.remove(KEY_S3_ACCESS_KEY_IV)
-                editor.remove(KEY_S3_ACCESS_KEY_CIPHER)
-            }
-            if (encryptedSecretKey != null) {
-                editor.putString(KEY_S3_SECRET_IV, encryptedSecretKey.first)
-                editor.putString(KEY_S3_SECRET_CIPHER, encryptedSecretKey.second)
-            } else {
-                editor.remove(KEY_S3_SECRET_IV)
-                editor.remove(KEY_S3_SECRET_CIPHER)
-            }
             editor.apply()
             return true
         } finally {
-            // 借用语义：任何结果路径（成功/封印失败）均擦除调用方密钥数组
             accessKey.fill('0')
             secretKey.fill('0')
         }

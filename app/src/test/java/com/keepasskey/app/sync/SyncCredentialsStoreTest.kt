@@ -156,7 +156,7 @@ class SyncCredentialsStoreTest {
     }
 
     @Test
-    fun `空密码保存显式清除旧密文`() {
+    fun `空密码保存保留既有密文 且不抹掉口令`() {
         store.saveWebDavConfig(
             url = "https://dav.example.com/remote.php/webdav",
             username = "dav_admin",
@@ -165,19 +165,21 @@ class SyncCredentialsStoreTest {
         )
         assertNotNull(memoryStorage["webdav_password_cipher"])
 
-        val cleared = store.saveWebDavConfig(
+        val saved = store.saveWebDavConfig(
             url = "https://dav.example.com/remote.php/webdav",
             username = "dav_admin",
             password = CharArray(0),
-            remotePath = "/keepass/vault.kdbx"
+            remotePath = "email/keepasskey.kdbx"
         )
 
-        assertTrue(cleared)
-        assertNull(memoryStorage["webdav_password_iv"])
-        assertNull(memoryStorage["webdav_password_cipher"])
+        assertTrue(saved)
+        assertNotNull("空密码不得抹掉密文", memoryStorage["webdav_password_iv"])
+        assertNotNull("空密码不得抹掉密文", memoryStorage["webdav_password_cipher"])
         val loaded = store.loadWebDavConfig()
         assertNotNull(loaded)
-        assertEquals(0, loaded!!.password.size)
+        assertEquals("email/keepasskey.kdbx", loaded!!.remotePath)
+        assertEquals("old_secret", String(loaded.password))
+        loaded.password.fill('0')
     }
 
     @Test

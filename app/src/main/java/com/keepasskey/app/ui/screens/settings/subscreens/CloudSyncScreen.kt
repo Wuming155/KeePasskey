@@ -378,7 +378,11 @@ fun CloudSyncScreen(
                 SyncStatusCard(
                     uiState = uiState,
                     onTriggerSync = onTriggerSync,
-                    onTestConnection = onTestConnection
+                    // 测连读已保存配置：先保存表单（含刚输入的密码）再测，避免「只有刚输密码才能测」
+                    onTestConnection = {
+                        persistConfig()
+                        onTestConnection()
+                    }
                 )
             }
 
