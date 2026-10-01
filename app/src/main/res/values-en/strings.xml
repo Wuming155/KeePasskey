@@ -1387,15 +1387,16 @@
     <string name="repo_files_dir_unavailable">Internal storage directory unavailable</string>
     <!-- ISSUE-P2-229: where a new vault lands - two choices (previously no entry at all; always silently written into the app-private dir) -->
     <string name="db_create_location_title">Storage location</string>
-    <string name="db_create_location_internal">App private folder (recommended)</string>
-    <string name="db_create_location_internal_sub">Readable only by this app; supports atomic saves and WebDAV / S3 sync; deleted when the app is uninstalled</string>
-    <string name="db_create_location_external">Custom location (system file picker)</string>
-    <string name="db_create_location_external_sub">Choose the folder and file name yourself, for manual backup and moving between devices</string>
-    <string name="db_create_location_external_hint">No location chosen yet - tap this row to pick one in the system file picker</string>
+    <!-- §394: the three title strings now serve as horizontal chip labels (aligned with the
+         "open existing vault" source chips); parentheticals moved into the per-option captions -->
+    <string name="db_create_location_internal">App-private folder</string>
+    <string name="db_create_location_internal_sub">Recommended: readable only by this app; supports atomic saves and WebDAV / S3 sync; deleted when the app is uninstalled</string>
+    <string name="db_create_location_external">Custom location</string>
+    <string name="db_create_location_external_hint">No location chosen yet - pick one in the system file picker</string>
     <string name="db_create_location_picked">Selected: %1$s</string>
     <string name="db_create_location_external_warning">Saves here are not atomic (a crash or power loss mid-save can corrupt the vault, so export backups regularly), and WebDAV / S3 sync does not apply</string>
     <!-- ISSUE-P3-425: third storage location - create to cloud -->
-    <string name="db_create_location_cloud">Cloud (WebDAV / S3)</string>
+    <string name="db_create_location_cloud">Cloud</string>
     <string name="db_create_location_cloud_loading">Reading cloud sync configuration…</string>
     <string name="db_create_location_cloud_ready_sub">Registered as a cloud-synced vault; upload happens with the sync cycle</string>
     <string name="db_create_location_cloud_unconfigured_sub">No cloud account configured yet: set up WebDAV or S3 in Settings → Cloud sync first</string>

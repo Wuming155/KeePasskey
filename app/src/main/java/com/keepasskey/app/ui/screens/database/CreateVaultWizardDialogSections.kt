@@ -204,18 +204,20 @@ internal fun CreateVaultConfirmButton(
 }
 
 /**
- * 新建库的存储位置选择（**ISSUE-P2-229**；ISSUE-P3-425 增设「云端」直建）。
+ * 新建库的存储位置选择（**ISSUE-P2-229**；ISSUE-P3-425 增设「云端」直建；§394 改横排 Chip）。
  *
- * 三行单选：内部存储为默认；选「自选位置」即当场拉起系统文件选择器，挑定的文件名回显在下方；
- * 「云端」仅在已配置云同步账号时可选（`CloudSyncSnapshot.ready`），未就绪时如实呈现
- * 「读取中 / 未配置」而非假装可选。外部位置的两条降级（写回非原子、不参与 WebDAV / S3 同步）
- * **必须**同屏如实告知——不得让用户在不知情下拿到一个「看起来一样但更容易损坏、也同步不走」的库。
+ * 用户裁决（2026-10-01）：对齐「导入已有库」三来源对话框的横排 Chip 形态（本地 / WebDAV / S3
+ * 并列），替代原三行两语单选——向导高度随之大幅收敛；长说明只随**当前选中项**单条呈现，
+ * 外部位置的两条降级（写回非原子、不参与 WebDAV / S3 同步）与云端目标告知**不缩水**。
+ * 「应用私有目录」为默认项；选「自选位置」即当场拉起系统文件选择器（取消回落内部）；
+ * 「云端」仅在已配置云同步账号时可选（`CloudSyncSnapshot.ready`），未就绪时置灰并以副文案
+ * 如实呈现「读取中 / 未配置」，不假装可选。
  */
 @Composable
 internal fun VaultStorageLocationSection(
     location: VaultStorageLocation,
     pickedFileName: String,
-    /** ISSUE-P3-425：云同步配置快照（决定「云端」行可用性与副文案） */
+    /** ISSUE-P3-425：云同步配置快照（决定「云端」Chip 可用性与副文案） */
     cloudSnapshot: CloudSyncSnapshot,
     onSelectInternal: () -> Unit,
     onSelectExternal: () -> Unit,
@@ -230,50 +232,67 @@ internal fun VaultStorageLocationSection(
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold
         )
-        StorageLocationOption(
-            title = stringResource(R.string.db_create_location_internal),
-            subtitle = stringResource(R.string.db_create_location_internal_sub),
-            selected = location == VaultStorageLocation.INTERNAL,
-            onClick = onSelectInternal
-        )
-        StorageLocationOption(
-            title = stringResource(R.string.db_create_location_external),
-            subtitle = stringResource(R.string.db_create_location_external_sub),
-            selected = location == VaultStorageLocation.EXTERNAL,
-            onClick = onSelectExternal
-        )
-        StorageLocationOption(
-            title = stringResource(R.string.db_create_location_cloud),
-            subtitle = cloudLocationSubtitle(cloudSnapshot),
-            selected = location == VaultStorageLocation.CLOUD,
-            enabled = cloudSnapshot.ready,
-            onClick = onSelectCloud
-        )
-        if (location == VaultStorageLocation.EXTERNAL) {
-            Text(
-                text = if (pickedFileName.isBlank()) {
-                    stringResource(R.string.db_create_location_external_hint)
-                } else {
-                    stringResource(R.string.db_create_location_picked, pickedFileName)
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChip(
+                selected = location == VaultStorageLocation.INTERNAL,
+                onClick = onSelectInternal,
+                label = { Text(stringResource(R.string.db_create_location_internal), fontSize = 12.sp) },
+                shape = CapsuleShape
             )
-            Text(
-                text = stringResource(R.string.db_create_location_external_warning),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
+            FilterChip(
+                selected = location == VaultStorageLocation.EXTERNAL,
+                onClick = onSelectExternal,
+                label = { Text(stringResource(R.string.db_create_location_external), fontSize = 12.sp) },
+                shape = CapsuleShape
+            )
+            FilterChip(
+                selected = location == VaultStorageLocation.CLOUD,
+                onClick = onSelectCloud,
+                enabled = cloudSnapshot.ready,
+                label = { Text(stringResource(R.string.db_create_location_cloud), fontSize = 12.sp) },
+                shape = CapsuleShape
             )
         }
-        if (location == VaultStorageLocation.CLOUD && cloudSnapshot.ready) {
-            // 云端直建的远端目标同屏如实告知（与同步配置页同一非敏感摘要）
-            Text(
-                text = stringResource(R.string.db_create_location_cloud_target, cloudSnapshot.targetHint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        when (location) {
+            VaultStorageLocation.INTERNAL -> LocationCaption(
+                text = stringResource(R.string.db_create_location_internal_sub)
+            )
+            VaultStorageLocation.EXTERNAL -> {
+                LocationCaption(
+                    text = if (pickedFileName.isBlank()) {
+                        stringResource(R.string.db_create_location_external_hint)
+                    } else {
+                        stringResource(R.string.db_create_location_picked, pickedFileName)
+                    }
+                )
+                Text(
+                    text = stringResource(R.string.db_create_location_external_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            VaultStorageLocation.CLOUD -> LocationCaption(
+                text = if (cloudSnapshot.ready) {
+                    stringResource(R.string.db_create_location_cloud_target, cloudSnapshot.targetHint)
+                } else {
+                    cloudLocationSubtitle(cloudSnapshot)
+                }
             )
         }
     }
+}
+
+/** 选中位置的单条说明（bodySmall / onSurfaceVariant；warning 走 error 色不经此） */
+@Composable
+private fun LocationCaption(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 /** 「云端」行的副文案：读取中 / 未配置 / 可用（含 Provider 种类）三态如实区分 */
@@ -288,37 +307,6 @@ private fun cloudLocationSubtitle(snapshot: CloudSyncSnapshot): String = when {
             else -> stringResource(R.string.picker_chip_webdav)
         }
     )
-}
-
-/** 单个位置选项（单选钮 + 标题 + 说明），整行可点；[enabled]=false 时整行置灰不可点。 */
-@Composable
-private fun StorageLocationOption(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    enabled: Boolean = true
-) {
-    val optionColor = if (enabled) {
-        androidx.compose.ui.graphics.Color.Unspecified
-    } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-    }
-    Row(
-        modifier = androidx.compose.ui.Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        androidx.compose.material3.RadioButton(selected = selected, onClick = onClick, enabled = enabled)
-        Spacer(modifier = androidx.compose.ui.Modifier.width(6.dp))
-        Column {
-            Text(text = title, style = MaterialTheme.typography.bodyMedium, color = optionColor)
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else optionColor
-            )
-        }
-    }
 }
 
 /** ISSUE-P2-354 AC①：「创建」按钮内嵌进度圈直径（dp） */
