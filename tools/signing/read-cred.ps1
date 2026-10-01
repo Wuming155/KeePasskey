@@ -1,4 +1,4 @@
-# 从 Windows 凭证管理器读取「普通凭据」（generic credential）的口令字段（ISSUE-P3-418）。
+﻿# 从 Windows 凭证管理器读取「普通凭据」（generic credential）的口令字段（ISSUE-P3-418）。
 #
 # 用途：app/build.gradle.kts 的发布签名口令解析链第三通道——
 #       环境变量 → Windows 凭证管理器 → keystore.properties。
