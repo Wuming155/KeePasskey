@@ -959,6 +959,7 @@
 
     <!-- ===== About subscreen ===== -->
     <string name="about_section_spec">Technical specs</string>
+    <string name="about_section_security">Security &amp; mechanics</string>
     <string name="about_spec_enc_title">Encryption specs</string>
     <string name="about_spec_enc_desc">KDBX 4 · AES-256 / ChaCha20 / Twofish · Argon2 / AES-KDF key derivation</string>
     <string name="about_spec_passkey_desc">End-to-end passkey creation, storage and autofill, degrading gracefully on older systems</string>

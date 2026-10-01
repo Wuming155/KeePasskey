@@ -74,27 +74,22 @@ fun AboutSettingsScreen(
                 ) { AboutSpecSection() }
             }
 
-            // ISSUE-P3-416：三张机制说明卡自各设置子页迁入（安全架构 / 零知识同步 / TOTP 引擎），
-            // 设置项单一位置——原挂载点已摘除，仅此一处呈现
+            // ISSUE-P3-416：机制说明自各设置子页迁入；ISSUE-P3-417 依「技术规格」段式样重排——
+            // 分区标题 + 单卡行式，不再同貌卡堆叠；设置项单一位置，原挂载点已摘除
             item {
-                BentoCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) { AboutSecurityArchCard() }
+                Text(
+                    text = stringResource(R.string.about_section_security),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
             }
 
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
                     backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) { ZeroKnowledgeCard(sealHardwareBacked = uiState.syncSealHardwareBacked) }
-            }
-
-            item {
-                BentoCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-                ) { AboutTotpEngineCard() }
+                ) { AboutMechanicsSection(sealHardwareBacked = uiState.syncSealHardwareBacked) }
             }
 
             item {

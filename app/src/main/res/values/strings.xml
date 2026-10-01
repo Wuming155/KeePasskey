@@ -970,6 +970,7 @@
 
     <!-- ===== 关于页 (AboutSettingsScreen) ===== -->
     <string name="about_section_spec">技术规格</string>
+    <string name="about_section_security">安全与机制</string>
     <string name="about_spec_enc_title">加密规格</string>
     <string name="about_spec_enc_desc">KDBX 4 · AES-256 / ChaCha20 / Twofish · Argon2 / AES-KDF 密钥派生</string>
     <string name="about_spec_passkey_desc">端到端生成、存储与自动填充通行密钥，低版本平滑退化为传统密码填充</string>

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -123,64 +124,77 @@ internal fun AboutSpecSection() {
 }
 
 /**
- * 「安全架构说明」卡（ISSUE-P3-416 自安全设置子页迁入：机制背景归「关于」自述面，设置项单一位置）。
- * 字符串资源（`sec_arch_title` / `sec_arch_desc`）原样复用，键名与文案零改动。
+ * 「安全与机制」段（ISSUE-P3-416 三张机制说明卡迁入后，ISSUE-P3-417 依「技术规格」段式样重排：
+ * 分区标题在页面本体，三块内容以规格行同款行式收进一张卡，不再同貌卡堆叠）。
+ *
+ * P2-285：零知识行的凭据封印声明按实测安全等级条件渲染（[sealHardwareBacked]），
+ * 与解锁面同形——软件级 / 未生成时如实呈现「无硬件隔离」降级文案。
  */
 @Composable
-internal fun AboutSecurityArchCard() {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.Security,
-                // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = stringResource(R.string.sec_arch_title),
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+internal fun AboutMechanicsSection(sealHardwareBacked: Boolean) {
+    val sealNotice = stringResource(
+        if (sealHardwareBacked) {
+            R.string.sync_credential_auth_notice
+        } else {
+            R.string.sync_credential_auth_notice_software
         }
-        Text(
-            text = stringResource(R.string.sec_arch_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = 18.sp
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        AboutMechanicsRow(
+            icon = Icons.Default.Security,
+            title = stringResource(R.string.sec_arch_title),
+            paragraphs = listOf(stringResource(R.string.sec_arch_desc))
+        )
+        AboutMechanicsRow(
+            icon = Icons.Default.Storage,
+            title = stringResource(R.string.sync_zeroknowledge_title),
+            paragraphs = listOf(
+                stringResource(R.string.sync_zeroknowledge_desc),
+                // ISSUE-P1-06 整改：向用户明示同步凭据封印密钥不绑定生物认证的安全取舍
+                sealNotice
+            )
+        )
+        AboutMechanicsRow(
+            icon = Icons.Default.Info,
+            title = stringResource(R.string.totp_info_title),
+            paragraphs = listOf(stringResource(R.string.totp_info_desc))
         )
     }
 }
 
-/**
- * 「TOTP 引擎说明」卡（ISSUE-P3-416 自 TOTP 设置子页迁入）。
- * 原卡无标题仅 Info 图标，入「关于」自述面后补标题键 `totp_info_title`（中英成对）。
- */
+/** 机制行（ISSUE-P3-417）：版式与 [AboutSpecRow] 同款，支持多段描述（零知识卡为两段） */
 @Composable
-internal fun AboutTotpEngineCard() {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.Info,
-                // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
+private fun AboutMechanicsRow(
+    icon: ImageVector,
+    title: String,
+    paragraphs: List<String>
+) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(
+            imageVector = icon,
+            // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = stringResource(R.string.totp_info_title),
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
+            paragraphs.forEach { paragraph ->
+                Text(
+                    text = paragraph,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+            }
         }
-        Text(
-            text = stringResource(R.string.totp_info_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = 18.sp
-        )
     }
 }
 

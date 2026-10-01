@@ -58,14 +58,17 @@ class SecurityClaimWiringTest {
 
     @Test
     fun `同步凭据封印声明按实测硬件落位成对渲染`() {
-        // ISSUE-P3-416：ZeroKnowledgeCard 宿主自 CloudSyncScreen 迁「关于」页，断言随消费点同步指向新宿主
+        // ISSUE-P3-416/417：声明渲染随卡片迁「关于」页并并入「安全与机制」段（AboutMechanicsSection），
+        // 断言随消费点同步指向新宿主与新组件（条件渲染语义不变，非放宽）
         assertTrue(
-            "ZeroKnowledgeCard 必须接收实测字段（禁默认 true 谎报）",
-            aboutSettingsScreenSource.contains("ZeroKnowledgeCard(sealHardwareBacked = uiState.syncSealHardwareBacked")
+            "机制段必须接收实测字段（禁默认 true 谎报）",
+            aboutSettingsScreenSource.contains(
+                "AboutMechanicsSection(sealHardwareBacked = uiState.syncSealHardwareBacked"
+            )
         )
         assertTrue(
             "软件级降级文案键必须被引用（AC② 与解锁面同形）",
-            cloudSyncSectionsSource.contains("R.string.sync_credential_auth_notice_software")
+            aboutSectionsSource.contains("R.string.sync_credential_auth_notice_software")
         )
     }
 
@@ -118,8 +121,8 @@ class SecurityClaimWiringTest {
     private val aboutSettingsScreenSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AboutSettingsScreen.kt")
 
-    private val cloudSyncSectionsSource: String
-        get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncSections.kt")
+    private val aboutSectionsSource: String
+        get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AboutSettingsScreenSections.kt")
 
     private val syncCredentialsStoreSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/sync/SyncCredentialsStore.kt")

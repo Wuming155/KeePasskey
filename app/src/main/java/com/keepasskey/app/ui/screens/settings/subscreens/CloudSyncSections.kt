@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
@@ -256,59 +255,8 @@ internal fun NetworkOptionsSection(
     }
 }
 
-/**
- * 区块 7：零知识与端到端加密机制说明（自 CloudSyncScreen 整体抽出）
- *
- * ISSUE-P2-285 AC②：凭据封印声明按实测安全等级条件渲染——[sealHardwareBacked]
- * 为 false（软件级 / 未生成）时如实呈现「无硬件隔离」降级文案（与解锁面同形）。
- */
-@Composable
-internal fun ZeroKnowledgeCard(sealHardwareBacked: Boolean) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = Icons.Default.Storage,
-                // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = stringResource(R.string.sync_zeroknowledge_title),
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-        Text(
-            text = stringResource(R.string.sync_zeroknowledge_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = 18.sp
-        )
-        // ISSUE-P1-06 整改：向用户明示同步凭据封印密钥不绑定生物认证的安全取舍
-        // ISSUE-P2-285 AC②：硬件 / 软件两套文案按实测条件渲染（禁硬编码硬件声明）
-        Text(
-            text = stringResource(
-                if (sealHardwareBacked) {
-                    R.string.sync_credential_auth_notice
-                } else {
-                    R.string.sync_credential_auth_notice_software
-                }
-            ),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = 18.sp
-        )
-    }
-}
+// ISSUE-P3-416/417：零知识与端到端加密机制说明已迁「关于」页「安全与机制」段
+//（AboutMechanicsSection；P2-285 实测条件渲染语义原样随迁，本文件不再保留组件）。
 
 /**
  * 后台定时同步间隔选择弹窗（自 CloudSyncScreen 整体抽出）
