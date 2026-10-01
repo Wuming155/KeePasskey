@@ -49,17 +49,7 @@
 
 > **暂无开放项**。
 
-## P3 低危问题、特性接线与体验优化（2 项）
-
-### ISSUE-P3-413：设置 Hub 最小分组改进（release 死页修复 + 外观独立成组 + 改主密码文案与归位）——**小批拆分**
-
-- **状态（2026-10-01）**：4 个子项全部落地并经用户真机确认（debug 包逐批走查无回归）。待流转归档。**核实时间点 2026-10-01**；**核实方式**：六路对照调研（5 个仓内参考项目经 `docs/references/` 文档优先原则 + 线上同类产品 Bitwarden / Proton Pass / 1Password），每条提案经独立复核员两轮逐条读码核验（含落点文件、行号、改动规模实读）。
-- **前情与红线（用户裁决，2026-10-01）**：ISSUE-P3-410/411/412 大批次（§380）已于 f1ddbce6 整体 revert，用户裁决原因＝**条目在 Hub 一级页与子页重复显示**（如指纹识别）且改动幅度过大。本条目红线：**每个设置项只出现在一个位置**；只动 Hub 内的行归属 / 文案 / 构建门控，不新增 Hub↔子页重复、不新开子页、不动路由与 ViewModel。已复核当前代码无重复（Hub 四桶 8 行均为子页入口或同文件弹窗，`SettingsScreen.kt:179-270`）。
-- **子项 1（缺陷属性，最先做）release 隐藏「开发者调试」Hub 入口**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsScreen.kt:259-266` 的 ModernSettingsRow 与相邻 divider 以 `if (BuildConfig.DEBUG)` 门控（约 4 行）。依据：release 惰性链条＝`DiagnosticLogGate.kt:57` 含 `BuildConfig.DEBUG` ⇒ 日志缓冲恒空 ⇒ `DebugSettingsScreen.kt:319` 导出恒禁用，该入口在 release 是死页；KeePassDX 设置内无任何调试分组。最小性：不删 `DebugSettingsScreen.kt`、不删路由（`KeePasskeySettingsNavGraphRoutes.kt:304`），无深链（`SettingsDebug` 全仓仅 3 处引用）。
-- **子项 2「外观与主题」独立成组**：拆 `SettingsScreen.kt:236-253` 第 3 桶为「自动填充」＋「界面与显示」两卡，新增分区标题 string × 2 语言（各 +1 行）。依据：全部参照项目均让外观独立成组（Bitwarden Appearance、KeePassDX 独立 `preferences_appearance.xml`、keepass2android 独立 `pref_app_display.xml`、KeePassXC 独立 User Interface 分组等），本桶实为「填充 1 项＋外观 1 项」拼凑桶（`values/strings.xml:261`）。最小性：不新开子页、不迁 `ThemeSettingsScreen.kt`；`SettingsGroupCard` 内容槽为 ColumnScope（`SettingsComponents.kt:47`）不触 `check_box_slot_children`；`SettingsScreen.kt` 现 338 行，不在 tier2 档内。
-- **子项 3「更改主密钥」文案统一为「更改主密码」**：`values/strings.xml:254`、`values-en/strings.xml:245` 各改 1 行 string 值（不动资源键名）。依据：同资源对自相矛盾（标题「主密钥」vs 副标题 `:255`「重设密码库主密码」），弹窗正文与成功 Toast 全用「主密码」，且本仓弹窗仅口令重派生（`MasterKeyChangeDialog.kt:206-216` 无 KeyFile 输入）；参照项目用 "Change master key" 是因其流程复合密钥文件/硬件密钥——**偏离参照口径的语义理由须写入批次文档**。
-- **子项 4「更改主密码」行挪入「安全」桶**：`SettingsScreen.kt:198-204`（含相邻 divider :197）移入第 2 桶卡片（:209-233），净改约 10 行；弹窗宿主同文件（:282），回调签名零改动。依据：六路调研无一家把改密与存储/同步并列（keepass2android 归 Database security、KeePassDX 归 Master key 子页、Bitwarden 归 Account security）。
-- **AC**：① 每子项独立小批落地（相邻子项可并批，单批改动 ≤ 2 代码文件 + strings 资源）；② `.\gradlew.bat test --rerun-tasks --max-workers=1` 全绿且 `python tools/doc/gate_readings.py` 8/8，读数块原样贴批次文档；③ **真机 UI 走查（上批欠账，必做）**：Hub 无重复条目、release 包调试入口不可见；④ 批次文档记录「本仓独采主密码」语义理由与 revert 前情。
+## P3 低危问题、特性接线与体验优化（1 项）
 
 ### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室）——**浏览器半环搁置**
 
