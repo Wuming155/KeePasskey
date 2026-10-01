@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.ThemeToggleCapsule
+import com.keepasskey.app.ui.screens.database.DatabasePickerViewModel
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.HeroTitleStyle
 
@@ -56,15 +57,13 @@ fun UnlockScreen(
     onUnlockSuccess: () -> Unit,
     modifier: Modifier = Modifier,
     onNavigateToDatabasePicker: () -> Unit = {},
-    /** ISSUE-P2-424 AC①：空状态「导入已有库」的统一出口（导航层接跳转库管理页 + 自动展开导入） */
-    onOpenExistingVault: () -> Unit = {},
+    viewModel: UnlockViewModel = hiltViewModel(),
     /**
-     * ISSUE-P3-427：空状态「新建密码库」的专属出口（导航层接跳转库管理页 + 自动展开新建向导）。
-     * 默认沿用 [onNavigateToDatabasePicker]：非导航宿主（自动填充 / 凭据创建窗口）本就不提供
-     * 库切换导航，无需感知这一枚新回调。
+     * 用户裁决 2026-10-01：空状态两枚入口**就地弹框**，不再跳转库管理页——原直达路径
+     * 会在弹框背后露出库管理页自带的同义入口（嵌套重复）。对话框组件与业务动作复用
+     * 库管理页同一套实现，承载见 [UnlockVaultDialogsHost]。
      */
-    onCreateNewVault: () -> Unit = onNavigateToDatabasePicker,
-    viewModel: UnlockViewModel = hiltViewModel()
+    pickerViewModel: DatabasePickerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -136,10 +135,13 @@ fun UnlockScreen(
         onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
         onDowngradeDecision = viewModel::onQuickUnlockDowngradeDecision,
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
-        onOpenExistingVault = onOpenExistingVault,
-        onCreateNewVault = onCreateNewVault,
+        onOpenExistingVault = pickerViewModel::openOpenSourceDialog,
+        onCreateNewVault = pickerViewModel::openCreateDialog,
         modifier = modifier
     )
+
+    // 空状态两枚入口的就地对话框宿主（新建向导 / 三来源导入 / 密钥文件一次性交付）
+    UnlockVaultDialogsHost(pickerViewModel)
 }
 
 /**
@@ -164,7 +166,7 @@ fun UnlockContent(
     onDowngradeDecision: (Boolean) -> Unit = {},
     onNavigateToDatabasePicker: () -> Unit,
     onOpenExistingVault: () -> Unit,
-    /** ISSUE-P3-427：空状态「新建密码库」直达新建向导的出口（与「切换库」分流） */
+    /** 用户裁决 2026-10-01：空状态「新建密码库」就地在解锁页弹新建向导（与「切换库」分流） */
     onCreateNewVault: () -> Unit = onNavigateToDatabasePicker
 ) {
     val scrollState = rememberScrollState()
@@ -225,7 +227,6 @@ fun UnlockContent(
             if (!uiState.hasDatabase) {
                 UnlockEmptyVaultContent(
                     uiState = uiState,
-                    onNavigateToDatabasePicker = onNavigateToDatabasePicker,
                     onOpenExistingVault = onOpenExistingVault,
                     onCreateNewVault = onCreateNewVault
                 )

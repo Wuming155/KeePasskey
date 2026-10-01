@@ -40,13 +40,13 @@ import com.keepasskey.app.ui.theme.HeroTitleStyle
 @Composable
 internal fun UnlockEmptyVaultContent(
     uiState: UnlockUiState,
-    onNavigateToDatabasePicker: () -> Unit,
+    /** 空状态「打开已有库」卡片：就地在解锁页弹三来源导入对话框（用户裁决 2026-10-01） */
     onOpenExistingVault: () -> Unit,
     /**
-     * ISSUE-P3-427：空状态「新建密码库」卡片的专属出口——与「切换库」用的
-     * [onNavigateToDatabasePicker] 分开，导航层据此直达新建向导（不再停在库管理页二次点击）。
+     * 空状态「新建密码库」卡片的专属回调——与「切换库」用的导航回调分开，
+     * 就地在解锁页弹新建向导（用户裁决 2026-10-01，替代原 ISSUE-P3-427 直达库管理页口径）。
      */
-    onCreateNewVault: () -> Unit = onNavigateToDatabasePicker
+    onCreateNewVault: () -> Unit
 ) {
     Text(
         text = stringResource(R.string.unlock_empty_vault_title),
@@ -178,8 +178,8 @@ internal fun UnlockEmptyVaultContentPreview() {
         ) {
             UnlockEmptyVaultContent(
                 uiState = UnlockUiState(hasDatabase = false),
-                onNavigateToDatabasePicker = {},
-                onOpenExistingVault = {}
+                onOpenExistingVault = {},
+                onCreateNewVault = {}
             )
         }
     }

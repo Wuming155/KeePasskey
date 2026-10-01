@@ -6,15 +6,9 @@ package com.keepasskey.app.ui.navigation
 sealed class Screen(val route: String) {
     data object Unlock : Screen("unlock")
 
-    /**
-     * 密码库管理页（ISSUE-P2-424 AC① / ISSUE-P3-427：两个可选参数——解锁页空状态的
-     * 「导入已有库」与「新建密码库」直达本页并自动展开对应对话框；默认全 false 维持普通进入）
-     */
-    data object DatabasePicker :
-        Screen("database_picker?openImport={openImport}&openCreate={openCreate}") {
-        fun createRoute(openImport: Boolean = false, openCreate: Boolean = false): String =
-            "database_picker?openImport=$openImport&openCreate=$openCreate"
-    }
+    /** 密码库管理页（用户裁决 2026-10-01：原 openImport / openCreate 直达参数已退役——
+     * 解锁页空状态两枚入口就地在解锁页弹框，不经本页） */
+    data object DatabasePicker : Screen("database_picker")
     data object VaultList : Screen("vault_list")
     data object Authenticator : Screen("authenticator")
     data object Generator : Screen("generator")

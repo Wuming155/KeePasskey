@@ -54,46 +54,23 @@ internal fun NavGraphBuilder.unlockRoute(
                 }
             },
             onNavigateToDatabasePicker = {
-                navController.navigate(Screen.DatabasePicker.createRoute()) { launchSingleTop = true }
-            },
-            // ISSUE-P2-424 AC①：空状态「导入已有库」统一出口——跳库管理页并自动展开
-            // 三来源导入对话框（云端路径自此可达，与库管理页「导入已有库」同一实现）
-            onOpenExistingVault = {
-                navController.navigate(Screen.DatabasePicker.createRoute(openImport = true)) { launchSingleTop = true }
-            },
-            // ISSUE-P3-427：空状态「新建密码库」直达新建向导——不再停在库管理页二次点击，
-            // 使新建路径的视线里只剩向导本身（导入动作不再并列呈现）
-            onCreateNewVault = {
-                navController.navigate(Screen.DatabasePicker.createRoute(openCreate = true)) { launchSingleTop = true }
+                navController.navigate(Screen.DatabasePicker.route) { launchSingleTop = true }
             }
+            // 用户裁决 2026-10-01：空状态「新建密码库 / 导入已有库」就地在解锁页弹框
+            // （UnlockVaultDialogsHost），不再经库管理页直达——弹框背后露出该页自带的
+            // 同义入口构成嵌套重复；原两条直达路由参数随之退役（接线守卫禁止复活）
         )
     }
 }
 
 /** 2. 密码库选择与多库管理页 */
 internal fun NavGraphBuilder.databasePickerRoute(navController: NavHostController) {
-    composable(
-        route = Screen.DatabasePicker.route,
-        arguments = listOf(
-            navArgument("openImport") {
-                type = NavType.BoolType
-                defaultValue = false
-            },
-            navArgument("openCreate") {
-                type = NavType.BoolType
-                defaultValue = false
-            }
-        )
-    ) { entry ->
+    composable(route = Screen.DatabasePicker.route) {
         DatabasePickerScreen(
             onBackClick = { navController.popBackStack() },
             onDatabaseSelected = {
                 navController.popBackStack()
-            },
-            // ISSUE-P2-424 AC①：解锁页「导入已有库」直达时自动展开导入对话框
-            autoOpenImport = entry.arguments?.getBoolean("openImport") == true,
-            // ISSUE-P3-427：解锁页「新建密码库」直达时自动展开新建向导
-            autoOpenCreate = entry.arguments?.getBoolean("openCreate") == true
+            }
         )
     }
 }

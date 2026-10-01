@@ -214,36 +214,4 @@ class DatabasePickerViewModelTest {
         // 不得被 ViewModel 二次判定或吞掉
         assertEquals(VaultRemovalKind.PRIVATE_FILE, repo.lastRemovalKind)
     }
-
-    /**
-     * ISSUE-P3-427 / ISSUE-P2-424 AC①：两条「路由直达」自动展开各有**独立的一次消费守卫**。
-     *
-     * 失效形态是静默的：配置变更（旋转）重建组合会重放 `LaunchedEffect`，无守卫就会在用户
-     * 已主动关闭对话框后再次弹出；而若两条路径共用一枚守卫，走过导入就会吞掉新建的直达意图。
-     */
-    @Test
-    fun `路由直达的自动展开各只消费一次且互不干扰`() = runTest {
-        val (viewModel, _) = createViewModel()
-
-        viewModel.openImportFromRoute()
-        testScheduler.runCurrent()
-        assertTrue("导入直达应展开三来源对话框", viewModel.uiState.value.showOpenSourceDialog)
-        assertFalse("导入路径不得顺带展开新建向导", viewModel.uiState.value.showCreateDialog)
-
-        viewModel.closeOpenSourceDialog()
-        testScheduler.runCurrent()
-        viewModel.openImportFromRoute()
-        testScheduler.runCurrent()
-        assertFalse("已消费过一次即不得因重建重弹", viewModel.uiState.value.showOpenSourceDialog)
-
-        viewModel.openCreateFromRoute()
-        testScheduler.runCurrent()
-        assertTrue("新建直达应展开新建向导（导入侧已消费不影响本侧）", viewModel.uiState.value.showCreateDialog)
-
-        viewModel.closeCreateDialog()
-        testScheduler.runCurrent()
-        viewModel.openCreateFromRoute()
-        testScheduler.runCurrent()
-        assertFalse("新建侧同样只消费一次", viewModel.uiState.value.showCreateDialog)
-    }
 }

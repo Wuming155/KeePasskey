@@ -162,32 +162,6 @@ class DatabasePickerViewModel @Inject constructor(
         cloudAccount.cancelAndWipe()
     }
 
-    /**
-     * ISSUE-P2-424 AC①：路由 `openImport=true` 的自动展开入口。配置变更（旋转）会重建组合并
-     * 重放 `LaunchedEffect`，本守卫保证每个 ViewModel 实例只消费一次路由意图（VM 经
-     * activity-retained 作用域跨配置变更存活），关窗后不因重建而反复弹出。
-     */
-    fun openImportFromRoute() {
-        if (routeAutoImportConsumed) return
-        routeAutoImportConsumed = true
-        openOpenSourceDialog()
-    }
-
-    private var routeAutoImportConsumed = false
-
-    /**
-     * ISSUE-P3-427：路由 `openCreate=true` 的自动展开入口（新建侧，与 [openImportFromRoute] 对称）。
-     * 守卫**独立成第二枚**而非复用：两条直达路径各自只消费一次，谁都不该吞掉对方的意图
-     * （同一路由实例同时带两参时，两个对话框都会展开——导航层不产生该组合，故不额外裁决）。
-     */
-    fun openCreateFromRoute() {
-        if (routeAutoCreateConsumed) return
-        routeAutoCreateConsumed = true
-        openCreateDialog()
-    }
-
-    private var routeAutoCreateConsumed = false
-
     /** 对话框已把预填包写入表单快照态（接管数组擦除责任）后回调：ViewModel 侧弃持 */
     fun consumeOpenVaultPrefill() {
         cloudAccount.consumePrefill()
