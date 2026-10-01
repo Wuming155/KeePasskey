@@ -73,6 +73,12 @@ function New-SigningKeyMaterial {
     }
 
     $password = New-RandomPasswordString
+    # keytool -genkeypair 遇已存在的密钥库会用**新口令**去 load 旧文件（其语义是向既有库
+    # 追加条目）→ 旧库旧口令必然报 "keystore password was incorrect"（ISSUE-P3-421）。
+    # 覆盖确认已在主流程取得，这里先删旧文件再生成；删除紧贴生成动作，失败窗口最小。
+    if (Test-Path $KeyStorePath) {
+        Remove-Item $KeyStorePath -Force
+    }
     # keytool 提示顺序（英文强制）：库口令 → 复述 → DN 确认（-dname 已给，答 yes）→
     # PKCS12 密钥口令（回车＝同库口令）。
     #
