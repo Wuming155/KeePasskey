@@ -769,7 +769,7 @@
     <!-- 无障碍服务在系统设置页展示的服务说明（必须如实描述读取范围） -->
     <string name="legacy_autofill_service_desc">KeePasskey 的旧版自动填充通道：在系统自动填充不可用的应用中检测口令输入框并代为填充。本服务仅在你从 KeePasskey 选择条目时读取并写入相关输入框的内容，不后台收集或上传任何屏幕内容，且受应用内「旧版自动填充服务」开关控制。</string>
     <string name="sec_clipboard_title">剪贴板保护</string>
-    <string name="sec_clipboard_sub">复制的敏感内容标记为敏感：系统复制提示不显示明文，并在设定时长后自动擦除</string>
+    <string name="sec_clipboard_sub">复制内容标记为敏感：系统提示不显示明文，到期自动擦除</string>
     <string name="sec_clipboard_countdown_title">剪贴板保留时长</string>
     <string name="sec_clipboard_risk_notice">已关闭自动擦除：复制的口令/验证码不会按设定时长清除，但以下四种时机仍会清空剪贴板——切到后台、熄屏/锁屏、锁定密码库、以及应用冷启动对账（冷启动对账在无法比对内容时也可能一并清除其它应用写入的内容）。建议保持开启，或改用自动填充直接填表。</string>
     <string name="sec_section_memory">内存与密钥保护</string>
@@ -981,9 +981,9 @@
     <!-- ===== 自动填充设置子页 (AutofillSettingsScreen) ===== -->
     <string name="autofill_section_provider">填充服务</string>
     <string name="autofill_cm_title">凭据管理器 (Credential Manager)</string>
-    <string name="autofill_cm_sub">Android 16+ 系统级凭据管理，密码与通行密钥统一填充。关闭后本应用不再返回任何凭据候选或保存入口（系统列表中仍会显示本应用）</string>
+    <string name="autofill_cm_sub">密码与通行密钥经 Android 16+ 系统凭据管理统一填充</string>
     <string name="autofill_passkey_title">通行密钥 (Passkey) 支持</string>
-    <string name="autofill_passkey_sub">在支持的应用与网站中使用本机生成的通行密钥登录；关闭后通行密钥的注册与登录均不可用，账号密码填充不受影响</string>
+    <string name="autofill_passkey_sub">在支持的应用与网站中使用本机生成的通行密钥登录</string>
     <!-- 特权浏览器白名单（CM 通道通行密钥可用性）：内置仅收录已取证浏览器，其余由用户逐项启用 -->
     <string name="settings_passkey_privileged_browsers">特权浏览器白名单</string>
     <string name="settings_passkey_privileged_sub">让 Chrome / Firefox 之外的浏览器也能使用通行密钥</string>
@@ -991,22 +991,22 @@
     <string name="settings_passkey_privileged_empty">未检测到可用的浏览器应用。</string>
     <!-- ISSUE-P3-324：旧版无障碍自动填充通道（默认关闭；系统自动填充框架不可用时的兜底通道） -->
     <string name="autofill_legacy_accessibility_title">旧版自动填充服务（无障碍）</string>
-    <string name="autofill_legacy_accessibility_sub">在系统自动填充不可用的应用或设备上，经无障碍服务检测口令输入框并代为填充：检测到口令框时发出通知，点按选择要填充的条目。开启后须在系统设置中启用本应用的无障碍服务；默认关闭。</string>
+    <string name="autofill_legacy_accessibility_sub">系统自动填充不可用时的兜底通道：经无障碍服务检测口令输入框并代为填充</string>
     <string name="autofill_service_title">系统自动填充服务</string>
     <!-- ISSUE-P2-228：原「旧版自动填充服务 / 兼容低版本 Android 的无障碍填充方式」为虚假描述——
          本应用没有注册任何 AccessibilityService（minSdk 36，AutofillService 自 API 26 起即为唯一
          官方填充通道），且该开关当时既不持久化也无消费方。现如实表述其控制对象与边界。 -->
-    <string name="autofill_service_sub">浏览器与应用表单的账号密码填充通道。关闭后本应用不再向任何界面提供填充与保存（系统设置仍会列出本应用，可在其中改选其它服务）</string>
+    <string name="autofill_service_sub">浏览器与应用表单的账号密码填充通道</string>
     <string name="autofill_section_ux">填充体验</string>
     <string name="autofill_inline_title">键盘内联建议</string>
-    <string name="autofill_inline_sub">在输入法候选栏直接展示账号建议；该通道会把候选的用户名与条目标题交给输入法（可能为第三方键盘），默认关闭</string>
+    <string name="autofill_inline_sub">在输入法候选栏展示账号建议，候选用户名会交给输入法，默认关闭</string>
     <string name="autofill_auto_return_title">填充后自动返回</string>
     <string name="autofill_auto_return_sub">完成填充后自动回到原应用</string>
     <string name="autofill_clear_clipboard_title">填充后清空剪贴板</string>
     <string name="autofill_clear_clipboard_sub">粘贴完成即清除剪贴板中的敏感内容</string>
     <string name="autofill_section_totp">验证码辅助</string>
     <string name="autofill_copy_totp_title">填充时复制验证码</string>
-    <string name="autofill_copy_totp_sub">自动填充账号密码的同时把对应 TOTP 验证码写入系统剪贴板（擦除窗口内前台应用可读取），默认关闭</string>
+    <string name="autofill_copy_totp_sub">自动填充时把对应 TOTP 验证码写入系统剪贴板（擦除窗口内可读），默认关闭</string>
     <string name="autofill_totp_notif_title">验证码通知提醒</string>
     <!-- ISSUE-P3-18 诚实化修正：原文案承诺「在通知栏快捷复制」，但本轮通知**不含复制 action**
          （仅展示验证码与剩余秒数，到期自动消失）。文案已改为与实现一致。 -->
@@ -1022,14 +1022,14 @@
          也无对应偏好项，属措辞漂移）。现如实表述其控制对象、作用范围与降级后果，措辞与
          DigitalAssetLinksVerifier 的 KDoc 互相锚定（由 DalSkipSwitchCopyWiringTest 锁定不漂移）。 -->
     <string name="autofill_skip_dal_title">跳过通行密钥站点归属校验</string>
-    <string name="autofill_skip_dal_sub">注册通行密钥前默认向站点拉取授权声明，核对调用应用对本站点的归属；开启后不再校验该归属，任何应用都能以任意域名注册通行密钥（默认关闭）</string>
+    <string name="autofill_skip_dal_sub">注册通行密钥前默认校验调用应用的站点归属声明；开启后不再校验，任何应用都能以任意域名注册</string>
     <!-- ISSUE-P0-02：设置页明示「下发前二次确认」为默认强制策略；
          ISSUE-P3-42：另提供默认关闭的「短时免重复确认」开关（不影响「库锁定必须先解锁」语义） -->
     <string name="autofill_fill_confirm_title">下发前二次确认</string>
     <string name="autofill_fill_confirm_sub">填充密码前默认要求生物识别或手动确认（库锁定时必须先解锁）</string>
     <string name="settings_always_on_badge">始终开启</string>
     <string name="autofill_session_grant_title">短时免重复确认（30 秒）</string>
-    <string name="autofill_session_grant_sub">库已解锁时，对同一应用/站点 30 秒内仅需确认一次；仅对能确定域名的表单生效（无法归属域名的表单每次仍需确认）；默认关闭</string>
+    <string name="autofill_session_grant_sub">库已解锁时，同一应用/站点 30 秒内仅需确认一次；仅对能确定域名的表单生效</string>
     <!-- ISSUE-P3-41：自动填充服务健康自检状态与修复指引 -->
     <string name="autofill_health_ok">自动填充服务运行正常</string>
     <string name="autofill_health_attention">自动填充服务需要处理</string>
@@ -1161,7 +1161,7 @@
     <string name="health_leak_status_failed">失败</string>
     <string name="health_status_safe">已防护</string>
     <string name="health_breach_toggle_title">已泄露密码检测（联网）</string>
-    <string name="health_breach_toggle_sub">默认关闭。开启后重新扫描时以 k-匿名方式查询公开泄露库（Have I Been Pwned）：仅发送密码 SHA-1 的前 5 位，密码明文与完整哈希均不出设备；关闭时本应用不发起任何相关网络请求</string>
+    <string name="health_breach_toggle_sub">开启后以 k-匿名方式查询公开泄露库（Have I Been Pwned）：仅发送密码 SHA-1 前 5 位，明文不出设备；默认关闭</string>
     <string name="health_tips_title">安全建议</string>
     <string name="health_tips_desc">为每个账户使用唯一的高强度密码，并开启双重认证；KeePasskey 可以帮你生成并记住它们</string>
 
@@ -1209,9 +1209,9 @@
     <string name="cred_draft_save">保存并填充</string>
     <string name="cred_draft_generate">生成密码</string>
     <string name="autofill_manual_picker_title">手动搜索入口</string>
-    <string name="autofill_manual_picker_sub">在系统填充面板常驻「搜索全部条目…」兜底入口；关闭后仅保留自动匹配与解锁引导</string>
+    <string name="autofill_manual_picker_sub">在系统填充面板常驻「搜索全部条目…」兜底入口</string>
     <string name="autofill_offer_create_title">无匹配时就地新建</string>
-    <string name="autofill_offer_create_sub">无匹配条目时在选择器空态提供「新建条目并填充」、在凭据管理器提供「新建密码条目」；关闭后两处入口均不呈现</string>
+    <string name="autofill_offer_create_sub">无匹配条目时在选择器与凭据管理器提供「新建条目并填充」入口</string>
     <string name="structured_dataset_subtitle">卡片 / 地址信息</string>
     <string name="structured_entry_badge">卡片/地址</string>
     <string name="cred_create_entry_subtitle">将通行密钥或密码保存至活动密码库</string>

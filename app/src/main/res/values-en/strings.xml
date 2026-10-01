@@ -760,7 +760,7 @@
     <string name="legacy_autofill_service_desc">The legacy autofill channel of KeePasskey: detects password fields and fills them in apps where system autofill is unavailable. This service only reads from and writes to the relevant fields when you choose an entry from KeePasskey; it does not collect or upload any screen content in the background, and it is controlled by the in-app Legacy autofill service toggle.</string>
     <string name="autofill_save_blocked">This app is on the autofill blocklist, so saving credentials was rejected.</string>
     <string name="sec_clipboard_title">Clipboard protection</string>
-    <string name="sec_clipboard_sub">Copied secrets are marked sensitive: the system copy confirmation hides them, and they are auto-cleared after the set duration</string>
+    <string name="sec_clipboard_sub">Copied secrets are marked sensitive: hidden from the system copy confirmation and auto-cleared after the set duration</string>
     <string name="sec_clipboard_countdown_title">Clipboard retention</string>
     <string name="sec_clipboard_risk_notice">Auto-clear is off: copied passwords/codes are not cleared on the set timer, but the clipboard is still wiped at four moments — when you leave the app, on screen-off/lock, when the vault is locked, and on cold-start reconciliation (the last one may also clear content written by other apps when it cannot compare). Keep it on, or use autofill to fill forms directly.</string>
     <string name="sec_section_memory">Memory &amp; key protection</string>
@@ -970,9 +970,9 @@
     <!-- ===== Autofill settings subscreen ===== -->
     <string name="autofill_section_provider">Fill services</string>
     <string name="autofill_cm_title">Credential Manager</string>
-    <string name="autofill_cm_sub">System-level credential management on Android 16+, unified passkey and password filling. When off, this app returns no credential candidates or save prompts at all (it still appears in the system list of providers)</string>
+    <string name="autofill_cm_sub">Passkeys and passwords filled through the Android 16+ system credential manager</string>
     <string name="autofill_passkey_title">Passkey support</string>
-    <string name="autofill_passkey_sub">Sign in with device-generated passkeys in supporting apps and sites; when off, passkey registration and sign-in are both unavailable, while password autofill keeps working</string>
+    <string name="autofill_passkey_sub">Sign in with device-generated passkeys in supporting apps and sites</string>
     <!-- Privileged browser allowlist (passkey availability in the Credential Manager channel) -->
     <string name="settings_passkey_privileged_browsers">Privileged browser allowlist</string>
     <string name="settings_passkey_privileged_sub">Let browsers other than Chrome / Firefox use passkeys</string>
@@ -980,21 +980,21 @@
     <string name="settings_passkey_privileged_empty">No browser apps detected.</string>
     <!-- ISSUE-P3-324: legacy accessibility-based autofill channel (off by default; fallback when the system autofill framework is unavailable) -->
     <string name="autofill_legacy_accessibility_title">Legacy autofill service (accessibility)</string>
-    <string name="autofill_legacy_accessibility_sub">For apps or devices where the system autofill framework is unavailable, this accessibility service detects password fields and fills them on your behalf: it posts a notification when a password field appears; tap it to pick an entry. Enabling this requires turning on the accessibility service of this app in system settings. Off by default.</string>
+    <string name="autofill_legacy_accessibility_sub">Fallback for apps where system autofill is unavailable: an accessibility service detects password fields and fills them on your behalf</string>
     <string name="autofill_service_title">System autofill service</string>
     <!-- ISSUE-P2-228: the old copy claimed an accessibility-based legacy channel; this app registers
          no AccessibilityService (minSdk 36), and the switch had neither persistence nor a consumer. -->
-    <string name="autofill_service_sub">Credential filling for browser and app forms. When off, this app offers no fill suggestions and accepts no saves anywhere (it is still listed by the system; pick another service in system settings)</string>
+    <string name="autofill_service_sub">Credential filling for browser and app forms</string>
     <string name="autofill_section_ux">Filling experience</string>
     <string name="autofill_inline_title">Inline keyboard suggestions</string>
-    <string name="autofill_inline_sub">Show account suggestions right in the input method bar; this passes the candidate username and entry title to the input method (which may be a third-party keyboard). Off by default</string>
+    <string name="autofill_inline_sub">Show account suggestions in the input method candidate bar; candidate usernames are passed to the input method. Off by default</string>
     <string name="autofill_auto_return_title">Return after filling</string>
     <string name="autofill_auto_return_sub">Go back to the original app once filling completes</string>
     <string name="autofill_clear_clipboard_title">Clear clipboard after fill</string>
     <string name="autofill_clear_clipboard_sub">Remove pasted secrets from the clipboard immediately</string>
     <string name="autofill_section_totp">Code assistance</string>
     <string name="autofill_copy_totp_title">Copy code when filling</string>
-    <string name="autofill_copy_totp_sub">Write the matching TOTP code to the system clipboard while autofilling credentials (readable by foreground apps during the erase window). Off by default</string>
+    <string name="autofill_copy_totp_sub">Write the matching TOTP code to the system clipboard while autofilling (readable during the erase window). Off by default</string>
     <string name="autofill_totp_notif_title">Code notification</string>
     <!-- ISSUE-P3-18 honesty fix: the previous copy promised a quick-copy action, but this
          notification carries NO copy action (code + remaining seconds only, auto-expiring). -->
@@ -1008,7 +1008,7 @@
          entirely — no such layer exists in this app. This switch actually gates the passkey
          registration gate (DigitalAssetLinksVerifier ownership check) in PasskeyCreateActivity. -->
     <string name="autofill_skip_dal_title">Skip passkey site ownership check</string>
-    <string name="autofill_skip_dal_sub">Passkey registration normally fetches the authorization statement published by the site to verify that the calling app belongs to it; when enabled, this check is skipped, so any app can register a passkey for any domain (off by default)</string>
+    <string name="autofill_skip_dal_sub">Passkey registration normally verifies the site-published ownership statement of the calling app; when enabled, this check is skipped, so any app can register a passkey for any domain</string>
     <string name="autofill_blacklist_row_title">Autofill blacklist</string>
     <string name="autofill_blacklist_count">%1$d apps blocked</string>
     <string name="autofill_blacklist_empty">No apps blocked</string>
@@ -1111,7 +1111,7 @@
     <string name="health_leak_status_failed">Failed</string>
     <string name="health_status_safe">Protected</string>
     <string name="health_breach_toggle_title">Breached password check (online)</string>
-    <string name="health_breach_toggle_sub">Off by default. When enabled, rescanning queries a public breach corpus (Have I Been Pwned) with k-anonymity: only the first 5 characters of the password SHA-1 are sent — neither the password nor the full hash leaves the device. While off, no related request is ever sent</string>
+    <string name="health_breach_toggle_sub">When enabled, breach checks query the public breach corpus (Have I Been Pwned) with k-anonymity: only the first 5 characters of the password SHA-1 are sent. Off by default</string>
     <string name="health_tips_title">Security tips</string>
     <string name="health_tips_desc">Use a unique strong password for every account and enable two-factor authentication. KeePasskey can generate and remember them for you</string>
 
@@ -1159,9 +1159,9 @@
     <string name="cred_draft_save">Save and fill</string>
     <string name="cred_draft_generate">Generate password</string>
     <string name="autofill_manual_picker_title">Manual search entry</string>
-    <string name="autofill_manual_picker_sub">Keep a persistent “Search all entries…” fallback in the system fill panel; off keeps only auto-match and the unlock guide</string>
+    <string name="autofill_manual_picker_sub">Keep a persistent “Search all entries…” fallback in the system fill panel</string>
     <string name="autofill_offer_create_title">Create entry when nothing matches</string>
-    <string name="autofill_offer_create_sub">Offer “Create entry and fill” on the empty picker and “Create password entry” in Credential Manager; turning this off hides both</string>
+    <string name="autofill_offer_create_sub">Offer “Create entry and fill” in the picker and Credential Manager when nothing matches</string>
     <string name="structured_dataset_subtitle">Card / address information</string>
     <string name="structured_entry_badge">Card/Address</string>
     <string name="cred_create_entry_subtitle">Save passkey or password to active vault</string>
@@ -1349,7 +1349,7 @@
     <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is required before filling a password by default (unlock first while the vault is locked)</string>
     <string name="settings_always_on_badge">Always on</string>
     <string name="autofill_session_grant_title">Skip repeat confirmation (30s)</string>
-    <string name="autofill_session_grant_sub">While the vault is unlocked, confirm only once per app/site within 30 seconds; applies only to forms with an identifiable domain (forms without one still require confirmation every time); disabled by default</string>
+    <string name="autofill_session_grant_sub">While the vault is unlocked, confirm only once per app/site within 30 seconds; applies only to forms with an identifiable domain</string>
     <string name="autofill_health_ok">Autofill service is working</string>
     <string name="autofill_health_attention">Autofill service needs attention</string>
     <string name="autofill_health_issue_service_missing">Autofill service is not declared correctly; reinstall the app</string>
