@@ -93,6 +93,34 @@ val forbiddenReleasePasswords = setOf(
 )
 val releasePasswordPlaceholderMarker = "__REPLACE_WITH"
 
+// =============================================================================================
+// ISSUE-P3-422：release 出包 fail-closed——签名未配置时**中止构建**，绝不静默产出未签名包。
+//
+// 缺陷背景：hasReleaseSigning=false 时（凭证管理器凭据缺失 / 环境变量未注入 /
+// keystore.properties 缺口令行），release 构建此前会静默产出未签名 APK 且显示
+// BUILD SUCCESSFUL——「构建成功」与「产物可分发」背离，误分发即翻车。
+//
+// 判定时机：taskGraph 就绪时检查实际调度的任务——仅当调度了 :app 的 assemble*/bundle*
+// Release 分发产物任务且 hasReleaseSigning=false 时 error(...) 中止；`test` /
+// `tasks` / `testReleaseUnitTest` / lint 等不产分发产物的任务不受影响（不误伤日常开发）。
+// =============================================================================================
+gradle.taskGraph.whenReady {
+    if (hasReleaseSigning) return@whenReady
+    val releaseArtifactTasks = allTasks.filter {
+        it.project == project &&
+            (it.name.startsWith("assemble") || it.name.startsWith("bundle")) &&
+            it.name.endsWith("Release")
+    }
+    if (releaseArtifactTasks.isNotEmpty()) {
+        error(
+            "release 签名未配置（hasReleaseSigning=false）却调度了 " +
+                "${releaseArtifactTasks.map { it.name }}——拒绝产出未签名包。" +
+                "口令通道（按优先级）：Windows 凭证管理器（tools/signing/write-cred.ps1）/" +
+                "CI Secret 环境变量/keystore.properties；密钥文件路径见 storeFile（ISSUE-P3-422）。",
+        )
+    }
+}
+
 if (hasReleaseSigning) {
     listOf(
         "storePassword（环境变量 / Windows 凭证管理器 / keystore.properties）" to releaseStorePassword!!,
@@ -154,8 +182,9 @@ android {
                 // - 启用 v4：额外产出 .idsig 文件，供 adb 增量安装（--incremental）与商店
                 //   做安装前完整性校验；仅为附加产物，不改变 APK 本体。
                 // 说明：本块整体位于 hasReleaseSigning 判定内。未配置签名（既无
-                // keystore.properties 也无 KEYSTORE_* 环境变量）时不会创建该 signingConfig，
-                // AGP 照常产出未签名包，assembleRelease 不会因此失败。
+                // keystore.properties 也无 KEYSTORE_* 环境变量也无凭证管理器凭据）时不会
+                // 创建该 signingConfig；ISSUE-P3-422 起 taskGraph 就绪判定会**中止**
+                // assemble*/bundle*Release——绝不静默产出未签名包。
                 enableV1Signing = false
                 enableV2Signing = true
                 enableV3Signing = true
