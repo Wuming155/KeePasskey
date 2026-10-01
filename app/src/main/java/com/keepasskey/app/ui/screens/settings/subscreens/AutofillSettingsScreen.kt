@@ -109,11 +109,9 @@ fun AutofillSettingsScreen(
                 AutofillSectionHeader(R.string.autofill_section_provider)
             }
 
-            // ISSUE-P3-41：服务健康自检（实时探测系统侧与本应用侧链路状态并给出修复指引）
-            item {
-                healthCard()
-            }
-
+            // ISSUE-P3-414（用户裁决）：不再在此页挂载健康自检卡——固定显示的「运行正常 / 需要处理」
+            // 横幅与异常行被视为重复提示；卡片组件与探针链保留（`healthCard` 槽位仍在），
+            // 供未来如「状态摘要」等面复用。
             item {
                 AutofillProviderCard(
                     uiState = uiState,
