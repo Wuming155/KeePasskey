@@ -8,8 +8,9 @@ package com.keepasskey.sync.network
  *   平台 Network Security Config 全局禁明文（cleartextTrafficPermitted="false"）为唯一行为——
  *   「允许明文流量」为不安全功能，按安全决策移除；
  * - **证书固定已整体移除（Wave 14）**：证书验证完全依赖 Android 系统默认 CA 链，不做任何
- *   SPKI 公钥锁定——锁定会阻碍云厂商常规证书轮换导致连接阻断，且本应用仅面向正规公网商业云服务
- *   （不支持自建服务器），无锁定必要。
+ *   SPKI 公钥锁定——锁定会阻碍云厂商常规证书轮换导致连接阻断，无锁定必要。
+ * - **端点口径（ISSUE-P2-425）**：仅 HTTPS（明文全拒）；自建 / 内网 HTTPS 端点默认可用，
+ *   重定向 / 解析到的非预期内网地址受连接期 SSRF 守卫拦截（见 [SyncEndpointGuard]）。
  */
 data class SyncNetworkOptions(
     val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
@@ -19,8 +20,9 @@ data class SyncNetworkOptions(
     val callTimeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS,
     /**
      * ISSUE-P1-05（ZT-05）SSRF 防护显式白名单豁免（默认空 = 不豁免任何主机）。
-     * 命中的主机跳过构造期字面 IP/保留名校验与连接期 [SsrfGuardDns] 解析网段校验，
-     * 供确需直连特定主机的场景经上层显式、可审计地放行；生产默认恒为空。
+     * ISSUE-P2-425 后的定位：**高级逃生通道**（如合法重定向落到自建内网等边缘情形）——
+     * 自建 / 内网 HTTPS 端点经构造期放宽已默认可用，无需走本参数；命中的主机在连接期
+     * 豁免 [SsrfGuardDns] 解析网段校验（豁免不延伸到云元数据红线）；生产默认恒为空。
      */
     val ssrfAllowedHosts: Set<String> = emptySet(),
     /**

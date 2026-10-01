@@ -8,31 +8,32 @@ import java.net.UnknownHostException
 import java.util.Locale
 
 /**
- * ISSUE-P1-05（ZT-05）同步端点 SSRF 与主机注入统一防线。
+ * ISSUE-P1-05（ZT-05）同步端点 SSRF 与主机注入统一防线；
+ * ISSUE-P2-425：构造期口径按产品裁决放宽为「**加密即可、明文全拒**」。
  *
- * 本应用仅面向正规公网商业云（AWS S3 / R2 / MinIO 公有端点、Nextcloud / 坚果云等公有 WebDAV），
- * 用户可控的端点 URL 与 S3 桶名若不加校验即可被用于两类攻击：
+ * 产品口径（PD-02，2026-10-01 定版）：同步端点**仅接受 HTTPS**（明文 HTTP 一律拒绝）；
+ * 用户**显式配置**的自建 / 内网 HTTPS 端点（RFC1918、ULA、链路本地、`localhost`、`.local`、
+ * `.internal`）**默认可用**——自托管 NAS / MinIO / Nextcloud 是合法加密同步目标，不再与
+ * 恶意内网重定向同等待遇。SSRF 防御的重心随之收敛到**连接期**：拦截「非用户意图」的内网到达。
  *
- * 1. **SSRF（CWE-918）**：端点直填内网/云元数据地址（`https://169.254.169.254/`、
- *    `https://192.168.x.x/`、`https://localhost/`），或填入解析到内网 IP 的域名，
- *    诱导设备向内部网络或云元数据服务发起携带凭据的请求；
- * 2. **主机注入**：S3 virtual-hosted 分支将未校验的桶名直接拼进 authority
- *    （`scheme://bucket.host/key`），注入 `x@evil.com/`、`x#`、`x?` 即可改写真实目标主机，
- *    且 SigV4 canonicalHeaders 取自被注入后的 host → 签名自洽 → 向攻击者主机投递对其有效的签名。
- *
- * 防线分三层，均 fail-closed：
- * - **构造期（纯字符串/字面 IP 校验，零网络）**：桶名严格按 S3 命名正则校验杜绝 authority 注入；
- *   端点主机拒绝 userinfo 注入、本地/内网保留名与**字面 IP** 的内网/保留网段；
- * - **连接期（DNS 解析后校验）**：经 [SsrfGuardDns] 拦截主机名解析结果，任一解析地址落入
+ * 残余攻击面与各层职责（均 fail-closed）：
+ * 1. **构造期（纯字符串/字面 IP 校验，零网络）**：桶名严格按 S3 命名正则校验杜绝 authority
+ *    注入（S3 virtual-hosted 分支 `scheme://bucket.host/key`，注入 `x@evil.com/`、`x#`、`x?`
+ *    即可改写真实目标主机并投递对其有效的 SigV4 签名）；端点主机拒绝 userinfo 注入与
+ *    明文 scheme；**云元数据红线**——`169.254.0.0/16` 字面量即便作为配置端点也仍拒绝
+ *    （非合法同步目标，仅攻击面）；
+ * 2. **连接期（DNS 解析后校验）**：经 [SsrfGuardDns] 拦截主机名解析结果，任一解析地址落入
  *   内网/保留网段即整体拒绝——同时抵御 DNS 重绑定（校验用的解析结果即喂给实际连接）；
- * - **连接期（目标地址复核）**：经 [SsrfGuardSocketFactory] 在建立 TCP 之前复核**实际目标地址**，
- *   覆盖 Dns 层天然够不着的两条路径——**IP 字面量**（OkHttp 路由层对其短路，不经自定义 Dns）
- *   与**重定向跳转**（ISSUE-P2-208：`302 → https://<内网 IP>/` 曾只剩 TLS 证书链一道约束）。
+ *   用户显式配置的端点主机经 [SyncHttpClientFactory] 登记为豁免（其解析地址获批放行），
+ *   但豁免**不延伸到云元数据网段**；
+ * 3. **连接期（目标地址复核）**：经 [SsrfGuardSocketFactory] 在建立 TCP 之前复核**实际目标地址**，
+ *   覆盖 Dns 层天然够不着的两条路径——**IP 字面量**（OkHttp 路由层对其短路，不经自定义 Dns；
+ *   已配置端点的字面量由工厂预登记放行）与**重定向跳转**（ISSUE-P2-208：`302 → https://<内网 IP>/`
+ *   曾只剩 TLS 证书链一道约束）。
  *
- * 显式白名单豁免：[allowedHosts] 提供可审计的例外通道（默认空），其解析结果经
- * [SsrfAddressApprovals] 登记后在连接期一并放行（否则纵深防御会退化为内网自建的可用性回归）；
- * 测试/本地联调另经 Provider 注入自定义 OkHttpClient 的生产旁路豁免
- * （与既有强制 HTTPS 校验的 `client == null` 门控一致）。
+ * 显式白名单豁免：[allowedHosts] 提供可审计的高级逃生通道（默认空，语义见
+ * [SyncNetworkOptions.ssrfAllowedHosts]）；测试/本地联调另经 Provider 注入自定义
+ * OkHttpClient 的生产旁路豁免（与既有强制 HTTPS 校验的 `client == null` 门控一致）。
  */
 object SyncEndpointGuard {
 
@@ -78,17 +79,36 @@ object SyncEndpointGuard {
 
     /**
      * 校验端点主机（构造期，纯解析 + 字面 IP 判定，不触发 DNS）。
-     * 拒绝 userinfo 注入、本地/内网保留主机名与字面 IP 的内网/保留网段。
+     *
+     * ISSUE-P2-425 放宽后的构造期仅拒绝三类（fail-closed）：
+     * 1. **明文 scheme**（`http://` 等）——「明文全拒」的产品红线；
+     * 2. **userinfo 注入**（`https://good.com@evil.com/`）——改写真实目标主机的注入手法；
+     * 3. **云元数据字面量**（`169.254.0.0/16`）——唯一保留的网段级构造期拒绝，
+     *    即便作为配置端点也仍拒绝（AC④ 红线）。
+     *
+     * 自建 / 内网 HTTPS 端点（RFC1918 / ULA / 链路本地（非元数据）/ `localhost` / `.local` /
+     * `.internal` 及一切私网字面 IP）**不再拒绝**——其「非预期内网到达」风险由连接期两层
+     * 守卫（[SsrfGuardDns] / [SsrfGuardSocketFactory]）复核，见类 KDoc。
      *
      * @param rawEndpoint 用户填写的端点（可无 scheme，按 https 归一化）
-     * @param allowedHosts 显式白名单豁免（默认空）
+     * @param allowedHosts 显式白名单豁免（默认空，高级逃生通道）
+     * @return 规范化后的端点主机（调用方须传给 [SyncHttpClientFactory.createSyncClient]
+     *   登记连接期豁免——「用户显式配置的端点」即其声明意图）
      */
-    fun validateEndpointHost(rawEndpoint: String, allowedHosts: Set<String> = emptySet()) {
+    fun validateEndpointHost(rawEndpoint: String, allowedHosts: Set<String> = emptySet()): String {
         val trimmed = rawEndpoint.trim()
         val normalized = if (trimmed.contains("://")) trimmed else "https://$trimmed"
         // 用 OkHttp HttpUrl 解析：与实际发起连接所用解析器同源，杜绝「校验解析」与「连接解析」差异
         val url = normalized.toHttpUrlOrNull()
             ?: throw SyncException.InvalidEndpointError("同步端点 URL 非法，无法解析主机：\"$rawEndpoint\"")
+
+        // ISSUE-P2-425：明文全拒——工厂恒 TLS-only，这里在构造期给出用户可理解的类型化错误
+        if (!url.isHttps) {
+            throw SyncException.InvalidEndpointError(
+                "同步端点必须使用 HTTPS（当前协议为 \"${url.scheme}://\"）。" +
+                    "明文 HTTP 已被禁止以保护凭据与密码库传输，请填写 https:// 开头的地址"
+            )
+        }
 
         // 拒绝 userinfo 注入（`https://good.com@evil.com/`）：云凭据为独立字段，端点 URL 不应携带 @
         if (url.username.isNotEmpty() || url.password.isNotEmpty()) {
@@ -101,8 +121,16 @@ object SyncEndpointGuard {
         if (host.isBlank()) {
             throw SyncException.InvalidEndpointError("同步端点 URL 缺少有效主机：\"$rawEndpoint\"")
         }
-        if (isHostAllowed(host, allowedHosts)) return
-        assertHostNotBlocked(host)
+        if (isHostAllowed(host, allowedHosts)) return host
+        // 云元数据红线（AC④）：169.254.0.0/16 字面量即便作为配置端点也仍拒绝
+        val literal = parseIpLiteral(host.lowercase(Locale.US).removeSuffix("."))
+        if (literal != null && isCloudMetadataAddress(literal)) {
+            throw SyncException.InvalidEndpointError(
+                "同步端点主机 \"$host\" 为云元数据网段（169.254.0.0/16）地址，已拒绝" +
+                    "（该网段仅是攻击面而非合法同步目标，任何口径下不放行）"
+            )
+        }
+        return host
     }
 
     /** 主机（含 virtual-host 组合后）是否命中显式白名单豁免 */
@@ -113,33 +141,13 @@ object SyncEndpointGuard {
     }
 
     /**
-     * 断言主机非本地/内网保留名、且非内网/保留网段的字面 IP。仅对字面 IP 做网段判定，
-     * 主机名的解析后判定由连接期 [SsrfGuardDns] 承担（避免构造期阻塞式 DNS）。
-     */
-    private fun assertHostNotBlocked(host: String) {
-        val lower = host.lowercase(Locale.US).removeSuffix(".")
-        if (lower == "localhost" ||
-            lower.endsWith(".localhost") ||
-            lower.endsWith(".local") ||
-            lower.endsWith(".internal")
-        ) {
-            throw SyncException.InvalidEndpointError(
-                "同步端点主机 \"$host\" 属本地/内网保留名，已拒绝（SSRF 防护：本应用仅支持公网商业云）"
-            )
-        }
-        val literal = parseIpLiteral(lower)
-        if (literal != null && isBlockedAddress(literal)) {
-            throw SyncException.InvalidEndpointError(
-                "同步端点主机 \"$host\" 为内网/保留网段地址，已拒绝（SSRF 防护：禁止直连内网段与云元数据端点）"
-            )
-        }
-    }
-
-    /**
      * 将主机解析为 IP **字面量**（不触发 DNS）；非字面量返回 null。
      * [InetAddress.getByName] 对合法 IP 字面量仅做本地解析，不发起网络查询。
+     *
+     * 公开给 [SyncHttpClientFactory]：对「已配置端点为 IP 字面量」的场景做连接期预登记放行
+     * （OkHttp 路由层对字面量短路、不经自定义 Dns，豁免无法经 Dns 层自然生效）。
      */
-    private fun parseIpLiteral(host: String): InetAddress? {
+    fun parseIpLiteral(host: String): InetAddress? {
         val bare = if (host.startsWith("[") && host.endsWith("]")) {
             host.substring(1, host.length - 1)
         } else {
@@ -149,6 +157,35 @@ object SyncEndpointGuard {
         if (!looksLikeIp) return null
         return runCatching { InetAddress.getByName(bare) }.getOrNull()
     }
+
+    /**
+     * 判定地址是否属云元数据网段 `169.254.0.0/16`（ISSUE-P2-425 的唯一网段级红线）。
+     *
+     * 该网段在 ISSUE-P2-425 放宽后**不再随内网一并豁免**：无论作为配置端点（构造期拒绝）
+     * 还是作为豁免主机的解析结果（[SsrfGuardDns] 豁免分支仍拒绝），一律不放行——
+     * 元数据服务只可能被攻击面利用，不存在「合法的元数据同步目标」。
+     * 未知地址族保守判定为命中（fail-closed）。
+     */
+    fun isCloudMetadataAddress(addr: InetAddress): Boolean {
+        val bytes = addr.address
+        return when {
+            bytes.size == 4 ->
+                bytes[0] == METADATA_OCTET_1.toByte() && bytes[1] == METADATA_OCTET_2.toByte()
+            // IPv4-mapped 形态：内嵌 IPv4 即元数据网段同样命中（getByName 通常已归一为 4 字节，
+            // 此处为防御性复核）；未知地址族保守视为命中
+            bytes.size == 16 ->
+                (0 until IPV4_MAPPED_MARKER_OFFSET).all { bytes[it].toInt() == 0 } &&
+                    bytes[IPV4_MAPPED_MARKER_OFFSET] == METADATA_OCTET_1.toByte() &&
+                    bytes[IPV4_MAPPED_MARKER_OFFSET + 1] == METADATA_OCTET_2.toByte()
+            else -> true
+        }
+    }
+
+    /** 云元数据网段 `169.254.0.0/16` 的首字节 */
+    private const val METADATA_OCTET_1 = 169
+
+    /** 云元数据网段 `169.254.0.0/16` 的次字节 */
+    private const val METADATA_OCTET_2 = 254
 
     /**
      * 判定一个已解析地址是否落入必须拒绝的内网/保留网段。
@@ -261,6 +298,15 @@ class SsrfGuardDns(
         val lower = hostname.lowercase(Locale.US).removeSuffix(".")
         val exempt = allowedHosts.any { it.lowercase(Locale.US) == lower }
         if (exempt) {
+            // ISSUE-P2-425：豁免只覆盖「内网自建可用性」这一意图，**不延伸到云元数据红线**——
+            // 豁免主机（含已配置端点）解析出 169.254.0.0/16 时仍整体拒绝
+            val metadata = addresses.firstOrNull { SyncEndpointGuard.isCloudMetadataAddress(it) }
+            if (metadata != null) {
+                throw UnknownHostException(
+                    "SSRF 防护：豁免主机 \"$hostname\" 解析到云元数据网段地址（${metadata.hostAddress}），" +
+                        "红线不随豁免放行，已拒绝连接"
+                )
+            }
             approvals.approveAll(addresses)
             return addresses
         }

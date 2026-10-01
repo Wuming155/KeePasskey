@@ -78,8 +78,9 @@ class S3SyncProvider(
 ) : SyncProvider {
 
     // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），
-    // 仅 HTTP 回环测试需显式注入明文客户端
-    private val httpClient: OkHttpClient = client ?: SyncHttpClientFactory.createSyncClient(networkOptions)
+    // 仅 HTTP 回环测试需显式注入明文客户端。生产路径在 init 中随构造期校验一并构建：
+    // 已配置端点主机传入工厂登记连接期豁免（ISSUE-P2-425，见 createSyncClient KDoc）
+    private val httpClient: OkHttpClient
 
     // SigV4 签名协作单元：与 Provider 共享同一凭据 CharArray 实例（借用语义），
     // [clearCredentials] 的显式清零对本单元即时生效
@@ -93,10 +94,10 @@ class S3SyncProvider(
         // ISSUE-P1-05（ZT-05）主机注入防线：桶名恒常严格按 S3 命名规则校验（与是否回环无关），
         // 杜绝 virtual-host 分支 `scheme://bucket.host/key` 经 `@ / # ?` 改写真实目标主机
         SyncEndpointGuard.validateBucketName(bucketName)
-        // Wave 14 全站强制 HTTPS（生产路径 fail-fast）：显式 http:// 端点在构造期即拒绝并抛
-        // 类型化 InvalidEndpointError；无 scheme 输入由 buildUrl 自动补 https://；
-        // 仅测试回环（显式注入 HTTP 客户端）豁免
         if (client == null) {
+            // Wave 14 全站强制 HTTPS（生产路径 fail-fast）：显式 http:// 端点在构造期即拒绝并抛
+            // 类型化 InvalidEndpointError；无 scheme 输入由 buildUrl 自动补 https://；
+            // 仅测试回环（显式注入 HTTP 客户端）豁免
             val trimmedEndpoint = endpoint.trim()
             if (trimmedEndpoint.contains("://") && !trimmedEndpoint.startsWith("https://", ignoreCase = true)) {
                 throw SyncException.InvalidEndpointError(
@@ -104,10 +105,13 @@ class S3SyncProvider(
                         "明文 HTTP 已被禁止以保护凭据与密码库传输，请填写 https:// 开头的商业云服务地址"
                 )
             }
-            // ISSUE-P1-05（ZT-05）SSRF 构造期防线：拒绝 userinfo 注入、本地/内网保留名与
-            // 字面 IP 的内网/保留网段（含 169.254.169.254 云元数据端点）；主机名的解析后
-            // 网段校验由连接期 SsrfGuardDns 承担。仅测试回环（注入客户端）豁免
-            SyncEndpointGuard.validateEndpointHost(endpoint, networkOptions.ssrfAllowedHosts)
+            // ISSUE-P1-05（ZT-05）构造期防线（ISSUE-P2-425 放宽）：拒绝 userinfo 注入与云元数据
+            // 字面量；自建 / 内网 HTTPS 端点放行，其连接期豁免经返回的规范化主机登记进工厂
+            // （重定向 / 重绑定跳到的非预期内网地址仍被 SsrfGuardDns / SsrfGuardSocketFactory 拦截）
+            val endpointHost = SyncEndpointGuard.validateEndpointHost(endpoint, networkOptions.ssrfAllowedHosts)
+            httpClient = SyncHttpClientFactory.createSyncClient(networkOptions, endpointHost)
+        } else {
+            httpClient = client
         }
     }
 

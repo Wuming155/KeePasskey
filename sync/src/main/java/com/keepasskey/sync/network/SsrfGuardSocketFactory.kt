@@ -30,9 +30,11 @@ import javax.net.SocketFactory
  * 「实际要连的地址」，对 IP 字面量与全部重定向跳数一律生效。
  *
  * ## 白名单豁免必须延续（[SsrfAddressApprovals]）
- * 显式白名单（[SyncNetworkOptions.ssrfAllowedHosts]，如自建 NAS / 内网 WebDAV）在 Dns 层被
- * 豁免，其解析出的内网地址**在连接期同样必须放行**——否则纵深防御会退化为可用性回归。
- * 故由 [SsrfGuardDns] 在豁免时把解析结果登记进 [SsrfAddressApprovals]，本层据此放行；
+ * 显式白名单（[SyncNetworkOptions.ssrfAllowedHosts]，高级逃生通道）与**用户显式配置的端点**
+ * （ISSUE-P2-425：自建 / 内网 HTTPS 端点默认可用）的到达地址在 Dns 层被豁免，其解析出的
+ * 内网地址**在连接期同样必须放行**——否则纵深防御会退化为可用性回归。
+ * 故由 [SsrfGuardDns] 在豁免时把解析结果登记进 [SsrfAddressApprovals]，已配置端点为
+ * IP 字面量时由 [SyncHttpClientFactory] 直接预登记（OkHttp 对字面量短路、不经 Dns）；
  * 未登记的地址（含一切 IP 字面量重定向目标）一律按 [SyncEndpointGuard.isBlockedAddress] 复核。
  */
 class SsrfGuardSocketFactory(

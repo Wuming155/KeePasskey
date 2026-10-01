@@ -10,12 +10,15 @@ import java.net.InetAddress
 import java.net.UnknownHostException
 
 /**
- * ISSUE-P1-05（ZT-05）SSRF 与主机注入防线单元测试。
+ * ISSUE-P1-05（ZT-05）SSRF 与主机注入防线单元测试；
+ * ISSUE-P2-425：构造期口径放宽为「加密即可、明文全拒」后的回归锁定。
  *
- * 三类注入必须被拒（对应验收标准）：
- * 1. 桶名 `x@evil.com`（authority userinfo 改写真实主机）；
- * 2. 桶名 `x#`（fragment 截断 authority）；
- * 3. 端点内网 IP（`169.254.169.254` 云元数据 / RFC1918 / 环回）SSRF 直连。
+ * 判别面：
+ * 1. 桶名注入（`x@evil.com` / `x#` / `x?` / IP 格式）恒被拒——主机注入防线不变；
+ * 2. 端点仅拒三类：明文 scheme、userinfo 注入、云元数据字面量（`169.254.0.0/16` 红线）；
+ *    自建 / 内网 HTTPS 端点放行（构造期放宽）；
+ * 3. 连接期语义不变：[SsrfGuardDns] / `isBlockedAddress` 对内网/保留网段的判定原样保留，
+ *    豁免主机解析到云元数据仍拒（红线不随豁免放行）。
  */
 class SyncEndpointGuardTest {
 
@@ -65,34 +68,44 @@ class SyncEndpointGuardTest {
             }
     }
 
-    // ---------- 端点主机（SSRF）校验 ----------
+    // ---------- 端点主机（SSRF）校验（ISSUE-P2-425 放宽后口径：加密即可、明文全拒） ----------
 
     @Test
-    fun `端点内网与云元数据字面 IP 被拒`() {
+    fun `云元数据字面 IP 端点仍被拒（红线）`() {
         listOf(
             "https://169.254.169.254/latest/meta-data/",
-            "https://192.168.1.1/dav",
-            "https://10.0.0.5/",
-            "https://172.16.0.9/",
-            "https://127.0.0.1/",
-            "https://100.64.0.1/"
+            // IPv4-mapped 形态的绕过尝试同样命中红线（getByName 归一为 4 字节）
+            "https://[::ffff:169.254.169.254]/"
         ).forEach { endpoint ->
             val ex = runCatching { SyncEndpointGuard.validateEndpointHost(endpoint) }.exceptionOrNull()
-            assertTrue("内网/保留网段端点 \"$endpoint\" 必须被拒", ex is SyncException.InvalidEndpointError)
+            assertTrue("云元数据端点 \"$endpoint\" 必须被拒（AC④ 红线）", ex is SyncException.InvalidEndpointError)
         }
     }
 
     @Test
-    fun `端点本地与内网保留主机名被拒`() {
+    fun `自建与内网 https 端点构造期放行（ISSUE-P2-425 放宽）`() {
         listOf(
+            "https://192.168.1.1/dav",
+            "https://10.0.0.5/",
+            "https://172.16.0.9/",
+            "https://127.0.0.1/",
+            "https://100.64.0.1/",
+            "https://[fe80::1]/dav",
+            "https://[fc00::1]/dav",
             "https://localhost/dav",
             "https://dav.localhost/",
-            "https://metadata.google.internal/",
-            "https://nas.local/"
+            "https://nas.local/",
+            "https://metadata.google.internal/"
         ).forEach { endpoint ->
             val ex = runCatching { SyncEndpointGuard.validateEndpointHost(endpoint) }.exceptionOrNull()
-            assertTrue("本地/内网保留名端点 \"$endpoint\" 必须被拒", ex is SyncException.InvalidEndpointError)
+            assertTrue("自建/内网 https 端点 \"$endpoint\" 不应被拒: $ex", ex == null)
         }
+    }
+
+    @Test
+    fun `明文 http 端点被拒（明文全拒红线）`() {
+        val ex = runCatching { SyncEndpointGuard.validateEndpointHost("http://dav.example.com/") }.exceptionOrNull()
+        assertTrue("明文 http 端点必须被拒", ex is SyncException.InvalidEndpointError)
     }
 
     @Test
@@ -180,5 +193,27 @@ class SyncEndpointGuardTest {
         val resolved = dns.lookup("nas.home")
         assertEquals(1, resolved.size)
         assertEquals("192.168.1.50", resolved[0].hostAddress)
+    }
+
+    @Test
+    fun `SsrfGuardDns 豁免主机解析到云元数据仍被拒（红线不随豁免）`() {
+        val dns = SsrfGuardDns(
+            FakeDns(listOf(InetAddress.getByName("169.254.169.254"))),
+            allowedHosts = setOf("metadata.google.internal")
+        )
+        val ex = runCatching { dns.lookup("metadata.google.internal") }.exceptionOrNull()
+        assertTrue("豁免主机解析到 169.254.0.0/16 必须仍被拒（ISSUE-P2-425 AC④）", ex is UnknownHostException)
+    }
+
+    @Test
+    fun `SsrfGuardDns 豁免主机的解析地址获批登记进连接期豁免表`() {
+        val approvals = SsrfAddressApprovals()
+        val resolved = listOf(InetAddress.getByName("192.168.1.50"))
+        val dns = SsrfGuardDns(FakeDns(resolved), allowedHosts = setOf("nas.home"), approvals = approvals)
+        dns.lookup("nas.home")
+        assertTrue(
+            "豁免主机的解析地址必须登记（否则连接期复核会拦下自建同步）",
+            approvals.isApproved(InetAddress.getByName("192.168.1.50"))
+        )
     }
 }

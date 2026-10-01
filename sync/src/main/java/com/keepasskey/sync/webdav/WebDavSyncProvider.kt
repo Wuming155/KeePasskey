@@ -26,7 +26,8 @@ import java.util.UUID
 
 /**
  * 标准 WebDAV 客户端实现 (RFC 4918)。
- * 支持 Nextcloud、ownCloud、坚果云等主流公网商业云 WebDAV 服务（不支持自建内网服务器）：
+ * 支持 Nextcloud、ownCloud、坚果云等公有 WebDAV 托管服务，以及自建服务器（NAS / 内网
+ * HTTPS 端点默认可用，ISSUE-P2-425；明文 HTTP 一律拒绝）：
  * 1. PROPFIND: 基于 DOM 解析 getetag, getcontentlength, getlastmodified, resourcetype;
  * 2. GET: 二进制流下载;
  * 3. PUT: 支持 If-Match: <etag> 乐观并发保护;
@@ -59,8 +60,9 @@ class WebDavSyncProvider(
 ) : SyncProvider {
 
     // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），
-    // 仅 HTTP 回环测试需显式注入明文客户端
-    private val httpClient: OkHttpClient = client ?: SyncHttpClientFactory.createSyncClient(networkOptions)
+    // 仅 HTTP 回环测试需显式注入明文客户端。生产路径在 init 中随构造期校验一并构建：
+    // 已配置端点主机传入工厂登记连接期豁免（ISSUE-P2-425，见 createSyncClient KDoc）
+    private val httpClient: OkHttpClient
 
     // L4 整改：Basic 认证头在构造时立即计算——调用方（SyncCoordinator）在构造返回后
     // 会立即显式清零传入的密码 CharArray，此前的 by lazy 首请求延迟求值会在清零后
@@ -68,10 +70,10 @@ class WebDavSyncProvider(
     private val authHeader: String
 
     init {
-        // Wave 14 全站强制 HTTPS（生产路径 fail-fast）：显式 http:// 端点在构造期即拒绝并抛
-        // 类型化 InvalidEndpointError（用户可理解提示），而非在网络层以晦涩错误失败；
-        // 仅测试回环（显式注入 HTTP 客户端）豁免——MockWebServer 回环地址为 http://，不承载生产流量
         if (client == null) {
+            // Wave 14 全站强制 HTTPS（生产路径 fail-fast）：显式 http:// 端点在构造期即拒绝并抛
+            // 类型化 InvalidEndpointError（用户可理解提示），而非在网络层以晦涩错误失败；
+            // 仅测试回环（显式注入 HTTP 客户端）豁免——MockWebServer 回环地址为 http://，不承载生产流量
             val trimmedUrl = serverUrl.trim()
             if (trimmedUrl.contains("://") && !trimmedUrl.startsWith("https://", ignoreCase = true)) {
                 throw SyncException.InvalidEndpointError(
@@ -79,10 +81,13 @@ class WebDavSyncProvider(
                         "明文 HTTP 已被禁止以保护凭据与密码库传输，请填写 https:// 开头的商业云服务地址"
                 )
             }
-            // ISSUE-P1-05（ZT-05）SSRF 构造期防线：拒绝 userinfo 注入、本地/内网保留名与
-            // 字面 IP 的内网/保留网段（含 169.254.169.254 云元数据端点）；主机名的解析后
-            // 网段校验由连接期 SsrfGuardDns 承担。仅测试回环（注入客户端）豁免
-            SyncEndpointGuard.validateEndpointHost(serverUrl, networkOptions.ssrfAllowedHosts)
+            // ISSUE-P1-05（ZT-05）构造期防线（ISSUE-P2-425 放宽）：拒绝 userinfo 注入与云元数据
+            // 字面量；自建 / 内网 HTTPS 端点放行，其连接期豁免经返回的规范化主机登记进工厂
+            // （重定向 / 重绑定跳到的非预期内网地址仍被 SsrfGuardDns / SsrfGuardSocketFactory 拦截）
+            val endpointHost = SyncEndpointGuard.validateEndpointHost(serverUrl, networkOptions.ssrfAllowedHosts)
+            httpClient = SyncHttpClientFactory.createSyncClient(networkOptions, endpointHost)
+        } else {
+            httpClient = client
         }
         authHeader = WebDavAuthHeader.build(username, passwordChars)
         passwordChars.fill('0')

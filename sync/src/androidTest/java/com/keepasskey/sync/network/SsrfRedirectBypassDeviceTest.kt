@@ -115,6 +115,29 @@ class SsrfRedirectBypassDeviceTest {
     }
 
     @Test
+    fun `已配置端点主机经生产工厂客户端放行至 TLS 阶段（ISSUE-P2-425 对向用例）`() {
+        // 配置私网/回环 HTTPS 端点构造通过（放宽）后，连接期不得把**已配置端点本身**拦下，
+        // 否则放宽只是纸面的。自签证书下客户端必然失败于 TLS——但失败**类型**即判据：
+        // SSLException = TCP 已建立（守卫放行）；「SSRF 防护」IOException = SYN 之前被拒（回归）
+        val server = newTlsServer()
+        try {
+            val client = SyncHttpClientFactory.createSyncClient(SyncNetworkOptions(), "127.0.0.1")
+            val failure = execute(client, "https://127.0.0.1:${server.port}/")
+
+            assertTrue(
+                "已配置端点（回环字面量）必须放行至 TLS 阶段（SSLException 证明 TCP 已建立），实际=$failure",
+                causes(failure).any { it is SSLException }
+            )
+            assertFalse(
+                "已配置端点本身不得被连接期守卫拒绝（否则自托管开箱即用不成立），实际=$failure",
+                causes(failure).any { it is IOException && it.message.orEmpty().contains("SSRF 防护") }
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun `302 重定向到 IPv4 字面量触发连接、到主机名被 SsrfGuardDns 拦截`() {
         val target = MockWebServer().apply {
             start(LOOPBACK, 0)

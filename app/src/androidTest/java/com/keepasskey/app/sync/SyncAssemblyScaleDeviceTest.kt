@@ -173,7 +173,7 @@ class SyncAssemblyScaleDeviceTest {
         assertTrue(
             "预置 WebDAV 凭据失败（Keystore 封印未通）",
             credentialsStore.saveWebDavConfig(
-                // 必须是公网 https 端点：`WebDavSyncProvider` 构造期的 SSRF 防护拒内网 / 保留网段；
+                // 预置合法 https 端点（ISSUE-P2-425 后仅 https / 元数据 / userinfo 构造期校验）；
                 // 本用例两轮均置测试 Provider / 离线模式，构造之后不触网。
                 url = "https://dav.example.com/dav",
                 username = "scale-p3302",

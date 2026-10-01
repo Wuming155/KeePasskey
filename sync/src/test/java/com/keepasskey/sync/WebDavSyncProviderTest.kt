@@ -382,15 +382,13 @@ class WebDavSyncProviderTest {
         assertNotNull(noSchemeProvider)
     }
 
-    // ===== ISSUE-P1-05（ZT-05）：SSRF 端点内网/注入防线 =====
+    // ===== ISSUE-P1-05（ZT-05）/ ISSUE-P2-425：SSRF 端点防线（构造期放宽后口径） =====
 
     @Test
-    fun `生产路径内网与云元数据 IP 端点在构造期被拒`() {
+    fun `生产路径云元数据端点在构造期仍被拒（红线）`() {
         listOf(
             "https://169.254.169.254/remote.php/webdav",
-            "https://192.168.1.10/dav",
-            "https://127.0.0.1/dav",
-            "https://localhost/dav"
+            "https://[::ffff:169.254.169.254]/"
         ).forEach { url ->
             val ex = runCatching {
                 WebDavSyncProvider(
@@ -399,7 +397,26 @@ class WebDavSyncProviderTest {
                     passwordChars = "pass123".toCharArray()
                 )
             }.exceptionOrNull()
-            assertTrue("内网/元数据端点 \"$url\" 必须被拒（SSRF）", ex is SyncException.InvalidEndpointError)
+            assertTrue("云元数据端点 \"$url\" 必须被拒（AC④ 红线）", ex is SyncException.InvalidEndpointError)
+        }
+    }
+
+    @Test
+    fun `生产路径自建与内网 https 端点构造通过（ISSUE-P2-425 放宽）`() {
+        listOf(
+            "https://192.168.1.10/dav",
+            "https://127.0.0.1/dav",
+            "https://localhost/dav",
+            "https://nas.local/dav"
+        ).forEach { url ->
+            val ex = runCatching {
+                WebDavSyncProvider(
+                    serverUrl = url,
+                    username = "admin",
+                    passwordChars = "pass123".toCharArray()
+                )
+            }.exceptionOrNull()
+            assertTrue("自建/内网 https 端点 \"$url\" 构造不应被拒: $ex", ex == null)
         }
     }
 

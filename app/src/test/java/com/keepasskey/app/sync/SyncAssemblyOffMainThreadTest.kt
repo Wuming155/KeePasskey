@@ -175,8 +175,8 @@ class SyncAssemblyOffMainThreadTest {
         assertTrue(
             "预置 WebDAV 凭据失败",
             credentialsStore.saveWebDavConfig(
-                // 必须是**公网** https 端点：WebDavSyncProvider 构造期带 SSRF 防护，
-                // 内网 / 保留网段（含 127.0.0.1）直接被拒；本用例置离线模式，构造后不触网
+                // 预置合法 https 端点（ISSUE-P2-425 后仅 https / 元数据 / userinfo 构造期校验）；
+                // 本用例置离线模式，构造后不触网
                 url = "https://dav.example.com/dav",
                 username = "tester",
                 password = "placeholder#1".toCharArray(),

@@ -521,12 +521,11 @@ class S3SyncProviderTest {
     }
 
     @Test
-    fun `生产路径内网与云元数据 IP 端点在构造期被拒`() {
-        // 用户可控端点直连云元数据服务（169.254.169.254）与内网段属 SSRF，构造期即 fail-closed
+    fun `生产路径云元数据端点在构造期仍被拒（ISSUE-P2-425 红线）`() {
+        // 用户可控端点直连云元数据服务（169.254.169.254）在放宽后仍是唯一网段级拒绝
         listOf(
             "https://169.254.169.254",
-            "https://192.168.1.10",
-            "https://127.0.0.1"
+            "https://[::ffff:169.254.169.254]"
         ).forEach { endpoint ->
             val ex = runCatching {
                 S3SyncProvider(
@@ -536,7 +535,26 @@ class S3SyncProviderTest {
                     secretAccessKey = "TESTSECRET".toCharArray()
                 )
             }.exceptionOrNull()
-            assertTrue("内网/元数据端点 \"$endpoint\" 必须被拒", ex is SyncException.InvalidEndpointError)
+            assertTrue("云元数据端点 \"$endpoint\" 必须被拒（AC④ 红线）", ex is SyncException.InvalidEndpointError)
+        }
+    }
+
+    @Test
+    fun `生产路径自建与内网 https 端点构造通过（ISSUE-P2-425 放宽）`() {
+        listOf(
+            "https://192.168.1.10",
+            "https://127.0.0.1",
+            "https://minio.nas.local"
+        ).forEach { endpoint ->
+            val ex = runCatching {
+                S3SyncProvider(
+                    endpoint = endpoint,
+                    bucketName = "test-bucket",
+                    accessKeyId = "TESTKEY".toCharArray(),
+                    secretAccessKey = "TESTSECRET".toCharArray()
+                )
+            }.exceptionOrNull()
+            assertTrue("自建/内网 https 端点 \"$endpoint\" 构造不应被拒: $ex", ex == null)
         }
     }
 }
