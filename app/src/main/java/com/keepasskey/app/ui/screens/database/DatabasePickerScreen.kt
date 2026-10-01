@@ -66,6 +66,8 @@ fun DatabasePickerScreen(
     modifier: Modifier = Modifier,
     /** ISSUE-P2-424 AC①：路由参数——解锁页空状态「导入已有库」直达本页并自动展开导入对话框 */
     autoOpenImport: Boolean = false,
+    /** ISSUE-P3-427：路由参数——解锁页空状态「新建密码库」直达本页并自动展开新建向导 */
+    autoOpenCreate: Boolean = false,
     viewModel: DatabasePickerViewModel = hiltViewModel()
 ) {
     // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
@@ -76,10 +78,12 @@ fun DatabasePickerScreen(
     // ISSUE-P2-424 AC③：打开对话框的云账号预填包（对话框消费后即弃持）
     val openVaultPrefill by viewModel.openVaultPrefill.collectAsStateWithLifecycle()
 
-    // ISSUE-P2-424 AC①：解锁页「导入已有库」入口统一到本页三来源对话框（云端路径自此可达）；
+    // ISSUE-P2-424 AC① / ISSUE-P3-427：解锁页空状态的两枚入口统一到本页——导入直达三来源
+    // 对话框（云端路径自此可达）、新建直达新建向导（不再停在列表页二次点击）；
     // 一次消费守卫在 VM（跨配置变更存活），旋转重建不重复弹出
-    LaunchedEffect(autoOpenImport) {
+    LaunchedEffect(autoOpenImport, autoOpenCreate) {
         if (autoOpenImport) viewModel.openImportFromRoute()
+        if (autoOpenCreate) viewModel.openCreateFromRoute()
     }
 
     LaunchedEffect(viewModel) {

@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.unlock
 
-import android.content.res.Configuration
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -59,6 +58,12 @@ fun UnlockScreen(
     onNavigateToDatabasePicker: () -> Unit = {},
     /** ISSUE-P2-424 AC①：空状态「导入已有库」的统一出口（导航层接跳转库管理页 + 自动展开导入） */
     onOpenExistingVault: () -> Unit = {},
+    /**
+     * ISSUE-P3-427：空状态「新建密码库」的专属出口（导航层接跳转库管理页 + 自动展开新建向导）。
+     * 默认沿用 [onNavigateToDatabasePicker]：非导航宿主（自动填充 / 凭据创建窗口）本就不提供
+     * 库切换导航，无需感知这一枚新回调。
+     */
+    onCreateNewVault: () -> Unit = onNavigateToDatabasePicker,
     viewModel: UnlockViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -132,6 +137,7 @@ fun UnlockScreen(
         onDowngradeDecision = viewModel::onQuickUnlockDowngradeDecision,
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
         onOpenExistingVault = onOpenExistingVault,
+        onCreateNewVault = onCreateNewVault,
         modifier = modifier
     )
 }
@@ -157,7 +163,9 @@ fun UnlockContent(
     modifier: Modifier = Modifier,
     onDowngradeDecision: (Boolean) -> Unit = {},
     onNavigateToDatabasePicker: () -> Unit,
-    onOpenExistingVault: () -> Unit
+    onOpenExistingVault: () -> Unit,
+    /** ISSUE-P3-427：空状态「新建密码库」直达新建向导的出口（与「切换库」分流） */
+    onCreateNewVault: () -> Unit = onNavigateToDatabasePicker
 ) {
     val scrollState = rememberScrollState()
 
@@ -218,7 +226,8 @@ fun UnlockContent(
                 UnlockEmptyVaultContent(
                     uiState = uiState,
                     onNavigateToDatabasePicker = onNavigateToDatabasePicker,
-                    onOpenExistingVault = onOpenExistingVault
+                    onOpenExistingVault = onOpenExistingVault,
+                    onCreateNewVault = onCreateNewVault
                 )
             } else {
                 Text(
@@ -363,35 +372,4 @@ private fun QuickUnlockDowngradeConsentDialog(
             }
         }
     )
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun UnlockContentPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        UnlockContent(
-            uiState = UnlockUiState().copy(
-                hasDatabase = true,
-                databaseName = "Preview Vault.kdbx",
-                databaseStatus = "Ready",
-                unlockMode = UnlockMode.STANDARD,
-                isQuickUnlockAvailable = true
-            ),
-            currentTheme = AppThemeMode.SYSTEM,
-            onThemeToggle = {},
-            onPasswordChange = {},
-            onTogglePasswordVisibility = {},
-            onSelectKeyFile = {},
-            onClearKeyFile = {},
-            onToggleReadOnly = {},
-            onSwitchMode = {},
-            onUnlock = {},
-            onBiometricUnlock = {},
-            onDowngradeDecision = {},
-            onNavigateToDatabasePicker = {},
-            onOpenExistingVault = {}
-        )
-    }
 }

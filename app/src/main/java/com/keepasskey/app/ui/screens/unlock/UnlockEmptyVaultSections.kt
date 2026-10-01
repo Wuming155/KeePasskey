@@ -41,7 +41,12 @@ import com.keepasskey.app.ui.theme.HeroTitleStyle
 internal fun UnlockEmptyVaultContent(
     uiState: UnlockUiState,
     onNavigateToDatabasePicker: () -> Unit,
-    onOpenExistingVault: () -> Unit
+    onOpenExistingVault: () -> Unit,
+    /**
+     * ISSUE-P3-427：空状态「新建密码库」卡片的专属出口——与「切换库」用的
+     * [onNavigateToDatabasePicker] 分开，导航层据此直达新建向导（不再停在库管理页二次点击）。
+     */
+    onCreateNewVault: () -> Unit = onNavigateToDatabasePicker
 ) {
     Text(
         text = stringResource(R.string.unlock_empty_vault_title),
@@ -75,7 +80,7 @@ internal fun UnlockEmptyVaultContent(
         iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
         title = stringResource(R.string.unlock_empty_create_btn),
         description = stringResource(R.string.unlock_empty_create_desc),
-        onClick = onNavigateToDatabasePicker
+        onClick = onCreateNewVault
     )
 
     Spacer(modifier = Modifier.height(12.dp))

@@ -60,6 +60,11 @@ internal fun NavGraphBuilder.unlockRoute(
             // 三来源导入对话框（云端路径自此可达，与库管理页「导入已有库」同一实现）
             onOpenExistingVault = {
                 navController.navigate(Screen.DatabasePicker.createRoute(openImport = true)) { launchSingleTop = true }
+            },
+            // ISSUE-P3-427：空状态「新建密码库」直达新建向导——不再停在库管理页二次点击，
+            // 使新建路径的视线里只剩向导本身（导入动作不再并列呈现）
+            onCreateNewVault = {
+                navController.navigate(Screen.DatabasePicker.createRoute(openCreate = true)) { launchSingleTop = true }
             }
         )
     }
@@ -73,6 +78,10 @@ internal fun NavGraphBuilder.databasePickerRoute(navController: NavHostControlle
             navArgument("openImport") {
                 type = NavType.BoolType
                 defaultValue = false
+            },
+            navArgument("openCreate") {
+                type = NavType.BoolType
+                defaultValue = false
             }
         )
     ) { entry ->
@@ -82,7 +91,9 @@ internal fun NavGraphBuilder.databasePickerRoute(navController: NavHostControlle
                 navController.popBackStack()
             },
             // ISSUE-P2-424 AC①：解锁页「导入已有库」直达时自动展开导入对话框
-            autoOpenImport = entry.arguments?.getBoolean("openImport") == true
+            autoOpenImport = entry.arguments?.getBoolean("openImport") == true,
+            // ISSUE-P3-427：解锁页「新建密码库」直达时自动展开新建向导
+            autoOpenCreate = entry.arguments?.getBoolean("openCreate") == true
         )
     }
 }

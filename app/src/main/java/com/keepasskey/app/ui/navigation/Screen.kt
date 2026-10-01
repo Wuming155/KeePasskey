@@ -7,12 +7,13 @@ sealed class Screen(val route: String) {
     data object Unlock : Screen("unlock")
 
     /**
-     * 密码库管理页（ISSUE-P2-424 AC①：可选 `openImport` 参数——解锁页「导入已有库」入口
-     * 跳转本页时自动展开三来源导入对话框；默认 false 维持普通进入）
+     * 密码库管理页（ISSUE-P2-424 AC① / ISSUE-P3-427：两个可选参数——解锁页空状态的
+     * 「导入已有库」与「新建密码库」直达本页并自动展开对应对话框；默认全 false 维持普通进入）
      */
-    data object DatabasePicker : Screen("database_picker?openImport={openImport}") {
-        fun createRoute(openImport: Boolean = false): String =
-            if (openImport) "database_picker?openImport=true" else "database_picker"
+    data object DatabasePicker :
+        Screen("database_picker?openImport={openImport}&openCreate={openCreate}") {
+        fun createRoute(openImport: Boolean = false, openCreate: Boolean = false): String =
+            "database_picker?openImport=$openImport&openCreate=$openCreate"
     }
     data object VaultList : Screen("vault_list")
     data object Authenticator : Screen("authenticator")
