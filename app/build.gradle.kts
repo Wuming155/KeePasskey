@@ -9,7 +9,8 @@ plugins {
     alias(libs.plugins.compose.screenshot)
 }
 
-// 自动签名的发布密钥库配置：支持从 keystore.properties 或环境变量加载
+// 自动签名的发布密钥库配置：口令解析顺序＝环境变量 → Windows 凭证管理器 → keystore.properties
+// （ISSUE-P3-418：凭证管理器通道经 DPAPI 按当前用户加密，本机不再需要口令明文落盘）
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
@@ -17,13 +18,45 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+// ISSUE-P3-418：从 Windows 凭证管理器读「普通凭据」口令（tools/signing/read-cred.ps1，CredRead）。
+// 凭证目标名：KeePasskey/Keystore/StorePassword、KeePasskey/Keystore/KeyPassword。
+// 退出码语义由脚本约定：0=读到 / 1=未配置（静默降级）/ 2=通道异常（告警后降级）。
+// 非 Windows（CI/Linux）或脚本缺失时不启用本通道。
+val credManReadScript = rootProject.file("tools/signing/read-cred.ps1")
+
+fun readWindowsCredentialPassword(target: String): String? {
+    if (!org.gradle.internal.os.OperatingSystem.current().isWindows || !credManReadScript.exists()) return null
+    return try {
+        val proc = ProcessBuilder(
+            "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", credManReadScript.absolutePath, "-Name", target,
+        ).start()
+        val stdout = proc.inputStream.readBytes().toString(Charsets.UTF_8)
+        val stderr = proc.errorStream.readBytes().toString(Charsets.UTF_8)
+        val exitCode = proc.waitFor()
+        when (exitCode) {
+            0 -> stdout.trim().ifEmpty { null }
+            1 -> null
+            else -> {
+                logger.warn("Windows 凭证管理器通道读取 $target 失败（exit=$exitCode）：${stderr.trim()}")
+                null
+            }
+        }
+    } catch (e: Exception) {
+        logger.warn("Windows 凭证管理器通道读取 $target 异常：${e.message}")
+        null
+    }
+}
+
 val releaseStoreFilePath: String? = System.getenv("KEYSTORE_FILE")
     ?: keystoreProperties.getProperty("storeFile")
 val releaseStorePassword: String? = System.getenv("KEYSTORE_PASSWORD")
+    ?: readWindowsCredentialPassword("KeePasskey/Keystore/StorePassword")
     ?: keystoreProperties.getProperty("storePassword")
 val releaseKeyAlias: String? = System.getenv("KEY_ALIAS")
     ?: keystoreProperties.getProperty("keyAlias")
 val releaseKeyPassword: String? = System.getenv("KEY_PASSWORD")
+    ?: readWindowsCredentialPassword("KeePasskey/Keystore/KeyPassword")
     ?: keystoreProperties.getProperty("keyPassword")
 
 val releaseStoreResolvedFile: File? = releaseStoreFilePath?.let { path ->
@@ -50,7 +83,8 @@ val hasReleaseSigning = releaseStoreResolvedFile?.exists() == true &&
 // 违例即 `error(...)`：**构建在配置阶段直接失败**，绝不产出用泄露口令签名的"稳定版"。
 //
 // 豁免通道：**不存在**——不得通过调低阈值、删断言或改用示例值来变绿；口令只能来自
-// 本地 `keystore.properties`（已 gitignore）或 CI Secret（KEYSTORE_PASSWORD / KEY_PASSWORD）。
+// 环境变量（CI Secret）、Windows 凭证管理器（ISSUE-P3-418，DPAPI 加密）或
+// 本地 `keystore.properties`（已 gitignore），任何情况下不得提交。
 // =============================================================================================
 val minReleasePasswordLength = 16
 val forbiddenReleasePasswords = setOf(
@@ -61,8 +95,8 @@ val releasePasswordPlaceholderMarker = "__REPLACE_WITH"
 
 if (hasReleaseSigning) {
     listOf(
-        "storePassword（keystore.properties / KEYSTORE_PASSWORD）" to releaseStorePassword!!,
-        "keyPassword（keystore.properties / KEY_PASSWORD）" to releaseKeyPassword!!,
+        "storePassword（环境变量 / Windows 凭证管理器 / keystore.properties）" to releaseStorePassword!!,
+        "keyPassword（环境变量 / Windows 凭证管理器 / keystore.properties）" to releaseKeyPassword!!,
     ).forEach { (label, password) ->
         val normalized = password.trim()
         // 顺序有意为之：先判「是否命中已公开值 / 占位符」（F-06 的精确场景），
