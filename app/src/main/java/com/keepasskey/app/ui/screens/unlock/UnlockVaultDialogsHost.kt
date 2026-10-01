@@ -40,14 +40,13 @@ internal fun UnlockVaultDialogsHost(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri -> uri?.let(pickerViewModel::saveGeneratedKeyFileTo) }
 
-    // 新建密码库向导（含云端直建位置）
+    // 新建密码库向导（§396 起存储位置仅本地两档）
     if (pickerUiState.showCreateDialog) {
         CreateVaultWizardDialog(
             onDismiss = pickerViewModel::closeCreateDialog,
             onConfirm = pickerViewModel::createDatabase,
             onWeakPasswordConfirmed = pickerViewModel::noteWeakMasterPasswordConfirmed,
-            isBusy = pickerUiState.isLoading,
-            cloudSnapshot = pickerUiState.cloudSnapshot
+            isBusy = pickerUiState.isLoading
         )
     }
 

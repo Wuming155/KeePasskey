@@ -373,9 +373,6 @@
 
     <!-- Database picker & other screens -->
     <string name="db_picker_msg_created">New vault created successfully</string>
-    <!-- ISSUE-P3-425 -->
-    <string name="db_picker_msg_cloud_register_failed">Vault created, but registering it as a cloud-synced vault failed (retry later in cloud sync settings)</string>
-    <string name="db_picker_cloud_create_unconfigured">Creating directly to the cloud requires a configured cloud sync account. Set one up first in Settings → Cloud sync</string>
     <string name="db_picker_msg_opened">External KDBX file opened and loaded</string>
     <string name="db_picker_msg_removed">Vault removed from the switch list</string>
     <string name="edit_title_required">Please enter an entry title</string>
@@ -1395,12 +1392,6 @@
     <string name="db_create_location_external_hint">No location chosen yet - pick one in the system file picker</string>
     <string name="db_create_location_picked">Selected: %1$s</string>
     <string name="db_create_location_external_warning">Saves here are not atomic (a crash or power loss mid-save can corrupt the vault, so export backups regularly), and WebDAV / S3 sync does not apply</string>
-    <!-- ISSUE-P3-425: third storage location - create to cloud -->
-    <string name="db_create_location_cloud">Cloud</string>
-    <string name="db_create_location_cloud_loading">Reading cloud sync configuration…</string>
-    <string name="db_create_location_cloud_ready_sub">Registered as a cloud-synced vault; upload happens with the sync cycle</string>
-    <string name="db_create_location_cloud_unconfigured_sub">No cloud account configured yet: set up WebDAV or S3 in Settings → Cloud sync first</string>
-    <string name="db_create_location_cloud_target">Sync target: %1$s</string>
     <string name="repo_saf_persist_consent_failed">The chosen location does not support persistent access, so creation was cancelled. Use the app private folder or pick another location</string>
     <string name="repo_saf_write_failed">Writing to the chosen location failed, so creation was cancelled</string>
     <string name="repo_no_active_database">Select or create a vault first</string>

@@ -380,10 +380,6 @@
 
     <!-- 密码库管理与其他页面补充 -->
     <string name="db_picker_msg_created">新密码库已成功创建</string>
-    <!-- ISSUE-P3-425：云端直建链路的专属提示（库已建成但云登记失败时不谎报全成） -->
-    <string name="db_picker_msg_cloud_register_failed">密码库已创建，但登记为云同步库失败（可稍后在云同步设置中重试）</string>
-    <!-- ISSUE-P3-425 fail-closed：未配置云账号时拒绝云端直建（绝不静默降级为普通本地库） -->
-    <string name="db_picker_cloud_create_unconfigured">云端直建需要已配置的云同步账号，请先在「设置 → 云同步」完成配置</string>
     <string name="db_picker_msg_opened">已成功打开并加载外部 KDBX 文件</string>
     <string name="db_picker_msg_removed">已从切换列表中移除该密码库关联</string>
     <string name="edit_title_required">请输入凭据标题</string>
@@ -1265,12 +1261,6 @@
     <string name="db_create_location_external_hint">尚未选择位置，请在系统文件选择器中指定</string>
     <string name="db_create_location_picked">已选择：%1$s</string>
     <string name="db_create_location_external_warning">该位置写盘非原子（保存途中断电或闪退存在损坏风险，建议定期导出备份），且不参与 WebDAV / S3 同步</string>
-    <!-- ISSUE-P3-425：新建库的第三种落地位置——云端直建（实际在应用私有目录建库，以云 syncType 登记，远端上传交由同步周期） -->
-    <string name="db_create_location_cloud">云端</string>
-    <string name="db_create_location_cloud_loading">正在读取云同步配置…</string>
-    <string name="db_create_location_cloud_ready_sub">登记为云同步库，远端上传随同步周期进行</string>
-    <string name="db_create_location_cloud_unconfigured_sub">尚未配置云账号：请先在「设置 → 云同步」中配置 WebDAV 或 S3</string>
-    <string name="db_create_location_cloud_target">同步目标：%1$s</string>
     <string name="repo_saf_persist_consent_failed">所选位置不支持持久访问授权，已取消创建。请改用应用私有目录，或换一个存储位置</string>
     <string name="repo_saf_write_failed">写入所选位置失败，已取消创建</string>
     <string name="repo_no_active_database">请先选择或创建密码库</string>

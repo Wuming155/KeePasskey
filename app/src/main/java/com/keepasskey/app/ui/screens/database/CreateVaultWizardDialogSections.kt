@@ -204,24 +204,21 @@ internal fun CreateVaultConfirmButton(
 }
 
 /**
- * 新建库的存储位置选择（**ISSUE-P2-229**；ISSUE-P3-425 增设「云端」直建；§394 改横排 Chip）。
+ * 新建库的存储位置选择（**ISSUE-P2-229**；§396 用户裁决：**移除「云端」档**，仅本地两档）。
  *
- * 用户裁决（2026-10-01）：对齐「导入已有库」三来源对话框的横排 Chip 形态（本地 / WebDAV / S3
- * 并列），替代原三行两语单选——向导高度随之大幅收敛；长说明只随**当前选中项**单条呈现，
- * 外部位置的两条降级（写回非原子、不参与 WebDAV / S3 同步）与云端目标告知**不缩水**。
- * 「应用私有目录」为默认项；选「自选位置」即当场拉起系统文件选择器（取消回落内部）；
- * 「云端」仅在已配置云同步账号时可选（`CloudSyncSnapshot.ready`），未就绪时置灰并以副文案
- * 如实呈现「读取中 / 未配置」，不假装可选。
+ * 用户裁决（2026-10-01 §394）：对齐「导入已有库」三来源对话框的横排 Chip 形态，替代原三行
+ * 两语单选——长说明只随**当前选中项**单条呈现，外部位置的两条降级（写回非原子、不参与
+ * WebDAV / S3 同步）**不缩水**。「应用私有目录」为默认项；选「自选位置」即当场拉起系统
+ * 文件选择器（取消回落内部）。
+ * 云端直建（ISSUE-P3-425 / §395 恒可选口径）已整条退役：新建云端库的需求由「打开已有库」
+ * 的云端导入 + 既有同步周期覆盖，本向导不再提供第三档。
  */
 @Composable
 internal fun VaultStorageLocationSection(
     location: VaultStorageLocation,
     pickedFileName: String,
-    /** ISSUE-P3-425：云同步配置快照（决定「云端」Chip 可用性与副文案） */
-    cloudSnapshot: CloudSyncSnapshot,
     onSelectInternal: () -> Unit,
-    onSelectExternal: () -> Unit,
-    onSelectCloud: () -> Unit
+    onSelectExternal: () -> Unit
 ) {
     Column(
         modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
@@ -229,8 +226,8 @@ internal fun VaultStorageLocationSection(
     ) {
         Text(
             text = stringResource(R.string.db_create_location_title),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -246,13 +243,6 @@ internal fun VaultStorageLocationSection(
                 selected = location == VaultStorageLocation.EXTERNAL,
                 onClick = onSelectExternal,
                 label = { Text(stringResource(R.string.db_create_location_external), fontSize = 12.sp) },
-                shape = CapsuleShape
-            )
-            FilterChip(
-                selected = location == VaultStorageLocation.CLOUD,
-                onClick = onSelectCloud,
-                enabled = cloudSnapshot.ready,
-                label = { Text(stringResource(R.string.db_create_location_cloud), fontSize = 12.sp) },
                 shape = CapsuleShape
             )
         }
@@ -274,13 +264,6 @@ internal fun VaultStorageLocationSection(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            VaultStorageLocation.CLOUD -> LocationCaption(
-                text = if (cloudSnapshot.ready) {
-                    stringResource(R.string.db_create_location_cloud_target, cloudSnapshot.targetHint)
-                } else {
-                    cloudLocationSubtitle(cloudSnapshot)
-                }
-            )
         }
     }
 }
@@ -295,38 +278,20 @@ private fun LocationCaption(text: String) {
     )
 }
 
-/** 「云端」行的副文案：读取中 / 未配置 / 可用（含 Provider 种类）三态如实区分 */
-@Composable
-private fun cloudLocationSubtitle(snapshot: CloudSyncSnapshot): String = when {
-    !snapshot.loaded -> stringResource(R.string.db_create_location_cloud_loading)
-    !snapshot.ready -> stringResource(R.string.db_create_location_cloud_unconfigured_sub)
-    else -> stringResource(
-        R.string.db_create_location_cloud_ready_sub,
-        when (snapshot.kind) {
-            OpenVaultSourceType.S3_COMPATIBLE -> stringResource(R.string.picker_chip_s3)
-            else -> stringResource(R.string.picker_chip_webdav)
-        }
-    )
-}
-
 /** ISSUE-P2-354 AC①：「创建」按钮内嵌进度圈直径（dp） */
 private const val CREATE_PROGRESS_SIZE = 18
 
 /**
- * 新建密码库的落地位置（ISSUE-P2-229；ISSUE-P3-425 增设云端直建）。
+ * 新建密码库的落地位置（ISSUE-P2-229；§396 用户裁决移除「云端」档——原 ISSUE-P3-425 直建）。
  * §391 起本枚举与消费它的存储位置区同文件（向导本体按行数分档闸门瘦身）。
  *
  * - [INTERNAL]：应用私有目录（`filesDir`）——具备原子写盘（`.tmp` + rename + `.bak`）
  *   与 WebDAV / S3 同步能力，为默认项；
  * - [EXTERNAL]：经系统文件选择器（`ACTION_CREATE_DOCUMENT`）由用户自选位置——
  *   便于自行备份与跨应用查看，但写回为非原子的 `"rwt"` 截断式写、且不参与同步
- *   （两条降级在向导内如实告知，并登记于 `docs/architecture/已知工程限界.md`）；
- * - [CLOUD]：云端直建（ISSUE-P3-425）——实际仍在 `filesDir` 建库（享受原子写盘），
- *   建成后以云 syncType 幂等重登记（与「云端打开」同形态），远端上传交由既有同步周期；
- *   仅在已配置云同步账号时可选（`CloudSyncSnapshot.ready`）。
+ *   （两条降级在向导内如实告知，并登记于 `docs/architecture/已知工程限界.md`）。
  */
 enum class VaultStorageLocation {
     INTERNAL,
-    EXTERNAL,
-    CLOUD
+    EXTERNAL
 }

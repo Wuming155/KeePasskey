@@ -127,8 +127,7 @@ fun DatabasePickerContent(
         keyFile: Boolean,
         preset: CreateVaultPreset,
         keyFileSourceUri: String?,
-        targetUri: String?,
-        storageLocation: VaultStorageLocation
+        targetUri: String?
     ) -> Unit,
     onOpenExistingClick: () -> Unit,
     onCloseOpenSourceDialog: () -> Unit,
@@ -312,15 +311,14 @@ fun DatabasePickerContent(
         }
     }
 
-    // 新建密码库向导对话框 (支持生成或选择已有密钥文件；ISSUE-P3-425 云端直建位置)
+    // 新建密码库向导对话框 (支持生成或选择已有密钥文件；§396 起存储位置仅本地两档)
     if (uiState.showCreateDialog) {
         CreateVaultWizardDialog(
             onDismiss = onCloseCreateDialog,
             onConfirm = onCreateDatabase,
             onWeakPasswordConfirmed = onWeakPasswordConfirmed,
             // ISSUE-P2-354 AC①：busy 真相源是 isLoading（ViewModel 同步守卫的投影）
-            isBusy = uiState.isLoading,
-            cloudSnapshot = uiState.cloudSnapshot
+            isBusy = uiState.isLoading
         )
     }
 

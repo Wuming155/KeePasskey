@@ -51,7 +51,7 @@ internal fun DatabasePickerContentPreview() {
             onSelectDatabase = { _ -> },
             onOpenCreateDialog = {},
             onCloseCreateDialog = {},
-            onCreateDatabase = { _, _, _, _, _, _, _ -> },
+            onCreateDatabase = { _, _, _, _, _, _ -> },
             onOpenExistingClick = {},
             onCloseOpenSourceDialog = {},
             onImportFromSource = { _ -> },

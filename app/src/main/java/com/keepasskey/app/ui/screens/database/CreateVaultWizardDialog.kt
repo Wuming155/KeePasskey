@@ -88,14 +88,14 @@ private class CreateVaultWizardState {
 internal fun CreateVaultWizardDialog(
     onDismiss: () -> Unit,
     // 形参顺序与 DatabasePickerViewModel.createDatabase 严格一致，便于直接方法引用接线
+    // （§396：存储位置只有本地两档，「云端直建」整条退役，不再上行 storageLocation）
     onConfirm: (
         name: String,
         pwd: CharArray,
         keyFile: Boolean,
         preset: CreateVaultPreset,
         keyFileSourceUri: String?,
-        targetUri: String?,
-        storageLocation: VaultStorageLocation
+        targetUri: String?
     ) -> Unit,
     /** ISSUE-P2-288：用户显式确认弱主口令时的留痕回调（不落明文） */
     onWeakPasswordConfirmed: () -> Unit = {},
@@ -103,9 +103,7 @@ internal fun CreateVaultWizardDialog(
      * ISSUE-P2-354 AC①：建库进行中（busy 时提交按钮禁用 + 内嵌进度、取消与点按外部均不可关闭）。
      * 真相源是 `DatabasePickerUiState.isLoading`（ViewModel 同步守卫的投影），不是对话框本地态。
      */
-    isBusy: Boolean = false,
-    /** ISSUE-P3-425：云同步配置快照（「云端」位置的可用性与目标提示；默认 IDLE 供预览） */
-    cloudSnapshot: CloudSyncSnapshot = CloudSyncSnapshot.IDLE
+    isBusy: Boolean = false
 ) {
     val state = remember { CreateVaultWizardState() }
     val launchers = rememberCreateVaultWizardLaunchers(
@@ -131,11 +129,10 @@ internal fun CreateVaultWizardDialog(
         state = state,
         launchers = launchers,
         isBusy = isBusy,
-        cloudSnapshot = cloudSnapshot,
         onDismiss = onDismiss,
         // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
         // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
-        // ISSUE-P2-229：仅「自选位置」时上行已挑定的文档 uri；内部存储与云端直建传 null
+        // ISSUE-P2-229：「自选位置」上行已挑定的文档 uri；应用私有目录传 null
         onConfirm = {
             onConfirm(
                 state.vaultName,
@@ -143,8 +140,7 @@ internal fun CreateVaultWizardDialog(
                 state.useKeyFile,
                 state.selectedPreset,
                 if (state.keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) state.selectedKeyFilePath else null,
-                state.selectedVaultUri.ifBlank { null },
-                state.storageLocation
+                state.selectedVaultUri.ifBlank { null }
             )
         },
         onWeakPasswordConfirmed = onWeakPasswordConfirmed
@@ -158,8 +154,6 @@ private fun CreateVaultWizardAlertDialog(
     launchers: CreateVaultWizardLaunchers,
     /** ISSUE-P2-354 AC①：建库进行中（见 [CreateVaultWizardDialog.isBusy]） */
     isBusy: Boolean,
-    /** ISSUE-P3-425：云同步配置快照（透传给存储位置区） */
-    cloudSnapshot: CloudSyncSnapshot,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onWeakPasswordConfirmed: () -> Unit
@@ -193,7 +187,7 @@ private fun CreateVaultWizardAlertDialog(
             )
         },
         text = {
-            CreateVaultWizardForm(state = state, launchers = launchers, cloudSnapshot = cloudSnapshot)
+            CreateVaultWizardForm(state = state, launchers = launchers)
         },
         confirmButton = {
             CreateVaultConfirmButton(
@@ -259,10 +253,10 @@ private fun rememberCreateVaultWizardLaunchers(
 @Composable
 private fun CreateVaultWizardForm(
     state: CreateVaultWizardState,
-    launchers: CreateVaultWizardLaunchers,
-    cloudSnapshot: CloudSyncSnapshot
+    launchers: CreateVaultWizardLaunchers
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    // §395：纵向间距 10 → 6dp（用户反馈弹窗过大；段落组件内部间距同批收敛）
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         // 本窗内含**主密码 + 确认主密码**两个 SecurePasswordField：对话框是独立窗口，
         // 必须在本窗内显式施加 FLAG_SECURE（同 SecureDialog KDoc 的官方依据）
         com.keepasskey.app.security.SecureDialogWindowEffect()
@@ -275,11 +269,10 @@ private fun CreateVaultWizardForm(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // ISSUE-P2-229：存储位置选择（内部存储 / 经系统文件选择器自选 / ISSUE-P3-425 云端直建）
+        // ISSUE-P2-229：存储位置选择（§396：仅本地两档——应用私有目录 / 经系统文件选择器自选）
         VaultStorageLocationSection(
             location = state.storageLocation,
             pickedFileName = state.selectedVaultFileName,
-            cloudSnapshot = cloudSnapshot,
             onSelectInternal = {
                 state.storageLocation = VaultStorageLocation.INTERNAL
                 state.selectedVaultUri = ""
@@ -290,11 +283,6 @@ private fun CreateVaultWizardForm(
                 launchers.createVaultDocument(
                     if (state.vaultName.endsWith(".kdbx", ignoreCase = true)) state.vaultName else "${state.vaultName}.kdbx"
                 )
-            },
-            onSelectCloud = {
-                state.storageLocation = VaultStorageLocation.CLOUD
-                state.selectedVaultUri = ""
-                state.selectedVaultFileName = ""
             }
         )
 
@@ -306,8 +294,8 @@ private fun CreateVaultWizardForm(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             KeyFileToggleRow(
                 useKeyFile = state.useKeyFile,

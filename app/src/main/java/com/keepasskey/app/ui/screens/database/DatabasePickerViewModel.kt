@@ -47,7 +47,8 @@ class DatabasePickerViewModel @Inject constructor(
     // ISSUE-P3-400：远端目录浏览控制器（打开对话框「浏览远端目录」共用设置页同一单例）。
     // nullable 仅为单测构造；生产 DI 恒注入
     private val remoteBrowseController: com.keepasskey.app.sync.RemoteBrowseController? = null,
-    // ISSUE-P2-424 AC③ / ISSUE-P3-425：云同步凭据仓库（已配置云账号的预填读取与云端直建判定）。
+    // ISSUE-P2-424 AC③：云同步凭据仓库（「打开已有库」对话框的预填读取；
+    // §396 起新建向导无云端档，不再有云端直建判定）。
     // nullable 仅为单测构造；生产 DI 恒注入
     private val syncCredentialsStore: com.keepasskey.app.sync.SyncCredentialsStore? = null,
     // 快照/预填读取的调度器（Keystore 解封为阻塞操作，限定符见 di/PickerIoDispatcher.kt）；
@@ -98,8 +99,8 @@ class DatabasePickerViewModel @Inject constructor(
         }
     )
 
-    // ISSUE-P2-424 AC③ / ISSUE-P3-425：已配置云账号的两处消费面（可用性快照 + 打开对话框预填）
-    // 自本 VM 拆出（§391 行数分档闸门）；凭据数组所有权口径见该类 KDoc
+    // ISSUE-P2-424 AC③：「打开已有库」对话框的凭据预填消费面（§396 起新建向导不再有云端档，
+    // 可用性快照消费面随「云端直建」整条退役，本控制器只剩预填）；凭据数组所有权口径见该类 KDoc
     private val cloudAccount = DatabasePickerCloudAccountController(
         store = syncCredentialsStore,
         appContext = appContext,
@@ -110,24 +111,18 @@ class DatabasePickerViewModel @Inject constructor(
     /** 打开对话框的预填包（对话框组合后消费；未消费路径由关窗兜底擦除） */
     val openVaultPrefill: StateFlow<OpenVaultPrefill?> = cloudAccount.prefill
 
-    init {
-        cloudAccount.refreshSnapshot()
-    }
-
     val uiState: StateFlow<DatabasePickerUiState> = combine(
         vaultRepository.getDatabases(),
         userMessageFlow,
         combine(showCreateDialogFlow, showOpenSourceDialogFlow) { c, o -> Pair(c, o) },
-        isCreatingFlow,
-        cloudAccount.cloudSnapshot
-    ) { databases, userMessage, (showCreateDialog, showOpenSourceDialog), isLoading, cloudSnapshot ->
+        isCreatingFlow
+    ) { databases, userMessage, (showCreateDialog, showOpenSourceDialog), isLoading ->
         DatabasePickerUiState(
             databases = databases,
             isLoading = isLoading,
             userMessage = userMessage,
             showCreateDialog = showCreateDialog,
-            showOpenSourceDialog = showOpenSourceDialog,
-            cloudSnapshot = cloudSnapshot
+            showOpenSourceDialog = showOpenSourceDialog
         )
     }.stateIn(
         scope = viewModelScope,
@@ -188,23 +183,12 @@ class DatabasePickerViewModel @Inject constructor(
         preset: CreateVaultPreset,
         keyFileSourceUri: String? = null,
         /** ISSUE-P2-229：非空即建到用户经系统文件选择器自选的位置（`content://` uri 字符串） */
-        targetUri: String? = null,
-        /**
-         * ISSUE-P3-425：存储位置意图。「云端」= 本地建库（filesDir）+ 以云 syncType 登记
-         * （远端上传交由既有同步周期，绑定不符保护照常生效）。
-         */
-        storageLocation: VaultStorageLocation = VaultStorageLocation.INTERNAL
+        targetUri: String? = null
     ) {
         // ISSUE-P2-354 AC①：busy 守卫——Argon2 派生是秒级操作，守卫在**协程之外同步置位**，
         // 快速连点的第二次调用直接被拒（对话框按钮的 enabled 只是 UI 层，挡不住重帧内的双击）。
         // 入参为借用语义（调用方持有并自行擦除），被拒路径不接管、不擦除。
         if (isCreatingFlow.value) return
-        // ISSUE-P3-425 fail-closed：云端直建要求已配置云账号——不满足时显式失败，
-        // 绝不静默降级成「普通本地库」（用户以为建到了云端，实际没有）
-        if (storageLocation == VaultStorageLocation.CLOUD && !cloudAccount.cloudReady) {
-            publishPickerMessage(UiMessage(R.string.db_picker_cloud_create_unconfigured, isError = true))
-            return
-        }
         isCreatingFlow.value = true
         viewModelScope.launch {
             // H2 整改：主密码全程 CharArray——复制私有副本并在 finally 擦除；
@@ -226,19 +210,8 @@ class DatabasePickerViewModel @Inject constructor(
                 }
                 if (result is KdbxResult.Success) {
                     val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
-                    // ISSUE-P3-425：云端直建 = 以云 syncType 幂等重登记同一本地文件
-                    // （与「云端打开」登记形态一致：本地文件是落地细节，卡片只显示云端库）；
-                    // 登记 id 变为绝对路径，但活动库切换由登记内部完成，选中事件不受影响
-                    val cloudRegisterFailed = storageLocation == VaultStorageLocation.CLOUD &&
-                        !registerCloudCreatedVault(fileName)
                     showCreateDialogFlow.value = false
-                    publishPickerMessage(
-                        UiMessage(
-                            if (cloudRegisterFailed) R.string.db_picker_msg_cloud_register_failed
-                            else R.string.db_picker_msg_created,
-                            isError = cloudRegisterFailed
-                        )
-                    )
+                    publishPickerMessage(UiMessage(R.string.db_picker_msg_created))
                     if (resolved.generated) {
                         // ISSUE-P3-21 验收 2：生成型密钥文件必须一次性交付（丢失即无法解锁）
                         keyFileDeliveryController.requestSave(name)
@@ -255,19 +228,6 @@ class DatabasePickerViewModel @Inject constructor(
                 isCreatingFlow.value = false
             }
         }
-    }
-
-    /**
-     * 云端直建的第二步（ISSUE-P3-425）：把刚建好的 filesDir 库文件按**云 syncType** 幂等重登记
-     * （复用 `importExternalDatabase` 单一登记出口，同一 path 覆盖条目并置活动库——与
-     * `CloudVaultImporter` 下载后登记的形态完全一致；目录扫描对同路径条目让位，不出双卡）。
-     * 远端文件的真实上传交由既有同步周期执行，`SyncVaultBindingStore` 的绑定不符保护照常生效。
-     */
-    private suspend fun registerCloudCreatedVault(fileName: String): Boolean {
-        val dir = appContext?.filesDir ?: return false
-        val path = java.io.File(dir, fileName).absolutePath
-        val syncType = cloudAccount.cloudSyncTypeLabel ?: return false
-        return vaultRepository.importExternalDatabase(fileName, path, syncType = syncType) is KdbxResult.Success
     }
 
     /**

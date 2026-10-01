@@ -52,28 +52,6 @@ sealed interface KeyFileDeliveryState {
 }
 
 /**
- * 云同步配置快照（ISSUE-P3-425）：新建向导「云端」位置的可用性与目标提示。
- *
- * 只承载**非敏感摘要**（Provider 种类 + 远端目标路径 / ObjectKey），不含任何凭据字节；
- * 由 ViewModel 自 `SyncCredentialsStore` 读取（密码解封后立即擦除，不入快照）。
- */
-data class CloudSyncSnapshot(
-    /** 配置读取是否已完成（false = 仍在读取，UI 显示读取中而非「未配置」） */
-    val loaded: Boolean = false,
-    /** 是否已配置可用的云同步账号（决定「云端」位置可选与否） */
-    val ready: Boolean = false,
-    /** 已配置的 Provider 种类（云端直建登记 syncType 与打开对话框来源共用同一枚举） */
-    val kind: OpenVaultSourceType? = null,
-    /** 远端目标提示（WebDAV = 远端路径；S3 = `bucket/objectKey`） */
-    val targetHint: String = ""
-) {
-    companion object {
-        /** 初始态：尚未读取配置 */
-        val IDLE = CloudSyncSnapshot()
-    }
-}
-
-/**
  * 已配置云账号的「打开已有库」预填载荷（ISSUE-P2-424 AC③）。
  *
  * 凭据 `CharArray` 为**借用语义的所有权移交**：ViewModel 自 `SyncCredentialsStore`
@@ -133,7 +111,5 @@ data class DatabasePickerUiState(
     val isLoading: Boolean = false,
     val showCreateDialog: Boolean = false,
     val showOpenSourceDialog: Boolean = false,
-    /** ISSUE-P3-425：云同步配置快照（新建向导「云端」位置的可用性与目标提示） */
-    val cloudSnapshot: CloudSyncSnapshot = CloudSyncSnapshot.IDLE,
     val userMessage: UiMessage? = null
 )

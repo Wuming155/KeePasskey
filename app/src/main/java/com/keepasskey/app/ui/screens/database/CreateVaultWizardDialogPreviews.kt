@@ -13,7 +13,7 @@ internal fun CreateVaultWizardDialogPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CreateVaultWizardDialog(
             onDismiss = {},
-            onConfirm = { _, _, _, _, _, _, _ -> }
+            onConfirm = { _, _, _, _, _, _ -> }
         )
     }
 }
@@ -30,30 +30,8 @@ internal fun CreateVaultWizardDialogBusyPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         CreateVaultWizardDialog(
             onDismiss = {},
-            onConfirm = { _, _, _, _, _, _, _ -> },
+            onConfirm = { _, _, _, _, _, _ -> },
             isBusy = true
-        )
-    }
-}
-
-/**
- * ISSUE-P3-425：「云端」位置可选的那一态（快照就绪 + 目标提示可见）——
- * 默认态预览只画 IDLE（选项禁用），云端可用差异不补态就只有真机能看见。
- */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@androidx.compose.ui.tooling.preview.Preview(name = "新建密码库向导 - 云端直建可用", showBackground = true)
-@Composable
-internal fun CreateVaultWizardDialogCloudReadyPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        CreateVaultWizardDialog(
-            onDismiss = {},
-            onConfirm = { _, _, _, _, _, _, _ -> },
-            cloudSnapshot = CloudSyncSnapshot(
-                loaded = true,
-                ready = true,
-                kind = OpenVaultSourceType.WEBDAV,
-                targetHint = "/keepasskey/passwords.kdbx"
-            )
         )
     }
 }
