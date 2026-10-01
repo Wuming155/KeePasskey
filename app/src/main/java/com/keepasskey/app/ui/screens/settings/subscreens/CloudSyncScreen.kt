@@ -190,7 +190,7 @@ fun CloudSyncScreen(
     }
 
     SettingsSubscreenScaffold(
-        titleRes = R.string.sync_screen_title,
+        titleRes = R.string.settings_sync,
         onBackClick = onBackClick,
         modifier = modifier,
     ) { innerPadding ->

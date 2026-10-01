@@ -677,7 +677,6 @@
     <string name="set_save_changes">Save changes</string>
 
     <!-- ===== Security settings subscreen ===== -->
-    <string name="sec_screen_title">Security</string>
     <string name="sec_section_biometric">Biometrics &amp; quick unlock</string>
     <string name="sec_biometric_title">Biometric unlock</string>
     <string name="sec_biometric_sub">Unlock with fingerprint or face, key protected by secure hardware</string>
@@ -770,7 +769,6 @@
     <string name="sec_arch_desc">The database is encrypted with KDBX 4 (AES-256 / ChaCha20 + Argon2); the vault file is always stored encrypted. The master key is sealed by Android Keystore, with TEE / StrongBox hardware isolation on devices that support it (measured, with an honest notice when unavailable). Large attachments are staged in plaintext in the app-private directory; plaintext export files are produced only with your explicit confirmation</string>
 
     <!-- ===== Sync settings subscreen ===== -->
-    <string name="sync_screen_title">Sync &amp; cloud backup</string>
     <string name="sync_section_provider">Sync provider</string>
     <string name="sync_section_webdav">WebDAV configuration</string>
     <string name="sync_section_s3">S3-compatible storage</string>
@@ -1074,7 +1072,6 @@
     <string name="debug_privacy_desc">Logs stay on this device; account names and URLs are stripped before export</string>
 
     <!-- ===== Password health check subscreen ===== -->
-    <string name="health_screen_title">Password health check</string>
     <string name="health_total_score">Overall health score</string>
     <string name="health_rating">Security rating: %1$s</string>
     <string name="health_last_scan">Last scan: %1$s</string>

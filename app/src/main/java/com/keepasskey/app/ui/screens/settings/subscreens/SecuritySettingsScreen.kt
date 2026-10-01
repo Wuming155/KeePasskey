@@ -85,7 +85,7 @@ fun SecuritySettingsScreen(
     val hostActivity = LocalActivity.current as? FragmentActivity
 
     SettingsSubscreenScaffold(
-        titleRes = R.string.sec_screen_title,
+        titleRes = R.string.settings_security,
         onBackClick = onBackClick,
         modifier = modifier,
     ) { innerPadding ->

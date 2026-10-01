@@ -688,7 +688,6 @@
     <string name="set_save_changes">保存更改</string>
 
     <!-- ===== 安全设置子页 (SecuritySettingsScreen) ===== -->
-    <string name="sec_screen_title">安全防护</string>
     <string name="sec_section_biometric">生物识别与快速解锁</string>
     <string name="sec_biometric_title">生物识别解锁</string>
     <string name="sec_biometric_sub">使用指纹或面容快速解锁，密钥由硬件安全模块保护</string>
@@ -780,7 +779,6 @@
     <string name="sec_arch_desc">数据库使用 KDBX 4 标准 (AES-256 / ChaCha20 + Argon2) 加密，库文件始终以密文存储。主密钥经 Android Keystore 封存，支持的设备上启用 TEE / StrongBox 硬件隔离（以实测为准，不支持时如实提示）。大体积附件在应用私有目录以明文暂存；明文导出文件由您显式确认后产生</string>
 
     <!-- ===== 同步设置子页 (WebDavSyncScreen) ===== -->
-    <string name="sync_screen_title">同步与云备份</string>
     <string name="sync_section_provider">同步提供商</string>
     <string name="sync_section_webdav">WebDAV 配置</string>
     <string name="sync_section_s3">S3 兼容存储配置</string>
@@ -1125,7 +1123,6 @@
     <string name="debug_privacy_desc">日志仅保存在本机，导出前自动移除账号名与网址字段</string>
 
     <!-- ===== 密码健康检查子页 (HealthCheckScreen) ===== -->
-    <string name="health_screen_title">密码健康检查</string>
     <string name="health_total_score">综合健康评分</string>
     <string name="health_rating">安全评级：%1$s</string>
     <string name="health_last_scan">上次扫描：%1$s</string>

@@ -40,7 +40,7 @@ fun HealthCheckScreen(
     modifier: Modifier = Modifier
 ) {
     SettingsSubscreenScaffold(
-        titleRes = R.string.health_screen_title,
+        titleRes = R.string.settings_health,
         onBackClick = onBackClick,
         modifier = modifier,
     ) { innerPadding ->
