@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
@@ -257,14 +258,17 @@ fun SettingsContent(
             // 分类 4: 系统维护与关于 (System, Maintenance & About)
             ModernSectionHeader(title = stringResource(R.string.set_section_system))
             SettingsGroupCard {
-                ModernSettingsRow(
-                    icon = Icons.Default.BugReport,
-                    iconTint = securityColors.warning,
-                    title = stringResource(R.string.debug_title),
-                    subtitle = stringResource(R.string.set_debug_entry_sub),
-                    onClick = onNavigateToDebug
-                )
-                SettingsItemDivider()
+                // ISSUE-P3-413：诊断日志闸门（DiagnosticLogGate）含 BuildConfig.DEBUG，release 日志缓冲恒空、导出恒禁用，入口仅 debug 构建露出
+                if (BuildConfig.DEBUG) {
+                    ModernSettingsRow(
+                        icon = Icons.Default.BugReport,
+                        iconTint = securityColors.warning,
+                        title = stringResource(R.string.debug_title),
+                        subtitle = stringResource(R.string.set_debug_entry_sub),
+                        onClick = onNavigateToDebug
+                    )
+                    SettingsItemDivider()
+                }
                 ModernSettingsRow(
                     icon = Icons.Default.Info,
                     iconTint = MaterialTheme.colorScheme.primary,
