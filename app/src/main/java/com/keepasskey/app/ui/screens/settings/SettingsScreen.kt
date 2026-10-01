@@ -233,7 +233,7 @@ fun SettingsContent(
                 )
             }
 
-            // 分类 3: 自动填充与个性化偏好 (Autofill & Preferences)
+            // 分类 3: 自动填充 (Autofill)
             ModernSectionHeader(title = stringResource(R.string.settings_cat_preferences))
             SettingsGroupCard {
                 ModernSettingsRow(
@@ -243,7 +243,11 @@ fun SettingsContent(
                     subtitle = stringResource(R.string.settings_autofill_sub),
                     onClick = onNavigateToAutofill
                 )
-                SettingsItemDivider()
+            }
+
+            // 分类 3b: 界面与显示 (Interface & Display)——ISSUE-P3-413：外观独立成组，不与自动填充混排
+            ModernSectionHeader(title = stringResource(R.string.settings_cat_display))
+            SettingsGroupCard {
                 ModernSettingsRow(
                     icon = Icons.Default.Palette,
                     iconTint = MaterialTheme.colorScheme.tertiary,

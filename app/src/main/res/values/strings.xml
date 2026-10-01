@@ -258,7 +258,8 @@
     <string name="settings_security_sub">生物识别、后台自动锁定、防截屏录屏</string>
     <string name="settings_health">健康度检查与审计</string>
     <string name="settings_health_sub">弱密码、密码复用、数据泄露比对</string>
-    <string name="settings_cat_preferences">自动填充与个性化偏好</string>
+    <string name="settings_cat_preferences">自动填充</string>
+    <string name="settings_cat_display">界面与显示</string>
     <string name="settings_autofill">自动填充与 Passkey</string>
     <string name="settings_autofill_sub">系统凭据提供者、通行密钥、剪贴板保护</string>
     <string name="settings_theme">外观与主题</string>

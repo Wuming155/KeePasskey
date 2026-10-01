@@ -249,7 +249,8 @@
     <string name="settings_security_sub">Biometrics, background auto-lock, screenshot protection</string>
     <string name="settings_health">Health Check &amp; Audit</string>
     <string name="settings_health_sub">Weak passwords, reuse detection, breach checking</string>
-    <string name="settings_cat_preferences">Autofill &amp; Preferences</string>
+    <string name="settings_cat_preferences">Autofill</string>
+    <string name="settings_cat_display">Interface &amp; Display</string>
     <string name="settings_autofill">Autofill &amp; Passkey</string>
     <string name="settings_autofill_sub">System credential provider, Passkeys, clipboard protection</string>
     <string name="settings_theme">Appearance &amp; Theme</string>
