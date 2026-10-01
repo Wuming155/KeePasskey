@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ISSUE-P3-423：debug 变体的应用名覆盖——桌面图标与系统凭据设置页副标题
+     （credential_provider_service.xml 的 settingsSubtitle）均引用 @string/app_name，
+     此处覆盖后 debug 安装面显示「KeePasskey Debug」，与 release 图标可分辨。
+     包名后缀（applicationIdSuffix ".debug"）见 app/build.gradle.kts buildTypes.debug。 -->
+<resources>
+    <string name="app_name">KeePasskey Debug</string>
+</resources>

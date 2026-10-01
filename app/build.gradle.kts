@@ -203,6 +203,17 @@ android {
     }
 
     buildTypes {
+        debug {
+            // ISSUE-P3-423：debug 与 release 包名区分（com.keepasskey.debug），两者可并存安装——
+            // debug keystore 与 release.jks 签名不一致，包名相同时装 debug 会把 release 连同
+            // 数据一起顶替卸载（allowBackup="false" 无备份可恢复，§263 同形态事故）。
+            // 代码与 manifest 无硬编码包名（provider 用 ${applicationId}，autofill / passkey
+            // 自校验走 Context.packageName），后缀不破这些面；代价是 debug / release 数据完全隔离。
+            // 桌面名后缀走 debug 源集资源覆盖（app/src/debug/res 的 app_name）而非 manifest
+            // 占位符——`credential_provider_service.xml` 的 settingsSubtitle 也引用 @string/app_name，
+            // 占位符只作用于 manifest 覆盖不到它，资源覆盖两处一次生效。
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = true
             // TASK-38 整改：启用资源收缩——随 R8 移除未被引用的资源（图标/布局/字符串等），

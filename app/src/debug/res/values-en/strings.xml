@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ISSUE-P3-423：debug 变体英文场景的应用名覆盖（与 values/strings.xml 同批）——
+     缺此文件时英文 locale 会回落到 main 源集的 values-en（无 Debug 后缀）。 -->
+<resources>
+    <string name="app_name">KeePasskey Debug</string>
+</resources>
