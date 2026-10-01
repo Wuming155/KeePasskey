@@ -18,7 +18,8 @@ import java.io.File
  *    `CreateDocument` 产出的文档，不在用户选定位置留下空库；
  * 3. **临时件必删**：`cacheDir` 中转库必须在 `finally` 删除；
  * 4. **写后读回复核**，且登记仍走仓库既有的 `importExternalDatabase`（单一登记出口）；
- * 5. **不静默降级**：向导侧未挑定文档时确认按钮必须禁用（不得悄悄改投内部存储）。
+ * 5. **不静默降级**：向导侧未挑定文档时确认按钮必须禁用（不得悄悄改投内部存储）；`ISSUE-P3-425` 的
+ *    「云端」档同理——未配置云账号时 ViewModel 必须 fail-closed 拒建，不得静默建成普通本地库。
  *
  * 断言前不剔除注释——本守卫匹配的是**调用形态**而非散文。
  */
@@ -35,6 +36,11 @@ class CreateVaultLocationWiringTest {
     private val wizardSource: String
         get() = readSource(
             "app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialog.kt"
+        )
+
+    private val pickerViewModelSource: String
+        get() = readSource(
+            "app/src/main/java/com/keepasskey/app/ui/screens/database/DatabasePickerViewModel.kt"
         )
 
     @Test
@@ -117,8 +123,19 @@ class CreateVaultLocationWiringTest {
             wizardSource.contains("isKeyFileValid && isLocationValid")
         )
         assertTrue(
-            "自选位置下未挑定即视为无效",
-            wizardSource.contains("storageLocation == VaultStorageLocation.INTERNAL || selectedVaultUri.isNotBlank()")
+            "「自选位置」未挑定即视为无效——ISSUE-P3-425 起为三档，判据改为**排除式**" +
+                "（只有 EXTERNAL 需要挑定文档；INTERNAL 与 CLOUD 是用户显式选定，不是回落）",
+            wizardSource.contains(
+                "storageLocation != VaultStorageLocation.EXTERNAL || selectedVaultUri.isNotBlank()"
+            )
+        )
+        assertTrue(
+            "「云端」档不得静默降级：未配置云账号时 ViewModel 必须 fail-closed 拒建（ISSUE-P3-425）",
+            pickerViewModelSource.contains("storageLocation == VaultStorageLocation.CLOUD && !cloudAccount.cloudReady")
+        )
+        assertTrue(
+            "fail-closed 必须给用户专属提示，不得复用「创建成功」文案谎报",
+            pickerViewModelSource.contains("db_picker_cloud_create_unconfigured")
         )
     }
 

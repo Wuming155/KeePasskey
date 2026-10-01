@@ -41,32 +41,11 @@
 
 ---
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-424：打开已有密码库的两入口行为不一致——解锁页空状态入口只走本地 SAF（文案却承诺「云盘」），云端来源还须手输凭据、不复用已配置云账号
+> **暂无开放项**。
 
-- **背景**：用户反馈「点击打开已有的密码库会直接访问本地的，期望可预选打开云端或本地」。核实发现「打开已有库」实际有**两个入口、能力不一致**：
-  - **入口 A（库管理页）**：`DatabasePickerScreen.kt:246-255`「打开已有 KDBX」→ `OpenExistingVaultDialog.kt:40-119`，有 本地 / WebDAV / 兼容 S3 三来源 Chip（`strings_ui_messages.xml:13-15`），云端走 `OpenVaultSubmission.Cloud`（`DatabasePickerViewModel.kt:286-290, 324-344`）下载后登记——能力齐全，但**云端凭据须现场手输**（表单状态 `OpenExistingVaultDialog.kt:150-181` 仅预填坚果云 URL；`DatabasePickerViewModel.kt:48-51` 未注入任何云账号仓库，设置页已配置的 WebDAV/S3 账号完全不复用）。
-  - **入口 B（解锁页空状态）**：`UnlockEmptyVaultSections.kt:83-90`「打开已有密码库」卡片，文案 `unlock_empty_open_desc`=「从本机存储或云盘导入 .kdbx」（`strings.xml:90`）**承诺了云盘**，实际接线 `UnlockScreen.kt:114-119` 仅 `ActivityResultContracts.OpenDocument` 本地 SAF，无任何云端路径——**文案与行为不符**，用户反馈即从此入口触发。
-- **核实**：2026-10-01，用户反馈触发；Explore 铺开代理全库定位，主会话抽查上述文件行号与字符串资源原文逐条确认。
-- **整改方向**：① 入口 B 与入口 A 统一——空状态「打开已有密码库」改走同一三来源对话框（或至少补齐云端路径），使文案不失实；② 云端来源与设置页云账号打通——已配置账号作为默认来源预填/直接选用，手输仅作兜底；③ 来源 Chip 支持「预选」记忆（默认上次使用的来源），即用户所言「预选打开云端的或者本地的」。
-- **验收标准**：AC① 解锁页空状态入口可从 WebDAV / S3 打开库；AC② `unlock_empty_open_desc` 文案与实际行为一致；AC③ 已配置云账号时，打开对话框的云端来源默认展示该账号（无需重新手输 URL/凭据）；AC④ 全量 `test` 绿 + 门禁读数全 PASS。
-
-## P3 低危问题、特性接线与体验优化（4 项）
-
-### ISSUE-P3-425：新建密码库只能落本地，无「直接建到云端（WebDAV/S3）」路径
-
-- **背景**：用户反馈「新建密码库只能新建到本地，不能新建到云端」。核实：`CreateVaultWizardDialogSections.kt:214-254` 存储位置仅 `VaultStorageLocation.INTERNAL`（应用私有目录）/ `EXTERNAL`（SAF 自选位置，`CreateVaultWizardDialog.kt:293-301` 走 `ActivityResultContracts.CreateDocument`），两档均为**本地落盘**；云端（WebDAV/S3）只作为建库后的**同步**能力（`db_create_location_internal_sub`「支持原子写盘与 WebDAV / S3 同步」，`strings.xml:1256` 附近；`db_create_location_external_warning` 明示 EXTERNAL 不参与同步），不存在「直接在远端创建 .kdbx」的选项。用户想用云端库仍须先建本地库再配同步。
-- **核实**：2026-10-01，同 ISSUE-P2-424（用户反馈触发；Explore 铺开 + 主会话抽查行号确认）。
-- **整改方向**：二选一（须先产品裁决）：a) 新建向导存储位置增加「云端」来源（WebDAV/S3，复用已配置云账号，衔接 ISSUE-P2-424②），选定远端目录后直接上传初始 .kdbx 并登记为云同步库；b) 裁决确认「先本地后同步」为唯一口径，登记 [`docs/architecture/产品裁决登记.md`](architecture/产品裁决登记.md) 并向用户解释清楚。
-- **验收标准**：AC① 存在可用的云端直建路径且创建后同步闭环（或裁决条目已登记且入口文案随之澄清）；AC② 全量 `test` 绿 + 门禁读数全 PASS。
-
-### ISSUE-P3-426：「打开已有 KDBX」入口与「新建密码库」并排混排，「添加密码库」信息架构须重整
-
-- **背景**：用户反馈「在新建密码库里面有一个打开已有的 KDBX，这不合适」。核实：新建向导内部**并无**该入口（`CreateVaultWizardDialog.kt:315-388` 表单仅库名/存储位置/主密码对/密钥文件/加密预设；其 `OpenDocument` launcher 是选密钥文件，`CreateVaultWizardDialog.kt:284-290`，非导入 kdbx）；混排发生在**库管理页同一操作栏**——`DatabasePickerScreen.kt:231-256` 同一 Row 内「新建密码库」Button 与「打开已有 KDBX」OutlinedButton 各占一半并排，用户感知为「新建密码库（页面）里混入了打开已有」。解锁页空状态则是两张卡片上下排列（`UnlockEmptyVaultSections.kt:72-90`），两处组织方式不一致。
-- **核实**：2026-10-01，同 ISSUE-P2-424（用户反馈触发；Explore 铺开 + 主会话抽查行号确认）。
-- **整改方向**：重整「添加密码库」信息架构，候选：a) 合并为单一「添加密码库」入口，进入后再分 新建 / 导入 两条路径（导入路径即 ISSUE-P2-424 的三来源对话框，同批实施可一次收口）；b) 库管理页分区呈现（「新建」与「导入」分组，次要动作视觉降级）。两屏（库管理页 / 解锁页空状态）组织方式须一致。
-- **验收标准**：AC① 库管理页与解锁页空状态的 新建/打开 入口组织方式一致、语义清晰（用户不再把「打开已有 KDBX」感知为新建流程的一部分）；AC② 全量 `test` 绿 + 门禁读数全 PASS。
+## P3 低危问题、特性接线与体验优化（1 项）
 
 ### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室）——**浏览器半环搁置**
 

@@ -64,6 +64,8 @@ fun DatabasePickerScreen(
     onBackClick: () -> Unit,
     onDatabaseSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** ISSUE-P2-424 AC①：路由参数——解锁页空状态「导入已有库」直达本页并自动展开导入对话框 */
+    autoOpenImport: Boolean = false,
     viewModel: DatabasePickerViewModel = hiltViewModel()
 ) {
     // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
@@ -71,6 +73,14 @@ fun DatabasePickerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ISSUE-P3-21：生成型密钥文件的一次性交付状态（复合密钥第二因子，丢失即无法解锁）
     val keyFileDelivery by viewModel.keyFileDelivery.collectAsStateWithLifecycle()
+    // ISSUE-P2-424 AC③：打开对话框的云账号预填包（对话框消费后即弃持）
+    val openVaultPrefill by viewModel.openVaultPrefill.collectAsStateWithLifecycle()
+
+    // ISSUE-P2-424 AC①：解锁页「导入已有库」入口统一到本页三来源对话框（云端路径自此可达）；
+    // 一次消费守卫在 VM（跨配置变更存活），旋转重建不重复弹出
+    LaunchedEffect(autoOpenImport) {
+        if (autoOpenImport) viewModel.openImportFromRoute()
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -85,6 +95,7 @@ fun DatabasePickerScreen(
     DatabasePickerContent(
         uiState = uiState,
         keyFileDelivery = keyFileDelivery,
+        openVaultPrefill = openVaultPrefill,
         onBackClick = onBackClick,
         onSelectDatabase = viewModel::selectDatabase,
         onOpenCreateDialog = viewModel::openCreateDialog,
@@ -95,6 +106,8 @@ fun DatabasePickerScreen(
         onKeyFileDeliveryDismissed = viewModel::dismissKeyFileDelivery,
         onOpenExistingClick = viewModel::openOpenSourceDialog,
         onCloseOpenSourceDialog = viewModel::closeOpenSourceDialog,
+        onConsumeOpenVaultPrefill = viewModel::consumeOpenVaultPrefill,
+        onNoteOpenVaultSource = viewModel::noteOpenVaultSource,
         onImportFromSource = viewModel::importDatabaseFromSource,
         onRemoveDatabase = viewModel::removeDatabase,
         // ISSUE-P3-400：远端目录浏览（对话框「浏览远端目录」与设置页共用同一控制器单例）
@@ -122,10 +135,15 @@ fun DatabasePickerContent(
         keyFile: Boolean,
         preset: CreateVaultPreset,
         keyFileSourceUri: String?,
-        targetUri: String?
+        targetUri: String?,
+        storageLocation: VaultStorageLocation
     ) -> Unit,
     onOpenExistingClick: () -> Unit,
     onCloseOpenSourceDialog: () -> Unit,
+    // ISSUE-P2-424 AC③：打开对话框的云账号预填（消费确认 + 来源留痕）
+    openVaultPrefill: OpenVaultPrefill? = null,
+    onConsumeOpenVaultPrefill: () -> Unit = {},
+    onNoteOpenVaultSource: (OpenVaultSourceType) -> Unit = {},
     onImportFromSource: (submission: OpenVaultSubmission) -> Unit,
     // ISSUE-P1-241：第二个参数即该动作的**真实对象**（应用私有库 = 真删文件 / 外部库 = 只摘登记），
     // 与确认弹窗所用文案同一枚判据，数据层据此决定是否删除物理文件
@@ -227,32 +245,31 @@ fun DatabasePickerContent(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 快速新建与打开已有操作栏
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // ISSUE-P3-426：「添加密码库」信息架构重整——新建（主动作，实心主按钮）与导入
+            // （次动作，描边按钮）上下分区、全宽排布，不再同排并列混排；
+            // 解锁页空状态同为「上下两张卡片」的分区口径，两屏语义一致
+            Button(
+                onClick = onOpenCreateDialog,
+                enabled = !uiState.isLoading,
+                shape = CapsuleShape,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Button(
-                    onClick = onOpenCreateDialog,
-                    enabled = !uiState.isLoading,
-                    shape = CapsuleShape,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.db_picker_create_new))
-                }
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(stringResource(R.string.db_picker_create_new))
+            }
 
-                OutlinedButton(
-                    onClick = onOpenExistingClick,
-                    enabled = !uiState.isLoading,
-                    shape = CapsuleShape,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.db_picker_open_external))
-                }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = onOpenExistingClick,
+                enabled = !uiState.isLoading,
+                shape = CapsuleShape,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(stringResource(R.string.db_picker_open_external))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -303,14 +320,15 @@ fun DatabasePickerContent(
         }
     }
 
-    // 新建密码库向导对话框 (支持生成或选择已有密钥文件)
+    // 新建密码库向导对话框 (支持生成或选择已有密钥文件；ISSUE-P3-425 云端直建位置)
     if (uiState.showCreateDialog) {
         CreateVaultWizardDialog(
             onDismiss = onCloseCreateDialog,
             onConfirm = onCreateDatabase,
             onWeakPasswordConfirmed = onWeakPasswordConfirmed,
             // ISSUE-P2-354 AC①：busy 真相源是 isLoading（ViewModel 同步守卫的投影）
-            isBusy = uiState.isLoading
+            isBusy = uiState.isLoading,
+            cloudSnapshot = uiState.cloudSnapshot
         )
     }
 
@@ -323,7 +341,7 @@ fun DatabasePickerContent(
         )
     }
 
-    // 打开已有 KDBX 文件对话框 (支持本地/WebDAV/S3 完整配置项填写)
+    // 打开已有 KDBX 文件对话框 (本地/WebDAV/S3 三来源 + ISSUE-P2-424 云账号预填与来源预选)
     if (uiState.showOpenSourceDialog) {
         OpenExistingVaultDialog(
             onDismiss = onCloseOpenSourceDialog,
@@ -331,7 +349,10 @@ fun DatabasePickerContent(
             browseState = browseState.collectAsState().value,
             onBrowseWebDav = onBrowseWebDav,
             onBrowseS3 = onBrowseS3,
-            onDismissBrowse = onDismissBrowse
+            onDismissBrowse = onDismissBrowse,
+            prefill = openVaultPrefill,
+            onPrefillConsumed = onConsumeOpenVaultPrefill,
+            onSourceSelected = onNoteOpenVaultSource
         )
     }
 

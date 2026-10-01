@@ -54,7 +54,12 @@ internal fun NavGraphBuilder.unlockRoute(
                 }
             },
             onNavigateToDatabasePicker = {
-                navController.navigate(Screen.DatabasePicker.route) { launchSingleTop = true }
+                navController.navigate(Screen.DatabasePicker.createRoute()) { launchSingleTop = true }
+            },
+            // ISSUE-P2-424 AC①：空状态「导入已有库」统一出口——跳库管理页并自动展开
+            // 三来源导入对话框（云端路径自此可达，与库管理页「导入已有库」同一实现）
+            onOpenExistingVault = {
+                navController.navigate(Screen.DatabasePicker.createRoute(openImport = true)) { launchSingleTop = true }
             }
         )
     }
@@ -62,12 +67,22 @@ internal fun NavGraphBuilder.unlockRoute(
 
 /** 2. 密码库选择与多库管理页 */
 internal fun NavGraphBuilder.databasePickerRoute(navController: NavHostController) {
-    composable(Screen.DatabasePicker.route) {
+    composable(
+        route = Screen.DatabasePicker.route,
+        arguments = listOf(
+            navArgument("openImport") {
+                type = NavType.BoolType
+                defaultValue = false
+            }
+        )
+    ) { entry ->
         DatabasePickerScreen(
             onBackClick = { navController.popBackStack() },
             onDatabaseSelected = {
                 navController.popBackStack()
-            }
+            },
+            // ISSUE-P2-424 AC①：解锁页「导入已有库」直达时自动展开导入对话框
+            autoOpenImport = entry.arguments?.getBoolean("openImport") == true
         )
     }
 }

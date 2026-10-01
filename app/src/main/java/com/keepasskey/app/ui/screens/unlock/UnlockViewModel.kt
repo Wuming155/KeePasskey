@@ -8,8 +8,6 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.data.repository.lacksPersistedReadPermission
-import com.keepasskey.app.data.repository.persistedReadUriStrings
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
@@ -17,7 +15,6 @@ import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -207,62 +204,6 @@ class UnlockViewModel @Inject constructor(
     /** 解锁页一次性意图透传（ISSUE-P3-01）；守卫条件见 [BiometricUnlockCoordinator]，false = 幂等空操作 */
     fun onBiometricAutoPromptRequested(activity: FragmentActivity?): Boolean =
         biometricUnlock.onBiometricAutoPromptRequested(activity)
-
-    /**
-     * 从外部文件导入密码库（在空状态下快速打开已有库）。
-     *
-     * ISSUE-P2-87：导入成功后再按**外层明文头部**（按 KDBX 规范位于认证之前，无需凭据、
-     * 不解密载荷）评估 KDF 工作因子，低于本应用建库默认强度时置
-     * [UnlockUiState.infoMessage] —— 这是**非阻断提示**：成功仍是成功
-     * （**不动** [UnlockUiState.errorMessage]），既不阻断后续解锁，也**不改写任何 KDF 参数**。
-     * 判据与文案口径见 `KdbxKdfStrengthAssessor`（只表述「低于本应用建库默认强度」，
-     * 不得解读为「不安全 / 已被攻破」）。
-     *
-     * 达标或**未能评估**（来源不可读 / 头部不可解析）时一并置空：同一槽位若残留上一次导入的
-     * 弱因子提示，会变成对**当前**库的误导性告警，故以「不残留」优先。
-     *
-     * **本页是用户导入后确定停留在的页面**，故弱因子提示落在本页；选择器页的导入路径
-     * （`DatabasePickerViewModel.importDatabaseFromSource`）随导入立即退栈、本页即其落点，
-     * 其提示责任同样由本页承载。
-     */
-    fun importExternalDatabase(name: String, path: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val result = vaultRepository.importExternalDatabase(name, path)
-            _uiState.update { it.copy(isLoading = false) }
-            if (result is KdbxResult.Failure) {
-                // 失败路径只置 errorMessage：成功/失败是互斥结论，不得同时给出告警
-                _uiState.update { it.copy(errorMessage = UiMessage(R.string.op_failed, listOf(result.message))) }
-            } else {
-                val belowBaseline = vaultRepository.assessKdfStrength(path)?.isBelowBaseline == true
-                _uiState.update {
-                    it.copy(
-                        infoMessage = when {
-                            // ISSUE-P3-230 AC①：`content://` 库未拿到持久化授权时给出**一次性可见提示**
-                            // （重启后可能打不开）——优先级高于弱因子提示，因为它直接决定「下次能否打开」
-                            lacksPersistedPermission(path) ->
-                                UiMessage(R.string.unlock_msg_no_persisted_permission)
-                            belowBaseline -> UiMessage(R.string.unlock_msg_weak_kdf)
-                            else -> null
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    /**
-     * `ISSUE-P3-230 AC①`：该库路径是否**缺少**持久化读授权。
-     *
-     * 判定与列表投影同源（`VaultUriPermission` 的纯函数 + 唯一平台查询），避免两处口径漂移。
-     * `appContext == null`（纯 JVM 单测）或查询失败一律返回 false——**绝不误报**：
-     * 把「查不到」说成「没授权」会凭空制造一条对用户的虚假告警。
-     */
-    private fun lacksPersistedPermission(path: String): Boolean {
-        val context = appContext ?: return false
-        val granted = persistedReadUriStrings(context) ?: return false
-        return lacksPersistedReadPermission(path, granted)
-    }
 
     /**
      * 主密码输入上行（来自 [com.keepasskey.app.ui.components.SecurePasswordField] 的 CharArray 桥接）。

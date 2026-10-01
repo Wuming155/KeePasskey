@@ -52,6 +52,75 @@ sealed interface KeyFileDeliveryState {
 }
 
 /**
+ * 云同步配置快照（ISSUE-P3-425）：新建向导「云端」位置的可用性与目标提示。
+ *
+ * 只承载**非敏感摘要**（Provider 种类 + 远端目标路径 / ObjectKey），不含任何凭据字节；
+ * 由 ViewModel 自 `SyncCredentialsStore` 读取（密码解封后立即擦除，不入快照）。
+ */
+data class CloudSyncSnapshot(
+    /** 配置读取是否已完成（false = 仍在读取，UI 显示读取中而非「未配置」） */
+    val loaded: Boolean = false,
+    /** 是否已配置可用的云同步账号（决定「云端」位置可选与否） */
+    val ready: Boolean = false,
+    /** 已配置的 Provider 种类（云端直建登记 syncType 与打开对话框来源共用同一枚举） */
+    val kind: OpenVaultSourceType? = null,
+    /** 远端目标提示（WebDAV = 远端路径；S3 = `bucket/objectKey`） */
+    val targetHint: String = ""
+) {
+    companion object {
+        /** 初始态：尚未读取配置 */
+        val IDLE = CloudSyncSnapshot()
+    }
+}
+
+/**
+ * 已配置云账号的「打开已有库」预填载荷（ISSUE-P2-424 AC③）。
+ *
+ * 凭据 `CharArray` 为**借用语义的所有权移交**：ViewModel 自 `SyncCredentialsStore`
+ * 解封后装入载荷，对话框把数组**原引用**写入表单快照态（其离场 `wipeSensitive` 统一擦除）
+ * 并回调消费确认；ViewModel 侧随即弃持。任何路径下数组都恰好被擦一次，绝不落地 String。
+ */
+class OpenVaultWebDavPrefill(
+    val url: String,
+    val username: String,
+    val passwordChars: CharArray,
+    val remotePath: String
+) {
+    /** 未被对话框消费时的兜底擦除（关窗 / 换路） */
+    fun wipe() {
+        passwordChars.fill('0')
+    }
+}
+
+/** S3 兼容账号的预填载荷（语义同 [OpenVaultWebDavPrefill]） */
+class OpenVaultS3Prefill(
+    val endpoint: String,
+    val bucket: String,
+    val region: String,
+    val accessKeyChars: CharArray,
+    val secretKeyChars: CharArray,
+    val objectKey: String,
+    val usePathStyle: Boolean
+) {
+    fun wipe() {
+        accessKeyChars.fill('0')
+        secretKeyChars.fill('0')
+    }
+}
+
+/** 打开对话框的预填包：上次使用的来源 + 已配置云账号（均可为空） */
+class OpenVaultPrefill(
+    val lastSource: OpenVaultSourceType,
+    val webdav: OpenVaultWebDavPrefill?,
+    val s3: OpenVaultS3Prefill?
+) {
+    fun wipe() {
+        webdav?.wipe()
+        s3?.wipe()
+    }
+}
+
+/**
  * 密码库选择与管理页面 UI 状态
  */
 data class DatabasePickerUiState(
@@ -64,5 +133,7 @@ data class DatabasePickerUiState(
     val isLoading: Boolean = false,
     val showCreateDialog: Boolean = false,
     val showOpenSourceDialog: Boolean = false,
+    /** ISSUE-P3-425：云同步配置快照（新建向导「云端」位置的可用性与目标提示） */
+    val cloudSnapshot: CloudSyncSnapshot = CloudSyncSnapshot.IDLE,
     val userMessage: UiMessage? = null
 )

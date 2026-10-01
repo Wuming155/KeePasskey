@@ -204,18 +204,22 @@ internal fun CreateVaultConfirmButton(
 }
 
 /**
- * 新建库的存储位置选择（**ISSUE-P2-229**）。
+ * 新建库的存储位置选择（**ISSUE-P2-229**；ISSUE-P3-425 增设「云端」直建）。
  *
- * 两行单选：内部存储为默认；选「自选位置」即当场拉起系统文件选择器，挑定的文件名回显在下方。
- * 外部位置的两条降级（写回非原子、不参与 WebDAV / S3 同步）**必须**同屏如实告知——
- * 不得让用户在不知情下拿到一个「看起来一样但更容易损坏、也同步不走」的库。
+ * 三行单选：内部存储为默认；选「自选位置」即当场拉起系统文件选择器，挑定的文件名回显在下方；
+ * 「云端」仅在已配置云同步账号时可选（`CloudSyncSnapshot.ready`），未就绪时如实呈现
+ * 「读取中 / 未配置」而非假装可选。外部位置的两条降级（写回非原子、不参与 WebDAV / S3 同步）
+ * **必须**同屏如实告知——不得让用户在不知情下拿到一个「看起来一样但更容易损坏、也同步不走」的库。
  */
 @Composable
 internal fun VaultStorageLocationSection(
     location: VaultStorageLocation,
     pickedFileName: String,
+    /** ISSUE-P3-425：云同步配置快照（决定「云端」行可用性与副文案） */
+    cloudSnapshot: CloudSyncSnapshot,
     onSelectInternal: () -> Unit,
-    onSelectExternal: () -> Unit
+    onSelectExternal: () -> Unit,
+    onSelectCloud: () -> Unit
 ) {
     Column(
         modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
@@ -238,6 +242,13 @@ internal fun VaultStorageLocationSection(
             selected = location == VaultStorageLocation.EXTERNAL,
             onClick = onSelectExternal
         )
+        StorageLocationOption(
+            title = stringResource(R.string.db_create_location_cloud),
+            subtitle = cloudLocationSubtitle(cloudSnapshot),
+            selected = location == VaultStorageLocation.CLOUD,
+            enabled = cloudSnapshot.ready,
+            onClick = onSelectCloud
+        )
         if (location == VaultStorageLocation.EXTERNAL) {
             Text(
                 text = if (pickedFileName.isBlank()) {
@@ -254,27 +265,10 @@ internal fun VaultStorageLocationSection(
                 color = MaterialTheme.colorScheme.error
             )
         }
-    }
-}
-
-/** 单个位置选项（单选钮 + 标题 + 说明），整行可点。 */
-@Composable
-private fun StorageLocationOption(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = androidx.compose.ui.Modifier.fillMaxWidth().clickable(onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        androidx.compose.material3.RadioButton(selected = selected, onClick = onClick)
-        Spacer(modifier = androidx.compose.ui.Modifier.width(6.dp))
-        Column {
-            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+        if (location == VaultStorageLocation.CLOUD && cloudSnapshot.ready) {
+            // 云端直建的远端目标同屏如实告知（与同步配置页同一非敏感摘要）
             Text(
-                text = subtitle,
+                text = stringResource(R.string.db_create_location_cloud_target, cloudSnapshot.targetHint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -282,5 +276,69 @@ private fun StorageLocationOption(
     }
 }
 
+/** 「云端」行的副文案：读取中 / 未配置 / 可用（含 Provider 种类）三态如实区分 */
+@Composable
+private fun cloudLocationSubtitle(snapshot: CloudSyncSnapshot): String = when {
+    !snapshot.loaded -> stringResource(R.string.db_create_location_cloud_loading)
+    !snapshot.ready -> stringResource(R.string.db_create_location_cloud_unconfigured_sub)
+    else -> stringResource(
+        R.string.db_create_location_cloud_ready_sub,
+        when (snapshot.kind) {
+            OpenVaultSourceType.S3_COMPATIBLE -> stringResource(R.string.picker_chip_s3)
+            else -> stringResource(R.string.picker_chip_webdav)
+        }
+    )
+}
+
+/** 单个位置选项（单选钮 + 标题 + 说明），整行可点；[enabled]=false 时整行置灰不可点。 */
+@Composable
+private fun StorageLocationOption(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    val optionColor = if (enabled) {
+        androidx.compose.ui.graphics.Color.Unspecified
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    Row(
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = onClick, enabled = enabled)
+        Spacer(modifier = androidx.compose.ui.Modifier.width(6.dp))
+        Column {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium, color = optionColor)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else optionColor
+            )
+        }
+    }
+}
+
 /** ISSUE-P2-354 AC①：「创建」按钮内嵌进度圈直径（dp） */
 private const val CREATE_PROGRESS_SIZE = 18
+
+/**
+ * 新建密码库的落地位置（ISSUE-P2-229；ISSUE-P3-425 增设云端直建）。
+ * §391 起本枚举与消费它的存储位置区同文件（向导本体按行数分档闸门瘦身）。
+ *
+ * - [INTERNAL]：应用私有目录（`filesDir`）——具备原子写盘（`.tmp` + rename + `.bak`）
+ *   与 WebDAV / S3 同步能力，为默认项；
+ * - [EXTERNAL]：经系统文件选择器（`ACTION_CREATE_DOCUMENT`）由用户自选位置——
+ *   便于自行备份与跨应用查看，但写回为非原子的 `"rwt"` 截断式写、且不参与同步
+ *   （两条降级在向导内如实告知，并登记于 `docs/architecture/已知工程限界.md`）；
+ * - [CLOUD]：云端直建（ISSUE-P3-425）——实际仍在 `filesDir` 建库（享受原子写盘），
+ *   建成后以云 syncType 幂等重登记（与「云端打开」同形态），远端上传交由既有同步周期；
+ *   仅在已配置云同步账号时可选（`CloudSyncSnapshot.ready`）。
+ */
+enum class VaultStorageLocation {
+    INTERNAL,
+    EXTERNAL,
+    CLOUD
+}

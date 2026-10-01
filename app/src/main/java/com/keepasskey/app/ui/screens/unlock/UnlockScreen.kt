@@ -57,6 +57,8 @@ fun UnlockScreen(
     onUnlockSuccess: () -> Unit,
     modifier: Modifier = Modifier,
     onNavigateToDatabasePicker: () -> Unit = {},
+    /** ISSUE-P2-424 AC①：空状态「导入已有库」的统一出口（导航层接跳转库管理页 + 自动展开导入） */
+    onOpenExistingVault: () -> Unit = {},
     viewModel: UnlockViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -111,13 +113,9 @@ fun UnlockScreen(
         viewModel.onKeyFileSelected(uri.toString())
     }
 
-    val kdbxImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val displayName = querySafDisplayName(context, uri)
-        viewModel.importExternalDatabase(displayName, uri.toString())
-    }
+    // ISSUE-P2-424 AC①：空状态「导入已有库」不再走本页仅本地的 SAF 导入器，统一跳转
+    // 密码库管理页并自动展开三来源导入对话框（本地 / WebDAV / S3，云账号预填）——
+    // 文案「从本机存储或云盘导入」自此与行为一致，云端打开能力不再缺失
 
     UnlockContent(
         uiState = uiState,
@@ -133,7 +131,7 @@ fun UnlockScreen(
         onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
         onDowngradeDecision = viewModel::onQuickUnlockDowngradeDecision,
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
-        onOpenExistingVault = { kdbxImportLauncher.launch(arrayOf("*/*")) },
+        onOpenExistingVault = onOpenExistingVault,
         modifier = modifier
     )
 }

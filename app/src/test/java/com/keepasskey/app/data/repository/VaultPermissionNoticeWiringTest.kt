@@ -15,8 +15,11 @@ import java.io.File
  * 四条判据：
  * 1. **不得回到静默**：`takePersistableUriPermission` 的 catch 分支必须落 `AppLog.w`，
  *    且**不得**再出现吞异常的 `catch (_: Throwable)` 形态；
- * 2. **解锁页一次性提示**必须接线（成功分支引用 `unlock_msg_no_persisted_permission`，
- *    且判定经与列表同源的纯函数）；
+ * 2. ~~**解锁页一次性提示**必须接线~~ —— **已随 `ISSUE-P2-424` 退役**（2026-10-01）：该提示的唯一载体是
+ *    解锁页自身的 SAF 导入通道（`UnlockViewModel.importExternalDatabase`），该通道已并入选择器页三来源对话框。
+ *    覆盖面**净变化为零**：选择器路径本就从未出现该提示（`ISSUE-P3-248` 已证——它随导入立即退栈），
+ *    故「缺持久化授权」的告知现由判据 3/4 锁住的**列表卡片状态 + 重新授权入口**（AC②，持久面）单独承载；
+ *    相应文案资源 `unlock_msg_no_persisted_permission` 与 `unlock_msg_weak_kdf` 已随唯一消费方一并删除。
  * 3. **列表状态与重授入口**必须接线（卡片渲染 + 页面提供 launcher 并复用既有导入路径）；
  * 4. **列表投影**必须填充 `lacksPersistedPermission`（否则 ③ 永远为 false，成了摆设）。
  */
@@ -42,19 +45,6 @@ class VaultPermissionNoticeWiringTest {
             "[$COORDINATOR] 持久化授权失败又退回「吞异常的 catch (_: Throwable)」形态 —— " +
                 "这正是 ISSUE-P3-230 的原缺陷",
             method.contains("catch (_: Throwable)")
-        )
-    }
-
-    @Test
-    fun `解锁页导入成功分支必须给出未授权提示`() {
-        val source = readRepoFile(UNLOCK_VIEW_MODEL)
-        assertTrue(
-            "[$UNLOCK_VIEW_MODEL] 成功分支未接线 unlock_msg_no_persisted_permission（AC① 的一次性提示）",
-            source.contains("unlock_msg_no_persisted_permission")
-        )
-        assertTrue(
-            "[$UNLOCK_VIEW_MODEL] 未授权判定未经与列表同源的纯函数（两处口径会漂移）",
-            source.contains("lacksPersistedReadPermission(") && source.contains("persistedReadUriStrings(")
         )
     }
 
@@ -115,8 +105,6 @@ class VaultPermissionNoticeWiringTest {
             "app/src/main/java/com/keepasskey/app/data/repository/VaultLifecycleCoordinator.kt"
         const val CATALOG =
             "app/src/main/java/com/keepasskey/app/data/repository/VaultDatabaseCatalog.kt"
-        const val UNLOCK_VIEW_MODEL =
-            "app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockViewModel.kt"
         const val CARD =
             "app/src/main/java/com/keepasskey/app/ui/screens/database/VaultDatabaseCard.kt"
         const val PICKER_SCREEN =

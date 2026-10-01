@@ -15,10 +15,13 @@ import android.content.Context
  *
  * ## 为什么把判据独立成文件
  *
- * 「是否缺持久化授权」有**两处**消费方（列表投影 `VaultDatabaseCatalog` 与解锁页提示
+ * 「是否缺持久化授权」曾有两处消费方（列表投影 `VaultDatabaseCatalog` 与解锁页提示
  * `UnlockViewModel`），若各写一份查询立刻会出现两种口径（本仓在 ISUUE-P2-43 的默认值问题上
  * 已踩过同型坑）。故：**判据本体是纯函数**（[lacksPersistedReadPermission]，JVM 可测），
  * 平台查询只在 [persistedReadUriStrings] 一处。
+ *
+ * 自 `ISSUE-P2-424`（2026-10-01）起解锁页的直连导入通道退役，消费方**只剩列表投影**——独立成文件的
+ * 理由不变（判据与平台查询仍须单点）；日后若重新出现第二处消费方，必须复用本文件而非再写一份查询。
  *
  * ## 口径（AC③：不得改为硬失败）
  *

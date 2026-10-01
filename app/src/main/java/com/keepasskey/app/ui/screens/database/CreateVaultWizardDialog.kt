@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.database
 
-import android.content.res.Configuration
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -36,66 +34,6 @@ import com.keepasskey.app.ui.components.MasterPasswordPolicy
 import com.keepasskey.app.ui.components.MasterPasswordWeakConfirmDialog
 import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.components.rememberMasterPasswordStrengthBits
-import com.keepasskey.app.ui.theme.CapsuleShape
-
-/**
- * 生成型密钥文件的一次性保存提示（ISSUE-P3-21 验收 2）。
- *
- * 该密钥文件是复合密钥的第二因子：**不保存即永久无法解锁**（会话锁定后内存副本立即清零，
- * 且该文件不会被再次生成）。因此：
- * - 主按钮直达 SAF 另存为（写盘复用既有导出通道 `exportKeyFileBytes`）；
- * - 次按钮文案如实写出后果，不提供「假装已保存」的第三条路径；
- * - 点击弹窗外部不关闭（`onDismissRequest` 不做任何事），杜绝误触导致第二因子静默丢失。
- */
-@Composable
-internal fun KeyFileOneTimeSaveDialog(
-    suggestedFileName: String,
-    onSaveClick: () -> Unit,
-    onSkipClick: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = {
-            // 必须显式选择：误触外部若静默关闭，用户将永久失去该密码库的第二因子
-        },
-        // 对话框窗口的 FLAG_SECURE 由 Compose 的 SecureFlagPolicy 决定（默认 Inherit ← **宿主窗口**），
-        // 宿主不带该 flag 时 Inherit 会清掉本窗的 flag（ISSUE-P2-246 真机实测）；故显式要求 SecureOn
-        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
-        title = {
-            Text(
-                text = stringResource(R.string.db_picker_keyfile_backup_title),
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // 对话框由 Compose 创建**独立窗口**，Activity 的 FLAG_SECURE 不会传播过来
-                // （官方："You must set FLAG_SECURE explicitly for every window created by the
-                // activity, including dialogs."）。本窗展示一次性密钥文件保存提示，属敏感面。
-                com.keepasskey.app.security.SecureDialogWindowEffect()
-                Text(
-                    text = stringResource(R.string.db_picker_keyfile_backup_warning),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = suggestedFileName,
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = onSaveClick, shape = CapsuleShape) {
-                Text(stringResource(R.string.db_picker_keyfile_backup_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onSkipClick) {
-                Text(stringResource(R.string.db_picker_keyfile_backup_skip))
-            }
-        }
-    )
-}
 
 /** 建库向导的 SAF 启动器对（§280 自 [CreateVaultWizardDialog] 拆出）。 */
 private class CreateVaultWizardLaunchers(
@@ -118,12 +56,12 @@ private class CreateVaultWizardState {
     var selectedKeyFileName by mutableStateOf("")
     // ISSUE-P2-85：预设改为类型化枚举——芯片与落盘共用 `CreateVaultPreset` 单一真相源
     var selectedPreset by mutableStateOf(CreateVaultPreset.DEFAULT)
-    // ISSUE-P2-229：新建库的落地位置二选一；选「自选位置」时必须已挑定文档
+    // ISSUE-P2-229：新建库的落地位置三选一；选「自选位置」时必须已挑定文档
     var storageLocation by mutableStateOf(VaultStorageLocation.INTERNAL)
     var selectedVaultUri by mutableStateOf("")
     var selectedVaultFileName by mutableStateOf("")
 
-    val isLocationValid get() = storageLocation == VaultStorageLocation.INTERNAL || selectedVaultUri.isNotBlank()
+    val isLocationValid get() = storageLocation != VaultStorageLocation.EXTERNAL || selectedVaultUri.isNotBlank()
     val isKeyFileValid get() = !useKeyFile || keyFileChoice == KeyFileSourceChoice.GENERATE ||
         selectedKeyFilePath.isNotBlank()
     // ISSUE-P2-288 AC①：主口令长度下限硬阻断（单一判据 MasterPasswordPolicy，与改密共用）
@@ -156,7 +94,8 @@ internal fun CreateVaultWizardDialog(
         keyFile: Boolean,
         preset: CreateVaultPreset,
         keyFileSourceUri: String?,
-        targetUri: String?
+        targetUri: String?,
+        storageLocation: VaultStorageLocation
     ) -> Unit,
     /** ISSUE-P2-288：用户显式确认弱主口令时的留痕回调（不落明文） */
     onWeakPasswordConfirmed: () -> Unit = {},
@@ -164,7 +103,9 @@ internal fun CreateVaultWizardDialog(
      * ISSUE-P2-354 AC①：建库进行中（busy 时提交按钮禁用 + 内嵌进度、取消与点按外部均不可关闭）。
      * 真相源是 `DatabasePickerUiState.isLoading`（ViewModel 同步守卫的投影），不是对话框本地态。
      */
-    isBusy: Boolean = false
+    isBusy: Boolean = false,
+    /** ISSUE-P3-425：云同步配置快照（「云端」位置的可用性与目标提示；默认 IDLE 供预览） */
+    cloudSnapshot: CloudSyncSnapshot = CloudSyncSnapshot.IDLE
 ) {
     val state = remember { CreateVaultWizardState() }
     val launchers = rememberCreateVaultWizardLaunchers(
@@ -190,10 +131,11 @@ internal fun CreateVaultWizardDialog(
         state = state,
         launchers = launchers,
         isBusy = isBusy,
+        cloudSnapshot = cloudSnapshot,
         onDismiss = onDismiss,
         // H2 整改：直接移交组件持有的 CharArray（ViewModel 复制私有副本并自行擦除）
         // ISSUE-P3-21：SELECT_EXISTING 时上行选中的密钥文件 Uri，其字节真实参与复合密钥
-        // ISSUE-P2-229：仅「自选位置」时上行已挑定的文档 uri；内部存储传 null
+        // ISSUE-P2-229：仅「自选位置」时上行已挑定的文档 uri；内部存储与云端直建传 null
         onConfirm = {
             onConfirm(
                 state.vaultName,
@@ -201,7 +143,8 @@ internal fun CreateVaultWizardDialog(
                 state.useKeyFile,
                 state.selectedPreset,
                 if (state.keyFileChoice == KeyFileSourceChoice.SELECT_EXISTING) state.selectedKeyFilePath else null,
-                state.selectedVaultUri.ifBlank { null }
+                state.selectedVaultUri.ifBlank { null },
+                state.storageLocation
             )
         },
         onWeakPasswordConfirmed = onWeakPasswordConfirmed
@@ -215,6 +158,8 @@ private fun CreateVaultWizardAlertDialog(
     launchers: CreateVaultWizardLaunchers,
     /** ISSUE-P2-354 AC①：建库进行中（见 [CreateVaultWizardDialog.isBusy]） */
     isBusy: Boolean,
+    /** ISSUE-P3-425：云同步配置快照（透传给存储位置区） */
+    cloudSnapshot: CloudSyncSnapshot,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onWeakPasswordConfirmed: () -> Unit
@@ -248,7 +193,7 @@ private fun CreateVaultWizardAlertDialog(
             )
         },
         text = {
-            CreateVaultWizardForm(state = state, launchers = launchers)
+            CreateVaultWizardForm(state = state, launchers = launchers, cloudSnapshot = cloudSnapshot)
         },
         confirmButton = {
             CreateVaultConfirmButton(
@@ -314,7 +259,8 @@ private fun rememberCreateVaultWizardLaunchers(
 @Composable
 private fun CreateVaultWizardForm(
     state: CreateVaultWizardState,
-    launchers: CreateVaultWizardLaunchers
+    launchers: CreateVaultWizardLaunchers,
+    cloudSnapshot: CloudSyncSnapshot
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // 本窗内含**主密码 + 确认主密码**两个 SecurePasswordField：对话框是独立窗口，
@@ -329,10 +275,11 @@ private fun CreateVaultWizardForm(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // ISSUE-P2-229：存储位置二选一（内部存储 / 经系统文件选择器自选）
+        // ISSUE-P2-229：存储位置选择（内部存储 / 经系统文件选择器自选 / ISSUE-P3-425 云端直建）
         VaultStorageLocationSection(
             location = state.storageLocation,
             pickedFileName = state.selectedVaultFileName,
+            cloudSnapshot = cloudSnapshot,
             onSelectInternal = {
                 state.storageLocation = VaultStorageLocation.INTERNAL
                 state.selectedVaultUri = ""
@@ -343,6 +290,11 @@ private fun CreateVaultWizardForm(
                 launchers.createVaultDocument(
                     if (state.vaultName.endsWith(".kdbx", ignoreCase = true)) state.vaultName else "${state.vaultName}.kdbx"
                 )
+            },
+            onSelectCloud = {
+                state.storageLocation = VaultStorageLocation.CLOUD
+                state.selectedVaultUri = ""
+                state.selectedVaultFileName = ""
             }
         )
 
@@ -428,50 +380,4 @@ private fun CreateVaultPasswordFields(state: CreateVaultWizardState) {
         onToggleVisibility = { state.passwordVisible = !state.passwordVisible },
         modifier = Modifier.fillMaxWidth()
     )
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@androidx.compose.ui.tooling.preview.Preview(name = "新建密码库向导 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "新建密码库向导 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun CreateVaultWizardDialogPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        CreateVaultWizardDialog(
-            onDismiss = {},
-            onConfirm = { _, _, _, _, _, _ -> }
-        )
-    }
-}
-
-/**
- * `ISSUE-P2-354 AC①`：`isBusy = true` 那一态（默认态预览只画 `false`）——
- * busy 的差异恰在按钮禁用 / 内嵌进度 / 取消置灰，不补态就永远看不见。
- * 单独开一个预览函数，不在同一张图里叠两个整屏。
- */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@androidx.compose.ui.tooling.preview.Preview(name = "新建密码库向导 - 建库进行中", showBackground = true)
-@Composable
-internal fun CreateVaultWizardDialogBusyPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        CreateVaultWizardDialog(
-            onDismiss = {},
-            onConfirm = { _, _, _, _, _, _ -> },
-            isBusy = true
-        )
-    }
-}
-
-/**
- * 新建密码库的落地位置（ISSUE-P2-229）。
- *
- * - [INTERNAL]：应用私有目录（`filesDir`）——具备原子写盘（`.tmp` + rename + `.bak`）
- *   与 WebDAV / S3 同步能力，为默认项；
- * - [EXTERNAL]：经系统文件选择器（`ACTION_CREATE_DOCUMENT`）由用户自选位置——
- *   便于自行备份与跨应用查看，但写回为非原子的 `"rwt"` 截断式写、且不参与同步
- *   （两条降级在向导内如实告知，并登记于 `docs/architecture/已知工程限界.md`）。
- */
-internal enum class VaultStorageLocation {
-    INTERNAL,
-    EXTERNAL
 }

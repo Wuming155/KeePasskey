@@ -68,12 +68,9 @@
     <string name="unlock_keyfile_selected">已加载密钥文件: %1$s</string>
     <string name="unlock_keyfile_none">未关联密钥文件 (可选)</string>
     <string name="unlock_keyfile_read_failed">无法读取所选密钥文件，请重试</string>
-    <!-- ISSUE-P2-87：导入库工作因子非阻断提示（解锁页信息位）。口径只能是
-         「低于本应用建库默认强度」，禁止表述为「不安全 / 已被攻破」；同时声明未自动修改任何参数 -->
-    <string name="unlock_msg_weak_kdf">该库的密钥派生工作因子低于本应用建库默认强度（未自动修改任何参数）</string>
-    <!-- ISSUE-P3-230：SAF 库未获持久化授权。**不是错误**——本次会话仍可正常打开与保存，
-         仅影响「重启后能否再次打开」，故文案不得表述为失败，也不得承诺任何补救动作 -->
-    <string name="unlock_msg_no_persisted_permission">未获得该位置的长期访问授权：本次使用正常，但重启后可能需要重新选择该文件</string>
+    <!-- ISSUE-P2-87 / ISSUE-P3-230 的两条一次性提示（unlock_msg_weak_kdf / unlock_msg_no_persisted_permission）
+         随其唯一消费方（解锁页直连导入通道，ISSUE-P2-424 退役）一并删除；
+         「未获长期访问授权」的告知现由下方列表卡片状态承载 -->
     <string name="vault_permission_not_persisted">未获长期访问授权，重启后可能需要重新选择该文件</string>
     <string name="vault_permission_restore_action">重新授权</string>
     <string name="keyfile_or_password_mismatch">主密码或密钥文件不正确，请确认密钥文件与创建密码库时使用的一致</string>
@@ -86,14 +83,16 @@
     <string name="unlock_empty_vault_subtitle">尚未选择或创建密码库，请从下方选择开始方式：</string>
     <string name="unlock_empty_create_btn">新建密码库</string>
     <string name="unlock_empty_create_desc">创建全新的 .kdbx 加密文件</string>
-    <string name="unlock_empty_open_title">打开已有密码库</string>
-    <string name="unlock_empty_open_desc">从本机存储或云盘导入 .kdbx</string>
+    <!-- ISSUE-P2-424 AC②：文案与实际行为一致——该入口统一走三来源导入（本地 / WebDAV / S3） -->
+    <string name="unlock_empty_open_title">导入已有库</string>
+    <string name="unlock_empty_open_desc">从本机存储、WebDAV 或 S3 导入已有 .kdbx 库</string>
 
     <!-- 密码库管理器 / 选择器 -->
     <string name="db_picker_title">密码库管理</string>
     <string name="db_picker_subtitle">管理并切换本地存储或云端同步的 KDBX 密码库</string>
     <string name="db_picker_current_active">当前激活</string>
-    <string name="db_picker_open_external">打开已有 KDBX</string>
+    <!-- ISSUE-P3-426：与「新建密码库」分区呈现的导入次动作（不再称「打开已有 KDBX」） -->
+    <string name="db_picker_open_external">导入已有库</string>
     <string name="db_picker_create_new">新建密码库</string>
     <string name="db_picker_create_title">新建密码库向导</string>
     <!-- ISSUE-P2-354 AC①：建库进行中（Argon2 派生期间）页面级进度文案 -->
@@ -381,6 +380,10 @@
 
     <!-- 密码库管理与其他页面补充 -->
     <string name="db_picker_msg_created">新密码库已成功创建</string>
+    <!-- ISSUE-P3-425：云端直建链路的专属提示（库已建成但云登记失败时不谎报全成） -->
+    <string name="db_picker_msg_cloud_register_failed">密码库已创建，但登记为云同步库失败（可稍后在云同步设置中重试）</string>
+    <!-- ISSUE-P3-425 fail-closed：未配置云账号时拒绝云端直建（绝不静默降级为普通本地库） -->
+    <string name="db_picker_cloud_create_unconfigured">云端直建需要已配置的云同步账号，请先在「设置 → 云同步」完成配置</string>
     <string name="db_picker_msg_opened">已成功打开并加载外部 KDBX 文件</string>
     <string name="db_picker_msg_removed">已从切换列表中移除该密码库关联</string>
     <string name="edit_title_required">请输入凭据标题</string>
@@ -1261,6 +1264,12 @@
     <string name="db_create_location_external_hint">尚未选择位置，点此行可在系统文件选择器中指定</string>
     <string name="db_create_location_picked">已选择：%1$s</string>
     <string name="db_create_location_external_warning">该位置写盘非原子（保存途中断电或闪退存在损坏风险，建议定期导出备份），且不参与 WebDAV / S3 同步</string>
+    <!-- ISSUE-P3-425：新建库的第三种落地位置——云端直建（实际在应用私有目录建库，以云 syncType 登记，远端上传交由同步周期） -->
+    <string name="db_create_location_cloud">云端（WebDAV / S3）</string>
+    <string name="db_create_location_cloud_loading">正在读取云同步配置…</string>
+    <string name="db_create_location_cloud_ready_sub">登记为云同步库，远端上传随同步周期进行</string>
+    <string name="db_create_location_cloud_unconfigured_sub">尚未配置云账号：请先在「设置 → 云同步」中配置 WebDAV 或 S3</string>
+    <string name="db_create_location_cloud_target">同步目标：%1$s</string>
     <string name="repo_saf_persist_consent_failed">所选位置不支持持久访问授权，已取消创建。请改用应用私有目录，或换一个存储位置</string>
     <string name="repo_saf_write_failed">写入所选位置失败，已取消创建</string>
     <string name="repo_no_active_database">请先选择或创建密码库</string>

@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +54,13 @@ internal fun OpenExistingVaultDialog(
         usePathStyle: Boolean,
         cursor: String?
     ) -> Unit = { _, _, _, _, _, _, _, _ -> },
-    onDismissBrowse: () -> Unit = {}
+    onDismissBrowse: () -> Unit = {},
+    // ISSUE-P2-424 AC③：已配置云账号 + 上次来源的预填包（null = 无可预填，退回手输）
+    prefill: OpenVaultPrefill? = null,
+    /** 预填包已写入表单快照态（数组所有权移交）后的消费确认；宿主负责弃持 */
+    onPrefillConsumed: () -> Unit = {},
+    /** 来源 Chip 被用户切换：宿主留痕为下次预选来源 */
+    onSourceSelected: (OpenVaultSourceType) -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedSource by remember { mutableStateOf(OpenVaultSourceType.LOCAL) }
@@ -74,6 +81,20 @@ internal fun OpenExistingVaultDialog(
     // ISSUE-P3-400：浏览远端目录可见性（cloud 表单的「浏览远端目录」按钮触发）
     var showBrowseDialog by remember { mutableStateOf(false) }
 
+    // ISSUE-P2-424 AC③：预填包到达即一次性应用——预选上次来源 + 已配置云账号写入表单快照态。
+    // 凭据数组按原引用移交（表单态离场 wipeSensitive 统一擦除），随后回调宿主弃持；
+    // `prefillApplied` 守卫保证只应用一次（消费后宿主置 null，LaunchedEffect 不会因 null 误触发）
+    var prefillApplied by remember { mutableStateOf(false) }
+    LaunchedEffect(prefill) {
+        val pack = prefill
+        if (pack == null || prefillApplied) return@LaunchedEffect
+        prefillApplied = true
+        selectedSource = pack.lastSource
+        pack.webdav?.let { webdav.applyPrefill(it) }
+        pack.s3?.let { s3.applyPrefill(it) }
+        onPrefillConsumed()
+    }
+
     // 离开组合（确认成功关窗 / 用户取消）即擦除本地敏感驻留
     DisposableEffect(Unit) {
         onDispose {
@@ -88,7 +109,10 @@ internal fun OpenExistingVaultDialog(
         text = {
             OpenVaultFormBody(
                 selectedSource = selectedSource,
-                onSelectSource = { selectedSource = it },
+                onSelectSource = {
+                    selectedSource = it
+                    onSourceSelected(it)
+                },
                 local = local,
                 webdav = webdav,
                 s3 = s3,
@@ -174,6 +198,18 @@ internal class WebdavVaultFormState {
         }
     }
 
+    /**
+     * ISSUE-P2-424 AC③：已配置账号预填（对话框 `LaunchedEffect` 一次性调用）。
+     * [pack.passwordChars] 按**原引用**移交本表单态（载荷消费后不再有其他持有方），
+     * 离场 `wipeSensitive` 统一擦除；展示名经 [applyRemotePath] 自动取路径末段。
+     */
+    fun applyPrefill(pack: OpenVaultWebDavPrefill) {
+        url = pack.url
+        username = pack.username
+        passwordChars = pack.passwordChars
+        applyRemotePath(pack.remotePath)
+    }
+
     /** 离开组合 / 关窗时擦除敏感驻留（借用语义收口） */
     fun wipeSensitive() {
         passwordChars.fill('0')
@@ -210,6 +246,17 @@ internal class S3VaultFormState {
         if (!nameEdited) {
             remoteFileName(key)?.let { name = it }
         }
+    }
+
+    /** ISSUE-P2-424 AC③：已配置账号预填（语义同 [WebdavVaultFormState.applyPrefill]） */
+    fun applyPrefill(pack: OpenVaultS3Prefill) {
+        endpoint = pack.endpoint
+        bucket = pack.bucket
+        region = pack.region
+        accessKeyChars = pack.accessKeyChars
+        secretKeyChars = pack.secretKeyChars
+        usePathStyle = pack.usePathStyle
+        applyObjectKey(pack.objectKey)
     }
 
     /** 离开组合 / 关窗时擦除敏感驻留（借用语义收口） */

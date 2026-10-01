@@ -177,15 +177,22 @@ class SecureDialogFlagPolicyTest {
          * 含 `securePolicy = SecureFlagPolicy.SecureOn` 的最少处数，按文件计。
          *
          * 计数依据（2026-09-21 现查 `grep -rn "    AlertDialog(" app/src/main/java`）：
-         * 四个文件共 **7 个** `AlertDialog` 调用（`CreateVaultWizardDialog.kt` 2 =
-         * 密钥文件备份提示 + 含主密码的建库向导；`ChildDatabaseDialogs.kt` 2 = 子库挂载 + 子库凭据补录；
+         * 共 **7 个** `AlertDialog` 调用（`CreateVaultWizardDialog.kt` 1 = 含主密码的建库向导；
+         * `KeyFileOneTimeSaveDialog.kt` 1 = 密钥文件备份提示，§391 自前者逐字拆出；
+         * `ChildDatabaseDialogs.kt` 2 = 子库挂载 + 子库凭据补录；
          * `EntryDetailPreviewDiffComponents.kt` 2 = 修订差异 + 附件预览；`MasterKeyChangeDialog.kt` 1）。
          */
         val SECURE_POLICY_CALL_SITES = listOf(
             SecureDialogCallSite(
                 path = "app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialog.kt",
                 invocation = SECURE_POLICY_REQUIREMENT,
-                expectedCalls = 2
+                expectedCalls = 1
+            ),
+            SecureDialogCallSite(
+                // §391 行数分档闸门：密钥文件备份提示自向导本体逐字拆出（对话框总数不变，仍为 7）
+                path = "app/src/main/java/com/keepasskey/app/ui/screens/database/KeyFileOneTimeSaveDialog.kt",
+                invocation = SECURE_POLICY_REQUIREMENT,
+                expectedCalls = 1
             ),
             SecureDialogCallSite(
                 path = "app/src/main/java/com/keepasskey/app/ui/screens/settings/MasterKeyChangeDialog.kt",

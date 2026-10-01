@@ -68,13 +68,10 @@
     <string name="unlock_keyfile_selected">Key file loaded: %1$s</string>
     <string name="unlock_keyfile_none">No key file selected (Optional)</string>
     <string name="unlock_keyfile_read_failed">Failed to read the selected key file, please retry</string>
-    <!-- ISSUE-P2-87: non-blocking work-factor notice on the unlock screen — "below this app's
-         default creation strength" only; never phrase it as "unsafe / compromised", and state
-         that no parameter was modified automatically -->
-    <string name="unlock_msg_weak_kdf">This vault\'s key derivation work factor is below this app\'s default creation strength (no parameter was changed automatically)</string>
-    <!-- ISSUE-P3-230: no persisted permission for this SAF location. NOT an error — the current
-         session still opens and saves normally; only the ability to re-open after a restart is affected -->
-    <string name="unlock_msg_no_persisted_permission">Long-term access to this location was not granted: it works for now, but you may need to re-select this file after restarting</string>
+    <!-- The two one-off notices from ISSUE-P2-87 / ISSUE-P3-230 (unlock_msg_weak_kdf /
+         unlock_msg_no_persisted_permission) were removed together with their only consumer
+         (the unlock screen's own import channel, retired by ISSUE-P2-424); the missing
+         persisted-permission state is now carried solely by the vault card below -->
     <string name="vault_permission_not_persisted">No long-term access granted — you may need to re-select this file after restarting</string>
     <string name="vault_permission_restore_action">Re-authorize</string>
     <string name="keyfile_or_password_mismatch">Incorrect master password or key file — make sure the key file is the one used to create this vault</string>
@@ -88,7 +85,8 @@
     <string name="db_picker_title">Vault Manager</string>
     <string name="db_picker_subtitle">Manage and switch local &amp; cloud synchronized KDBX vaults</string>
     <string name="db_picker_current_active">Active</string>
-    <string name="db_picker_open_external">Open Existing KDBX</string>
+    <!-- ISSUE-P3-426: secondary import action, presented separately from "Create new vault" -->
+    <string name="db_picker_open_external">Import existing vault</string>
     <string name="db_picker_create_new">New Vault</string>
     <string name="db_picker_create_title">New Vault Wizard</string>
     <!-- ISSUE-P2-354 AC①: page-level progress copy while a vault is being created (Argon2 derive) -->
@@ -375,6 +373,9 @@
 
     <!-- Database picker & other screens -->
     <string name="db_picker_msg_created">New vault created successfully</string>
+    <!-- ISSUE-P3-425 -->
+    <string name="db_picker_msg_cloud_register_failed">Vault created, but registering it as a cloud-synced vault failed (retry later in cloud sync settings)</string>
+    <string name="db_picker_cloud_create_unconfigured">Creating directly to the cloud requires a configured cloud sync account. Set one up first in Settings → Cloud sync</string>
     <string name="db_picker_msg_opened">External KDBX file opened and loaded</string>
     <string name="db_picker_msg_removed">Vault removed from the switch list</string>
     <string name="edit_title_required">Please enter an entry title</string>
@@ -1345,8 +1346,9 @@
     <string name="unlock_empty_vault_subtitle">No vault selected or created yet. Choose how to start below:</string>
     <string name="unlock_empty_create_btn">Create vault</string>
     <string name="unlock_empty_create_desc">Create a new .kdbx encrypted file</string>
-    <string name="unlock_empty_open_title">Open existing vault</string>
-    <string name="unlock_empty_open_desc">Import a .kdbx file from storage or cloud</string>
+    <!-- ISSUE-P2-424 AC②: wording matches actual behavior - the entry opens the unified three-source import flow -->
+    <string name="unlock_empty_open_title">Import existing vault</string>
+    <string name="unlock_empty_open_desc">Import an existing .kdbx from local storage, WebDAV or S3</string>
     <string name="autofill_fill_confirm_title">Confirm before filling</string>
     <string name="autofill_fill_confirm_sub">Biometric or manual confirmation is required before filling a password by default (unlock first while the vault is locked)</string>
     <string name="settings_always_on_badge">Always on</string>
@@ -1392,6 +1394,12 @@
     <string name="db_create_location_external_hint">No location chosen yet - tap this row to pick one in the system file picker</string>
     <string name="db_create_location_picked">Selected: %1$s</string>
     <string name="db_create_location_external_warning">Saves here are not atomic (a crash or power loss mid-save can corrupt the vault, so export backups regularly), and WebDAV / S3 sync does not apply</string>
+    <!-- ISSUE-P3-425: third storage location - create to cloud -->
+    <string name="db_create_location_cloud">Cloud (WebDAV / S3)</string>
+    <string name="db_create_location_cloud_loading">Reading cloud sync configuration…</string>
+    <string name="db_create_location_cloud_ready_sub">Registered as a cloud-synced vault; upload happens with the sync cycle</string>
+    <string name="db_create_location_cloud_unconfigured_sub">No cloud account configured yet: set up WebDAV or S3 in Settings → Cloud sync first</string>
+    <string name="db_create_location_cloud_target">Sync target: %1$s</string>
     <string name="repo_saf_persist_consent_failed">The chosen location does not support persistent access, so creation was cancelled. Use the app private folder or pick another location</string>
     <string name="repo_saf_write_failed">Writing to the chosen location failed, so creation was cancelled</string>
     <string name="repo_no_active_database">Select or create a vault first</string>
