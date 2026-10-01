@@ -418,10 +418,7 @@ fun CloudSyncScreen(
                 )
             }
 
-            // 7. 零知识与端到端加密机制说明
-            item {
-                ZeroKnowledgeCard(sealHardwareBacked = uiState.syncSealHardwareBacked)
-            }
+            // ISSUE-P3-416：零知识说明卡已迁「关于」页（设置项单一位置；ZeroKnowledgeCard 宿主随迁）
 
             item {
                 Spacer(modifier = Modifier.height(24.dp))

@@ -58,9 +58,10 @@ class SecurityClaimWiringTest {
 
     @Test
     fun `同步凭据封印声明按实测硬件落位成对渲染`() {
+        // ISSUE-P3-416：ZeroKnowledgeCard 宿主自 CloudSyncScreen 迁「关于」页，断言随消费点同步指向新宿主
         assertTrue(
             "ZeroKnowledgeCard 必须接收实测字段（禁默认 true 谎报）",
-            cloudSyncScreenSource.contains("ZeroKnowledgeCard(sealHardwareBacked = uiState.syncSealHardwareBacked")
+            aboutSettingsScreenSource.contains("ZeroKnowledgeCard(sealHardwareBacked = uiState.syncSealHardwareBacked")
         )
         assertTrue(
             "软件级降级文案键必须被引用（AC② 与解锁面同形）",
@@ -114,8 +115,8 @@ class SecurityClaimWiringTest {
     private val securitySettingsScreenSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SecuritySettingsScreen.kt")
 
-    private val cloudSyncScreenSource: String
-        get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncScreen.kt")
+    private val aboutSettingsScreenSource: String
+        get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AboutSettingsScreen.kt")
 
     private val cloudSyncSectionsSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncSections.kt")

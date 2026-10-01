@@ -37,7 +37,7 @@ internal class SyncCredentialSealer(
      *   1. 凭据解封后以 CharArray 承载，借用语义要求调用方用毕立即 fill('0') 擦除；
      *   2. S3 凭据在同步周期结束后经 `S3SyncProvider.clearCredentials` 显式清零；
      *   3. SigV4 派生链（signingKey/kSecret/kDate/kRegion/kService）全程 finally 擦除；
-     *   4. UI 层（CloudSyncScreen ZeroKnowledgeCard）向用户明示此安全取舍；
+     *   4. UI 层（AboutSettingsScreen 的 ZeroKnowledgeCard，ISSUE-P3-416 迁入）向用户明示此安全取舍；
      * - **替代方案评估**：改为 requireUserAuth=true + 短时授权窗口（如 30s）会导致
      *   后台同步频繁弹出 BiometricPrompt，用户体验不可接受；当前方案在「可用性」与
      *   「安全性」间取得平衡，凭据暴露面已从「String 不可变驻留」收窄至「CharArray 可控生命周期」。

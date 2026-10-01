@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -116,6 +118,68 @@ internal fun AboutSpecSection() {
             icon = Icons.Default.Code,
             title = stringResource(R.string.about_spec_arch_title),
             description = stringResource(R.string.about_spec_arch_desc)
+        )
+    }
+}
+
+/**
+ * 「安全架构说明」卡（ISSUE-P3-416 自安全设置子页迁入：机制背景归「关于」自述面，设置项单一位置）。
+ * 字符串资源（`sec_arch_title` / `sec_arch_desc`）原样复用，键名与文案零改动。
+ */
+@Composable
+internal fun AboutSecurityArchCard() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Security,
+                // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.sec_arch_title),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Text(
+            text = stringResource(R.string.sec_arch_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 18.sp
+        )
+    }
+}
+
+/**
+ * 「TOTP 引擎说明」卡（ISSUE-P3-416 自 TOTP 设置子页迁入）。
+ * 原卡无标题仅 Info 图标，入「关于」自述面后补标题键 `totp_info_title`（中英成对）。
+ */
+@Composable
+internal fun AboutTotpEngineCard() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                // ISSUE-P3-358 AC③：装饰图标（紧邻标题文本）不再出英文硬编码描述
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.totp_info_title),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Text(
+            text = stringResource(R.string.totp_info_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            lineHeight = 18.sp
         )
     }
 }

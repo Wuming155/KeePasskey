@@ -74,6 +74,29 @@ fun AboutSettingsScreen(
                 ) { AboutSpecSection() }
             }
 
+            // ISSUE-P3-416：三张机制说明卡自各设置子页迁入（安全架构 / 零知识同步 / TOTP 引擎），
+            // 设置项单一位置——原挂载点已摘除，仅此一处呈现
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ) { AboutSecurityArchCard() }
+            }
+
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ) { ZeroKnowledgeCard(sealHardwareBacked = uiState.syncSealHardwareBacked) }
+            }
+
+            item {
+                BentoCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
+                ) { AboutTotpEngineCard() }
+            }
+
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
