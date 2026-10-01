@@ -686,6 +686,12 @@
     <string name="set_new_master_password">新主密码</string>
     <string name="set_confirm_master_password">确认新主密码</string>
     <string name="set_save_changes">保存更改</string>
+    <!-- ISSUE-P3-428：改密对话框密钥文件第二因子三态 -->
+    <string name="set_master_keyfile_section">密钥文件（第二因子）</string>
+    <string name="set_master_keyfile_keep">保持现状</string>
+    <string name="set_master_keyfile_use">绑定或更换密钥文件…</string>
+    <string name="set_master_keyfile_selected">已选择：%1$s</string>
+    <string name="set_master_keyfile_remove">解绑密钥文件</string>
 
     <!-- ===== 安全设置子页 (SecuritySettingsScreen) ===== -->
     <string name="sec_section_biometric">生物识别与快速解锁</string>

@@ -675,6 +675,12 @@
     <string name="set_new_master_password">New master password</string>
     <string name="set_confirm_master_password">Confirm new master password</string>
     <string name="set_save_changes">Save changes</string>
+    <!-- ISSUE-P3-428: key file second-factor tri-state in the master key change dialog -->
+    <string name="set_master_keyfile_section">Key file (second factor)</string>
+    <string name="set_master_keyfile_keep">Keep current</string>
+    <string name="set_master_keyfile_use">Bind or replace key file…</string>
+    <string name="set_master_keyfile_selected">Selected: %1$s</string>
+    <string name="set_master_keyfile_remove">Unbind key file</string>
 
     <!-- ===== Security settings subscreen ===== -->
     <string name="sec_section_biometric">Biometrics &amp; quick unlock</string>

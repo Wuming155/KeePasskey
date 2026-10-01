@@ -327,9 +327,20 @@ internal class VaultLifecycleCoordinator(
     /**
      * 更换主凭据：会话层重加密写盘（`DatabaseSession.changeCredentials`），
      * **仅成功时**刷新库列表（ISSUE-P3-305 自 `RealVaultRepository` 逐行搬出）。
+     *
+     * ISSUE-P3-428：[keyFileIntent] 三态映射 database 层两个重载——`Keep` 走单参
+     * （沿用会话当前绑定的密钥文件快照），`Remove` 显式双参 `null`（解绑），
+     * `Use` 传用户选定字节（绑定或更换；借用语义，本层只读不擦除，清零归调用方）。
      */
-    suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> {
-        val result = databaseSession.changeCredentials(newPassword)
+    suspend fun changeMasterPassword(
+        newPassword: CharArray,
+        keyFileIntent: ChangeKeyFileIntent = ChangeKeyFileIntent.Keep
+    ): KdbxResult<Unit> {
+        val result = when (keyFileIntent) {
+            ChangeKeyFileIntent.Keep -> databaseSession.changeCredentials(newPassword)
+            ChangeKeyFileIntent.Remove -> databaseSession.changeCredentials(newPassword, null)
+            is ChangeKeyFileIntent.Use -> databaseSession.changeCredentials(newPassword, keyFileIntent.bytes)
+        }
         if (result is KdbxResult.Success) {
             refresh()
         }

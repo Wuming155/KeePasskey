@@ -68,3 +68,29 @@ sealed interface CreateKeyFileFactor {
      */
     class Existing(val bytes: ByteArray) : CreateKeyFileFactor
 }
+
+/**
+ * 更换主凭据时对密钥文件第二因子的意图（ISSUE-P3-428）。
+ *
+ * 与建库侧 [CreateKeyFileFactor] 语义不同：这里作用于**已存在**的库，
+ * 三态分别映射 database 层 `DatabaseSession.changeCredentials` 的两个重载——
+ * `Keep` 走单参路径（沿用会话当前绑定的密钥文件快照），`Remove` / `Use`
+ * 走双参路径（`null` = 不使用密钥文件 / 传字节 = 绑定或更换）。
+ */
+sealed interface ChangeKeyFileIntent {
+
+    /** 维持会话当前绑定的密钥文件（未绑定则保持仅主密码），不改写第二因子 */
+    data object Keep : ChangeKeyFileIntent
+
+    /** 解绑第二因子：改后库仅以主密码保护 */
+    data object Remove : ChangeKeyFileIntent
+
+    /**
+     * 绑定或更换为用户选定的密钥文件。
+     *
+     * [bytes] 为**借用语义**：与 [CreateKeyFileFactor.Existing] 同一口径——
+     * 实现方只读取（派生复合密钥并克隆写入会话缓存），不持有引用、不擦除；
+     * 调用方用毕必须在 `finally` 中显式 `fill(0)`。刻意不做 `data class`（理由同上）。
+     */
+    class Use(val bytes: ByteArray) : ChangeKeyFileIntent
+}

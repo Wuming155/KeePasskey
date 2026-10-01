@@ -48,8 +48,10 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
+import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -90,7 +92,10 @@ fun SettingsScreen(
         onNavigateToTotp = onNavigateToTotp,
         onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
-        onChangeMasterPassword = { viewModel.changeMasterPassword(it, hostActivity) },
+        onChangeMasterPassword = { chars, intent ->
+            viewModel.masterKeyChangeController.submit(chars, intent, hostActivity)
+        },
+        onReadKeyFile = viewModel.keyFileReader,
         onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
         onMasterKeyChangeFeedbackShown = viewModel::clearMasterKeyChangeFeedback,
         onBackClick = onBackClick,
@@ -115,8 +120,13 @@ fun SettingsContent(
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
     onNavigateToAbout: () -> Unit,
-    /** ISSUE-P2-354 AC③：提交新主口令——数组所有权移交 ViewModel（viewModelScope 任务负责清零） */
-    onChangeMasterPassword: (CharArray) -> Unit = { chars -> chars.fill('0') },
+    /**
+     * ISSUE-P2-354 AC③：提交新主口令与密钥文件意图——数组所有权移交 ViewModel
+     * （viewModelScope 任务负责清零）；ISSUE-P3-428：`Use` 字节清零责任同移交。
+     */
+    onChangeMasterPassword: (CharArray, ChangeKeyFileIntent) -> Unit = { chars, _ -> chars.fill('0') },
+    /** ISSUE-P3-428：改密对话框「绑定/更换」的密钥文件读取通道（全仓唯一 SAF 读取） */
+    onReadKeyFile: suspend (String) -> KeyFileReadResult = { KeyFileReadResult.Unreadable },
     /** ISSUE-P2-288：弱主口令显式确认后的留痕回调（不落明文） */
     onWeakPasswordConfirmed: () -> Unit = {},
     /** ISSUE-P2-354 AC③：换密反馈经 Snackbar 展示后的一次性清除 */
@@ -293,6 +303,7 @@ fun SettingsContent(
             kdfAlgorithm = uiState.kdfAlgorithm,
             isBusy = uiState.isChangingMasterKey,
             onChangeMasterPassword = onChangeMasterPassword,
+            onReadKeyFile = onReadKeyFile,
             onDismiss = { showMasterKeyDialog = false },
             onWeakPasswordConfirmed = onWeakPasswordConfirmed
         )

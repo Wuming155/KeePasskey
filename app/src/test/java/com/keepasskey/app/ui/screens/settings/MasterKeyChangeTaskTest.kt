@@ -5,6 +5,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.breach.BreachRangeClient
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
@@ -71,7 +72,10 @@ class MasterKeyChangeTaskTest {
         val gate = CompletableDeferred<Unit>()
         val fake = FakeVaultRepository()
         val repository = object : VaultRepository by fake {
-            override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> {
+            override suspend fun changeMasterPassword(
+                newPassword: CharArray,
+                keyFileIntent: ChangeKeyFileIntent
+            ): KdbxResult<Unit> {
                 // 门闩挂起：把「任务在途」窗口拉长到断言可稳定观察
                 gate.await()
                 return fake.changeMasterPassword(newPassword)
@@ -84,7 +88,7 @@ class MasterKeyChangeTaskTest {
         testScheduler.runCurrent()
 
         val first = "Master-Key-Fake-1".toCharArray()
-        viewModel.changeMasterPassword(first)
+        viewModel.masterKeyChangeController.submit(first)
         // 调度到 viewModelScope：任务启动并在门闩上挂起，busy 投影进 uiState
         testScheduler.runCurrent()
         assertTrue(
@@ -94,7 +98,7 @@ class MasterKeyChangeTaskTest {
 
         // 忙态中的第二次提交：同步拒绝 + 入参当场清零（所有权自调用起移交 VM）
         val second = "Master-Key-Fake-2".toCharArray()
-        viewModel.changeMasterPassword(second)
+        viewModel.masterKeyChangeController.submit(second)
         assertTrue("忙路径必须同步清零被拒入参", second.all { it == '0' })
         assertFalse(
             "在途入参不得在调用点被预清零（清零属任务的 finally）",
@@ -130,7 +134,7 @@ class MasterKeyChangeTaskTest {
         }
 
         val password = "Reseal-New-Pass#1".toCharArray()
-        controller.submit(password, HOST_ACTIVITY)
+        controller.submit(password, ChangeKeyFileIntent.Keep, HOST_ACTIVITY)
         advanceUntilIdle()
 
         assertEquals("成功路径必须恰好触发一次重封印", 1, resealCalls.size)
@@ -144,7 +148,10 @@ class MasterKeyChangeTaskTest {
     fun `换密失败不触发重封印`() = runTest {
         val fake = FakeVaultRepository()
         val repository = object : VaultRepository by fake {
-            override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> =
+            override suspend fun changeMasterPassword(
+                newPassword: CharArray,
+                keyFileIntent: ChangeKeyFileIntent
+            ): KdbxResult<Unit> =
                 KdbxResult.Failure(IllegalStateException("boom"), "改密失败")
         }
         var resealCalls = 0
@@ -153,11 +160,42 @@ class MasterKeyChangeTaskTest {
         }
 
         val password = "Should-Not-Reseal".toCharArray()
-        controller.submit(password, HOST_ACTIVITY)
+        controller.submit(password, ChangeKeyFileIntent.Keep, HOST_ACTIVITY)
         advanceUntilIdle()
 
         assertEquals("失败路径不得触发重封印（封印载荷只承载当前有效密码）", 0, resealCalls)
         assertTrue(password.all { it == '0' })
+    }
+
+    // ── ISSUE-P3-428：密钥文件第二因子三态透传与借用字节清零 ────────────
+
+    @Test
+    fun `换密三态透传：Use字节finally清零、Remove与缺省Keep原样上行`() = runTest {
+        val received = mutableListOf<ChangeKeyFileIntent>()
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun changeMasterPassword(
+                newPassword: CharArray,
+                keyFileIntent: ChangeKeyFileIntent
+            ): KdbxResult<Unit> {
+                received.add(keyFileIntent)
+                return KdbxResult.Success(Unit)
+            }
+        }
+        val controller = SettingsMasterKeyChangeController(repository, this)
+
+        val bytes = ByteArray(8) { 0x11 }
+        controller.submit("Tri-State#1".toCharArray(), ChangeKeyFileIntent.Use(bytes))
+        advanceUntilIdle()
+        assertTrue("Use 意图必须原样上行", received.single() is ChangeKeyFileIntent.Use)
+        assertTrue("任务收尾必须清零借用密钥文件字节", bytes.all { it == 0.toByte() })
+
+        controller.submit("Tri-State#2".toCharArray(), ChangeKeyFileIntent.Remove)
+        advanceUntilIdle()
+        assertEquals("Remove 意图必须原样上行", ChangeKeyFileIntent.Remove, received.last())
+
+        controller.submit("Tri-State#3".toCharArray())
+        advanceUntilIdle()
+        assertEquals("缺省必须为 Keep（沿用既有单参语义）", ChangeKeyFileIntent.Keep, received.last())
     }
 
     private suspend fun buildViewModel(repository: VaultRepository): SettingsViewModel {

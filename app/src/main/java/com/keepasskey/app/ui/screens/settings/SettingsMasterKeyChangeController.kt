@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings
 
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
@@ -54,16 +55,27 @@ internal class SettingsMasterKeyChangeController(
     /** busy + 结果反馈（投影层订阅它并入 [SettingsUiState]）。 */
     val state: StateFlow<MasterKeyChangeTaskState> = mutableState.asStateFlow()
 
-    /** 提交新主口令（[newPasswordChars] 所有权移交本方法，见类 KDoc 的擦除契约）。 */
-    fun submit(newPasswordChars: CharArray, activity: FragmentActivity? = null) {
+    /**
+     * 提交新主口令（[newPasswordChars] 所有权移交本方法，见类 KDoc 的擦除契约）。
+     *
+     * ISSUE-P3-428：[keyFileIntent] 透传对密钥文件第二因子的意图（默认 Keep 沿用
+     * 既有语义）；`Use` 携带的字节同为借用语义——仓库侧只读不擦除，**清零责任在本
+     * 方法的 `finally`**（与密码数组同一收尾窗口），成败与异常路径均不遗留。
+     */
+    fun submit(
+        newPasswordChars: CharArray,
+        keyFileIntent: ChangeKeyFileIntent = ChangeKeyFileIntent.Keep,
+        activity: FragmentActivity? = null
+    ) {
         if (mutableState.value.isChanging) {
             newPasswordChars.fill('0')
+            keyFileIntent.eraseBorrowedBytes()
             return
         }
         mutableState.update { it.copy(isChanging = true) }
         scope.launch {
             try {
-                val result = repository.changeMasterPassword(newPasswordChars)
+                val result = repository.changeMasterPassword(newPasswordChars, keyFileIntent)
                 mutableState.update {
                     it.copy(
                         feedback = when (result) {
@@ -77,6 +89,7 @@ internal class SettingsMasterKeyChangeController(
                 }
             } finally {
                 newPasswordChars.fill('0')
+                keyFileIntent.eraseBorrowedBytes()
                 mutableState.update { it.copy(isChanging = false) }
             }
         }
@@ -86,4 +99,9 @@ internal class SettingsMasterKeyChangeController(
     fun clearFeedback() {
         mutableState.update { it.copy(feedback = null) }
     }
+}
+
+/** ISSUE-P3-428：擦除 `Use` 意图携带的借用密钥文件字节（其余意图为 no-op）。 */
+private fun ChangeKeyFileIntent.eraseBorrowedBytes() {
+    if (this is ChangeKeyFileIntent.Use) bytes.fill(0)
 }

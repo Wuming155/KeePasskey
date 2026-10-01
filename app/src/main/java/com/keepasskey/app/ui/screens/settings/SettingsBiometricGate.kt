@@ -89,4 +89,11 @@ internal class SettingsFeatureControllers(
         scope = scope,
         stateSubscribeTimeoutMillis = stateSubscribeTimeoutMillis
     )
+
+    /**
+     * ISSUE-P3-428：密钥文件读取通道（改密对话框「绑定/更换」用）——全仓唯一 SAF 读取
+     * （ISSUE-P3-04 口径）；通道缺失（单测注入 null）时按 `Unreadable` fail-closed，绝不静默当成功。
+     */
+    val keyFileReader: suspend (String) -> com.keepasskey.app.ui.screens.unlock.KeyFileReadResult =
+        { uri -> keyFileAccess?.read(uri) ?: com.keepasskey.app.ui.screens.unlock.KeyFileReadResult.Unreadable }
 }

@@ -152,8 +152,9 @@ class SettingsViewModel @Inject constructor(
     private val masterKeyChange =
         SettingsMasterKeyChangeController(vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange)
 
-    /** P0-3 / P2-354：提交换密（所有权移交、忙守卫清零入参）；P2-398：成功后经宿主 Activity 重封印 */
-    fun changeMasterPassword(newPasswordChars: CharArray, activity: FragmentActivity? = null) = masterKeyChange.submit(newPasswordChars, activity)
+    /** P2-354/P2-398/P3-428 改密链路收口：提交（含密钥文件三态）直用控制器；读取通道见 features.keyFileReader */
+    internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange
+    internal val keyFileReader get() = features.keyFileReader
 
     /** ISSUE-P2-354 AC③：换密回执经 Snackbar 展示后清除（一次性消息语义）。 */
     fun clearMasterKeyChangeFeedback() = masterKeyChange.clearFeedback()

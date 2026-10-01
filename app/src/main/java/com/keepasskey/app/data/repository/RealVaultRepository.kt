@@ -150,8 +150,10 @@ class RealVaultRepository @Inject constructor(
     override fun ioProgress(): Flow<Float?> = databaseSession.ioProgress
 
     /** ISSUE-P3-305：凭据轮换下沉 [VaultLifecycleCoordinator]（仅成功时刷新库列表）。 */
-    override suspend fun changeMasterPassword(newPassword: CharArray): KdbxResult<Unit> =
-        lifecycle.changeMasterPassword(newPassword)
+    override suspend fun changeMasterPassword(
+        newPassword: CharArray,
+        keyFileIntent: ChangeKeyFileIntent
+    ): KdbxResult<Unit> = lifecycle.changeMasterPassword(newPassword, keyFileIntent)
 
     /** ISSUE-P3-305：锁定与刷新下沉 [VaultLifecycleCoordinator]。 */
     override suspend fun lockDatabase() = lifecycle.lockDatabase()

@@ -102,7 +102,10 @@ class FakeVaultRepository(
         }
     }
 
-    override suspend fun changeMasterPassword(newPassword: CharArray): com.keepasskey.core.result.KdbxResult<Unit> {
+    override suspend fun changeMasterPassword(
+        newPassword: CharArray,
+        keyFileIntent: ChangeKeyFileIntent
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 

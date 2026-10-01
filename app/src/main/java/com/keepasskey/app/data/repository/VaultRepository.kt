@@ -60,8 +60,15 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
 
     /**
      * 更改当前数据库的主密钥。
+     *
+     * ISSUE-P3-428：[keyFileIntent] 表达对密钥文件第二因子的意图（默认
+     * [ChangeKeyFileIntent.Keep] 沿用既有单参语义——既有调用点零改动）；
+     * `Remove` / `Use` 走 database 层双参 `changeCredentials` 完成解绑 / 绑定或更换。
      */
-    suspend fun changeMasterPassword(newPassword: CharArray): com.keepasskey.core.result.KdbxResult<Unit>
+    suspend fun changeMasterPassword(
+        newPassword: CharArray,
+        keyFileIntent: ChangeKeyFileIntent = ChangeKeyFileIntent.Keep
+    ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
      * 锁定当前密码库，清空内存凭据与活动树
