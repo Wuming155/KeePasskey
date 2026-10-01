@@ -29,6 +29,7 @@ $MinPasswordLength = 16  # 与 app/build.gradle.kts 的 P2-55 构建期断言同
 
 $source = @'
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 
@@ -108,6 +109,29 @@ public static class KeePasskeyCredManWrite {
 
     public static bool BlobEquals(byte[] a, byte[] b) {
         return a != null && b != null && a.Length == b.Length && a.SequenceEqual(b);
+    }
+
+    // 带 stdin 喂入地运行外部命令（敏感输入只经 stdin，不经命令行参数）。
+    // 返回 "exit=<code>\n<stdout><stderr>"。PS 5.1 原生管道编码不可靠，
+    // keytool 的口令提示一律走本入口（ISSUE-P3-420）。
+    public static string RunProcessCapture(string exe, string args, string stdin) {
+        var psi = new ProcessStartInfo {
+            FileName = exe,
+            Arguments = args,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        using (Process p = Process.Start(psi)) {
+            var outTask = p.StandardOutput.ReadToEndAsync();
+            var errTask = p.StandardError.ReadToEndAsync();
+            p.StandardInput.Write(stdin);
+            p.StandardInput.Close();
+            p.WaitForExit();
+            return "exit=" + p.ExitCode + "\n" + outTask.Result + errTask.Result;
+        }
     }
 }
 '@
