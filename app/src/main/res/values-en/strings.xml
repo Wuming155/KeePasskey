@@ -242,7 +242,7 @@
     <string name="settings_database_sub">KDBX 4 · Argon2 / AES-KDF · Encryption parameters &amp; Recycle Bin</string>
     <string name="settings_sync">Cloud Synchronization</string>
     <string name="settings_sync_sub">WebDAV &amp; S3 compatible multi-protocol sync</string>
-    <string name="settings_change_master_key">Change Master Key</string>
+    <string name="settings_change_master_key">Change Master Password</string>
     <string name="settings_change_master_key_sub">Reset master password and key derivation settings</string>
     <string name="settings_cat_security">Security &amp; Audit</string>
     <string name="settings_security">Device Unlock &amp; Security</string>

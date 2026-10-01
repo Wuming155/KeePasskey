@@ -251,7 +251,7 @@
     <string name="settings_database_sub">KDBX 4 · Argon2 / AES-KDF · 加密参数与回收站</string>
     <string name="settings_sync">云端同步</string>
     <string name="settings_sync_sub">WebDAV、兼容 S3 存储多协议自动同步</string>
-    <string name="settings_change_master_key">更改主密钥</string>
+    <string name="settings_change_master_key">更改主密码</string>
     <string name="settings_change_master_key_sub">重设密码库主密码与安全派生凭据</string>
     <string name="settings_cat_security">安全与审计</string>
     <string name="settings_security">设备解锁与安全策略</string>

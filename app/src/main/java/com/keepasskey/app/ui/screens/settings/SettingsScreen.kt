@@ -195,14 +195,6 @@ fun SettingsContent(
                     subtitle = stringResource(R.string.settings_sync_sub),
                     onClick = onNavigateToSync
                 )
-                SettingsItemDivider()
-                ModernSettingsRow(
-                    icon = Icons.Default.VpnKey,
-                    iconTint = securityColors.warning,
-                    title = stringResource(R.string.settings_change_master_key),
-                    subtitle = stringResource(R.string.settings_change_master_key_sub),
-                    onClick = { showMasterKeyDialog = true }
-                )
             }
 
             // 分类 2: 设备安全与两步验证 (Security & Authentication)
@@ -230,6 +222,15 @@ fun SettingsContent(
                     title = stringResource(R.string.settings_health),
                     subtitle = stringResource(R.string.settings_health_sub),
                     onClick = onNavigateToHealth
+                )
+                SettingsItemDivider()
+                // ISSUE-P3-413：凭据操作归安全域——六路调研无一家把改密与存储/同步并列（keepass2android 归 Database security、Bitwarden 归 Account security）
+                ModernSettingsRow(
+                    icon = Icons.Default.VpnKey,
+                    iconTint = securityColors.warning,
+                    title = stringResource(R.string.settings_change_master_key),
+                    subtitle = stringResource(R.string.settings_change_master_key_sub),
+                    onClick = { showMasterKeyDialog = true }
                 )
             }
 
