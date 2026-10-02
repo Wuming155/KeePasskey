@@ -60,7 +60,7 @@ internal class HotpAdvanceCoordinator(
         }
         return when (writeResult) {
             is KdbxResult.Success -> KdbxResult.Success(snapshot)
-            is KdbxResult.Failure -> KdbxResult.Failure(writeResult.error, writeResult.userMessage)
+            is KdbxResult.Failure -> KdbxResult.Failure(writeResult.error, writeResult.userText)
         }
     }
 }

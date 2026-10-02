@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.keepasskey.app.ui.model.textArg
+import com.keepasskey.app.ui.model.StringsProvider
 
 /**
  * 更换主密钥任务的局部状态（ISSUE-P2-354 AC③）。
@@ -70,7 +72,9 @@ internal class SettingsMasterKeyChangeController(
      */
     private val activeDbId: suspend () -> String? = {
         repository.getDatabases().first().firstOrNull { it.isActive }?.id
-    }
+    },
+    // ISSUE-P3-453：错误码 → 本地化文案通道（置于末位以免打乱既有位置传参；生产由宿主显式注入）
+    private val strings: StringsProvider = StringsProvider { _, _ -> "" }
 ) {
 
     private val mutableState = MutableStateFlow(MasterKeyChangeTaskState())
@@ -119,7 +123,7 @@ internal class SettingsMasterKeyChangeController(
                     it.copy(
                         feedback = when (result) {
                             is KdbxResult.Success<*> -> UiMessage(R.string.set_master_key_updated)
-                            is KdbxResult.Failure -> UiMessage(R.string.op_failed, listOf(result.message))
+                            is KdbxResult.Failure -> UiMessage(R.string.op_failed, listOf(result.textArg(strings)))
                         }
                     )
                 }

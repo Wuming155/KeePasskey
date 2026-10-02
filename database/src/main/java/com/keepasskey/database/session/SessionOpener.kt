@@ -3,6 +3,7 @@ package com.keepasskey.database.session
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.database.file.KdbxDatabase
@@ -115,7 +116,7 @@ internal class SessionOpener(
 
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
-                KdbxResult.Failure(t, "创建密码库失败: ${t.message}")
+                KdbxResult.Failure(t, code = KdbxError.CREATE_FAILED)
             }
         }
     }
@@ -190,7 +191,7 @@ internal class SessionOpener(
             } catch (t: Throwable) {
                 // ISSUE-P3-368：失败清进度（UI 随 isLoading 回落隐藏，不留半程残值）
                 progress(null)
-                KdbxResult.Failure(t, "解锁密码库失败: ${t.message}")
+                KdbxResult.Failure(t, code = KdbxError.UNLOCK_FAILED)
             }
         }
     }

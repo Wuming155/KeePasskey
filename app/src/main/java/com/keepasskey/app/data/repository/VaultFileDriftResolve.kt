@@ -57,7 +57,7 @@ internal class VaultFileDriftResolve(
         if (localFile == null || !localFile.exists()) {
             return KdbxResult.Failure(
                 IllegalStateException("磁盘库文件不可读"),
-                strings.get(R.string.ext_mod_reload_failed, "文件不可读")
+                strings.get(R.string.ext_mod_reload_failed, strings.get(R.string.err_drift_file_unreadable))
             )
         }
         var pwdCopy: CharArray? = null
@@ -87,7 +87,7 @@ internal class VaultFileDriftResolve(
         if (localFile == null || !localFile.exists()) {
             return KdbxResult.Failure(
                 IllegalStateException("磁盘库文件不可读"),
-                strings.get(R.string.ext_mod_merge_failed, "文件不可读")
+                strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_drift_file_unreadable))
             )
         }
         val diskBytes = localFile.readBytes()
@@ -95,7 +95,7 @@ internal class VaultFileDriftResolve(
         val localDb = databaseSession.databaseFlow.value
             ?: return KdbxResult.Failure(
                 IllegalStateException("无活动数据库"),
-                strings.get(R.string.ext_mod_merge_failed, "无活动数据库")
+                strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_drift_no_active_database))
             )
         val baseLite = KdbxDatabaseLite(
             rootGroup = localDb.rootGroup,
@@ -129,7 +129,10 @@ internal class VaultFileDriftResolve(
         if (!adopted) {
             return KdbxResult.Failure(
                 IllegalStateException("合并窗口内会话树已变化"),
-                strings.get(R.string.ext_mod_merge_failed, "合并窗口内会话树已变化")
+                strings.get(
+                    R.string.ext_mod_merge_failed,
+                    strings.get(R.string.err_drift_session_tree_changed)
+                )
             )
         }
         val saveResult = databaseSession.save()

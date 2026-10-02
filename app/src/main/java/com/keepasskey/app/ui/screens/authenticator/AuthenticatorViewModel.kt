@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.keepasskey.app.ui.model.textArg
 
 @HiltViewModel
 class AuthenticatorViewModel @Inject constructor(
@@ -27,7 +28,9 @@ class AuthenticatorViewModel @Inject constructor(
     // 允许为 null 仅用于 JVM 单测注入（测试环境无法提供系统剪贴板服务）；生产 DI 恒定注入真实实现
     private val clipboardSecurityManager: ClipboardSecurityManager? = null,
     // ISSUE-P3-182：展示装配调度器（生产 Dispatchers.Default；单测注入测试调度器保证断言确定性）
-    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default
+    @EntryDisplayDispatcher private val displayDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    // ISSUE-P3-453：错误码 → 本地化文案通道（生产 DI 注入真实现）
+    private val strings: com.keepasskey.app.ui.model.StringsProvider = com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
 ) : ViewModel() {
 
     companion object {
@@ -163,7 +166,7 @@ class AuthenticatorViewModel @Inject constructor(
                     userMessageFlow.value = UiMessage(R.string.auth_totp_copied, listOf(code))
                 }
                 is com.keepasskey.core.result.KdbxResult.Failure ->
-                    userMessageFlow.value = UiMessage(R.string.op_failed, listOf(result.message))
+                    userMessageFlow.value = UiMessage(R.string.op_failed, listOf(result.textArg(strings)))
             }
         }
     }

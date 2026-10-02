@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * TASK-21 拆分：设置页「导出 / 模板安装 / 调试日志导出」动作控制器。
@@ -180,7 +181,7 @@ internal class SettingsExportController(
             } else {
                 UiMessage(
                     R.string.op_failed,
-                    listOf((result as com.keepasskey.core.result.KdbxResult.Failure).message),
+                    listOf((result as com.keepasskey.core.result.KdbxResult.Failure).textArg(strings)),
                     isError = true
                 )
             }
@@ -204,7 +205,7 @@ internal class SettingsExportController(
                 exportAuditRecorder.record(artifactKind, rawTarget, success = false)
                 // ISSUE-P2-20：序列化已失败，SAF 目标必然仍是空文档——清理不留 0 字节残留
                 SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-                return UiMessage(R.string.op_failed, listOf(failure.message), isError = true)
+                return UiMessage(R.string.op_failed, listOf(failure.textArg(strings)), isError = true)
             }
             val bytes = result.getOrNull()
             val resolver = appContext?.contentResolver

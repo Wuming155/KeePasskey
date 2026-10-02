@@ -356,7 +356,7 @@ internal class VaultLifecycleCoordinator(
         val result = when (keyFileIntent) {
             ChangeKeyFileIntent.Keep -> KdbxResult.Failure(
                 IllegalArgumentException("Keep 意图不构成任何改动"),
-                "未指定任何改动"
+                strings.get(R.string.err_lifecycle_no_change)
             )
             is ChangeKeyFileIntent.Use -> databaseSession.changeKeyFileOnly(keyFileIntent.bytes)
             ChangeKeyFileIntent.Remove -> databaseSession.changeKeyFileOnly(null)

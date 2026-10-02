@@ -2,55 +2,61 @@ package com.keepasskey.core.result
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ISSUE-P1-10 (ZT-10)：KdbxResult.message 兜底脱敏回归——
- * 未显式提供 userMessage 时不得把裸异常 message 上浮 UI。
+ * ISSUE-P1-10 (ZT-10)：KdbxResult 兜底脱敏回归——
+ * 未显式提供 [KdbxResult.Failure.userText] 时不得把裸异常 message 上浮 UI（兜底为错误码，非异常内容）。
+ *
+ * ISSUE-P3-453：兜底值由「固定中文通用文案」改为 [KdbxError] 类型化错误码——
+ * 下层模块（core / database）拿不到 app 字符串资源，只产机器可读的码，
+ * 由 app 层的 `KdbxErrorTexts` 映射为资源文案；异常细节只留 [KdbxResult.Failure.error]（日志面）。
  */
 class KdbxResultTest {
 
     @Test
-    fun `未提供 userMessage 时兜底为固定通用文案，绝不透出异常 message`() {
-        val failure = KdbxResult.runCatching<String> {
+    fun `未提供 userText 时兜底为错误码，绝不透出异常 message`() {
+        val result = KdbxResult.runCatching<String> {
             throw IllegalStateException("https://secret.example.com/path user@example.com")
         }
 
-        val message = (failure as KdbxResult.Failure).message
-        assertEquals("未知错误", message)
-        // 敏感内容不得经兜底文案外泄
-        assertFalse(message.contains("secret.example.com"))
-        assertFalse(message.contains("user@example.com"))
+        val failure = result as KdbxResult.Failure
+        // ISSUE-P3-453：兜底值是错误码（ASCII 机器标识），不是任何用户可见文案
+        assertEquals(KdbxError.UNKNOWN, failure.code)
+        assertNull(failure.userText)
+        assertFalse(failure.code.contains("secret.example.com"))
+        assertFalse(failure.code.contains("user@example.com"))
     }
 
     @Test
-    fun `显式 userMessage 优先于兜底文案`() {
+    fun `显式 userText 优先于兜底错误码`() {
         val failure = KdbxResult.Failure(IllegalStateException("raw message"), "解锁密码库失败")
 
-        assertEquals("解锁密码库失败", failure.message)
+        assertEquals("解锁密码库失败", failure.userText)
     }
 
     @Test
     fun `原始异常仍保留在 error 字段供日志侧脱敏记录`() {
         val failure = KdbxResult.runCatching<String> {
             throw IllegalStateException("raw message")
-        }
+        } as KdbxResult.Failure
 
-        val error = (failure as KdbxResult.Failure).error
+        val error = failure.error
         assertTrue(error is IllegalStateException)
         assertEquals("raw message", error.message)
     }
 
     @Test
-    fun `onFailure 回调携带的 message 同样受兜底约束`() {
+    fun `onFailure 回调携带的是错误码而非用户文案`() {
         val failure = KdbxResult.runCatching<String> {
             throw IllegalStateException("https://secret.example.com/path")
         }
 
         var observed: String? = null
-        failure.onFailure { _, message -> observed = message }
+        failure.onFailure { _, code -> observed = code }
 
-        assertEquals("未知错误", observed)
+        assertEquals(KdbxError.UNKNOWN, observed)
     }
 }

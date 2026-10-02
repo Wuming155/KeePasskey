@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.keepasskey.app.ui.model.textArg
+import com.keepasskey.app.ui.model.StringsProvider
 
 /**
  * 主密码解锁会话（ISSUE-P3-188 自 `UnlockViewModel` 结构性下沉，零行为变更）。
@@ -32,7 +34,9 @@ internal class MasterPasswordUnlockSession(
     private val keyFileSession: KeyFileSessionCoordinator,
     private val enrollment: BiometricEnrollmentCoordinator,
     private val debugLog: DebugLogBuffer,
-    private val activeDbId: () -> String?
+    private val activeDbId: () -> String?,
+    // ISSUE-P3-453：错误码 → 本地化文案通道（生产由宿主显式注入真实现）
+    private val strings: StringsProvider = StringsProvider { _, _ -> "" },
 ) {
 
     /**
@@ -207,7 +211,7 @@ internal class MasterPasswordUnlockSession(
             invalidCredentials && usedKeyFile ->
                 UiMessage(R.string.keyfile_or_password_mismatch)
             invalidCredentials -> UiMessage(R.string.unlock_error_invalid_password)
-            else -> UiMessage(R.string.op_failed, listOf(result.message))
+            else -> UiMessage(R.string.op_failed, listOf(result.textArg(strings)))
         }
         // ISSUE-P1-04：失败路径无条件清零主密码（不再保留错误密码驻留堆内存）
         wipe()

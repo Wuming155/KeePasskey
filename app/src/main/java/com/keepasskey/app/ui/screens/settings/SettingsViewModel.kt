@@ -148,13 +148,13 @@ class SettingsViewModel @Inject constructor(
         // ISSUE-P1-431：封印载荷不再含密钥文件字节，原 sessionKeyFileBytes 通道退役
         sessionPasswordChars = { databaseSession?.passwordSnapshot() }
     )
-    /** 开关动作即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
-    private val biometricToggleState = biometricGate.toggleState
+    private val biometricToggleState = biometricGate.toggleState // 开关动作即时状态（验证中/一次性反馈），经投影层并入 uiState
     private val masterKeyChange = SettingsMasterKeyChangeController(
         vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange, keyFileAccess,
-        keyFileVaultCopyStore // ISSUE-P3-434：第4参记忆位置同步；§411（P3-448）：副本同步 + 「导入密钥文件」收编
-    )
-    // P2-354/P2-398/P3-428/P3-430 改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
+        keyFileVaultCopyStore, // ISSUE-P3-434：第4参记忆位置同步；§411（P3-448）：副本同步 + 「导入密钥文件」收编
+        // ISSUE-P3-453：strings 命名置末位（错误码 → 本地化文案通道），不打断既有位置传参序列
+        strings = strings
+    ) // §411（P3-452/P3-448）改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
     internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange
     internal val keyFileReader get() = features.keyFileReader // ISSUE-P3-428：改密对话框 SAF 读取通道（全仓唯一）
 

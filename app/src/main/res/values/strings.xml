@@ -883,6 +883,28 @@
     <string name="sync_feedback_conflict">检测到多端并发冲突，请在冲突解决界面处理</string>
     <string name="vault_conflict_action">去解决冲突</string>
     <string name="op_failed">操作失败：%1$s</string>
+    <!-- ISSUE-P3-453：下层模块（core/database）只产类型化错误码，由 app 层映射为本组资源文案。
+         新增 KdbxError 常量时须同批补 zh/en 两处；映射缺失回落 err_unknown（可观测降级，非崩溃）。 -->
+    <string name="err_unknown">未知错误</string>
+    <string name="err_open_create_failed">创建密码库失败</string>
+    <string name="err_open_unlock_failed">解锁密码库失败</string>
+    <string name="err_save_read_only">数据库以只读模式打开，无法保存</string>
+    <string name="err_save_no_writer">未指定活动数据库保存通道</string>
+    <string name="err_save_no_database">当前无活动数据库</string>
+    <string name="err_save_credentials_lost">主密码凭据丢失，请重新输入主密码</string>
+    <string name="err_save_failed">保存数据库失败</string>
+    <string name="err_export_no_database">当前无活动数据库（已锁定或未打开）</string>
+    <string name="err_export_credentials_lost">主密码凭据丢失，无法导出</string>
+    <string name="err_export_failed">导出数据库失败</string>
+    <string name="err_credentials_read_only">数据库处于只读模式，无法修改主凭据</string>
+    <string name="err_credentials_no_writer">未指定活动数据库保存通道</string>
+    <string name="err_credentials_no_database">当前无活动数据库</string>
+    <string name="err_credentials_change_failed">更新主密码失败</string>
+    <string name="err_credentials_keyfile_only_unbind">仅密钥文件会话不能解绑唯一解锁因子</string>
+    <string name="err_drift_file_unreadable">文件不可读</string>
+    <string name="err_drift_no_active_database">无活动数据库</string>
+    <string name="err_drift_session_tree_changed">合并窗口内会话树已变化</string>
+    <string name="err_lifecycle_no_change">未指定任何改动</string>
     <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
     <!-- §410 走查：未配置云同步时下拉刷新的如实提示（不进同步周期） -->
     <string name="sync_feedback_not_configured">尚未设置云同步，可在「设置 → 云端同步」中配置</string>

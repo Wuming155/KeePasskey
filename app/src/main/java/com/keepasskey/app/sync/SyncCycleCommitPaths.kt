@@ -9,6 +9,7 @@ import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.merge.SyncConflictStrategy
 import com.keepasskey.sync.provider.SyncProvider
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * 同步周期步骤 2 / 步骤 3 的提交路径（ISSUE-P3-305 自 [SyncCycleRunner] 同包下沉，函数体逐行未改）。
@@ -115,7 +116,7 @@ internal suspend fun SyncCycleRunner.tryFastCommitPath(
                 // 整库「本地赢」覆盖远端（他端改动丢失）
                 commitResult.settlement?.reject()
                 return SyncOutcome.Error(
-                    strings.get(R.string.sync_error_remote_updated_local_save_failed, saveResult.message)
+                    strings.get(R.string.sync_error_remote_updated_local_save_failed, saveResult.textArg(strings))
                 )
             }
             // ISSUE-P2-308：采纳确认（落盘成功）后落地基线前移与高水位记录

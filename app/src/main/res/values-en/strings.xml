@@ -873,6 +873,27 @@
     <string name="sync_feedback_conflict">Conflict detected, please resolve in conflict screen</string>
     <string name="vault_conflict_action">Resolve conflict</string>
     <string name="op_failed">Operation failed: %1$s</string>
+    <!-- ISSUE-P3-453: typed error codes from core/database map to these strings. -->
+    <string name="err_unknown">Unknown error</string>
+    <string name="err_open_create_failed">Failed to create the database</string>
+    <string name="err_open_unlock_failed">Failed to unlock the database</string>
+    <string name="err_save_read_only">Database is open in read-only mode; cannot save</string>
+    <string name="err_save_no_writer">No active database save channel</string>
+    <string name="err_save_no_database">No active database</string>
+    <string name="err_save_credentials_lost">Master password credential lost; please re-enter it</string>
+    <string name="err_save_failed">Failed to save the database</string>
+    <string name="err_export_no_database">No active database (locked or not open)</string>
+    <string name="err_export_credentials_lost">Master password credential lost; cannot export</string>
+    <string name="err_export_failed">Failed to export the database</string>
+    <string name="err_credentials_read_only">Database is read-only; cannot change master credentials</string>
+    <string name="err_credentials_no_writer">No active database save channel</string>
+    <string name="err_credentials_no_database">No active database</string>
+    <string name="err_credentials_change_failed">Failed to update the master password</string>
+    <string name="err_credentials_keyfile_only_unbind">A key-file-only session cannot unbind its sole unlock factor</string>
+    <string name="err_drift_file_unreadable">File is unreadable</string>
+    <string name="err_drift_no_active_database">No active database</string>
+    <string name="err_drift_session_tree_changed">In-memory tree changed during the merge window</string>
+    <string name="err_lifecycle_no_change">No change specified</string>
     <string name="sync_feedback_offline">Offline or network unreachable; local changes kept safe</string>
     <!-- §410 walkthrough: honest notice when pull-to-refresh fires with cloud sync unconfigured -->
     <string name="sync_feedback_not_configured">Cloud sync is not set up yet — configure it in Settings → Cloud sync</string>

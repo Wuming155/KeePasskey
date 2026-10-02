@@ -200,7 +200,7 @@ class CustomIconDeleteTest {
         val result = coordinator.deleteCustomIcon(iconId.toHexString())
 
         assertTrue(result is KdbxResult.Failure)
-        assertEquals("磁盘错误", (result as KdbxResult.Failure).message)
+        assertEquals("磁盘错误", (result as KdbxResult.Failure).userText)
     }
 
     @Test

@@ -7,6 +7,8 @@ import com.keepasskey.app.sync.CloudVaultImportResult
 import com.keepasskey.app.sync.CloudVaultImporter
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.ui.model.textArg
+import com.keepasskey.app.ui.model.StringsProvider
 
 /**
  * 「从来源打开已有库」的登记流程（`ISSUE-P2-399` / `ISSUE-P2-424`）。
@@ -27,7 +29,9 @@ internal class DatabasePickerOpenVaultImporter(
     private val vaultRepository: VaultRepository,
     private val cloudVaultImporter: CloudVaultImporter?,
     private val publish: (UiMessage) -> Unit,
-    private val onOpened: suspend (fileName: String) -> Unit
+    private val onOpened: suspend (fileName: String) -> Unit,
+    // ISSUE-P3-453：错误码 → 本地化文案通道（生产由宿主显式注入真实现）
+    private val strings: StringsProvider = StringsProvider { _, _ -> "" },
 ) {
 
     /** 本地库：登记（`content://` 持久化授权 / 文件路径）并置为活动库（原实现原样保留） */
@@ -48,7 +52,7 @@ internal class DatabasePickerOpenVaultImporter(
             }
             onOpened(fileName)
         } else {
-            publish(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+            publish(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
         }
     }
 

@@ -13,6 +13,7 @@ import com.keepasskey.sync.model.cleanEtag
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * ISSUE-P1-275 AC①：冲突上传 If 预条件期望值的**唯一判据**——冲突时刻 ETag 规范化后非空
@@ -154,7 +155,7 @@ internal suspend fun autoMergeAndUpload(
             AutoMergeUploadResult.Completed(
                 if (saveResult is KdbxResult.Failure) {
                     SyncOutcome.Error(
-                        strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
+                        strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.textArg(strings))
                     )
                 } else {
                     SyncOutcome.MergedAndUploaded
@@ -212,7 +213,7 @@ internal suspend fun autoMergeAndUpload(
                         AutoMergeUploadResult.Completed(
                             if (saveResult is KdbxResult.Failure) {
                                 SyncOutcome.Error(
-                                    strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
+                                    strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.textArg(strings))
                                 )
                             } else {
                                 SyncOutcome.MergedAndUploaded

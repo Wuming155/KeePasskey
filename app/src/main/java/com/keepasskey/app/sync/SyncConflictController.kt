@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * 冲突检测后的决策与提交（ISSUE-P3-25 拆分自 `SyncCoordinator`，纯搬运）。
@@ -163,7 +164,7 @@ class SyncConflictController @Inject constructor(
                         SyncOutcome.Error(
                             strings.get(
                                 R.string.sync_error_remote_updated_local_save_failed,
-                                saveResult.message
+                                saveResult.textArg(strings)
                             )
                         )
                     } else {

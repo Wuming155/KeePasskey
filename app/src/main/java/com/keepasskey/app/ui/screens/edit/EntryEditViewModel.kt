@@ -318,7 +318,7 @@ class EntryEditViewModel @Inject constructor(
                     _uiState.update { it.copy(customIconId = result.data, isDirty = true) }
                 }
                 is com.keepasskey.core.result.KdbxResult.Failure ->
-                    _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(result.message))) }
+                    _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(strings.get(com.keepasskey.app.ui.model.KdbxErrorTexts.resIdFor(result.code))))) }
             }
         }
     }

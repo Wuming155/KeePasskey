@@ -10,6 +10,8 @@ import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import com.keepasskey.app.ui.model.textArg
+import com.keepasskey.app.ui.model.StringsProvider
 
 /**
  * 详情页条目动作簇（ISSUE-P3-188 自 `EntryDetailViewModel` 结构性下沉，零行为变更）：
@@ -28,6 +30,8 @@ internal class EntryDetailEntryActions(
     private val onEntrySwitched: (String) -> Unit,
     private val onEntryDeleted: () -> Unit,
     private val showMessage: (UiMessage) -> Unit,
+    // ISSUE-P3-453：错误码 → 本地化文案通道（生产由宿主显式注入真实现）
+    private val strings: StringsProvider = StringsProvider { _, _ -> "" },
     /**
      * ISSUE-P3-357 + `ISSUE-P3-359` AC④：可撤销消息的发布口——比 [showMessage] 多带一个
      * 撤销动作（由外壳全局宿主在 `ActionPerformed` 时以自身作用域执行；软删除发生在
@@ -49,7 +53,7 @@ internal class EntryDetailEntryActions(
                     onEntrySwitched(result.data)
                 }
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.edit_save_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.edit_save_failed, listOf(result.textArg(strings))))
             }
         }
     }
@@ -80,14 +84,14 @@ internal class EntryDetailEntryActions(
                                 is KdbxResult.Success ->
                                     showMessage(UiMessage(R.string.vault_entry_restored))
                                 is KdbxResult.Failure ->
-                                    showMessage(UiMessage(R.string.op_failed, listOf(restored.message)))
+                                    showMessage(UiMessage(R.string.op_failed, listOf(restored.textArg(strings))))
                             }
                         }
                     }
                     onEntryDeleted()
                 }
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.textArg(strings))))
             }
         }
     }
@@ -104,7 +108,7 @@ internal class EntryDetailEntryActions(
             when (val result = vaultRepository.batchMoveEntries(setOf(entryId), targetGroupId)) {
                 is KdbxResult.Success -> showMessage(UiMessage(R.string.detail_move_success))
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.textArg(strings))))
             }
         }
     }
@@ -128,7 +132,7 @@ internal class EntryDetailEntryActions(
             when (val result = admin.deleteCustomIcon(iconId)) {
                 is KdbxResult.Success -> showMessage(UiMessage(R.string.vault_icon_delete_done))
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.op_failed, listOf(result.message)))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.textArg(strings))))
             }
         }
     }

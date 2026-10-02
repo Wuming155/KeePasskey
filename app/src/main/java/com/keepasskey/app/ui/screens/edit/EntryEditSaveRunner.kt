@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * 条目保存执行体（`ISSUE-P2-354 AC①②` 自 `EntryEditViewModel.saveEntry` 拆出；
@@ -89,7 +90,7 @@ internal class EntryEditSaveRunner(
                 val failure = result as KdbxResult.Failure
                 uiState.update {
                     it.copy(
-                        userMessage = UiMessage(R.string.edit_save_failed, listOf(failure.message)),
+                        userMessage = UiMessage(R.string.edit_save_failed, listOf(failure.textArg(strings))),
                         isSaving = false
                     )
                 }

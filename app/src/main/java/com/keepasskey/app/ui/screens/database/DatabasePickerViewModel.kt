@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.keepasskey.app.ui.model.textArg
 
 sealed interface DatabasePickerEvent {
     data class DatabaseSelected(val id: String) : DatabasePickerEvent
@@ -90,6 +91,9 @@ class DatabasePickerViewModel @Inject constructor(
     )
 
     // ISSUE-P2-399 / ISSUE-P2-424：「从来源打开已有库」的登记流程（§391 拆出，行为逐字不变）
+    // ISSUE-P3-453：错误码 → 本地化文案通道（生产 appContext 恒非 null）
+    private val strings: com.keepasskey.app.ui.model.StringsProvider =
+        com.keepasskey.app.ui.model.StringsProvider { id, args -> appContext?.getString(id, *args) ?: "" }
     private val openVaultImporter = DatabasePickerOpenVaultImporter(
         vaultRepository = vaultRepository,
         cloudVaultImporter = cloudVaultImporter,
@@ -222,7 +226,7 @@ class DatabasePickerViewModel @Inject constructor(
                     // 以文件名下行的选中事件对这类库无效
                     _events.emit(DatabasePickerEvent.DatabaseSelected(targetUri ?: fileName))
                 } else {
-                    publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                    publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
                 }
             } finally {
                 pwd.fill('0')
@@ -308,7 +312,7 @@ class DatabasePickerViewModel @Inject constructor(
                 keyFileVaultCopyStore?.clear(id)
                 publishPickerMessage(UiMessage(R.string.db_picker_msg_removed))
             } else {
-                publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }

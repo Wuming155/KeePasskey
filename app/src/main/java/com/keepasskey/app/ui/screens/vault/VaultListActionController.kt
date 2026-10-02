@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import java.nio.CharBuffer
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * 密码库列表页的**写操作编排**（ISSUE-P3-29：自 `VaultListViewModel.kt` 拆出）。
@@ -144,7 +145,7 @@ internal class VaultListActionController(
                 onMessage(UiMessage(R.string.vault_batch_moved, listOf(selected.size)))
                 clearBatchSelection()
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -166,7 +167,7 @@ internal class VaultListActionController(
                 onMessage(UiMessage(R.string.vault_batch_deleted, listOf(selected.size), undoable = true))
                 clearBatchSelection()
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -208,7 +209,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_group_created, listOf(name.trim())))
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -222,7 +223,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_group_renamed, listOf(newName.trim())))
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -244,7 +245,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_group_deleted))
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -256,7 +257,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_entry_restored))
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -268,7 +269,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_entry_purged))
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -280,7 +281,7 @@ internal class VaultListActionController(
             if (result is KdbxResult.Success) {
                 onMessage(UiMessage(R.string.vault_recycle_emptied))
             } else {
-                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }
         }
     }
@@ -356,7 +357,7 @@ internal class VaultListActionController(
                 if (result is KdbxResult.Success) {
                     onMessage(UiMessage(R.string.vault_scan_entry_created, listOf(title)))
                 } else {
-                    onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))
+                    onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
                 }
             } finally {
                 // 兜底擦除（仓库契约已清零；幂等双保险，覆盖协程体异常路径）

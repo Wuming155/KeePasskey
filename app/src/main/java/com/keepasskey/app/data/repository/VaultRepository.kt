@@ -129,8 +129,9 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
     ): com.keepasskey.core.result.KdbxResult<Unit> = when {
         targetUri != null -> com.keepasskey.core.result.KdbxResult.Failure(
             UnsupportedOperationException("实现方未支持在自选位置建库"),
-            // 兜底文案留空：本分支在生产 DI 下不可达（RealVaultRepository 已覆盖）
-            userMessage = null
+            // 兜底文案留空：本分支在生产 DI 下不可达（RealVaultRepository 已覆盖），
+            // 缺省时 Failure 的 code 回落 kdbx.unknown，绝不谎报「创建成功」
+            userText = null
         )
 
         else -> when (keyFileFactor) {
@@ -138,8 +139,8 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
             else -> com.keepasskey.core.result.KdbxResult.Failure(
                 UnsupportedOperationException("实现方未支持携带密钥文件的建库通道"),
                 // 兜底文案留空：本分支在生产 DI 下不可达（RealVaultRepository 已覆盖），
-                // Failure.message 会回退为 KdbxResult 的固定通用文案，绝不谎报「创建成功」
-                userMessage = null
+                // 缺省时 Failure 的 code 回落 kdbx.unknown，绝不谎报「创建成功」
+                userText = null
             )
         }
     }

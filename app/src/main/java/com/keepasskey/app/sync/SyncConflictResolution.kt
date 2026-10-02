@@ -16,6 +16,7 @@ import com.keepasskey.sync.merge.KdbxMerger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * 用户裁决与上传回写（ISSUE-P3-305 自 [SyncConflictController] 同包下沉，函数体逐行未改）。
@@ -174,7 +175,7 @@ private suspend fun SyncConflictController.adoptMergedDatabase(
         // ISSUE-P2-308：落盘失败 ⇒ 基线保持原状不前移
         settlement?.reject()
         SyncOutcome.Error(
-            strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.message)
+            strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.textArg(strings))
         )
     } else {
         settlement?.accept()

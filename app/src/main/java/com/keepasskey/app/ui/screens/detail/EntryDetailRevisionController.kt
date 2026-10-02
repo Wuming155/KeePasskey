@@ -10,6 +10,7 @@ import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * 历史修订的回滚与对比预解密（断点8 / TASK-31 / M2 / ISSUE-P2-15）。
@@ -69,7 +70,7 @@ internal class EntryDetailRevisionController(
         return if (result is KdbxResult.Success) {
             UiMessage(R.string.detail_history_rolled_back)
         } else {
-            UiMessage(R.string.edit_save_failed, listOf((result as KdbxResult.Failure).message))
+            UiMessage(R.string.edit_save_failed, listOf((result as KdbxResult.Failure).textArg(strings)))
         }
     }
 

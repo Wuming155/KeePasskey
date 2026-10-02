@@ -8,6 +8,8 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.fieldref.FieldReferenceEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import com.keepasskey.app.ui.model.textArg
+import com.keepasskey.app.ui.model.StringsProvider
 
 /**
  * 详情页复制 / 取码动作簇（ISSUE-P3-188 自 `EntryDetailViewModel` 结构性下沉）。
@@ -27,6 +29,8 @@ internal class EntryDetailCopyCoordinator(
     private val liveTotpCode: () -> String?,
     private val projectedTotpCode: () -> String?,
     private val showMessage: (UiMessage) -> Unit,
+    // ISSUE-P3-453：错误码 → 本地化文案通道（生产由宿主显式注入真实现）
+    private val strings: StringsProvider = StringsProvider { _, _ -> "" },
     /**
      * ISSUE-P3-360 AC③a：TOTP 当前剩余秒数（取详情页节拍通道的实时值）。
      * 缺省 `{ 0 }` = 未知——按非临期处理，既有纯 JVM 构造方零改即兼容。
@@ -185,7 +189,7 @@ internal class EntryDetailCopyCoordinator(
                     )
                 }
                 is KdbxResult.Failure ->
-                    showMessage(UiMessage(R.string.op_failed, listOf(result.message), isError = true))
+                    showMessage(UiMessage(R.string.op_failed, listOf(result.textArg(strings)), isError = true))
             }
         }
     }

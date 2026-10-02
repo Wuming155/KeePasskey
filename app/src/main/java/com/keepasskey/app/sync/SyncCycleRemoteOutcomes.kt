@@ -7,6 +7,7 @@ import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncOpenResult
 import com.keepasskey.sync.merge.SyncConflictStrategy
+import com.keepasskey.app.ui.model.textArg
 
 /**
  * 同步周期「远端裁决分支」（ISSUE-P3-188 第二档：自 [SyncCycleRunner] 同包下沉，**函数体逐字未改**）。
@@ -89,7 +90,7 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
         val preSave = databaseSession.save()
         if (preSave is KdbxResult.Failure) {
             return SyncOutcome.Error(
-                strings.get(R.string.sync_error_conflict_presave_failed, preSave.message)
+                strings.get(R.string.sync_error_conflict_presave_failed, preSave.textArg(strings))
             )
         }
         return conflicts.handleConflictMerge(
@@ -140,7 +141,7 @@ internal suspend fun SyncCycleRunner.handleConflictDetected(
     val preSave = databaseSession.save()
     if (preSave is KdbxResult.Failure) {
         return SyncOutcome.Error(
-            strings.get(R.string.sync_error_conflict_presave_failed, preSave.message)
+            strings.get(R.string.sync_error_conflict_presave_failed, preSave.textArg(strings))
         )
     }
     // ISSUE-P3-03 (43a)：强制策略优先；null 表示继续三方合并

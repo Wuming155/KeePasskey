@@ -1,5 +1,6 @@
 package com.keepasskey.database.session
 
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
@@ -43,17 +44,17 @@ internal class SessionPersistence(
         if (core.readOnlyMode) {
             return@withLock KdbxResult.Failure(
                 IllegalStateException("数据库以只读模式打开"),
-                "数据库以只读模式打开，无法保存"
+                code = KdbxError.SAVE_READ_ONLY
             )
         }
         withContext(Dispatchers.Default) {
             val writer = core.saveWriter ?: return@withContext KdbxResult.Failure(
                 IllegalStateException("无活动数据库保存通道"),
-                "未指定活动数据库保存通道"
+                code = KdbxError.SAVE_NO_WRITER
             )
             val db = core.database.value ?: return@withContext KdbxResult.Failure(
                 IllegalStateException("活动数据库为空"),
-                "当前无活动数据库"
+                code = KdbxError.SAVE_NO_DATABASE
             )
             // P1-10：仅密钥文件会话（主密码为 null/空）下 passwordCache 可为空，
             // 只要密钥文件缓存仍在即可完成保存；两者皆缺失才视为凭据丢失
@@ -61,7 +62,7 @@ internal class SessionPersistence(
             if (pwd == null && credentials.currentKeyFile() == null) {
                 return@withContext KdbxResult.Failure(
                     IllegalStateException("主密码已被清理"),
-                    "主密码凭据丢失，请重新输入主密码"
+                    code = KdbxError.SAVE_CREDENTIALS_LOST
                 )
             }
 
@@ -93,7 +94,7 @@ internal class SessionPersistence(
             } catch (t: Throwable) {
                 // ISSUE-P3-368：失败清进度（不留半程残值）
                 progress(null)
-                KdbxResult.Failure(t, "保存数据库失败: ${t.message}")
+                KdbxResult.Failure(t, code = KdbxError.SAVE_FAILED)
             }
         }
     }
@@ -106,20 +107,20 @@ internal class SessionPersistence(
     suspend fun exportToBytes(): KdbxResult<ByteArray> = mutex.withLock {
         val db = core.database.value ?: return@withLock KdbxResult.Failure(
             IllegalStateException("活动数据库为空"),
-            "当前无活动数据库（已锁定或未打开）"
+            code = KdbxError.EXPORT_NO_DATABASE
         )
         val pwd = credentials.currentPassword()
         if (pwd == null && credentials.currentKeyFile() == null) {
             return@withLock KdbxResult.Failure(
                 IllegalStateException("主密码已被清理"),
-                "主密码凭据丢失，无法导出"
+                code = KdbxError.EXPORT_CREDENTIALS_LOST
             )
         }
         withContext(Dispatchers.Default) {
             try {
                 KdbxResult.Success(serializeToBytes(db, pwd, credentials.currentKeyFile()))
             } catch (t: Throwable) {
-                KdbxResult.Failure(t, "导出数据库失败: ${t.message}")
+                KdbxResult.Failure(t, code = KdbxError.EXPORT_FAILED)
             }
         }
     }
@@ -159,16 +160,16 @@ internal class SessionPersistence(
         if (core.readOnlyMode) {
             return@withLock KdbxResult.Failure(
                 IllegalStateException("数据库处于只读模式，无法修改主凭据"),
-                "数据库处于只读模式，无法修改主凭据"
+                code = KdbxError.CREDENTIALS_READ_ONLY
             )
         }
         val writer = core.saveWriter ?: return@withLock KdbxResult.Failure(
             IllegalStateException("无活动数据库保存通道"),
-            "当前无活动数据库"
+            code = KdbxError.CREDENTIALS_NO_WRITER
         )
         val db = core.database.value ?: return@withLock KdbxResult.Failure(
             IllegalStateException("活动数据库为空"),
-            "当前无活动数据库"
+                code = KdbxError.CREDENTIALS_NO_DATABASE
         )
 
         val oldPwd = credentials.passwordSnapshot()
@@ -192,7 +193,7 @@ internal class SessionPersistence(
         } catch (t: Throwable) {
             // 失败时回滚既有凭据
             credentials.restoreCredentials(oldPwd, oldKey)
-            KdbxResult.Failure(t, "更新主密码失败: ${t.message}")
+            KdbxResult.Failure(t, code = KdbxError.CREDENTIALS_CHANGE_FAILED)
         }
     }
 
@@ -210,7 +211,7 @@ internal class SessionPersistence(
         if (pwdSnapshot == null && newKeyFileData == null) {
             return KdbxResult.Failure(
                 IllegalStateException("会话无主密码分量，解绑密钥文件将不剩任何解锁因子"),
-                "仅密钥文件会话不能解绑唯一解锁因子"
+                code = KdbxError.CREDENTIALS_KEYFILE_ONLY_UNBIND
             )
         }
         return try {
