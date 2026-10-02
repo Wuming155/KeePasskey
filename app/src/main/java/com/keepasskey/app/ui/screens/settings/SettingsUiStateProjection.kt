@@ -210,6 +210,7 @@ internal fun buildSettingsUiState(
     appLanguage = userSettings.appLanguage,
     oledBlackOptimization = userSettings.oledBlackOptimization,
     dynamicColorEnabled = userSettings.dynamicColorEnabled,
+    customSeedColor = userSettings.customSeedColor,
     showUsernameInList = userSettings.showUsernameInList,
     showOtpInList = userSettings.showOtpInList,
     showPasskeyBadge = userSettings.showPasskeyBadge,

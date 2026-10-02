@@ -202,6 +202,13 @@ fun CloudSyncScreen(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ISSUE-P3-445 AC①：「测试连接」高困惑点一次性可关闭提示（关闭态持久化，非模态）
+            item {
+                com.keepasskey.app.ui.components.DismissibleHelpTip(
+                    tip = com.keepasskey.app.ui.components.HelpTip.CLOUD_SYNC_TEST_CONNECTION
+                )
+            }
+
             // 1. 同步协议提供商选择
             item {
                 ProviderSelectionSection(

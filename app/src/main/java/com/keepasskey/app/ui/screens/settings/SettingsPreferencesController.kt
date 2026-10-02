@@ -386,6 +386,13 @@ internal class SettingsPreferencesController(
         }
     }
 
+    /** ISSUE-P3-441 AC①：自定义种子色设置/清除（null = 清除；互斥写由仓库层原子事务兜底） */
+    fun setCustomSeedColor(seed: Long?) {
+        scope.launch {
+            settingsRepository.setCustomSeedColor(seed)
+        }
+    }
+
     // ISSUE-P2-212：生物识别开关已移出本控制器——「开启」须先经 BiometricPrompt 当场验证
     // （见 BiometricEnableCoordinator），直写偏好会让开关在未验证的情况下被打开
 

@@ -311,6 +311,7 @@ class SettingsViewModel @Inject constructor(
     fun setThemePalette(themePalette: AppThemePalette) = preferences.setThemePalette(themePalette)
     fun setOledBlackOptimization(enabled: Boolean) = preferences.setOledBlackOptimization(enabled)
     fun setDynamicColorEnabled(enabled: Boolean) = preferences.setDynamicColorEnabled(enabled)
+    fun setCustomSeedColor(seed: Long?) = preferences.setCustomSeedColor(seed)
     /**
      * ISSUE-P2-212：生物识别开关切换。**开启必须当场验证**（委托 [BiometricEnableCoordinator]），
      * 取消/失败/无强生物识别一律不写偏好；关闭落偏好并**撤销全部生物识别数据**（ISSUE-P2-253）。
@@ -335,8 +336,7 @@ class SettingsViewModel @Inject constructor(
         choice: com.keepasskey.app.security.ExternalModificationChoice
     ) = issueWiring.applyExternalModificationChoice(choice)
     /** ISSUE-P2-378：待决外部修改提示（KeePasskeyApp 全局对话框消费） */
-    val externalModificationPending: StateFlow<com.keepasskey.app.security.VaultFileDriftPrompt?>
-        get() = issueWiring.pending
+    val externalModificationPending: StateFlow<com.keepasskey.app.security.VaultFileDriftPrompt?> get() = issueWiring.pending
     /** ISSUE-P3-385：密码库设置页 Meta 编辑反馈 */
     val databaseMetaFeedback: StateFlow<String?> get() = issueWiring.databaseMetaFeedback
     fun clearDatabaseMetaFeedback() = issueWiring.clearDatabaseMetaFeedback()
@@ -382,8 +382,7 @@ class SettingsViewModel @Inject constructor(
     fun setCredentialProviderEnabled(enabled: Boolean) = extendedPreferences.setCredentialProviderEnabled(enabled)
     fun setPasskeySupportEnabled(enabled: Boolean) = extendedPreferences.setPasskeySupportEnabled(enabled)
     fun setAutofillServiceEnabled(enabled: Boolean) = extendedPreferences.setAutofillServiceEnabled(enabled)
-    fun setAutofillLegacyAccessibilityEnabled(enabled: Boolean) =
-        extendedPreferences.setAutofillLegacyAccessibilityEnabled(enabled)
+    fun setAutofillLegacyAccessibilityEnabled(enabled: Boolean) = extendedPreferences.setAutofillLegacyAccessibilityEnabled(enabled)
     fun setRecycleBinEnabled(enabled: Boolean) = preferences.setRecycleBinEnabled(enabled)
 
     // ===== 列表显示（仓库直写） =====
@@ -426,11 +425,9 @@ class SettingsViewModel @Inject constructor(
         store = passkeyPrivilegedBrowserStore,
         scope = viewModelScope
     )
-    val privilegedBrowsers: StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>>
-        get() = privilegedBrowserController.privilegedBrowsers
+    val privilegedBrowsers: StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>> get() = privilegedBrowserController.privilegedBrowsers
     fun refreshPrivilegedBrowsers() = privilegedBrowserController.refresh()
-    fun setPrivilegedBrowserEnabled(packageName: String, enabled: Boolean) =
-        privilegedBrowserController.setEnabled(packageName, enabled)
+    fun setPrivilegedBrowserEnabled(packageName: String, enabled: Boolean) = privilegedBrowserController.setEnabled(packageName, enabled)
 
     // ===== ISSUE-P3-43：保存侧黑名单 + 字段签名级屏蔽 =====
     val autofillSaveBlockedPackages: StateFlow<List<String>> = preferences.autofillSaveBlockedPackages
@@ -460,8 +457,7 @@ class SettingsViewModel @Inject constructor(
     fun setWebdavChunkSizeMb(sizeMb: Int) = extendedPreferences.setWebdavChunkSizeMb(sizeMb)
 
     // ===== KP2A 扩展：TOTP 规范映射 =====
-    fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) =
-        extendedPreferences.updateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
+    fun updateTotpFieldMapping(seedField: String, settingsField: String, stepSeconds: Int, digits: Int) = extendedPreferences.updateTotpFieldMapping(seedField, settingsField, stepSeconds, digits)
 
     // ===== TASK-47：已泄露密码检测（联网，默认关闭） =====
     fun setBreachCheckEnabled(enabled: Boolean) = extendedPreferences.setBreachCheckEnabled(enabled)
@@ -478,6 +474,8 @@ class SettingsViewModel @Inject constructor(
     fun exportDebugLogs(targetUri: Uri) = exportController.exportDebugLogs(targetUri)
     fun clearDebugExportFeedback() = exportController.clearDebugExportFeedback()
     val exportFeedback: StateFlow<UiMessage?> get() = exportController.exportFeedback
+    // ISSUE-P3-437 AC②：导出长操作进行中（库属性页渲染过程反馈段）
+    val isExportInProgress: StateFlow<Boolean> get() = exportController.isExportInProgress
     fun clearExportFeedback() = exportController.clearExportFeedback()
     fun exportKdbxTo(targetUri: Uri) = exportController.exportKdbxTo(targetUri)
     fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportVaultXmlTo(targetUri, ticket)

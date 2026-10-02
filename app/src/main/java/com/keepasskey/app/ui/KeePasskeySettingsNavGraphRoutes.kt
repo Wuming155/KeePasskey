@@ -38,6 +38,8 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
         val kdfBenchmarkState by settingsViewModel.kdfBenchmark.collectAsStateWithLifecycle()
         // TASK-13 整改：导出/模板动作反馈流
         val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
+        // ISSUE-P3-437 AC②：导出长操作进行中（过程反馈段）
+        val isExportInProgress by settingsViewModel.isExportInProgress.collectAsStateWithLifecycle()
         // ISSUE-P3-19：明文导入状态流（Idle / Parsing / Done / Failed）
         val importState by settingsViewModel.importState.collectAsStateWithLifecycle()
         // ISSUE-P3-384：`.kdbx` 并入状态流
@@ -60,6 +62,7 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             onRunKdfBenchmark = settingsViewModel::runKdfBenchmark,
             // TASK-13 整改：导出/模板真实动作接线
             exportFeedback = exportFeedback,
+            isExportInProgress = isExportInProgress,
             onClearExportFeedback = settingsViewModel::clearExportFeedback,
             onExportKdbx = settingsViewModel::exportKdbxTo,
             onExportXml = settingsViewModel::exportVaultXmlTo,
@@ -261,6 +264,8 @@ internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController
             // ISSUE-P3-263 / PD-30（候选 A）：动态取色生效期间调色盘置灰，
             // 「一步切回」＝关闭动态取色即可恢复品牌调色盘（偏好值已落盘，无须另行选择）
             onSwitchToBrandPalette = { settingsViewModel.setDynamicColorEnabled(false) },
+            // ISSUE-P3-441 AC①：自定义种子色（null = 清除；互斥写由仓库层原子事务兜底）
+            onCustomSeedSelected = settingsViewModel::setCustomSeedColor,
             onLanguageSelected = settingsViewModel::setAppLanguage,
             onOledOptimizationToggle = settingsViewModel::setOledBlackOptimization,
             onDynamicColorToggle = settingsViewModel::setDynamicColorEnabled,

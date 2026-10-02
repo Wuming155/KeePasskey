@@ -68,6 +68,28 @@
     <string name="unlock_keyfile_selected">Key file loaded: %1$s</string>
     <string name="unlock_keyfile_none">No key file selected (Optional)</string>
     <string name="unlock_keyfile_read_failed">Failed to read the selected key file, please retry</string>
+    <!-- ISSUE-P3-437 AC①: stage feedback lines for the unlock flow (no sensitive payload) -->
+    <string name="unlock_stage_reading_keyfile">Reading key file…</string>
+    <string name="unlock_stage_deriving_keys">Deriving key…</string>
+    <string name="unlock_stage_unsealing">Unsealing credential…</string>
+    <!-- ISSUE-P3-439: advanced search options (field scope / exclude expired / case sensitivity; defaults = current behavior) -->
+    <string name="search_advanced_title">Advanced search</string>
+    <string name="search_field_title">Title</string>
+    <string name="search_field_username">Username</string>
+    <string name="search_field_url">URL</string>
+    <string name="search_field_notes">Notes</string>
+    <string name="search_field_tags">Tags</string>
+    <string name="search_field_custom">Custom fields</string>
+    <string name="search_advanced_exclude_expired">Exclude expired entries</string>
+    <string name="search_advanced_case_sensitive">Case sensitive</string>
+    <!-- ISSUE-P3-445: one-time dismissible help tips for high-confusion spots (non-modal; dismissal persisted) -->
+    <string name="help_tip_cloud_sync_test_title">About "Test connection"</string>
+    <string name="help_tip_cloud_sync_test_body">Tapping it first saves the current form (including the password you just typed), then performs a real connection check against the server. Nothing is synced unless the check passes — retry safely.</string>
+    <string name="help_tip_autofill_channel_title">Autofill has two layers of switches</string>
+    <string name="help_tip_autofill_channel_body">The in-app switches only control whether KeePasskey responds to system requests; whether the system has selected KeePasskey is a separate layer. Both must be on for autofill to work. If prompts don\'t appear, check the health card first.</string>
+    <string name="help_tip_unlock_keyfile_title">About key files</string>
+    <string name="help_tip_unlock_keyfile_body">A key file is a second unlock factor alongside the master password and must be used together with it. Only enable one if you have a complete backup — losing it means the database cannot be unlocked.</string>
+    <string name="help_tip_dismiss">Dismiss this tip</string>
     <!-- The two one-off notices from ISSUE-P2-87 / ISSUE-P3-230 (unlock_msg_weak_kdf /
          unlock_msg_no_persisted_permission) were removed together with their only consumer
          (the unlock screen's own import channel, retired by ISSUE-P2-424); the missing
@@ -631,6 +653,7 @@
     <string name="dbset_export_dialog_warning">The exported file is unprotected. Anyone who obtains it may brute-force the master password. Keep it safe</string>
     <string name="dbset_export_kdbx_btn">Export KDBX (full copy)</string>
     <string name="dbset_export_kdbx_done">KDBX file exported</string>
+    <string name="dbset_export_running">Exporting…</string>
     <string name="dbset_export_xml_btn">Export XML (plaintext)</string>
     <string name="dbset_export_xml_done">XML plaintext exported. Move it to a safe location immediately</string>
     <!-- ISSUE-P3-73: generic plaintext CSV export -->
@@ -928,6 +951,17 @@
     <string name="theme_palette_amber_sunset_sub">Warm amber orange, retro vibe</string>
     <string name="theme_palette_obsidian">Obsidian</string>
     <string name="theme_palette_obsidian_sub">Restrained monochrome gray, pure texture</string>
+    <string name="theme_palette_rose">Rose</string>
+    <string name="theme_palette_rose_sub">Rich warm red with amber accents</string>
+    <string name="theme_palette_cyan_mist">Cyan Mist</string>
+    <string name="theme_palette_cyan_mist_sub">Clear cyan-blue, calm and professional</string>
+    <string name="theme_palette_indigo_night">Indigo Night</string>
+    <string name="theme_palette_indigo_night_sub">Deep indigo with rose-purple contrast</string>
+    <!-- ISSUE-P3-441: custom seed color (third color source) -->
+    <string name="theme_palette_custom">Custom</string>
+    <string name="theme_palette_custom_sub">Generate your own light/dark scheme from one seed color</string>
+    <string name="theme_seed_picker_title">Pick a seed color</string>
+    <string name="theme_seed_clear">Clear custom color</string>
     <string name="theme_section_peek">Privacy preview</string>
     <string name="theme_mask_pwd_title">Mask passwords in lists</string>
     <string name="theme_mask_pwd_sub">Hide password fields with dots by default</string>

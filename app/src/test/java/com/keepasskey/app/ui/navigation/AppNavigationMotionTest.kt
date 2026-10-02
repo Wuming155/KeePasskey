@@ -355,9 +355,10 @@ class AppNavigationMotionTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/generator/GeneratorDisplayCard.kt"
         )
 
-        /** 内容层列表站点（`ISSUE-P3-261` AC⑧）。 */
+        /** 内容层列表站点（`ISSUE-P3-261` AC⑧）。§280 规模门禁同批：列表装配自
+         * VaultListScreen 逐字迁至同包 VaultListContent，断言定位随之改指内容装配文件。 */
         private val LIST_SOURCES = listOf(
-            "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListScreen.kt",
+            "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListContent.kt",
             "app/src/main/java/com/keepasskey/app/ui/screens/authenticator/AuthenticatorScreen.kt"
         )
 

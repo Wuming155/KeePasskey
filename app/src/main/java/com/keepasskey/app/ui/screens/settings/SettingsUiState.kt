@@ -180,6 +180,8 @@ data class SettingsUiState(
     val appLanguage: com.keepasskey.app.data.repository.AppLanguage = com.keepasskey.app.data.repository.AppLanguage.SYSTEM,
     val oledBlackOptimization: Boolean = false,
     val dynamicColorEnabled: Boolean = false, // Material You 动态取色 (Android 12+)
+    // ISSUE-P3-441 AC①：自定义种子色（ARGB，null = 未启用；搜索/主题面板回显）
+    val customSeedColor: Long? = null,
     val showUsernameInList: Boolean = true,
     val showOtpInList: Boolean = true,
     val showPasskeyBadge: Boolean = true,

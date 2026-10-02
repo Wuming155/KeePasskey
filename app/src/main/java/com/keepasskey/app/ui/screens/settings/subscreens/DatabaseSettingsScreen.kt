@@ -51,6 +51,8 @@ fun DatabaseSettingsScreen(
     // TASK-13 整改：导出/模板动作经 ViewModel 真实序列化与 SAF 落盘
     exportFeedback: UiMessage? = null,
     onClearExportFeedback: () -> Unit = {},
+    // ISSUE-P3-437 AC②：导出长操作进行中（序列化 + SAF 写盘期间呈现过程反馈段）
+    isExportInProgress: Boolean = false,
     onExportKdbx: (android.net.Uri) -> Unit = {},
     // ISSUE-P3-110：明文导出必须携带确认令牌（由本屏二次确认弹窗经 ExportConfirmationPolicy 签发）
     onExportXml: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
@@ -236,6 +238,14 @@ fun DatabaseSettingsScreen(
             // TASK-13 整改：导出/模板动作结果反馈（点击清除），真实动作的结果如实上浮。
             // ISSUE-P2-353 AC④：错误样式改读类型化 isError 字段——按文案 contains("失败")
             // 判定在英文语言下会把失败条目渲染成成功样式。
+            // ISSUE-P3-437 AC②：导出进行中先挂过程反馈段（与解锁/云同步共用同一通道）。
+            if (isExportInProgress) {
+                item {
+                    com.keepasskey.app.ui.components.OperationProgressSection(
+                        label = stringResource(R.string.dbset_export_running)
+                    )
+                }
+            }
             exportFeedback?.let { feedback ->
                 item {
                     DatabaseFeedbackItem(

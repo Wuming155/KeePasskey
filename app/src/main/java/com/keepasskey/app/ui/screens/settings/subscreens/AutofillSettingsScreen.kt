@@ -103,6 +103,13 @@ fun AutofillSettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ISSUE-P3-445 AC①：通道选择高困惑点一次性可关闭提示（关闭态持久化，非模态）
+            item {
+                com.keepasskey.app.ui.components.DismissibleHelpTip(
+                    tip = com.keepasskey.app.ui.components.HelpTip.AUTOFILL_CHANNEL
+                )
+            }
+
             // 1. Android 系统级凭据提供程序 (Credential Provider)
             item {
                 AutofillSectionHeader(R.string.autofill_section_provider)

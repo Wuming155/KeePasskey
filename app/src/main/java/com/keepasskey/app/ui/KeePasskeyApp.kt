@@ -97,7 +97,8 @@ fun KeePasskeyApp() {
             themeMode = appSettings.themeMode,
             themePalette = appSettings.themePalette,
             oledBlack = appSettings.oledBlackOptimization,
-            dynamicColorEnabled = appSettings.dynamicColorEnabled
+            dynamicColorEnabled = appSettings.dynamicColorEnabled,
+            customSeedColor = appSettings.customSeedColor
         ) {
             val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()

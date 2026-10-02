@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.keepasskey.app.ui.theme.AppThemeMode
@@ -89,6 +90,8 @@ class RealSettingsRepository @Inject constructor(
         themePalette = enumValueOrDefault(prefs[KEY_THEME_PALETTE], AppThemePalette.SAPPHIRE),
         oledBlackOptimization = prefs[KEY_OLED_BLACK] ?: false,
         dynamicColorEnabled = prefs[KEY_DYNAMIC_COLOR] ?: false,
+        // ISSUE-P3-441 AC①：自定义种子色（null = 未启用）
+        customSeedColor = prefs[KEY_CUSTOM_SEED_COLOR],
         appLanguage = enumValueOrDefault(prefs[KEY_APP_LANGUAGE], AppLanguage.SYSTEM),
         // ISSUE-P2-212：与 UserSettings 出厂默认一致——未持久化过即视为关闭
         biometricEnabled = prefs[KEY_BIOMETRIC_ENABLED] ?: false,
@@ -139,9 +142,34 @@ class RealSettingsRepository @Inject constructor(
      * 动态取色生效期间 UI 侧调色盘整体置灰不可点，本互斥写是**兜底不变量**：
      * 任何路径写入调色盘后，配色来源必然收敛回品牌调色盘。
      */
+    /**
+     * ISSUE-P3-263 / PD-30（候选 A「互斥单选」）：调色盘与动态取色同属「配色来源」单维度，
+     * 点选任一调色盘即在**同一次 DataStore 原子事务**内幂等关闭 `dynamic_color_enabled`，
+     * 杜绝「两个偏好同时看似生效」的存储态（整改前两键各写各的、互不感知）。
+     * 动态取色生效期间 UI 侧调色盘整体置灰不可点，本互斥写是**兜底不变量**：
+     * 任何路径写入调色盘后，配色来源必然收敛回品牌调色盘。
+     *
+     * ISSUE-P3-441 AC①：三态互斥补全——点选调色盘**并清除**自定义种子色
+     * （否则关掉动态取色后会意外落回 CUSTOM 而非所选调色盘）。
+     */
     override suspend fun setThemePalette(themePalette: AppThemePalette) = edit {
         it[KEY_THEME_PALETTE] = themePalette.name
         it[KEY_DYNAMIC_COLOR] = false
+        it.remove(KEY_CUSTOM_SEED_COLOR)
+    }
+
+    /**
+     * ISSUE-P3-441 AC①：设置/清除自定义种子色（ARGB；null = 清除）。
+     * 非 null 写入在同一原子事务内幂等关闭动态取色（PD-30 三态互斥兜底），
+     * 与 setThemePalette 的互斥写同口径。
+     */
+    override suspend fun setCustomSeedColor(seed: Long?) = edit {
+        if (seed == null) {
+            it.remove(KEY_CUSTOM_SEED_COLOR)
+        } else {
+            it[KEY_CUSTOM_SEED_COLOR] = seed
+            it[KEY_DYNAMIC_COLOR] = false
+        }
     }
 
     override suspend fun setOledBlackOptimization(enabled: Boolean) =
@@ -266,6 +294,8 @@ class RealSettingsRepository @Inject constructor(
         private val KEY_THEME_PALETTE = stringPreferencesKey("theme_palette")
         private val KEY_OLED_BLACK = booleanPreferencesKey("oled_black_optimization")
         private val KEY_DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color_enabled")
+        // ISSUE-P3-441：自定义种子色（ARGB Long；缺失键 = 未启用）
+        private val KEY_CUSTOM_SEED_COLOR = longPreferencesKey("custom_seed_color")
         private val KEY_APP_LANGUAGE = stringPreferencesKey("app_language")
         private val KEY_BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
         private val KEY_AUTO_LOCK_BACKGROUND = booleanPreferencesKey("auto_lock_background")

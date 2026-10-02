@@ -19,13 +19,25 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(themeMode = themeMode) }
     }
 
-    /** ISSUE-P3-263 / PD-30（候选 A）：与生产 DataStore 语义一致——点选调色盘即幂等关闭动态取色 */
+    /** ISSUE-P3-263 / PD-30（候选 A）：与生产 DataStore 语义一致——点选调色盘即幂等关闭动态取色，
+     * ISSUE-P3-441：并清除自定义种子色（三态互斥） */
     override suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette) {
-        settingsFlow.update { it.copy(themePalette = themePalette, dynamicColorEnabled = false) }
+        settingsFlow.update { it.copy(themePalette = themePalette, dynamicColorEnabled = false, customSeedColor = null) }
     }
 
     override suspend fun setDynamicColorEnabled(enabled: Boolean) {
         settingsFlow.update { it.copy(dynamicColorEnabled = enabled) }
+    }
+
+    /** ISSUE-P3-441：种子色写入幂等关闭动态取色；null 清除（与生产 DataStore 语义一致） */
+    override suspend fun setCustomSeedColor(seed: Long?) {
+        settingsFlow.update {
+            if (seed == null) {
+                it.copy(customSeedColor = null)
+            } else {
+                it.copy(customSeedColor = seed, dynamicColorEnabled = false)
+            }
+        }
     }
 
     override suspend fun setOledBlackOptimization(enabled: Boolean) {

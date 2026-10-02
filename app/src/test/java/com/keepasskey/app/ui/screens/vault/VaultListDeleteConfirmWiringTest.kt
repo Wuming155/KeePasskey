@@ -17,7 +17,10 @@ class VaultListDeleteConfirmWiringTest {
 
     @Test
     fun `顶栏批量删除与行内永久删除都必须先置位确认对话框`() {
-        val screen = readSource(SCREEN)
+        // §280 规模门禁同批：Scaffold / LazyColumn 装配自 VaultListScreen 逐字迁至同包
+        // VaultListContent（顶栏批量删除置位 / 行内永久删除置位随迁），故按
+        // 「页面壳 + 内容装配」**并集**扫描——断言与计数逐字保留，只放宽定位范围。
+        val screen = readSource(SCREEN) + "\n" + readSource(CONTENT)
         assertTrue(
             "顶栏删除图标只能置位确认开关，不得直连执行体",
             screen.contains("onBatchDelete = { dialogs.showBatchDeleteConfirm = true }")
@@ -162,6 +165,8 @@ class VaultListDeleteConfirmWiringTest {
     private companion object {
         const val SCREEN =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListScreen.kt"
+        const val CONTENT =
+            "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListContent.kt"
         const val HOST =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListDialogHost.kt"
         /** ISSUE-P3-359 AC④：屏级效果件退役后，撤销编排的现场是外壳全局宿主 */

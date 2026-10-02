@@ -65,7 +65,10 @@ class OneTapInteractionWiringTest {
     fun `列表行验证码徽标可点复制且 HOTP 被排除`() {
         val layouts = stripComments(readSource(VAULT_ROW_LAYOUTS))
         val controller = stripComments(readSource(VAULT_ACTION_CONTROLLER))
-        val screen = stripComments(readSource(VAULT_LIST_SCREEN))
+        // §280 规模门禁同批：Scaffold / LazyColumn 装配自 VaultListScreen 逐字迁至同包
+        // VaultListContent，故按「页面壳 + 内容装配」**并集**扫描（断言逐字保留，只放宽定位范围）
+        val screen = stripComments(readSource(VAULT_LIST_SCREEN)) +
+            "\n" + stripComments(readSource(VAULT_LIST_CONTENT))
 
         assertTrue(
             "徽标必须挂 clickable（否则复制验证码仍须进详情页）",
@@ -303,6 +306,8 @@ class OneTapInteractionWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListActionController.kt"
         const val VAULT_LIST_SCREEN =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListScreen.kt"
+        const val VAULT_LIST_CONTENT =
+            "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListContent.kt"
         const val SECURITY_SCREEN =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/SecuritySettingsScreen.kt"
         const val SECURITY_DIALOGS =

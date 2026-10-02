@@ -82,6 +82,13 @@ internal class SettingsExportController(
      * ISSUE-P2-353 AC④：失败反馈一律带 `isError = true`，展示层据此上错误样式、不读文案。 */
     val exportFeedback: StateFlow<UiMessage?> = exportFeedbackFlow.asStateFlow()
 
+    // ISSUE-P3-437 AC②：导出长操作（序列化 + SAF 写盘）进行中标记——
+    // 导出此前只有终态反馈、零过程反馈，此状态由库属性页渲染过程反馈段
+    private val exportInProgressFlow = MutableStateFlow(false)
+
+    /** true = 正处于任一导出动作的序列化/写盘期间（导出进行中行禁用由展示层裁决） */
+    val isExportInProgress: StateFlow<Boolean> = exportInProgressFlow.asStateFlow()
+
     fun clearExportFeedback() {
         exportFeedbackFlow.value = null
     }
@@ -188,49 +195,55 @@ internal class SettingsExportController(
         bytesProvider: suspend () -> com.keepasskey.core.result.KdbxResult<ByteArray>
     ): UiMessage {
         val rawTarget = targetUri.toString()
-        val result = bytesProvider()
-        if (!result.isSuccess) {
-            val failure = result as com.keepasskey.core.result.KdbxResult.Failure
-            exportAuditRecorder.record(artifactKind, rawTarget, success = false)
-            // ISSUE-P2-20：序列化已失败，SAF 目标必然仍是空文档——清理不留 0 字节残留
-            SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-            return UiMessage(R.string.op_failed, listOf(failure.message), isError = true)
-        }
-        val bytes = result.getOrNull()
-        val resolver = appContext?.contentResolver
-        // ISSUE-P3-86（审计 F-02，MEDIUM）：整库序列化缓冲用毕必须清零——明文 XML / CSV 尤甚
-        // （该数组是**整库全部字段值**的明文副本）。清零置于 finally，覆盖「写盘成功 / 写盘失败 /
-        // 解析器抛异常」三态，且**晚于** `os.write(bytes)`（写前清零会导出全零内容）。
-        // ISSUE-P3-296：此处 `bytes` 是 `toByteArray()` 的**复制**交付副本（R2），由本 finally 负责；
-        // 导出器内部的第二份整份明文字节已由 `WipableByteArrayOutputStream.wipe()` 在
-        // `KdbxCsvExporter` / `KeePassXmlExporter` 的 `finally` 内擦除，两层责任见契约 §4 #10/#19。
-        val written = try {
-            if (bytes != null && resolver != null) {
-                try {
-                    resolver.openOutputStream(targetUri)?.use { os ->
-                        os.write(bytes)
-                        os.flush()
-                        true
-                    } ?: false
-                } catch (e: Exception) {
-                    debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
+        // ISSUE-P3-437 AC②：进入序列化/写盘即置进行中，终态（成功/失败）统一撤下
+        exportInProgressFlow.value = true
+        try {
+            val result = bytesProvider()
+            if (!result.isSuccess) {
+                val failure = result as com.keepasskey.core.result.KdbxResult.Failure
+                exportAuditRecorder.record(artifactKind, rawTarget, success = false)
+                // ISSUE-P2-20：序列化已失败，SAF 目标必然仍是空文档——清理不留 0 字节残留
+                SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
+                return UiMessage(R.string.op_failed, listOf(failure.message), isError = true)
+            }
+            val bytes = result.getOrNull()
+            val resolver = appContext?.contentResolver
+            // ISSUE-P3-86（审计 F-02，MEDIUM）：整库序列化缓冲用毕必须清零——明文 XML / CSV 尤甚
+            // （该数组是**整库全部字段值**的明文副本）。清零置于 finally，覆盖「写盘成功 / 写盘失败 /
+            // 解析器抛异常」三态，且**晚于** `os.write(bytes)`（写前清零会导出全零内容）。
+            // ISSUE-P3-296：此处 `bytes` 是 `toByteArray()` 的**复制**交付副本（R2），由本 finally 负责；
+            // 导出器内部的第二份整份明文字节已由 `WipableByteArrayOutputStream.wipe()` 在
+            // `KdbxCsvExporter` / `KeePassXmlExporter` 的 `finally` 内擦除，两层责任见契约 §4 #10/#19。
+            val written = try {
+                if (bytes != null && resolver != null) {
+                    try {
+                        resolver.openOutputStream(targetUri)?.use { os ->
+                            os.write(bytes)
+                            os.flush()
+                            true
+                        } ?: false
+                    } catch (e: Exception) {
+                        debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
+                        false
+                    }
+                } else {
                     false
                 }
+            } finally {
+                bytes?.fill(0)
+            }
+            // ISSUE-P2-10 (ZT-15)：审计留痕——只记时间（缓冲统一加戳）、导出类型与目标脱敏标识
+            exportAuditRecorder.record(artifactKind, rawTarget, success = written)
+            return if (written) {
+                UiMessage(successMessageRes)
             } else {
-                false
+                // ISSUE-P2-20：写盘失败（含会话熔断/流不可得/异常），清理空或残缺目标文档，
+                // 不向用户目录静默遗留 0 字节产物
+                SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
+                UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_saf_write_failed)), isError = true)
             }
         } finally {
-            bytes?.fill(0)
-        }
-        // ISSUE-P2-10 (ZT-15)：审计留痕——只记时间（缓冲统一加戳）、导出类型与目标脱敏标识
-        exportAuditRecorder.record(artifactKind, rawTarget, success = written)
-        return if (written) {
-            UiMessage(successMessageRes)
-        } else {
-            // ISSUE-P2-20：写盘失败（含会话熔断/流不可得/异常），清理空或残缺目标文档，
-            // 不向用户目录静默遗留 0 字节产物
-            SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
-            UiMessage(R.string.op_failed, listOf(strings.get(R.string.export_saf_write_failed)), isError = true)
+            exportInProgressFlow.value = false
         }
     }
 }

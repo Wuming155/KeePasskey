@@ -37,6 +37,9 @@ data class UserSettings(
     val oledBlackOptimization: Boolean = false,
     // Material You 动态取色（Android 12+ 生效，开启后覆盖品牌调色盘）
     val dynamicColorEnabled: Boolean = false,
+    // ISSUE-P3-441 AC①：自定义种子色（ARGB，null = 未启用；生效时配色来源为 CUSTOM）。
+    // PD-30 三态互斥由存储不变量兜底：写入种子色即关动态取色，点选调色盘即清种子色
+    val customSeedColor: Long? = null,
     val appLanguage: AppLanguage = AppLanguage.SYSTEM,
     // ISSUE-P2-212：默认**关闭**——生物识别解锁必须由用户在设置页手动开启，
     // 且开启动作本身要当场通过一次强生物识别验证（此前默认 true 却因无封印凭据
@@ -96,6 +99,12 @@ interface SettingsRepository {
     suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette)
     suspend fun setOledBlackOptimization(enabled: Boolean)
     suspend fun setDynamicColorEnabled(enabled: Boolean)
+
+    /**
+     * ISSUE-P3-441 AC①：设置/清除自定义种子色（ARGB；null = 清除）。
+     * 与 PD-30 同口径：非 null 写入须在同一原子事务内幂等关闭动态取色（三态互斥兜底）。
+     */
+    suspend fun setCustomSeedColor(seed: Long?)
     suspend fun setAppLanguage(language: AppLanguage)
     suspend fun setBiometricEnabled(enabled: Boolean)
     suspend fun setAutoLockBackground(enabled: Boolean)

@@ -53,4 +53,41 @@ class SettingsPaletteMutualExclusionTest {
 
         assertTrue(repository.getSettings().first().dynamicColorEnabled)
     }
+
+    // ===== ISSUE-P3-441 AC①：三态互斥（调色盘 / 动态取色 / 自定义种子色） =====
+
+    @Test
+    fun `写入种子色即互斥关闭动态取色`() = runTest {
+        val repository = FakeSettingsRepository()
+        repository.setDynamicColorEnabled(true)
+
+        repository.setCustomSeedColor(0xFF00897B)
+
+        val settings = repository.getSettings().first()
+        assertFalse("写入种子色必须关闭动态取色（PD-30 三态互斥）", settings.dynamicColorEnabled)
+        assertEquals(0xFF00897B, settings.customSeedColor)
+    }
+
+    @Test
+    fun `清除种子色不影响其余配色偏好`() = runTest {
+        val repository = FakeSettingsRepository()
+        repository.setCustomSeedColor(0xFF00897B)
+
+        repository.setCustomSeedColor(null)
+
+        val settings = repository.getSettings().first()
+        assertEquals(null, settings.customSeedColor)
+    }
+
+    @Test
+    fun `点选调色盘即清除自定义种子色`() = runTest {
+        val repository = FakeSettingsRepository()
+        repository.setCustomSeedColor(0xFF00897B)
+
+        repository.setThemePalette(AppThemePalette.EMERALD)
+
+        val settings = repository.getSettings().first()
+        assertEquals("点选调色盘必须清除种子色（否则关动态取色后意外落回 CUSTOM）", null, settings.customSeedColor)
+        assertFalse(settings.dynamicColorEnabled)
+    }
 }

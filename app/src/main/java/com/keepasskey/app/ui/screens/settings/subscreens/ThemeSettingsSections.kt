@@ -171,17 +171,21 @@ private fun OledBlackToggleRow(
 }
 
 /**
- * 2. 现代化内置主题调色盘（5 套全色相风格）。
+ * 2. 现代化内置主题调色盘（5 套全色相风格 + ISSUE-P3-441 扩 3 套）。
  *
  * ISSUE-P3-263 / PD-30（候选 A「互斥单选」）：配色来源判据与 [KeePasskeyTheme] 共用同一
- * 纯函数 [resolveColorSource]——动态取色生效期间调色盘 5 项整体置灰不可点、
- * 不呈现任何「已选中」，并附行内原因说明与一步切回动作（关闭动态取色即恢复品牌调色盘，
+ * 纯函数 [resolveColorSource]——动态取色生效期间调色盘与自定义种子色整体置灰不可点、
+ * 不呈现任何「已选中」，并附行内原因说明与一步切回动作（关闭动态取色即恢复原色源，
  * 偏好值保留不动）。
+ *
+ * ISSUE-P3-441 AC①：调色盘条目之后追加「自定义」形态（第三配色来源）——
+ * 当前无自定义色时展示引导态（点按开种子色选择器）；已设置时以生成色预览 + 选中角标呈现。
  */
 internal fun LazyListScope.themePaletteSection(
     uiState: SettingsUiState,
     onPaletteSelected: (AppThemePalette) -> Unit,
-    onSwitchToBrandPalette: () -> Unit
+    onSwitchToBrandPalette: () -> Unit,
+    onCustomSeedSelected: (Long?) -> Unit = {}
 ) {
     item { ThemeSectionTitle(stringResource(R.string.theme_section_palette)) }
 
@@ -193,9 +197,13 @@ internal fun LazyListScope.themePaletteSection(
             AppThemeMode.SYSTEM -> isSystemInDarkTheme()
         }
         // AC① 判据单点化：与 Theme 层共用 resolveColorSource，禁止另写「开关 × SDK」推导
-        val paletteUsable =
-            resolveColorSource(uiState.dynamicColorEnabled, Build.VERSION.SDK_INT) ==
-                ColorSource.BRAND_PALETTE
+        val colorSource = resolveColorSource(
+            dynamicColorEnabled = uiState.dynamicColorEnabled,
+            seedColor = uiState.customSeedColor,
+            sdkInt = Build.VERSION.SDK_INT
+        )
+        val paletteUsable = colorSource == ColorSource.BRAND_PALETTE
+        val customUsable = colorSource == ColorSource.CUSTOM
 
         BentoCard(
             modifier = Modifier.fillMaxWidth(),
@@ -209,7 +217,7 @@ internal fun LazyListScope.themePaletteSection(
                 )
 
                 // AC③：置灰必须附原因说明 + 一步切换动作，不得让用户靠试错猜
-                if (!paletteUsable) {
+                if (colorSource == ColorSource.DYNAMIC) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -236,6 +244,15 @@ internal fun LazyListScope.themePaletteSection(
                         onClick = { onPaletteSelected(palette) }
                     )
                 }
+
+                // ISSUE-P3-441 AC①：「自定义」形态（配色来源第三态，与调色盘/动态取色互斥）
+                ThemeCustomSeedCard(
+                    seedColor = uiState.customSeedColor,
+                    isSelected = customUsable,
+                    isDarkTheme = previewDarkTheme,
+                    enabled = colorSource != ColorSource.DYNAMIC,
+                    onSelect = { onCustomSeedSelected(it) }
+                )
             }
         }
     }

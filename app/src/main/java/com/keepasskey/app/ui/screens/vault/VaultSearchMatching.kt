@@ -2,6 +2,8 @@ package com.keepasskey.app.ui.screens.vault
 
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.app.ui.screens.settings.SearchAdvancedOptions
+import com.keepasskey.app.ui.screens.settings.SearchField
 import com.keepasskey.app.ui.screens.settings.SearchMatchMode
 
 /**
@@ -24,6 +26,12 @@ import com.keepasskey.app.ui.screens.settings.SearchMatchMode
  * ISSUE-P3-352 AC②：子串未命中时追加**域名感知档**（[domainTierMatches]，加性 OR，
  * 不放宽任何子串口径）——见该函数 KDoc；凭据供给 / 签名侧域判定零改动。
  *
+ * ISSUE-P3-439 AC①②：高级选项（[SearchAdvancedOptions]，默认值＝现行为零变化）：
+ * - 字段范围勾选（[SearchAdvancedOptions.fields]）收窄候选文本类别；受保护字段键仍可命中
+ *   （勾选自定义字段时），保护口径零改动；域名感知档独立于字段范围（复用 URL / rpId 主机名，
+ *   属 ISSUE-P3-352 既有档，不在本条收窄面内）；
+ * - 大小写档（[SearchAdvancedOptions.caseSensitive]，默认不敏感＝现状）。
+ *
  * 成本（AC③ 留证口径）：候选文本序列惰性求值；ALL_TERMS 最坏 O(词数 × 文本量)，
  * 与 CONTAINS 同阶（词数即查询长度 / 平均词长），且搜索流已有 300ms 防抖。
  * 域名感知档仅在子串未命中且查询含 `.` 时求值（多数查询在短路守卫处零开销）。
@@ -31,31 +39,35 @@ import com.keepasskey.app.ui.screens.settings.SearchMatchMode
 internal fun matchesSearchQuery(
     entry: UiVaultEntry,
     query: String,
-    mode: SearchMatchMode = SearchMatchMode.CONTAINS
+    mode: SearchMatchMode = SearchMatchMode.CONTAINS,
+    options: SearchAdvancedOptions = SearchAdvancedOptions()
 ): Boolean {
     if (query.isBlank()) return true
     return when (mode) {
-        SearchMatchMode.CONTAINS -> entry.matchesTerm(query)
+        SearchMatchMode.CONTAINS -> entry.matchesTerm(query, options)
         SearchMatchMode.ALL_TERMS ->
-            query.trim().split(WHITESPACE_RUN).all { entry.matchesTerm(it) }
+            query.trim().split(WHITESPACE_RUN).all { entry.matchesTerm(it, options) }
     }
 }
 
-/** 单词（或单串）对候选文本的大小写不敏感子串匹配。 */
-private fun UiVaultEntry.matchesTerm(term: String): Boolean =
-    searchableTexts().any { it.contains(term, ignoreCase = true) } ||
+/** 单词（或单串）对候选文本的子串匹配（大小写敏感档由 [SearchAdvancedOptions.caseSensitive] 裁决）。 */
+private fun UiVaultEntry.matchesTerm(term: String, options: SearchAdvancedOptions): Boolean =
+    searchableTexts(options.fields)
+        .any { it.contains(term, ignoreCase = !options.caseSensitive) } ||
         domainTierMatches(term, this)
 
 /** 参与搜索命中的候选文本（受保护自定义字段只出键、不出值——见 [matchesSearchQuery] KDoc）。 */
-private fun UiVaultEntry.searchableTexts(): Sequence<String> = sequence {
-    yield(title)
-    yield(username)
-    yield(url)
-    yield(notes)
-    yieldAll(tags)
-    for (field in customFields) {
-        yield(field.key)
-        if (!field.isProtected) yield(field.value)
+private fun UiVaultEntry.searchableTexts(fields: Set<SearchField>): Sequence<String> = sequence {
+    if (SearchField.TITLE in fields) yield(title)
+    if (SearchField.USERNAME in fields) yield(username)
+    if (SearchField.URL in fields) yield(url)
+    if (SearchField.NOTES in fields) yield(notes)
+    if (SearchField.TAGS in fields) yieldAll(tags)
+    if (SearchField.CUSTOM_FIELDS in fields) {
+        for (field in customFields) {
+            yield(field.key)
+            if (!field.isProtected) yield(field.value)
+        }
     }
 }
 

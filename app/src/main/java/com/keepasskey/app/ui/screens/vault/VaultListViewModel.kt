@@ -86,7 +86,10 @@ class VaultListViewModel @Inject constructor(
     // ISSUE-P3-30：子库只读投影通道（生产 DI 注入 @Singleton 单例）。
     // null 仅用于不涉子库的纯 JVM 单测；无该通道时子库分区恒为空表，不影响根库列表任何行为。
     private val childDatabaseSessionManager: ChildDatabaseSessionManager? = null,
-    private val createEntryPrefill: com.keepasskey.app.ui.screens.edit.CreateEntryPrefillHost? = null
+    private val createEntryPrefill: com.keepasskey.app.ui.screens.edit.CreateEntryPrefillHost? = null,
+    // ISSUE-P3-439：高级搜索选项的持久化写通道（与读通道 ExtendedSettingsSource 同一仓库）。
+    // null 仅用于纯 JVM 单测；null 时选项仍会话内生效但不落盘（与偏好通道缺位语义一致）
+    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -118,13 +121,20 @@ class VaultListViewModel @Inject constructor(
         extendedSettingsSource?.load() ?: ExtendedSettings()
     private val extendedSettingsFlow = MutableStateFlow(initialExtendedSettings)
 
+    // ISSUE-P3-439：高级搜索选项（构造期从偏好快照装载；用户改动即写回偏好通道）。
+    // 状态与持久化编排在同包 [VaultSearchAdvancedStore]（§280 规模门禁同批拆出，语义零变化）
+    internal val searchAdvancedStore =
+        VaultSearchAdvancedStore(initialExtendedSettings.searchAdvanced, extendedSettingsStore)
+
     // ISSUE-P3-17：autoActivateSearchOnOpen 是「打开数据库后」的一次性意图——仅在 ViewModel
     // 构造（= 解锁后首次进入列表页）时装载，页面返回 / 重组不重复装载，避免反复抢焦点弹输入法
     private val autoActivateSearchFlow =
         MutableStateFlow(initialExtendedSettings.autoActivateSearchOnOpen)
 
-    // ISSUE-P3-29：写操作 / 剪贴板编排（批量状态由该协作者持有，对外只读暴露）
-    private val actions = VaultListActionController(
+    // ISSUE-P3-29：写操作 / 剪贴板编排（批量状态由该协作者持有，对外只读暴露）。
+    // 对外门面（copyX / 批量 / 分组 / 回收站 / 通行密钥导入上行）在同包
+    // VaultListViewModelActions.kt（§280 规模门禁同批逐字迁出，internal 供扩展访问）
+    internal val actions = VaultListActionController(
         repository = vaultRepository,
         scope = viewModelScope,
         strings = strings,
@@ -138,8 +148,8 @@ class VaultListViewModel @Inject constructor(
         )
     )
 
-    // ISSUE-P3-29：同步指示与下拉刷新编排
-    private val syncController = VaultListSyncController(
+    // ISSUE-P3-29：同步指示与下拉刷新编排（门面在同包 VaultListViewModelActions.kt）
+    internal val syncController = VaultListSyncController(
         syncCoordinator = syncCoordinator,
         scope = viewModelScope,
         strings = strings,
@@ -147,8 +157,9 @@ class VaultListViewModel @Inject constructor(
     )
 
     // ISSUE-P3-29：TOTP 实时倒计时（种子只在数据层解析）
-    // ISSUE-P2-89：本协作者的两条输出均**不进整页状态**，经下方窄通道直接给列表行徽标
-    private val totpTracker = TotpCountdownTracker(
+    // ISSUE-P2-89：本协作者的两条输出均**不进整页状态**，经下方窄通道直接给列表行徽标。
+    // 窄通道的对外暴露（totpNowSeconds / totpLiveCodes）在同包 VaultListTotpChannels.kt
+    internal val totpTracker = TotpCountdownTracker(
         vaultRepository = vaultRepository,
         scope = viewModelScope,
         currentEntries = { uiState.value.entries },
@@ -271,6 +282,9 @@ class VaultListViewModel @Inject constructor(
         VaultListSessionState(groupId, params, message)
     }.combine(extendedSettingsFlow) { state, extended ->
         state.copy(extended = extended)
+    }.combine(searchAdvancedStore.state) { state, searchAdvanced ->
+        // ISSUE-P3-439：高级搜索选项以本流为准（用户改动即时生效，不等页面进入刷新）
+        state.copy(extended = state.extended.copy(searchAdvanced = searchAdvanced))
     }.combine(autoActivateSearchFlow) { state, autoActivate ->
         state.copy(autoActivateSearch = autoActivate)
     }.combine(childDatabaseStateFlow) { state, childDatabase ->
@@ -315,25 +329,8 @@ class VaultListViewModel @Inject constructor(
             initialValue = VaultListUiState()
         )
 
-    /**
-     * ISSUE-P2-89 / ISSUE-P3-158：列表行 TOTP 徽标的**秒级刻度**（窄通道）。
-     *
-     * 本流即列表页的秒级节拍本体（`WhileSubscribed` 驱动，见 [TotpCountdownTracker]）：
-     * UI 侧只在渲染徽标处用 `collectAsStateWithLifecycle` 读取，**读取作用域只有徽标本身**，
-     * 故每秒的重组面不再扩散到整页状态与全部列表行；页面不可见时无人订阅，节拍自动停止。
-     *
-     * 下发**刻度**而非「剩余秒数」：倒计时需按各条目自身周期换算，若在下游只给一个
-     * 剩余秒数，等于把「全局 30 秒」这一错误前提固化进通道（ISSUE-P3-158）。
-     */
-    val totpNowSeconds: StateFlow<Long> get() = totpTracker.nowSeconds
-
-    /**
-     * ISSUE-P2-89：列表行 TOTP 徽标的**本周期实时验证码**（窄通道，`entryId → 验证码`）。
-     *
-     * 仅在周期翻转时更新（订阅驱动）。徽标取 `totpLiveCodes[entry.id] ?: entry.totpCode`：
-     * 前者是本周期之码，后者是投影层即时计算的兜底值（条目刚出现、尚未等到下一拍刷新时）。
-     */
-    val totpLiveCodes: StateFlow<Map<String, String>> get() = totpTracker.liveCodes
+    // ISSUE-P2-89 / ISSUE-P3-158：TOTP 窄通道（totpNowSeconds / totpLiveCodes）随拆分
+    // 移至同包 VaultListTotpChannels.kt（KDoc 与判据逐字随迁；§280 规模门禁同批结构性拆分）
 
     /**
      * ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照。
@@ -343,7 +340,10 @@ class VaultListViewModel @Inject constructor(
      */
     fun onScreenEntered() {
         val source = extendedSettingsSource ?: return
-        extendedSettingsFlow.value = source.load()
+        val loaded = source.load()
+        extendedSettingsFlow.value = loaded
+        // ISSUE-P3-439：偏好快照刷新时同步高级搜索选项（设置页与列表页同源）
+        searchAdvancedStore.reload(loaded.searchAdvanced)
     }
 
     /**
@@ -398,90 +398,8 @@ class VaultListViewModel @Inject constructor(
         favoriteOnlyFlow.value = favoriteOnly
     }
 
-    fun copyPassword(entry: UiVaultEntry) = actions.copyPassword(entry)
-
-    fun copyUsername(entry: UiVaultEntry) = actions.copyUsername(entry)
-
-    /** ISSUE-P3-184：列表行徽标一次点击复制当前 TOTP 验证码（HOTP 由 actions 硬拒绝）。 */
-    fun copyTotpCode(entry: UiVaultEntry) = actions.copyTotpCode(entry)
-
-    fun clearUserMessage() {
-        userMessageFlow.value = null
-    }
-
-    // 批量管理操作
-    fun startBatchMode(initialEntryId: String) = actions.startBatchMode(initialEntryId)
-
-    fun toggleEntrySelection(entryId: String) = actions.toggleEntrySelection(entryId)
-
-    fun selectAllEntries() = actions.selectAllEntries()
-
-    fun clearBatchSelection() = actions.clearBatchSelection()
-
-    fun batchMoveSelected(targetGroupId: String?) = actions.batchMoveSelected(targetGroupId)
-
-    fun batchDeleteSelected() = actions.batchDeleteSelected()
-
-    fun undoPendingSoftDelete() = actions.undoBatchDelete() // ISSUE-P2-357 AC②：软删除 Snackbar 的撤销入口
-
-    /** 下拉手势同步触发：真实执行 SyncCoordinator 全量同步（不再使用演示性假桩） */
-    fun triggerPullRefresh() = syncController.triggerPullRefresh()
-
-    /**
-     * `ISSUE-P2-291` AC②：库身份绑定不符待确认位（整库覆盖确认对话框的可见性）。
-     */
-    val pendingBindingTakeover: StateFlow<Boolean> get() = syncController.pendingBindingTakeover
-
-    /** 用户确认整库覆盖云端副本并改绑当前库 */
-    fun confirmBindingTakeover() = syncController.confirmBindingTakeover()
-
-    /** 用户取消整库覆盖（保持本地与云端现状） */
-    fun dismissBindingTakeover() = syncController.dismissBindingTakeover()
-
-    fun createGroup(name: String, iconName: String = "folder") = actions.createGroup(name, iconName)
-
-    fun renameGroup(group: VaultGroup, newName: String) = actions.renameGroup(group, newName)
-
-    fun changeGroupIcon(group: VaultGroup, newIcon: String) = actions.changeGroupIcon(group, newIcon)
-
-    fun deleteGroup(groupId: String) = actions.deleteGroup(groupId)
-
-    fun restoreEntry(entryId: String) = actions.restoreEntry(entryId)
-
-    fun purgeEntry(entryId: String) = actions.purgeEntry(entryId)
-
-    fun emptyRecycleBin() = actions.emptyRecycleBin()
-
-    /**
-     * 顶栏「扫码」解码上行（PD-47 同链路：框架边界 String 已由对话框转 CharArray，
-     * 擦除义务移交写编排）。
-     *
-     * `ISSUE-P3-337` 口径 1：**先分流再处理**——`otpauth:` 走既有 TOTP 链（一字未改），
-     * JSON 形态走通行密钥链（解析后只进确认草案），其余一律如实拒绝。
-     * **禁止回退式猜测**（不得「先按 TOTP 解、失败再按通行密钥解」）：两个解析器都留了
-     * 宽容面，顺序猜错就是把任意文本当口令种子落库、或错拒一把完好凭据。
-     */
-    fun onQrCodeDecoded(decoded: CharArray) {
-        when (ScanPayloadClassifier.classify(decoded)) {
-            ScanPayloadKind.Totp -> actions.addEntryFromScannedOtpauth(decoded)
-            ScanPayloadKind.Passkey -> actions.beginPasskeyImportFromScan(decoded)
-            ScanPayloadKind.Unknown -> actions.rejectUnknownScannedQr(decoded)
-        }
-    }
-
-    /** 待确认的通行密钥导入草案（非空即确认对话框可见；仅内存持有，见 `PasskeyImportDraft`）。 */
-    val pendingPasskeyImport get() = actions.pendingPasskeyImport
-
-    /** 用户在确认对话框点「导入」。 */
-    fun confirmPasskeyImport() = actions.confirmPasskeyImport()
-
-    /** 用户取消导入（草案即刻擦除，不落库不导航）。 */
-    fun dismissPasskeyImport() = actions.dismissPasskeyImport()
-
-    /** 导入成功后待打开的条目 id（一次性消费；只带 id，不承载任何凭据值）。 */
-    val openEntryEditId get() = actions.openEntryEditId
-
-    fun consumeOpenEntryEditId() = actions.consumeOpenEntryEditId()
+    // 复制 / 批量 / 分组 / 回收站 / 通行密钥导入等对外门面随 §280 规模门禁拆分
+    // 逐字迁至同包 VaultListViewModelActions.kt（扩展函数形态，调用点语法不变）
 
     /**
      * 离开密码库页（ViewModel 销毁）时，尚未确认 / 尚未落库的导入草案**必须**擦除：

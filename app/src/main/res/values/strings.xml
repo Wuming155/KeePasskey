@@ -68,6 +68,28 @@
     <string name="unlock_keyfile_selected">已加载密钥文件: %1$s</string>
     <string name="unlock_keyfile_none">未关联密钥文件 (可选)</string>
     <string name="unlock_keyfile_read_failed">无法读取所选密钥文件，请重试</string>
+    <!-- ISSUE-P3-437 AC①：解锁链阶段型过程文案（零敏感载荷，仅过程描述） -->
+    <string name="unlock_stage_reading_keyfile">正在读取密钥文件…</string>
+    <string name="unlock_stage_deriving_keys">正在派生密钥…</string>
+    <string name="unlock_stage_unsealing">正在解封验证…</string>
+    <!-- ISSUE-P3-439：高级搜索选项（字段范围 / 排除已过期 / 大小写档；默认值＝现行为零变化） -->
+    <string name="search_advanced_title">高级搜索</string>
+    <string name="search_field_title">标题</string>
+    <string name="search_field_username">用户名</string>
+    <string name="search_field_url">URL</string>
+    <string name="search_field_notes">备注</string>
+    <string name="search_field_tags">标签</string>
+    <string name="search_field_custom">自定义字段</string>
+    <string name="search_advanced_exclude_expired">排除已过期条目</string>
+    <string name="search_advanced_case_sensitive">区分大小写</string>
+    <!-- ISSUE-P3-445：高困惑点一次性可关闭提示条（非模态；关闭态持久化） -->
+    <string name="help_tip_cloud_sync_test_title">关于「测试连接」</string>
+    <string name="help_tip_cloud_sync_test_body">点按后会先保存当前表单（含刚输入的密码），再向远端发起真实连接验证；未通过不会同步数据，可放心重试。</string>
+    <string name="help_tip_autofill_channel_title">自动填充通道是两层开关</string>
+    <string name="help_tip_autofill_channel_body">应用内开关只控制本应用是否响应系统请求；系统设置里是否已选用 KeePasskey 是另一层，两者都开启才能完成填充。不弹填充时建议先看健康自检。</string>
+    <string name="help_tip_unlock_keyfile_title">关于密钥文件</string>
+    <string name="help_tip_unlock_keyfile_body">密钥文件是与主密码并列的第二解锁因子，须与主密码一同使用；仅在有完整备份时启用——丢失将无法解锁。</string>
+    <string name="help_tip_dismiss">关闭此提示</string>
     <!-- ISSUE-P2-87 / ISSUE-P3-230 的两条一次性提示（unlock_msg_weak_kdf / unlock_msg_no_persisted_permission）
          随其唯一消费方（解锁页直连导入通道，ISSUE-P2-424 退役）一并删除；
          「未获长期访问授权」的告知现由下方列表卡片状态承载 -->
@@ -642,6 +664,7 @@
     <string name="dbset_export_dialog_warning">导出文件为未锁定状态，任何拿到该文件的人都可能暴力破解主密码，请妥善保管</string>
     <string name="dbset_export_kdbx_btn">导出 KDBX (完整副本)</string>
     <string name="dbset_export_kdbx_done">KDBX 文件导出成功</string>
+    <string name="dbset_export_running">正在导出…</string>
     <string name="dbset_export_xml_btn">导出 XML (明文)</string>
     <string name="dbset_export_xml_done">XML 明文导出成功，请立即转移至安全位置</string>
     <!-- ISSUE-P3-73：通用明文 CSV 导出 -->
@@ -940,6 +963,17 @@
     <string name="theme_palette_amber_sunset_sub">温暖琥珀橙，复古氛围</string>
     <string name="theme_palette_obsidian">黑曜石</string>
     <string name="theme_palette_obsidian_sub">克制单色灰，纯粹质感</string>
+    <string name="theme_palette_rose">玫瑰红</string>
+    <string name="theme_palette_rose_sub">浓郁暖红，点缀琥珀</string>
+    <string name="theme_palette_cyan_mist">青雾</string>
+    <string name="theme_palette_cyan_mist_sub">清透青蓝，冷静专业</string>
+    <string name="theme_palette_indigo_night">靛夜</string>
+    <string name="theme_palette_indigo_night_sub">深邃靛蓝，玫紫对比</string>
+    <!-- ISSUE-P3-441：自定义种子色（配色来源第三形态） -->
+    <string name="theme_palette_custom">自定义</string>
+    <string name="theme_palette_custom_sub">以一个种子色生成专属明暗方案</string>
+    <string name="theme_seed_picker_title">选择种子色</string>
+    <string name="theme_seed_clear">清除自定义色</string>
     <string name="theme_section_peek">隐私预览</string>
     <string name="theme_mask_pwd_title">遮罩列表密码</string>
     <string name="theme_mask_pwd_sub">列表中的密码字段默认以圆点隐藏</string>

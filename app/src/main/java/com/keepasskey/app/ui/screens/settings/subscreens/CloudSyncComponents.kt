@@ -210,7 +210,15 @@ internal fun SyncStatusCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        SyncFeedbackMessage(message = uiState.syncFeedbackMessage)
+        // ISSUE-P3-437 AC②：同步进行中挂过程反馈段（跑马灯 + 阶段文案「正在通过 X 连接云端服务器...」），
+        // 与解锁页/导出共用同一通道；终态仍走 SyncFeedbackMessage 反馈条
+        if (uiState.isSyncing) {
+            com.keepasskey.app.ui.components.OperationProgressSection(
+                label = uiState.syncFeedbackMessage?.resolveText()
+            )
+        } else {
+            SyncFeedbackMessage(message = uiState.syncFeedbackMessage)
+        }
 
         SyncActionButtonsRow(
             isSyncing = uiState.isSyncing,
@@ -233,6 +241,17 @@ internal fun SyncStatusCardPreview() {
                 syncStatusText = stringResource(R.string.sync_status_synced),
                 syncLastTime = stringResource(R.string.vault_last_sync_time, "2026-01-02 12:00"),
                 isConnectionVerified = true
+            ),
+            onTriggerSync = {},
+            onTestConnection = {}
+        )
+        // ISSUE-P3-437 AC④：同步进行中（过程反馈段可见态）——跑马灯与阶段文案的间距此前不可见
+        SyncStatusCard(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+                syncStatusText = stringResource(R.string.sync_status_syncing),
+                isSyncing = true,
+                isConnectionVerified = true,
+                syncFeedbackMessage = com.keepasskey.app.ui.model.UiMessage(R.string.sync_feedback_connecting, listOf("WebDAV"))
             ),
             onTriggerSync = {},
             onTestConnection = {}

@@ -140,7 +140,7 @@ internal class BiometricUnlockCoordinator(
         if (activity == null || storage == null || authManager == null || dbId == null) {
             // fail-closed：无真实生物识别上下文时不得伪造解锁成功
             uiState.update {
-                it.copy(isLoading = false, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
+                it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
             }
             fallbackToMasterPasswordMode()
             return
@@ -158,7 +158,8 @@ internal class BiometricUnlockCoordinator(
             return
         }
 
-        uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        // ISSUE-P3-437 AC①：从发起认证到解封全程处于「解封验证」阶段（StrongBox 大载荷可达数十秒）
+        uiState.update { it.copy(isLoading = true, errorMessage = null, loadStage = UnlockStage.UNSEALING) }
 
         try {
             val decryptCipher = authManager.prepareDecryptCipher(dbId, cred.first)
@@ -176,6 +177,8 @@ internal class BiometricUnlockCoordinator(
             uiState.update {
                 it.copy(
                     isLoading = false,
+                    // ISSUE-P3-437 AC①：终态撤下阶段文案（下同，各失败/取消路径同口径）
+                    loadStage = null,
                     isQuickUnlockAvailable = false,
                     errorMessage = UiMessage(R.string.sec_biometric_key_invalidated)
                 )
@@ -185,7 +188,7 @@ internal class BiometricUnlockCoordinator(
             // 禁止静默失败：留痕异常类型（不外传裸异常 message），并由结果路径统一提示
             debugLog.warn(TAG, "生物识别解锁启动异常: ${e.javaClass.simpleName}")
             uiState.update {
-                it.copy(isLoading = false, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
+                it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
             }
             fallbackToMasterPasswordMode()
         }
@@ -211,22 +214,22 @@ internal class BiometricUnlockCoordinator(
         when (result) {
             is BiometricResult.Success -> startBiometricUnlock(result.cipher, storage, dbId, sealedCiphertext)
             is BiometricResult.Cancelled -> {
-                uiState.update { it.copy(isLoading = false, errorMessage = null, infoMessage = null) }
+                uiState.update { it.copy(isLoading = false, loadStage = null, errorMessage = null, infoMessage = null) }
                 fallbackToMasterPasswordMode()
             }
             is BiometricResult.Error -> {
                 // ISSUE-P3-14：errString 为内部诊断标识，仅落日志；用户可见文案经错误码映射到已资源化字符串
                 debugLog.warn(TAG, "生物识别认证失败: code=${result.errorCode}")
                 uiState.update {
-                    it.copy(isLoading = false, errorMessage = BiometricFailureMessagePolicy.of(result))
+                    it.copy(isLoading = false, loadStage = null, errorMessage = BiometricFailureMessagePolicy.of(result))
                 }
                 fallbackToMasterPasswordMode()
             }
             is BiometricResult.Failed -> {
                 // ISSUE-P2-355 AC①：快速解锁比对失败不再静默——置失败提示并回落主密码模式
-                // （原实现在 QUICK 模式仅置 errorMessage，卡片无错误槽位 ⇒ 用户只见按钮复原）
+                // （原实现在 QUICK 模式仅置 errorMessage，卡片无错误槽位 ⇒ 全程静默）
                 uiState.update {
-                    it.copy(isLoading = false, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
+                    it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
                 }
                 fallbackToMasterPasswordMode()
             }
@@ -247,7 +250,7 @@ internal class BiometricUnlockCoordinator(
         if (authedCipher == null) {
             // ISSUE-P2-355 AC①：授权 Cipher 缺失此前连消息都不设、也不回落 ⇒ 静默消失
             uiState.update {
-                it.copy(isLoading = false, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
+                it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
             }
             fallbackToMasterPasswordMode()
             return
@@ -271,6 +274,7 @@ internal class BiometricUnlockCoordinator(
                 uiState.update {
                     it.copy(
                         isLoading = false,
+                        loadStage = null,
                         isQuickUnlockAvailable = false,
                         errorMessage = UiMessage(R.string.unlock_error_invalid_password)
                     )
@@ -302,11 +306,15 @@ internal class BiometricUnlockCoordinator(
     ) {
         val payload = BiometricSealedPayloadCodec.decode(decryptedBytes)
         // ③ 现读一次：仅在「载荷没带密钥文件且会话驻留也没有」时才走 IO 重读
+        // （ISSUE-P3-437 AC①：现读期间呈现「正在读取密钥文件…」阶段文案）
         if (payload.keyFileData == null && sessionKeyFileData() == null) {
+            uiState.update { it.copy(loadStage = UnlockStage.READING_KEY_FILE) }
             restoreRememberedKeyFile?.invoke()
         }
         val legacyKeyFileInPayload = payload.keyFileData != null
         try {
+            // ISSUE-P3-437 AC①：进入 unlockActiveDatabase 管线即处于 KDF 派生段
+            uiState.update { it.copy(loadStage = UnlockStage.DERIVING_KEYS) }
             when (val unlockResult = vaultRepository.unlockActiveDatabase(
                 payload.passwordChars,
                 // ①存量载荷自带 → ②/③会话驻留或记忆现读（字节归 [KeyFileSessionCoordinator]
@@ -328,6 +336,7 @@ internal class BiometricUnlockCoordinator(
                     uiState.update {
                         it.copy(
                             isLoading = false,
+                            loadStage = null,
                             // ISSUE-P3-01：生物识别解锁成功同样用尽自动唤起机会（终态不可逆）
                             biometricAutoPrompt = BiometricAutoPrompt.CONSUMED
                         )
@@ -343,6 +352,7 @@ internal class BiometricUnlockCoordinator(
                     uiState.update {
                         it.copy(
                             isLoading = false,
+                            loadStage = null,
                             isQuickUnlockAvailable = false,
                             errorMessage = UiMessage(R.string.unlock_error_invalid_password)
                         )

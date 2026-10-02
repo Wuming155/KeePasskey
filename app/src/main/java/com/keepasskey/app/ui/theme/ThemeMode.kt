@@ -15,10 +15,11 @@ enum class AppThemeMode(@StringRes val displayNameRes: Int) {
 }
 
 /**
- * 配色来源（ISSUE-P3-263 / PD-30，候选 A「互斥单选」）。
+ * 配色来源（ISSUE-P3-263 / PD-30，候选 A「互斥单选」；ISSUE-P3-441 AC① 扩第三形态）。
  *
- * [DYNAMIC]：系统壁纸动态取色（Material You）实际生效，品牌调色盘让位；
- * [BRAND_PALETTE]：品牌调色盘实际生效。
+ * [DYNAMIC]：系统壁纸动态取色（Material You）实际生效，品牌调色盘与自定义种子色让位；
+ * [BRAND_PALETTE]：品牌调色盘实际生效；
+ * [CUSTOM]：用户自定义种子色实际生效（种子 → 三族明暗方案，见 `SeedSchemeGenerator`）。
  *
  * 这是「当前实际生效」的唯一判据——设置页与 [KeePasskeyTheme] 必须共用
  * [resolveColorSource]，禁止 UI 与 Theme 层各写一份「开关 × SDK」推导
@@ -26,22 +27,30 @@ enum class AppThemeMode(@StringRes val displayNameRes: Int) {
  */
 enum class ColorSource {
     DYNAMIC,
-    BRAND_PALETTE
+    BRAND_PALETTE,
+    CUSTOM
 }
 
 /**
- * 配色来源唯一判据（ISSUE-P3-263 AC① 纯函数）。
+ * 配色来源唯一判据（ISSUE-P3-263 AC① 纯函数；ISSUE-P3-441 AC① 扩种子色分支）。
  *
- * 动态取色命中当且仅当「偏好开启 **且** 设备支持」（Android 12 / API 31 起，
- * `Build.VERSION_CODES.S`）：`dynamic_color_enabled` 可能经备份恢复为 `true` 而
- * 设备不支持，此时须显式回落品牌调色盘，不得依赖渲染层隐式兜底。
+ * 优先级：动态取色命中当且仅当「偏好开启 **且** 设备支持」（Android 12 / API 31 起）；
+ * 其次「已设置自定义种子色」（[seedColor] 非 null）即 [ColorSource.CUSTOM]；
+ * 否则回落品牌调色盘。动态取色可能经备份恢复为 `true` 而设备不支持，此时显式回落
+ * （种子色已设则到自定义、未设则品牌调色盘），不得依赖渲染层隐式兜底。
+ *
+ * 存储层互斥口径（PD-30，同一次原子事务）：写入种子色即幂等关动态取色；点选调色盘
+ * 即幂等关动态取色**并清除**种子色——三态互斥由存储不变量兜底，本函数只做静态判定。
  */
-fun resolveColorSource(dynamicColorEnabled: Boolean, sdkInt: Int): ColorSource =
-    if (dynamicColorEnabled && sdkInt >= Build.VERSION_CODES.S) {
-        ColorSource.DYNAMIC
-    } else {
-        ColorSource.BRAND_PALETTE
-    }
+fun resolveColorSource(
+    dynamicColorEnabled: Boolean,
+    seedColor: Long?,
+    sdkInt: Int
+): ColorSource = when {
+    dynamicColorEnabled && sdkInt >= Build.VERSION_CODES.S -> ColorSource.DYNAMIC
+    seedColor != null -> ColorSource.CUSTOM
+    else -> ColorSource.BRAND_PALETTE
+}
 
 /**
  * 现代化内置主题调色盘风格 (满足不同审美偏好与现代感视觉)
@@ -195,5 +204,78 @@ enum class AppThemePalette(
         tertiaryContainerLight = Color(0xFFF1F5F9),
         tertiaryColorDark = Color(0xFFE2E8F0),
         tertiaryContainerDark = Color(0xFF64748B)
+    ),
+    // ===== ISSUE-P3-441 AC③：预设调色盘适度扩充（纯数据追加，覆写管线零改动） =====
+    ROSE(
+        titleRes = R.string.theme_palette_rose,
+        subtitleRes = R.string.theme_palette_rose_sub,
+        primaryColorLight = Color(0xFF8F3B44),
+        onPrimaryLight = Color(0xFFFFFFFF),
+        primaryColorDark = Color(0xFFFFB3AE),
+        onPrimaryDark = Color(0xFF5D1219),
+        containerColorLight = Color(0xFFFFDAD7),
+        onContainerColorLight = Color(0xFF410006),
+        containerColorDark = Color(0xFF73292F),
+        onContainerColorDark = Color(0xFFFFDAD7),
+        secondaryColorLight = Color(0xFF775657),
+        onSecondaryLight = Color(0xFFFFFFFF),
+        secondaryColorDark = Color(0xFFE7BDBD),
+        onSecondaryDark = Color(0xFF2C1516),
+        secondaryContainerLight = Color(0xFFFFD9D9),
+        onSecondaryContainerLight = Color(0xFF2C1516),
+        secondaryContainerDark = Color(0xFF44292A),
+        onSecondaryContainerDark = Color(0xFFFFD9D9),
+        tertiaryColorLight = Color(0xFF7C5800),
+        tertiaryContainerLight = Color(0xFFFFDEAB),
+        tertiaryColorDark = Color(0xFFF7BC48),
+        tertiaryContainerDark = Color(0xFF573E00)
+    ),
+    CYAN_MIST(
+        titleRes = R.string.theme_palette_cyan_mist,
+        subtitleRes = R.string.theme_palette_cyan_mist_sub,
+        primaryColorLight = Color(0xFF00696D),
+        onPrimaryLight = Color(0xFFFFFFFF),
+        primaryColorDark = Color(0xFF4CDADF),
+        onPrimaryDark = Color(0xFF003739),
+        containerColorLight = Color(0xFF9CF0F3),
+        onContainerColorLight = Color(0xFF002021),
+        containerColorDark = Color(0xFF004F52),
+        onContainerColorDark = Color(0xFF9CF0F3),
+        secondaryColorLight = Color(0xFF4A6365),
+        onSecondaryLight = Color(0xFFFFFFFF),
+        secondaryColorDark = Color(0xFFB1CBCD),
+        onSecondaryDark = Color(0xFF051F21),
+        secondaryContainerLight = Color(0xFFCCE8E9),
+        onSecondaryContainerLight = Color(0xFF051F21),
+        secondaryContainerDark = Color(0xFF334B4D),
+        onSecondaryContainerDark = Color(0xFFCCE8E9),
+        tertiaryColorLight = Color(0xFF4B607B),
+        tertiaryContainerLight = Color(0xFFD3E4FF),
+        tertiaryColorDark = Color(0xFFB3C8E7),
+        tertiaryContainerDark = Color(0xFF33475D)
+    ),
+    INDIGO_NIGHT(
+        titleRes = R.string.theme_palette_indigo_night,
+        subtitleRes = R.string.theme_palette_indigo_night_sub,
+        primaryColorLight = Color(0xFF4954A8),
+        onPrimaryLight = Color(0xFFFFFFFF),
+        primaryColorDark = Color(0xFFBCC2FF),
+        onPrimaryDark = Color(0xFF172465),
+        containerColorLight = Color(0xFFDEE0FF),
+        onContainerColorLight = Color(0xFF00105C),
+        containerColorDark = Color(0xFF324092),
+        onContainerColorDark = Color(0xFFDEE0FF),
+        secondaryColorLight = Color(0xFF5B5D72),
+        onSecondaryLight = Color(0xFFFFFFFF),
+        secondaryColorDark = Color(0xFFC4C4DD),
+        onSecondaryDark = Color(0xFF181A2C),
+        secondaryContainerLight = Color(0xFFE0E1F9),
+        onSecondaryContainerLight = Color(0xFF181A2C),
+        secondaryContainerDark = Color(0xFF454659),
+        onSecondaryContainerDark = Color(0xFFE0E1F9),
+        tertiaryColorLight = Color(0xFF77536D),
+        tertiaryContainerLight = Color(0xFFFFD7F1),
+        tertiaryColorDark = Color(0xFFE6BAD7),
+        tertiaryContainerDark = Color(0xFF5E3A55)
     )
 }

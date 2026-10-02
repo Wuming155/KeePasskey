@@ -121,7 +121,14 @@ internal class MasterPasswordUnlockSession(
                 uiState.update { it.copy(errorMessage = UiMessage(R.string.unlock_error_empty_password)) }
                 return@launch
             }
-            uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            uiState.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                    // ISSUE-P3-437 AC①：进入解锁管线即处于 KDF 派生段（文案先行，派生不阻塞主线程感知）
+                    loadStage = UnlockStage.DERIVING_KEYS
+                )
+            }
             // ISSUE-P3-04：本次尝试是否携带密钥文件因子（决定失败语义分型与记忆写入）
             val usedKeyFile = keyFileSession.keyFileData != null
 
@@ -158,6 +165,8 @@ internal class MasterPasswordUnlockSession(
         uiState.update {
             it.copy(
                 isLoading = false,
+                // ISSUE-P3-437 AC①：解锁收尾（成功/失败同口径）撤下阶段文案
+                loadStage = null,
                 hasKeyFile = false,
                 keyFileName = "",
                 throttleFailureCount = 0,
@@ -205,6 +214,8 @@ internal class MasterPasswordUnlockSession(
         uiState.update {
             it.copy(
                 isLoading = false,
+                // ISSUE-P3-437 AC①：失败路径同口径撤下阶段文案
+                loadStage = null,
                 errorMessage = errorMsg,
                 // 通知输入组件同步擦除显示态，与 VM 清零保持一致（用户须重新输入后重试）
                 clearPasswordFieldToken = it.clearPasswordFieldToken + 1,

@@ -128,6 +128,12 @@ class ExtendedSettingsStore @Inject constructor(
             ),
             // ISSUE-P3-309：全文搜索匹配档（默认子串口径）
             searchMatchMode = enumOrDefault(p.getString(K_SEARCH_MATCH_MODE, null), defaults.searchMatchMode),
+            // ISSUE-P3-439：高级搜索选项（字段范围逗号串 / 排除已过期 / 大小写档）
+            searchAdvanced = decodeSearchAdvanced(
+                p.getString(K_SEARCH_FIELD_SCOPE, null),
+                p.getBoolean(K_SEARCH_EXCLUDE_EXPIRED, defaults.searchAdvanced.excludeExpired),
+                p.getBoolean(K_SEARCH_CASE_SENSITIVE, defaults.searchAdvanced.caseSensitive)
+            ),
 
             // TOTP 规范字段映射
             totpSeedFieldName = p.getString(K_TOTP_SEED_FIELD_NAME, null)
@@ -187,6 +193,13 @@ class ExtendedSettingsStore @Inject constructor(
             .putString(K_LIST_DENSITY, settings.listDensity.name)
             .putBoolean(K_AUTO_ACTIVATE_SEARCH_ON_OPEN, settings.autoActivateSearchOnOpen)
             .putString(K_SEARCH_MATCH_MODE, settings.searchMatchMode.name)
+            // ISSUE-P3-439：高级搜索选项（字段范围以逗号串承载；空集也如实写空串）
+            .putString(
+                K_SEARCH_FIELD_SCOPE,
+                settings.searchAdvanced.fields.joinToString(SEPARATOR) { it.name }
+            )
+            .putBoolean(K_SEARCH_EXCLUDE_EXPIRED, settings.searchAdvanced.excludeExpired)
+            .putBoolean(K_SEARCH_CASE_SENSITIVE, settings.searchAdvanced.caseSensitive)
             .putString(K_TOTP_SEED_FIELD_NAME, settings.totpSeedFieldName)
             .putString(K_TOTP_SETTINGS_FIELD_NAME, settings.totpSettingsFieldName)
             .putInt(K_DEFAULT_TOTP_STEP_SECONDS, settings.defaultTotpStepSeconds)
@@ -327,8 +340,37 @@ class ExtendedSettingsStore @Inject constructor(
     private inline fun <reified T : Enum<T>> enumOrDefault(name: String?, default: T): T =
         name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: default
 
+    /**
+     * ISSUE-P3-439：高级搜索选项的字段范围反序列化（逗号串 → 枚举集）。
+     * null / 空串 / 含未知枚举名（前向兼容）时：null 回落全选默认，串内未知名跳过；
+     * 解析结果恒非空集（空集会使搜索恒空，属配置损坏，回落全选）。
+     */
+    private fun decodeSearchAdvanced(
+        scopeRaw: String?,
+        excludeExpired: Boolean,
+        caseSensitive: Boolean
+    ): com.keepasskey.app.ui.screens.settings.SearchAdvancedOptions {
+        val defaults = com.keepasskey.app.ui.screens.settings.SearchAdvancedOptions()
+        val fields = scopeRaw?.split(SEPARATOR)
+            ?.mapNotNull { token ->
+                token.takeIf { it.isNotBlank() }
+                    ?.let { runCatching { com.keepasskey.app.ui.screens.settings.SearchField.valueOf(it) }.getOrNull() }
+            }
+            ?.toSet()
+            ?.ifEmpty { null }
+            ?: defaults.fields
+        return com.keepasskey.app.ui.screens.settings.SearchAdvancedOptions(
+            fields = fields,
+            excludeExpired = excludeExpired,
+            caseSensitive = caseSensitive
+        )
+    }
+
     private companion object {
         const val PREFS_NAME = "keepasskey_extended_settings"
+
+        /** ISSUE-P3-439：字段范围逗号串的分隔符（枚举名不含逗号，安全） */
+        const val SEPARATOR = ","
 
         const val K_USE_OFFLINE_CACHE = "use_offline_cache"
         const val K_PERIODIC_SYNC_ENABLED = "periodic_sync_enabled"
@@ -383,6 +425,10 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_AUTO_ACTIVATE_SEARCH_ON_OPEN = "auto_activate_search_on_open"
         /** ISSUE-P3-309：全文搜索匹配档（默认 CONTAINS = 既有子串口径） */
         const val K_SEARCH_MATCH_MODE = "search_match_mode"
+        /** ISSUE-P3-439：高级搜索选项持久化键（字段范围逗号串 / 排除已过期 / 大小写档） */
+        const val K_SEARCH_FIELD_SCOPE = "search_field_scope"
+        const val K_SEARCH_EXCLUDE_EXPIRED = "search_exclude_expired"
+        const val K_SEARCH_CASE_SENSITIVE = "search_case_sensitive"
         const val K_TOTP_SEED_FIELD_NAME = "totp_seed_field_name"
         const val K_TOTP_SETTINGS_FIELD_NAME = "totp_settings_field_name"
         const val K_DEFAULT_TOTP_STEP_SECONDS = "default_totp_step_seconds"

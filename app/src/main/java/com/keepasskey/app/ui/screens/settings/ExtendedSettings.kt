@@ -93,6 +93,8 @@ data class ExtendedSettings(
     val autoActivateSearchOnOpen: Boolean = false,
     // ISSUE-P3-309：全文搜索匹配档（默认维持子串口径，行为零变更；分词档见 SearchMatchMode KDoc）
     val searchMatchMode: SearchMatchMode = SearchMatchMode.CONTAINS,
+    // ISSUE-P3-439：高级搜索选项（字段范围 / 排除已过期 / 大小写档；默认值＝现行为零变化）
+    val searchAdvanced: SearchAdvancedOptions = SearchAdvancedOptions(),
 
     // TOTP 规范字段映射
     val totpSeedFieldName: String = "TOTP Seed",

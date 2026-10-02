@@ -28,6 +28,9 @@ data class UnlockUiState(
     // ISSUE-P3-368 AC②：打开链进度（0..1 确定段；null = KDF 等分段不确定段）。
     // 仅在 isLoading 期间由解锁页渲染进度条；isLoading 语义与按钮内嵌圈不回归。
     val loadProgress: Float? = null,
+    // ISSUE-P3-437 AC①：解锁链阶段型过程文案（null = 未处于可命名的阶段）。
+    // 仅在 isLoading 期间由解锁页渲染；与 loadProgress 同为过程可感知性通道，零敏感载荷。
+    val loadStage: UnlockStage? = null,
     val errorMessage: UiMessage? = null,
     val infoMessage: UiMessage? = null,
     // H1 整改：默认值不再写死演示库名/假状态文案，由真实活动数据库填充

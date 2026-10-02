@@ -60,20 +60,26 @@ internal class KeyFileSessionCoordinator(
                 onKeyFileReadFailed()
                 return@launch
             }
-            when (val outcome = access.read(uri)) {
-                is KeyFileReadResult.Success -> {
-                    try {
-                        adoptKeyFile(outcome.bytes, outcome.displayName)
-                    } finally {
-                        // 移交后立即擦除读取结果（VM 内部持独立副本）
-                        outcome.bytes.fill(0)
+            // ISSUE-P3-437 AC①：SAF 现读期间呈现「正在读取密钥文件…」阶段文案（终态统一撤下）
+            uiState.update { it.copy(loadStage = UnlockStage.READING_KEY_FILE) }
+            try {
+                when (val outcome = access.read(uri)) {
+                    is KeyFileReadResult.Success -> {
+                        try {
+                            adoptKeyFile(outcome.bytes, outcome.displayName)
+                        } finally {
+                            // 移交后立即擦除读取结果（VM 内部持独立副本）
+                            outcome.bytes.fill(0)
+                        }
+                        keyFileUserTouched = true
+                        trackKeyFileSource(uri)
                     }
-                    keyFileUserTouched = true
-                    trackKeyFileSource(uri)
+                    // 「读不到」分型：空文件 / 流异常一律显式反馈，绝不静默忽略
+                    KeyFileReadResult.Empty,
+                    KeyFileReadResult.Unreadable -> onKeyFileReadFailed()
                 }
-                // 「读不到」分型：空文件 / 流异常一律显式反馈，绝不静默忽略
-                KeyFileReadResult.Empty,
-                KeyFileReadResult.Unreadable -> onKeyFileReadFailed()
+            } finally {
+                uiState.update { it.copy(loadStage = null) }
             }
         }
     }
@@ -174,33 +180,40 @@ internal class KeyFileSessionCoordinator(
             access.forget()
             return
         }
-        when (val outcome = access.read(remembered.uri)) {
-            is KeyFileReadResult.Success -> {
-                if (keyFileUserTouched) {
-                    // 读取期间用户已显式选择其它密钥文件：丢弃恢复结果，尊重用户选择
-                    outcome.bytes.fill(0)
-                    return
-                }
-                val displayName = outcome.displayName.ifBlank { remembered.displayName }
-                try {
-                    adoptKeyFile(outcome.bytes, displayName)
-                } finally {
-                    outcome.bytes.fill(0)
-                }
-                keyFileSourceUri = remembered.uri
-                uiState.update {
-                    it.copy(
-                        infoMessage = UiMessage(
-                            R.string.keyfile_restored_from_memory,
-                            listOf(displayName)
+        // ISSUE-P3-437 AC①：记忆现读期间呈现「正在读取密钥文件…」阶段文案
+        // （冷启动恢复不在 isLoading 窗口内、渲染层自然不挂出；生物识别解封后的现读在窗口内可见）
+        uiState.update { it.copy(loadStage = UnlockStage.READING_KEY_FILE) }
+        try {
+            when (val outcome = access.read(remembered.uri)) {
+                is KeyFileReadResult.Success -> {
+                    if (keyFileUserTouched) {
+                        // 读取期间用户已显式选择其它密钥文件：丢弃恢复结果，尊重用户选择
+                        outcome.bytes.fill(0)
+                        return
+                    }
+                    val displayName = outcome.displayName.ifBlank { remembered.displayName }
+                    try {
+                        adoptKeyFile(outcome.bytes, displayName)
+                    } finally {
+                        outcome.bytes.fill(0)
+                    }
+                    keyFileSourceUri = remembered.uri
+                    uiState.update {
+                        it.copy(
+                            infoMessage = UiMessage(
+                                R.string.keyfile_restored_from_memory,
+                                listOf(displayName)
+                            )
                         )
-                    )
+                    }
+                }
+                else -> {
+                    debugLog.warn(TAG, "记忆的密钥文件已不可读（授权有效但读取失败），清除记录并降级为未记住")
+                    access.forget()
                 }
             }
-            else -> {
-                debugLog.warn(TAG, "记忆的密钥文件已不可读（授权有效但读取失败），清除记录并降级为未记住")
-                access.forget()
-            }
+        } finally {
+            uiState.update { it.copy(loadStage = null) }
         }
     }
 

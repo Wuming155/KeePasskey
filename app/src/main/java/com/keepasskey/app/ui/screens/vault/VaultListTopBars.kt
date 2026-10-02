@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -125,6 +126,10 @@ internal fun VaultListSearchTopBar(
     onScanClick: (() -> Unit)? = null,
     /** ISSUE-P3-360 AC④a：非空才呈现溢出菜单「选择」项（进入批量模式；回收站内无溢出菜单） */
     onSelectEntriesClick: (() -> Unit)? = null,
+    /** ISSUE-P3-439：高级搜索面板展开态（true 时入口高亮，提示面板已展开） */
+    advancedActive: Boolean = false,
+    /** ISSUE-P3-439：高级搜索面板展开/收起切换 */
+    onToggleAdvanced: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -209,6 +214,14 @@ internal fun VaultListSearchTopBar(
                     )
                 }
             } else {
+                // ISSUE-P3-439：高级搜索选项入口（展开态高亮；回收站内不呈现——搜索面板同样服务于搜索）
+                IconButton(onClick = onToggleAdvanced) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = stringResource(R.string.search_advanced_title),
+                        tint = if (advancedActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 // 收敛后的竖排三点溢出菜单：排序 / 选择（ISSUE-P3-360 AC④a）/ 锁定 / 扫码（只读隐藏）/（可选）彻底退出
                 Box {
                     IconButton(onClick = { showOverflowMenu = true }) {

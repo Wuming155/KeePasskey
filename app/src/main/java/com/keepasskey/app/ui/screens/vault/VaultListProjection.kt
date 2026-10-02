@@ -11,6 +11,7 @@ import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
+import com.keepasskey.app.ui.screens.settings.SearchAdvancedOptions
 import com.keepasskey.app.ui.screens.settings.SearchMatchMode
 
 /**
@@ -135,7 +136,9 @@ internal fun buildVaultListUiState(
         availableTags = content.availableTags,
         hasFavoriteEntries = content.hasFavoriteEntries,
         selectedTag = session.filterParams.selectedTag,
-        favoriteOnly = session.filterParams.favoriteOnly
+        favoriteOnly = session.filterParams.favoriteOnly,
+        // ISSUE-P3-439：高级搜索选项快照（搜索面板回显；过滤消费在 selectSortedEntries）
+        searchAdvanced = session.extended.searchAdvanced
     )
 }
 
@@ -182,7 +185,8 @@ private fun projectVaultListContent(
         sortOption = session.filterParams.sortOption,
         selectedTag = session.filterParams.selectedTag,
         favoriteOnly = session.filterParams.favoriteOnly,
-        searchMatchMode = session.extended.searchMatchMode
+        searchMatchMode = session.extended.searchMatchMode,
+        searchAdvanced = session.extended.searchAdvanced
     )
     // 4. ISSUE-P3-17：搜索结果行的分组路径（仅在「搜索中 + 开关开启」时装配）
     val entryGroupPaths = searchEntryGroupPaths(allGroups, sortedEntries, session, isSearching)
@@ -259,7 +263,11 @@ private fun buildBreadcrumbs(
  */
 
 /** 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目；
- * 再叠加 ISSUE-P3-297 处置③的标签 / 收藏筛选档（与搜索独立、可叠加） */
+ * 再叠加 ISSUE-P3-297 处置③的标签 / 收藏筛选档（与搜索独立、可叠加）。
+ *
+ * ISSUE-P3-439 AC①：搜索态下按 [SearchAdvancedOptions.excludeExpired] 排除已过期条目——
+ * 仅影响应用内搜索展示（非搜索态的分组浏览零变化），与 PD-61 填充链排除过期的口径独立。
+ */
 private fun selectSortedEntries(
     allEntries: List<UiVaultEntry>,
     query: String,
@@ -269,7 +277,8 @@ private fun selectSortedEntries(
     sortOption: VaultSortOption,
     selectedTag: String?,
     favoriteOnly: Boolean,
-    searchMatchMode: SearchMatchMode
+    searchMatchMode: SearchMatchMode,
+    searchAdvanced: SearchAdvancedOptions = SearchAdvancedOptions()
 ): List<UiVaultEntry> {
     val targetEntries = if (isSearching) {
         // 用户已在回收站内搜索时**不得**再把结果过滤空（还原前总得找得到）
@@ -277,11 +286,14 @@ private fun selectSortedEntries(
     } else {
         allEntries.filter { it.groupId == effectiveGroupId }
     }
+    // ISSUE-P3-439 AC①：仅搜索态生效（时钟在投影入口取一次，避免逐条取 now）
+    val expiredCutoff = if (isSearching && searchAdvanced.excludeExpired) java.time.Instant.now() else null
     return sortEntries(
         targetEntries.filter {
-            matchesSearchQuery(it, query, searchMatchMode) &&
+            matchesSearchQuery(it, query, searchMatchMode, searchAdvanced) &&
                 (!favoriteOnly || it.isFavorite) &&
-                (selectedTag == null || selectedTag in it.tags)
+                (selectedTag == null || selectedTag in it.tags) &&
+                (expiredCutoff == null || it.expiresAt?.isBefore(expiredCutoff) != true)
         },
         sortOption
     )

@@ -104,12 +104,23 @@ internal fun UnlockLoadProgressIndicator(progress: Float?) {
 /**
  * ISSUE-P3-368 AC②：加载中的打开进度段（未加载时零渲染，不改动默认态布局）。
  * 解锁页两条路径（快速解锁卡 / 主密码区）共用，收敛调用点行数（long_functions 闸门）。
+ *
+ * ISSUE-P3-437 AC①：进度条下叠加阶段文案（[UnlockUiState.loadStage]）——
+ * 「正在派生密钥… / 正在读取密钥文件… / 正在解封验证…」，让秒级起步的解锁等待全程可解释。
  */
 @Composable
 internal fun UnlockLoadProgressSection(uiState: UnlockUiState) {
     if (!uiState.isLoading) return
     Spacer(modifier = Modifier.height(6.dp))
     UnlockLoadProgressIndicator(uiState.loadProgress)
+    uiState.loadStage?.let { stage ->
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(stage.labelRes),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
     Spacer(modifier = Modifier.height(6.dp))
 }
 
@@ -218,6 +229,53 @@ internal fun UnlockQuickUnlockCard(
 }
 
 /**
+ * 主密码输入框的 supporting 槽位（§280 规模门禁同批自 [UnlockStandardUnlockContent] 逐字迁出，
+ * 结构性拆分：渲染语义零变化）。
+ *
+ * ISSUE-P2-355 AC②：锁定期倒计时由 throttleLockoutRemainingMs 状态直驱、每秒刷新——
+ * 一次性快照会随用户输入（onPasswordChangeSecure 清提示）消失，直驱行冲不掉；
+ * 下方 errorMessage 的锁定快照与此行同源，锁定期内不重复渲染。
+ */
+@Composable
+private fun UnlockPasswordSupportingText(uiState: UnlockUiState) {
+    val lockoutMs = uiState.throttleLockoutRemainingMs
+    val countdownShown = lockoutMs > 0L
+    if (countdownShown) {
+        Text(
+            text = lockoutUiMessage(lockoutMs).resolveText(),
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+    uiState.errorMessage?.let { message ->
+        if (!(countdownShown && message.isLockoutCountdown())) {
+            Text(
+                text = message.resolveText(),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+    // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（节流关闭 / 锁定态 / 已输入时为 null 不呈现）
+    if (uiState.errorMessage != null) {
+        uiState.throttleAttemptsRemaining?.let { remaining ->
+            Text(
+                text = stringResource(R.string.unlock_attempts_remaining, remaining),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+    uiState.infoMessage?.let { message ->
+        Text(
+            text = message.resolveText(),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+/**
  * 完整主密码解锁区（含密钥文件、只读开关与解锁主操作）
  */
 @Composable
@@ -237,52 +295,20 @@ internal fun UnlockStandardUnlockContent(
         placeholder = stringResource(R.string.unlock_master_password_hint),
         onPasswordChanged = onPasswordChange,
         isError = uiState.errorMessage != null,
-        supportingText = {
-            // ISSUE-P2-355 AC②：锁定期倒计时由 throttleLockoutRemainingMs 状态直驱、每秒刷新——
-            // 一次性快照会随用户输入（onPasswordChangeSecure 清提示）消失，直驱行冲不掉；
-            // 下方 errorMessage 的锁定快照与此行同源，锁定期内不重复渲染
-            val lockoutMs = uiState.throttleLockoutRemainingMs
-            val countdownShown = lockoutMs > 0L
-            if (countdownShown) {
-                Text(
-                    text = lockoutUiMessage(lockoutMs).resolveText(),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            uiState.errorMessage?.let { message ->
-                if (!(countdownShown && message.isLockoutCountdown())) {
-                    Text(
-                        text = message.resolveText(),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-            // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（节流关闭 / 锁定态 / 已输入时为 null 不呈现）
-            if (uiState.errorMessage != null) {
-                uiState.throttleAttemptsRemaining?.let { remaining ->
-                    Text(
-                        text = stringResource(R.string.unlock_attempts_remaining, remaining),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-            uiState.infoMessage?.let { message ->
-                Text(
-                    text = message.resolveText(),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        },
+        supportingText = { UnlockPasswordSupportingText(uiState) },
         isPasswordVisible = uiState.isPasswordVisible,
         onToggleVisibility = onTogglePasswordVisibility,
         onDone = onUnlock,
         // ISSUE-P1-04：失败/锁定后令牌递增，驱动输入框擦除显示态，与 VM 主密码清零同步
         wipeToken = uiState.clearPasswordFieldToken,
         modifier = Modifier.fillMaxWidth()
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // ISSUE-P3-445 AC①：密钥文件高困惑点一次性可关闭提示（关闭态持久化，非模态）
+    com.keepasskey.app.ui.components.DismissibleHelpTip(
+        tip = com.keepasskey.app.ui.components.HelpTip.UNLOCK_KEYFILE
     )
 
     Spacer(modifier = Modifier.height(12.dp))
@@ -389,6 +415,19 @@ internal fun UnlockLoadingProgressPreview() {
                     unlockMode = UnlockMode.QUICK_UNLOCK,
                     isLoading = true,
                     loadProgress = 0.45f
+                ),
+                onBiometricUnlock = {},
+                onSwitchMode = {},
+                onToggleReadOnly = {}
+            )
+            // ISSUE-P3-437 AC④：阶段文案可见态预览——派生段文案的间距/换行在无阶段预览中不可见
+            UnlockQuickUnlockCard(
+                uiState = UnlockUiState().copy(
+                    hasDatabase = true,
+                    unlockMode = UnlockMode.QUICK_UNLOCK,
+                    isLoading = true,
+                    loadProgress = null,
+                    loadStage = UnlockStage.UNSEALING
                 ),
                 onBiometricUnlock = {},
                 onSwitchMode = {},

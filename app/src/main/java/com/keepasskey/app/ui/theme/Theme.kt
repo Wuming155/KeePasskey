@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -58,6 +59,10 @@ fun KeePasskeyTheme(
     themePalette: AppThemePalette = AppThemePalette.SAPPHIRE,
     oledBlack: Boolean = false,
     dynamicColorEnabled: Boolean = false,
+    // ISSUE-P3-441 AC①：自定义种子色（ARGB Long，null = 未启用）。
+    // 互斥裁决在存储层（写入种子色即关动态取色；点选调色盘即清种子色），本层只按
+    // resolveColorSource 静态判定
+    customSeedColor: Long? = null,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
@@ -72,19 +77,23 @@ fun KeePasskeyTheme(
         LightColorScheme
     }
 
-    // Material You 动态取色（Android 12+）：开启后以系统壁纸取色为基准，品牌调色盘让位；
-    // 语义安全色 (LocalSecurityColors) 保持固定，不随壁纸漂移。
+    // Material You 动态取色（Android 12+）：开启后以系统壁纸取色为基准，品牌调色盘与
+    // 自定义种子色让位；语义安全色 (LocalSecurityColors) 保持固定，不随壁纸漂移。
     // ISSUE-P3-263 AC①：判据单点化——必须经 resolveColorSource 推导，
     // 禁止在本层再写第二份「开关 × SDK」条件（与设置页共用同一真值）
-    val useDynamicColor = resolveColorSource(
+    val colorSource = resolveColorSource(
         dynamicColorEnabled = dynamicColorEnabled,
+        seedColor = customSeedColor,
         sdkInt = Build.VERSION.SDK_INT
-    ) == ColorSource.DYNAMIC
+    )
+    val useDynamicColor = colorSource == ColorSource.DYNAMIC
     val colorScheme = resolveAppColorScheme(
         useDynamicColor = useDynamicColor,
         darkTheme = darkTheme,
         baseColorScheme = baseColorScheme,
-        themePalette = themePalette
+        themePalette = themePalette,
+        colorSource = colorSource,
+        seedColor = customSeedColor
     )
 
     // 动态取色路径下 OLED 纯黑需手动接管（品牌暗色板已内置纯黑方案）
@@ -125,7 +134,9 @@ fun KeePasskeyTheme(
 
 /**
  * 解析生效的 [ColorScheme]：动态取色命中时以系统壁纸取色为基准；
- * 否则以品牌调色盘覆写 primary / secondary / tertiary 三族语义色（dark / light 两分支）。
+ * 自定义种子色（ISSUE-P3-441 AC①）命中时由 [SeedSchemeGenerator] 生成三族明暗语义色、
+ * 经与品牌调色盘同一的「三族覆写管线」拷上基座（surface / error 等基座色零变化）；
+ * 否则以品牌调色盘覆写 primary / secondary / tertiary 三族（dark / light 两分支）。
  * §211 自 [KeePasskeyTheme] 下沉（纯函数，逐字搬动、零行为变更）。
  */
 @Composable
@@ -133,11 +144,44 @@ private fun resolveAppColorScheme(
     useDynamicColor: Boolean,
     darkTheme: Boolean,
     baseColorScheme: ColorScheme,
-    themePalette: AppThemePalette
+    themePalette: AppThemePalette,
+    colorSource: ColorSource = ColorSource.BRAND_PALETTE,
+    seedColor: Long? = null
 ): ColorScheme = when {
     useDynamicColor -> {
         val context = LocalContext.current
         if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    }
+    // ISSUE-P3-441 AC①：种子色 → 生成三族 → 拷上基座（生成按种子值记忆，重组不重复算）
+    colorSource == ColorSource.CUSTOM && seedColor != null -> {
+        val families = remember(seedColor) { SeedSchemeGenerator.generate(seedColor) }
+        if (darkTheme) {
+            baseColorScheme.copy(
+                primary = families.primaryDark,
+                onPrimary = families.onPrimaryDark,
+                primaryContainer = families.primaryContainerDark,
+                onPrimaryContainer = families.onPrimaryContainerDark,
+                secondary = families.secondaryDark,
+                onSecondary = families.onSecondaryDark,
+                secondaryContainer = families.secondaryContainerDark,
+                onSecondaryContainer = families.onSecondaryContainerDark,
+                tertiary = families.tertiaryDark,
+                tertiaryContainer = families.tertiaryContainerDark
+            )
+        } else {
+            baseColorScheme.copy(
+                primary = families.primaryLight,
+                onPrimary = families.onPrimaryLight,
+                primaryContainer = families.primaryContainerLight,
+                onPrimaryContainer = families.onPrimaryContainerLight,
+                secondary = families.secondaryLight,
+                onSecondary = families.onSecondaryLight,
+                secondaryContainer = families.secondaryContainerLight,
+                onSecondaryContainer = families.onSecondaryContainerLight,
+                tertiary = families.tertiaryLight,
+                tertiaryContainer = families.tertiaryContainerLight
+            )
+        }
     }
     darkTheme -> baseColorScheme.copy(
         primary = themePalette.primaryColorDark,

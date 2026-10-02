@@ -55,7 +55,12 @@ class ThemePaletteMutualExclusionWiringTest {
         val source = readSource(SECTIONS)
         assertTrue(
             "设置页必须与 Theme 层共用 resolveColorSource（AC① 判据单点化，禁止另写开关×SDK）",
-            source.contains("resolveColorSource(uiState.dynamicColorEnabled, Build.VERSION.SDK_INT)")
+            source.contains("resolveColorSource(")
+        )
+        // ISSUE-P3-441 AC①：判据签名扩种子色后，分区必须把 customSeedColor 传入同一真值函数
+        assertTrue(
+            "配色来源判据必须把自定义种子色一并传入 resolveColorSource（三态单点判定）",
+            source.contains("seedColor = uiState.customSeedColor")
         )
         assertTrue(
             "选中态必须被 paletteUsable 门控——动态取色生效期间不得呈现任何已选中",
@@ -72,6 +77,32 @@ class ThemePaletteMutualExclusionWiringTest {
         assertTrue(
             "置灰分区必须提供一步切回动作（AC③）",
             source.contains("R.string.theme_palette_use_instead")
+        )
+    }
+
+    /**
+     * ISSUE-P3-441 AC①：自定义种子色的三态互斥接线守卫——
+     * 存储侧点选调色盘须清除种子色、写入种子色须关动态取色（同事务）；
+     * 呈现侧「自定义」卡片复用互斥置灰语义。
+     */
+    @Test
+    fun `自定义种子色三态互斥接线须完整`() {
+        val repository = readSource(REPOSITORY)
+        val paletteBody = extractSetThemePaletteBody(repository)
+        assertTrue(
+            "setThemePalette 须在同一事务内清除自定义种子色（否则关动态取色后意外落回 CUSTOM）",
+            paletteBody.contains("it.remove(KEY_CUSTOM_SEED_COLOR)")
+        )
+        val seedBody = extractSetCustomSeedColorBody(repository)
+        assertTrue(
+            "setCustomSeedColor 非 null 写入须在同一事务内幂等关闭动态取色（PD-30 三态互斥）",
+            seedBody.contains("it[KEY_DYNAMIC_COLOR] = false")
+        )
+        val sections = readSource(SECTIONS)
+        assertTrue(
+            "「自定义」卡片须与调色盘同一互斥置灰口径（动态取色生效期间不可点）",
+            sections.contains("ThemeCustomSeedCard(") &&
+                sections.contains("enabled = colorSource != ColorSource.DYNAMIC")
         )
     }
 
@@ -114,6 +145,14 @@ class ThemePaletteMutualExclusionWiringTest {
         val start = source.indexOf("override suspend fun setThemePalette")
         assertTrue("RealSettingsRepository 缺 setThemePalette", start >= 0)
         val end = source.indexOf("override suspend fun setOledBlackOptimization", start)
+        return source.substring(start, if (end > start) end else source.length)
+    }
+
+    /** 截取 RealSettingsRepository.setCustomSeedColor 的函数体（ISSUE-P3-441 三态互斥守卫用） */
+    private fun extractSetCustomSeedColorBody(source: String): String {
+        val start = source.indexOf("override suspend fun setCustomSeedColor")
+        assertTrue("RealSettingsRepository 缺 setCustomSeedColor", start >= 0)
+        val end = source.indexOf("override suspend fun setAppLanguage", start)
         return source.substring(start, if (end > start) end else source.length)
     }
 

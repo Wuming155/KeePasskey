@@ -9,6 +9,7 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.screens.settings.ListDensity
+import com.keepasskey.app.ui.screens.settings.SearchAdvancedOptions
 
 /**
  * 排序方向：升序 / 降序
@@ -137,5 +138,7 @@ data class VaultListUiState(
     // ISSUE-P3-297 处置③：当前生效的标签筛选档（null = 未按标签筛选）
     val selectedTag: String? = null,
     // ISSUE-P3-297 处置③：是否只看收藏条目
-    val favoriteOnly: Boolean = false
+    val favoriteOnly: Boolean = false,
+    // ISSUE-P3-439：高级搜索选项快照（字段范围 / 排除已过期 / 大小写档；搜索面板呈现与回显）
+    val searchAdvanced: SearchAdvancedOptions = SearchAdvancedOptions()
 )

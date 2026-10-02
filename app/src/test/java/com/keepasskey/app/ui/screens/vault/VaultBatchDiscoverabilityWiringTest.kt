@@ -18,8 +18,13 @@ import java.io.File
  */
 class VaultBatchDiscoverabilityWiringTest {
 
+    // §280 规模门禁同批：Scaffold / LazyColumn 装配自 VaultListScreen 逐字迁至同包
+    // VaultListContent（骨架 / 空态判定 / 高亮词接线随迁），故按「页面壳 + 内容装配」
+    // **并集**扫描——断言逐字保留，只放宽定位范围（AGENTS.md §3 测试资产纪律）。
     private val topBars by lazy { readSource(TOP_BARS) }
-    private val screen by lazy { readSource(SCREEN) }
+    private val screen by lazy {
+        readSource(SCREEN) + "\n" + readSource(CONTENT)
+    }
     private val controller by lazy { readSource(ACTION_CONTROLLER) }
 
     @Test
@@ -147,6 +152,7 @@ class VaultBatchDiscoverabilityWiringTest {
     private companion object {
         const val TOP_BARS = "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListTopBars.kt"
         const val SCREEN = "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListScreen.kt"
+        const val CONTENT = "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListContent.kt"
         const val ACTION_CONTROLLER =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListActionController.kt"
         const val BATCH_GUIDE = "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListBatchGuide.kt"
