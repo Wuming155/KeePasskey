@@ -62,9 +62,8 @@ internal object DatabaseKeyFileFactorResolver {
                 // 字节所有权已移交因子；清零责任随借用契约留给 createDatabase 的调用收尾
                 borrowedKeyFileBytes = outcome.bytes
             )
-            // 「读不到」分型（空文件 / 超限 / 流异常）一律显式反馈，绝不静默忽略
+            // 「读不到」分型（空文件 / 流异常）一律显式反馈，绝不静默忽略
             KeyFileReadResult.Empty,
-            KeyFileReadResult.TooLarge,
             KeyFileReadResult.Unreadable -> KeyFileFactorResolution.Failed(
                 UiMessage(R.string.unlock_keyfile_read_failed)
             )

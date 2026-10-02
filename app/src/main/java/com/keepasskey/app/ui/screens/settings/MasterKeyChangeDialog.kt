@@ -103,7 +103,6 @@ internal fun MasterKeyChangeDialog(
                 }
                 // 「读不到」分型一律显式反馈，绝不静默当成功（fail-closed，ISSUE-P3-04 口径）
                 KeyFileReadResult.Empty,
-                KeyFileReadResult.TooLarge,
                 KeyFileReadResult.Unreadable -> keyFileReadFailed = true
             }
         }

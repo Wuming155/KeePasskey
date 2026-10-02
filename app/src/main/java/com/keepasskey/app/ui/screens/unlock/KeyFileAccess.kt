@@ -10,8 +10,11 @@ data class RememberedKeyFile(val uri: String, val displayName: String)
 
 /**
  * 密钥文件读取结果（ISSUE-P3-04）：分型承载失败原因，禁止静默失败——
- * 「读不到」（提供方拒绝/流异常/空文件/超限）与「内容错」（由数据库层
+ * 「读不到」（提供方拒绝/流异常/空文件）与「内容错」（由数据库层
  * `KdbxCorruptFileException` / `KdbxInvalidCredentialsException` 表达）语义可分。
+ *
+ * ISSUE-P3-435：不设文件大小上限（对齐 KeePass 官方 / kp2a / KeePassXC——整文件读入，
+ * 最多拒空文件）；密钥文件内容即密钥材料本身，任何截断都会产出错误密钥。
  */
 sealed interface KeyFileReadResult {
 
@@ -23,9 +26,6 @@ sealed interface KeyFileReadResult {
 
     /** 空文件（0 字节）——不可能是合法密钥文件 */
     data object Empty : KeyFileReadResult
-
-    /** 超出读取上限（[KEY_FILE_MAX_BYTES] 字节），拒绝半截读取 */
-    data object TooLarge : KeyFileReadResult
 
     /** 流不可打开 / 读取异常 / 提供方拒绝访问 / 无可用上下文 */
     data object Unreadable : KeyFileReadResult
@@ -67,9 +67,6 @@ interface KeyFileAccess {
     /** 清除记忆的密钥文件元数据 */
     suspend fun forget()
 }
-
-/** 密钥文件读取上限：1 MiB（密钥文件惯例为 32~128 字节，上限防御异常超大 Uri） */
-const val KEY_FILE_MAX_BYTES: Int = 1 shl 20
 
 /**
  * 密钥文件记忆裁决（纯函数，无 Android 依赖，供 JVM 单测直接覆盖）。

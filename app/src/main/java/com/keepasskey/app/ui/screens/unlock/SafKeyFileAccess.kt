@@ -59,12 +59,9 @@ class SafKeyFileAccess @Inject constructor(
                 debugLog.warn(TAG, "密钥文件流不可打开（提供方拒绝或已失效）")
                 return@withContext KeyFileReadResult.Unreadable
             }
-            // use{} 强关闭；分块缓冲与内部缓冲在 readKeyFileBytesCapped 内清零
-            val bytes = stream.use { readKeyFileBytesCapped(it) }
-            if (bytes == null) {
-                debugLog.warn(TAG, "密钥文件超出 $KEY_FILE_MAX_BYTES 字节上限，拒绝读取")
-                KeyFileReadResult.TooLarge
-            } else if (bytes.isEmpty()) {
+            // use{} 强关闭；分块缓冲与内部缓冲在 readKeyFileBytes 内清零
+            val bytes = stream.use { readKeyFileBytes(it) }
+            if (bytes.isEmpty()) {
                 debugLog.warn(TAG, "密钥文件为空文件，拒绝作为密钥材料")
                 KeyFileReadResult.Empty
             } else {
@@ -157,20 +154,21 @@ internal fun querySafDisplayName(context: Context, uri: Uri): String = runCatchi
 }.getOrNull() ?: uri.lastPathSegment.orEmpty()
 
 /**
- * 读取密钥文件字节（上限 [KEY_FILE_MAX_BYTES] 字节；超限返回 null，绝不截断半截密钥）。
+ * 读取密钥文件字节：**整流读入，无大小上限**（ISSUE-P3-435，用户 2026-10-02 裁决）——
+ * 密钥文件内容即密钥材料本身（KDBX4 为整文件 SHA-512），任何截断都产出错误密钥；
+ * KeePass 官方 / kp2a / KeePassXC 均对密钥文件无大小上限，本仓对齐。
  *
  * 密钥材料擦除纪律：[READ_CHUNK_BYTES] 分块缓冲在 `finally` 清零，
  * [WipeableByteArrayOutputStream] 内部缓冲在返回前清零——堆上仅保留移交调用方的结果数组
  * （调用方用毕 `fill(0)`）。
  */
-internal fun readKeyFileBytesCapped(input: InputStream): ByteArray? {
+internal fun readKeyFileBytes(input: InputStream): ByteArray {
     val sink = WipeableByteArrayOutputStream()
     val chunk = ByteArray(READ_CHUNK_BYTES)
     try {
         while (true) {
             val read = input.read(chunk)
             if (read < 0) break
-            if (sink.size() + read > KEY_FILE_MAX_BYTES) return null
             sink.write(chunk, 0, read)
         }
         return sink.toByteArray()
@@ -180,7 +178,7 @@ internal fun readKeyFileBytesCapped(input: InputStream): ByteArray? {
     }
 }
 
-/** 单次读取分块大小：8 KiB（密钥文件惯例为 32~128 字节，单块即可读完） */
+/** 单次读取分块大小：8 KiB（密钥文件逐块追加进可擦除缓冲，不整块物化中转数组） */
 internal const val READ_CHUNK_BYTES: Int = 8 * 1024
 
 /**

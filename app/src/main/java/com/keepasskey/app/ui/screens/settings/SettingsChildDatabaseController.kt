@@ -210,7 +210,7 @@ internal class SettingsChildDatabaseController(
             is KeyFileReadResult.Success -> result.bytes
 
             else -> {
-                // 仅留痕分型名（Empty / TooLarge / Unreadable），不外传 Uri 与异常 message
+                // 仅留痕分型名（Empty / Unreadable），不外传 Uri 与异常 message
                 debugLogBuffer.warn(TAG, "子库密钥文件不可用: ${result.javaClass.simpleName}")
                 feedbackFlow.value = keyFileFeedback()
                 null

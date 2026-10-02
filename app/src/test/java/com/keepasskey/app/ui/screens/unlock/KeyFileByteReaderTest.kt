@@ -3,13 +3,17 @@ package com.keepasskey.app.ui.screens.unlock
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 
 /**
- * ISSUE-P3-04 密钥文件安全读取单测：上限闸门（不截断半截密钥）+ 空文件语义。
+ * ISSUE-P3-04 密钥文件安全读取单测：整流读入语义 + 空文件语义。
+ *
+ * ISSUE-P3-435（用户 2026-10-02 裁决）：**不设文件大小上限**——密钥文件内容即密钥材料
+ * 本身（KDBX4 为整文件 SHA-512），任何截断都产出错误密钥；KeePass 官方 / kp2a /
+ * KeePassXC 均无上限，本仓对齐。原「上限闸门（不截断半截密钥）」两用例随被删对象
+ * （`KEY_FILE_MAX_BYTES` / `TooLarge`）退役，由「大文件整读」回归承接。
  *
  * 这些用例不触碰 SAF / ContentResolver，可在 JVM 直接执行；SAF 选择器交互需真机验证。
  */
@@ -19,7 +23,7 @@ class KeyFileByteReaderTest {
     fun `常规密钥文件按原样读出`() {
         val bytes = ByteArray(32) { (it * 3 + 1).toByte() }
 
-        val read = readKeyFileBytesCapped(ByteArrayInputStream(bytes))
+        val read = readKeyFileBytes(ByteArrayInputStream(bytes))
 
         assertNotNull(read)
         assertArrayEquals(bytes, read)
@@ -27,29 +31,32 @@ class KeyFileByteReaderTest {
 
     @Test
     fun `空文件读出空数组由调用方判定为非法`() {
-        val read = readKeyFileBytesCapped(ByteArrayInputStream(ByteArray(0)))
+        val read = readKeyFileBytes(ByteArrayInputStream(ByteArray(0)))
 
         assertNotNull(read)
-        assertEquals(0, read!!.size)
+        assertEquals(0, read.size)
     }
 
     @Test
-    fun `恰好等于上限的文件可读`() {
-        val bytes = ByteArray(KEY_FILE_MAX_BYTES) { (it % 251).toByte() }
+    fun `旧1MiB上限附近的合法大文件整流读出`() {
+        // ISSUE-P3-435 回归：旧上限 1 MiB 曾把 2.28 MB 级合法密钥文件拒之门外
+        // （用户装机走查实测）；去上限后该尺寸必须整文件读出、绝不截断
+        val bytes = ByteArray((1 shl 20) + 1) { (it % 251).toByte() }
 
-        val read = readKeyFileBytesCapped(ByteArrayInputStream(bytes))
+        val read = readKeyFileBytes(ByteArrayInputStream(bytes))
 
         assertNotNull(read)
-        assertEquals(KEY_FILE_MAX_BYTES, read!!.size)
+        assertEquals(bytes.size, read.size)
+        assertArrayEquals(bytes, read)
     }
 
     @Test
-    fun `超出上限的文件返回null绝不截断`() {
-        val bytes = ByteArray(KEY_FILE_MAX_BYTES + 1) { (it % 251).toByte() }
+    fun `用户实测2_28MB级密钥文件整流读出`() {
+        val bytes = ByteArray(2_280_000) { (it % 251).toByte() }
 
-        val read = readKeyFileBytesCapped(ByteArrayInputStream(bytes))
+        val read = readKeyFileBytes(ByteArrayInputStream(bytes))
 
-        assertNull("超限必须整体拒绝，不得返回被截断的密钥材料", read)
+        assertEquals("用户实测被旧上限拒读的尺寸必须完整读出（P3-435）", bytes.size, read.size)
     }
 
     @Test

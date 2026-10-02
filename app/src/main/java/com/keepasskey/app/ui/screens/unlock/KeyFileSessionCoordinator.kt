@@ -71,9 +71,8 @@ internal class KeyFileSessionCoordinator(
                     keyFileUserTouched = true
                     trackKeyFileSource(uri)
                 }
-                // 「读不到」分型：空文件 / 超限 / 流异常一律显式反馈，绝不静默忽略
+                // 「读不到」分型：空文件 / 流异常一律显式反馈，绝不静默忽略
                 KeyFileReadResult.Empty,
-                KeyFileReadResult.TooLarge,
                 KeyFileReadResult.Unreadable -> onKeyFileReadFailed()
             }
         }
