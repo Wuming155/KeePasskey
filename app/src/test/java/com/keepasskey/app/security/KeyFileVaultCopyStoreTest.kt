@@ -49,6 +49,9 @@ class KeyFileVaultCopyStoreTest {
         }
     }
 
+    /** 副本文件名已按 SHA-256 摘要编码（§411 真机修复：SAF 库 id 含斜杠不能直接拼名） */
+    private fun soleTarget(): File = storeDir.listFiles()!!.single()
+
     @Test
     fun `save 后 load 能往返字节与显示名`() = runTest {
         val store = newStore()
@@ -62,12 +65,28 @@ class KeyFileVaultCopyStoreTest {
     }
 
     @Test
+    fun `含斜杠的 SAF 库 id 也能落盘回读（真机回归）`() = runTest {
+        // 真机铁证：SAF 库 id = content://…document/1022，含斜杠直接拼名会形成
+        // 不存在的多级子路径 → FileNotFoundException，副本功能全灭（§411 装机走查）
+        val store = newStore()
+        val safDbId = "content://com.android.providers.downloads.documents/document/1022"
+        val bytes = byteArrayOf(7, 8, 9)
+        assertTrue(store.save(safDbId, bytes, "passwords.kdbx"))
+
+        val loaded = store.load(safDbId)!!
+        assertArrayEquals(bytes, loaded.bytes)
+        assertEquals("passwords.kdbx", loaded.displayName)
+        loaded.bytes.fill(0)
+        assertTrue("落盘文件必须是单级平铺文件", soleTarget().parentFile == storeDir)
+    }
+
+    @Test
     fun `密文不含明文字节与显示名（加密存储口径）`() = runTest {
         val store = newStore()
         val bytes = "SECRET-KEY-FILE-CONTENT".toByteArray()
         assertTrue(store.save("db-1", bytes, "display-name.keyx"))
 
-        val raw = File(storeDir, "db-1.kfc").readBytes()
+        val raw = soleTarget().readBytes()
         assertFalse(
             "密文中不得出现完整明文字节序列",
             raw.toList().windowed(bytes.size).any { it.toByteArray().contentEquals(bytes) }
@@ -80,8 +99,8 @@ class KeyFileVaultCopyStoreTest {
     fun `损坏副本就地删除并返回 null`() = runTest {
         val store = newStore()
         assertTrue(store.save("db-1", byteArrayOf(9, 9), "a.keyx"))
-        // 破坏：截掉大半个头部（sealIv 之后结构不完整）
-        val target = File(storeDir, "db-1.kfc")
+        // 破坏：截到只剩 iv 段（结构不完整）
+        val target = soleTarget()
         target.writeBytes(target.readBytes().copyOf(12))
 
         assertNull(store.load("db-1"))

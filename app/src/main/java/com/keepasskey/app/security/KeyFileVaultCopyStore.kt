@@ -5,6 +5,7 @@ import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -230,7 +231,17 @@ class KeyFileVaultCopyStore @Inject constructor(
         return null
     }
 
-    private fun fileFor(dir: File, databaseId: String): File = File(dir, "$databaseId$FILE_SUFFIX")
+    /**
+     * 副本文件名（§411 真机修复）：库 id 对 SAF 库是 `content://` URI——**含 `/` 斜杠**，
+     * 直接拼接文件名会形成不存在的多级子路径（真机 `FileNotFoundException`，副本功能全灭）。
+     * 统一对 dbId 做 SHA-256 十六进制摘要编码（同库恒同文件名，save/load/clear 三侧一致）。
+     */
+    private fun fileFor(dir: File, databaseId: String): File {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(databaseId.toByteArray(Charsets.UTF_8))
+            .toHexString()
+        return File(dir, "$digest$FILE_SUFFIX")
+    }
 
     private fun writeShort(os: java.io.OutputStream, value: Int) {
         os.write((value shr 8) and 0xFF)
