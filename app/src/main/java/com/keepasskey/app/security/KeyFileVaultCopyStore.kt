@@ -5,29 +5,36 @@ import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * 密钥文件的**应用私有目录收编副本**（ISSUE-P3-448，§411 实装）。
+ * 密钥文件的**应用私有目录收编副本**（ISSUE-P3-448，§411 实装；§411 热修复重构）。
  *
  * 语义（用户裁决）：「导入密钥文件」= 把解锁时所选（记忆）的密钥文件内容复制进应用私有目录，
  * 此后解锁链**优先消费本副本**——不再依赖 SAF 持久化读授权（授权失效不再阻断解锁），
  * 对比「记住密钥文件位置」（仅记 SAF Uri）的增强收编。
  *
- * **加密存储口径**（AC① 裁决）：密钥文件字节即密钥材料，绝不明文落盘——以专用 Keystore
- * AES-256-GCM 密钥（[KEY_ALIAS]，`requireUserAuth = false`）整载荷加密后写入
- * `filesDir/keyfiles/<dbId>.kfc`。非认证密钥的安全取舍与 `SyncCredentialSealer` 同判据：
- * 副本必须在解锁页（未认证态）自动可用；写入为临时文件 + 原子改名（工程规则「原子写盘」）。
- *
- * 载荷布局（加密前明文）：`[2 字节显示名长度][显示名 UTF-8][密钥文件字节]`——
- * 显示名是非密钥元数据，随载荷一并加密可让「副本尚存而 Uri 记忆丢失」的孤儿副本
- * 仍能正确回显文件名。读写全程 `ByteArray`，调用方对 [load] 返回的字节承担清零义务。
+ * **加密架构（§411 热修复，ANR 实测驱动）**：真机 ANR 取证（M332BF）表明，把 700 KB 密钥文件
+ * 整载荷直接经 Keystore（StrongBox）GCM 加密会在 KeyMint binder 上阻塞主线程数十秒
+ * （`slow binder: app → keystore2 → strongbox-nxp`，§408 已有同型教训：**芯片只处理小数据段**）。
+ * 现改为**信封加密**：
+ * - 每次 save 生成随机 32 B 数据加密密钥（DEK），Keystore 密钥（[KEY_ALIAS]，`requireUserAuth=false`，
+ *   安全取舍与 `SyncCredentialSealer` 同判据）只封印这 32 B（小载荷，秒内）；
+ * - 700 KB 级载荷由 DEK 在**软件层** AES-256-GCM 加密（`javax.crypto` 本地运算，不经 KeyMint）；
+ * - 文件布局：`[12B sealIv][2B sealCtLen][sealCt][12B dataIv][dataCt]`；`dataCt` 明文为
+ *   `[2B 显示名长][显示名 UTF-8][密钥文件字节]`（显示名随载荷加密，孤儿副本仍可回显）。
+ * - 读写全程 `ByteArray` 且整体移至 `Dispatchers.IO`（Keystore 与文件 IO 绝不上主线程）；
+ *   写入为临时文件 + 原子改名（工程规则「原子写盘」）。
  *
  * 清除时机（AC②）：解绑 / 换绑（`SettingsMasterKeyChangeController`）、偏好关闭、
- * 解锁成功但未使用密钥文件（`KeyFileSessionCoordinator`）、删除库（`VaultLifecycleCoordinator`）。
+ * 解锁成功但未使用密钥文件（`KeyFileSessionCoordinator`）、删除库（`DatabasePickerViewModel`）。
  */
 @Singleton
 class KeyFileVaultCopyStore @Inject constructor(
@@ -38,74 +45,94 @@ class KeyFileVaultCopyStore @Inject constructor(
     private val debugLog: DebugLogBuffer? = null
 ) {
 
-    /**
-     * 单测注入的落盘根目录覆盖（生产恒 null → `filesDir/keyfiles`）。
-     * 不走构造参数：Hilt 不接受无绑定的 `File?` 依赖（MissingBinding）。
-     */
-    @VisibleForTesting
-    internal var baseDirOverride: File? = null
-
     /** 收编副本（解密产物）：字节（调用方用毕清零）+ 非敏感显示名 */
     data class StoredCopy(val bytes: ByteArray, val displayName: String)
 
-    /**
-     * 测试注入的加密钩子（JVM 单测无 Keystore）：`明文 → (iv, 密文)`。
-     * 生产恒 null → 走 Keystore 真实加解密（与 [SyncCredentialSealer] 的 customEncryptor 同范式）。
-     */
+    /** 单测注入的落盘根目录覆盖（生产恒 null → `filesDir/keyfiles`）。Hilt 不接受 `File?` 构造依赖。 */
     @VisibleForTesting
-    internal var encryptHook: ((ByteArray) -> Pair<ByteArray, ByteArray>)? = null
+    internal var baseDirOverride: File? = null
 
-    /** 测试注入的解密钩子：`(iv, 密文) → 明文`。生产恒 null。 */
+    /** 测试注入的 DEK 封印钩子（JVM 无 Keystore）：`DEK → (iv, 密文)`。生产恒 null。 */
     @VisibleForTesting
-    internal var decryptHook: ((ByteArray, ByteArray) -> ByteArray)? = null
+    internal var sealHook: ((ByteArray) -> Pair<ByteArray, ByteArray>)? = null
+
+    /** 测试注入的 DEK 解封钩子：`(iv, 密文) → DEK`。生产恒 null。 */
+    @VisibleForTesting
+    internal var unsealHook: ((ByteArray, ByteArray) -> ByteArray)? = null
 
     private val baseDir: File?
         get() = baseDirOverride
             ?: context?.filesDir?.let { File(it, DIR_NAME) }
 
-    /** 收编副本：加密写盘（原子改名）。失败显式留痕并返回 false（绝不静默当成功）。 */
-    fun save(databaseId: String, bytes: ByteArray, displayName: String): Boolean {
-        if (databaseId.isBlank() || bytes.isEmpty()) return false
-        val dir = baseDir ?: return false
-        val payload = withDisplayName(displayName, bytes)
-        try {
-            val (iv, ciphertext) = encryptHook?.invoke(payload) ?: sealWithKeystore(payload)
-                ?: return false
-            if (!dir.exists()) dir.mkdirs()
-            val target = fileFor(dir, databaseId)
-            val tmp = File(target.parentFile, target.name + ".tmp")
-            tmp.outputStream().use { os ->
-                os.write(iv)
-                os.write(ciphertext)
-                os.fd.sync()
+    private val random = SecureRandom()
+
+    /** 收编副本：生成一次性 DEK → Keystore 封 DEK → 软件层加密载荷 → 原子写盘。失败显式留痕并返回 false。 */
+    suspend fun save(databaseId: String, bytes: ByteArray, displayName: String): Boolean =
+        withContext(Dispatchers.IO) {
+            if (databaseId.isBlank() || bytes.isEmpty()) return@withContext false
+            val dir = baseDir ?: return@withContext false
+            val payload = withDisplayName(displayName, bytes)
+            // DEK 清零收口在最外层 finally：加密封装全程（含软件层 doFinal）都要求 DEK 存活
+            val dek = ByteArray(DEK_LENGTH_BYTES).also { random.nextBytes(it) }
+            try {
+                // Keystore 只封这 32 B（§408 教训：芯片不碰大载荷）
+                val (sealIv, sealCt) = sealHook?.invoke(dek) ?: sealWithKeystore(dek)
+                    ?: return@withContext false
+                val dataIv = ByteArray(IV_LENGTH_BYTES).also { random.nextBytes(it) }
+                val dataCt = softAesGcm(dek, dataIv, payload)
+                if (!dir.exists()) dir.mkdirs()
+                val target = fileFor(dir, databaseId)
+                val tmp = File(target.parentFile, target.name + ".tmp")
+                tmp.outputStream().use { os ->
+                    os.write(sealIv)
+                    writeShort(os, sealCt.size)
+                    os.write(sealCt)
+                    os.write(dataIv)
+                    os.write(dataCt)
+                    os.fd.sync()
+                }
+                if (!tmp.renameTo(target)) {
+                    tmp.delete()
+                    debugLog?.warn(TAG, "副本原子改名失败")
+                    return@withContext false
+                }
+                true
+            } catch (e: Exception) {
+                debugLog?.warn(TAG, "副本写入失败: ${e.javaClass.simpleName}")
+                false
+            } finally {
+                dek.fill(0)
+                payload.fill(0)
             }
-            if (!tmp.renameTo(target)) {
-                tmp.delete()
-                debugLog?.warn(TAG, "副本原子改名失败")
-                return false
-            }
-            return true
-        } catch (e: Exception) {
-            debugLog?.warn(TAG, "副本写入失败: ${e.javaClass.simpleName}")
-            return false
-        } finally {
-            payload.fill(0)
         }
-    }
 
     /** 读取并解密封印副本；缺失 / 损坏返回 null（损坏就地删除，避免反复失败）。 */
-    fun load(databaseId: String): StoredCopy? {
-        if (databaseId.isBlank()) return null
-        val dir = baseDir ?: return null
+    suspend fun load(databaseId: String): StoredCopy? = withContext(Dispatchers.IO) {
+        if (databaseId.isBlank()) return@withContext null
+        val dir = baseDir ?: return@withContext null
         val target = fileFor(dir, databaseId)
-        if (!target.exists()) return null
-        return try {
+        if (!target.exists()) return@withContext null
+        try {
             val raw = target.readBytes()
-            if (raw.size <= IV_LENGTH_BYTES) return corrupt(target)
-            val iv = raw.copyOfRange(0, IV_LENGTH_BYTES)
-            val ciphertext = raw.copyOfRange(IV_LENGTH_BYTES, raw.size)
-            val payload = decryptHook?.invoke(iv, ciphertext) ?: unsealWithKeystore(iv, ciphertext)
-                ?: return corrupt(target)
+            var offset = 0
+            fun take(n: Int): ByteArray {
+                if (raw.size < offset + n) throw IllegalStateException("副本截断")
+                return raw.copyOfRange(offset, offset + n).also { offset += n }
+            }
+            val sealIv = take(IV_LENGTH_BYTES)
+            val sealLen = ((raw[offset].toInt() and 0xFF) shl 8) or (raw[offset + 1].toInt() and 0xFF)
+            offset += 2
+            val sealCt = take(sealLen)
+            val dataIv = take(IV_LENGTH_BYTES)
+            val dataCt = take(raw.size - offset)
+            // Keystore 只解封 32 B DEK（小载荷）；700 KB 级载荷走软件层解密
+            val dek = unsealHook?.invoke(sealIv, sealCt) ?: unsealWithKeystore(sealIv, sealCt)
+                ?: return@withContext corrupt(target)
+            val payload = try {
+                softAesGcm(dek, dataIv, dataCt, decrypt = true)
+            } finally {
+                dek.fill(0)
+            }
             val copy = parsePayload(payload)
             payload.fill(0)
             copy
@@ -138,8 +165,8 @@ class KeyFileVaultCopyStore @Inject constructor(
 
     // ===== 内部实现 =====
 
-    /** Keystore 封印（requireUserAuth = false 的安全取舍声明见类 KDoc） */
-    private fun sealWithKeystore(payload: ByteArray): Pair<ByteArray, ByteArray>? {
+    /** Keystore 封 DEK（requireUserAuth = false 的安全取舍声明见类 KDoc；仅 32 B 小载荷） */
+    private fun sealWithKeystore(dek: ByteArray): Pair<ByteArray, ByteArray>? {
         val km = keystoreManager ?: run {
             debugLog?.warn(TAG, "Keystore 通道缺失，副本未写入")
             return null
@@ -147,7 +174,7 @@ class KeyFileVaultCopyStore @Inject constructor(
         val key = km.getOrCreateKey(KEY_ALIAS, requireUserAuth = false)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
-        return Pair(cipher.iv, cipher.doFinal(payload))
+        return Pair(cipher.iv, cipher.doFinal(dek))
     }
 
     private fun unsealWithKeystore(iv: ByteArray, ciphertext: ByteArray): ByteArray? {
@@ -156,6 +183,20 @@ class KeyFileVaultCopyStore @Inject constructor(
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
         return cipher.doFinal(ciphertext)
+    }
+
+    /**
+     * **软件层** AES-256-GCM（`javax.crypto` 本地运算，不进 KeyMint/StrongBox）：
+     * encrypt = true 时 plaintext=载荷；false 时入参为密文返回明文。
+     */
+    private fun softAesGcm(dek: ByteArray, iv: ByteArray, data: ByteArray, decrypt: Boolean = false): ByteArray {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(
+            if (decrypt) Cipher.DECRYPT_MODE else Cipher.ENCRYPT_MODE,
+            SecretKeySpec(dek, "AES"),
+            GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv)
+        )
+        return cipher.doFinal(data)
     }
 
     /** 明文载荷组装：`[2 字节名字节长][显示名 UTF-8][密钥文件字节]` */
@@ -167,7 +208,6 @@ class KeyFileVaultCopyStore @Inject constructor(
         payload[1] = (nameLen and 0xFF).toByte()
         nameBytes.copyInto(payload, NAME_LEN_PREFIX)
         bytes.copyInto(payload, NAME_LEN_PREFIX + nameLen)
-        // nameBytes 是临时副本（toByteArray 产物），随 GC 回收；不留长驻引用
         return payload
     }
 
@@ -192,6 +232,11 @@ class KeyFileVaultCopyStore @Inject constructor(
 
     private fun fileFor(dir: File, databaseId: String): File = File(dir, "$databaseId$FILE_SUFFIX")
 
+    private fun writeShort(os: java.io.OutputStream, value: Int) {
+        os.write((value shr 8) and 0xFF)
+        os.write(value and 0xFF)
+    }
+
     private companion object {
         const val TAG = "KeyFileVaultCopy"
         const val DIR_NAME = "keyfiles"
@@ -200,6 +245,7 @@ class KeyFileVaultCopyStore @Inject constructor(
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val GCM_TAG_LENGTH_BITS = 128
         const val IV_LENGTH_BYTES = 12
+        const val DEK_LENGTH_BYTES = 32
         const val NAME_LEN_PREFIX = 2
         const val USHORT_MAX = 0xFFFF
     }

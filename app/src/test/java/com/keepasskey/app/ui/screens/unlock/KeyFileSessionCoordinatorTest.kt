@@ -118,11 +118,11 @@ class KeyFileSessionCoordinatorTest {
             context = null,
             keystoreManager = null
         ).also { it.baseDirOverride = dir }
-        store.encryptHook = { plaintext ->
+        store.sealHook = { dek ->
             val iv = ByteArray(12) { it.toByte() }
-            iv to plaintext.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
+            iv to dek.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
         }
-        store.decryptHook = { iv, ciphertext ->
+        store.unsealHook = { iv, ciphertext ->
             ciphertext.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
         }
         val uiState = MutableStateFlow(UnlockUiState())
