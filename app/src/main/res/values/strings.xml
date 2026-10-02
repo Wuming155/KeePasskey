@@ -683,6 +683,7 @@
     <string name="set_about_entry_sub">版本 %1$s</string>
     <string name="set_master_key_updated">主密码已更新，加密密钥已重新派生</string>
     <string name="set_master_key_dialog_desc">修改主密码将使用 %1$s 重新派生密钥并重加密整个数据库，过程不可逆</string>
+    <string name="set_master_key_keep_hint">两个密码框都留空＝保持当前主密码，仅修改密钥文件</string>
     <string name="set_new_master_password">新主密码</string>
     <string name="set_confirm_master_password">确认新主密码</string>
     <string name="set_save_changes">保存更改</string>

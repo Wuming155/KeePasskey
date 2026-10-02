@@ -109,6 +109,10 @@ class FakeVaultRepository(
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
+    override suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): com.keepasskey.core.result.KdbxResult<Unit> {
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+    }
+
     override suspend fun lockDatabase() {
         // 假数据仓库内存模拟无操作
     }

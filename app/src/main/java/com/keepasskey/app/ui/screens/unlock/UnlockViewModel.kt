@@ -68,7 +68,10 @@ class UnlockViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context? = null,
     // ISSUE-P2-355 AC③：全局脏表单注册表（消费「锁定丢弃未保存编辑」一次性告知）。
     // nullable 仅用于纯 JVM 单测；生产 DI 注入 @Singleton 真现实例
-    private val unsavedEditRegistry: com.keepasskey.app.security.UnsavedEditRegistry? = null
+    private val unsavedEditRegistry: com.keepasskey.app.security.UnsavedEditRegistry? = null,
+    // ISSUE-P1-429：封印 / 解封 keystore 密算的调度器（生产 DI 注入 @SealCryptoDispatcher = IO；
+    // 默认值仅供未触 crypto 路径的既有 JVM 单测沿用，触路径的用例注入 TestDispatcher 保确定性）
+    @com.keepasskey.app.di.SealCryptoDispatcher private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -99,7 +102,8 @@ class UnlockViewModel @Inject constructor(
         activeDbId = { activeDatabaseId },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
-        debugLog = debugLog
+        debugLog = debugLog,
+        cryptoDispatcher = cryptoDispatcher
     )
 
     /** 生物识别凭据登记协调器（ISSUE-P3-25）：解锁成功后的首次封印（best-effort） */
@@ -111,7 +115,8 @@ class UnlockViewModel @Inject constructor(
         keyFileBytes = { keyFileSession.keyFileData },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
-        debugLog = debugLog
+        debugLog = debugLog,
+        cryptoDispatcher = cryptoDispatcher
     )
 
     /** 主密码解锁会话（ISSUE-P3-188）：承载主密码缓冲区与「节流闸门 → 解锁 → 收尾/分型」全流程 */

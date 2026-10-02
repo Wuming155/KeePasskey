@@ -373,4 +373,18 @@ class DatabaseSession(
         newPasswordChars: CharArray?,
         newKeyFileData: ByteArray?
     ): KdbxResult<Unit> = persistence.changeCredentials(newPasswordChars, newKeyFileData)
+
+    /**
+     * 当前会话主密码快照（ISSUE-P3-430）：克隆副本，**调用方用毕必须 `fill('0')` 清零**；
+     * 会话无主密码分量（仅密钥文件会话）返回 `null`。绝不落地为 `String`、不写日志。
+     */
+    fun passwordSnapshot(): CharArray? = credentials.passwordSnapshot()
+
+    /**
+     * 仅更换密钥文件因子，主密码分量原样保留（ISSUE-P3-430）。
+     * 语义与 fail-closed 边界见 [SessionPersistence.changeKeyFileOnly]；
+     * [newKeyFileData] 借用语义同双参 [changeCredentials]。
+     */
+    suspend fun changeKeyFileOnly(newKeyFileData: ByteArray?): KdbxResult<Unit> =
+        persistence.changeKeyFileOnly(newKeyFileData)
 }

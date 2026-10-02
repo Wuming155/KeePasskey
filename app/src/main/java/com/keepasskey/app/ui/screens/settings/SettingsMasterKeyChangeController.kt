@@ -46,8 +46,9 @@ internal data class MasterKeyChangeTaskState(
 internal class SettingsMasterKeyChangeController(
     private val repository: VaultRepository,
     private val scope: CoroutineScope,
-    /** ISSUE-P2-398：改密成功后的重封印挂点（activity 宿主由 UI 层透传；null 时不重封印） */
-    private val resealAfterChange: (suspend (FragmentActivity?, CharArray) -> Unit)? = null
+    /** 忙守卫 + ISSUE-P2-398：改密成功后的重封印挂点（activity 宿主由 UI 层透传；null 时不重封印）；
+     * ISSUE-P3-430：密码入参可为 null = 密码分量未变（仅改绑密钥文件，由会话快照封印） */
+    private val resealAfterChange: (suspend (FragmentActivity?, CharArray?) -> Unit)? = null
 ) {
 
     private val mutableState = MutableStateFlow(MasterKeyChangeTaskState())
@@ -56,17 +57,27 @@ internal class SettingsMasterKeyChangeController(
     val state: StateFlow<MasterKeyChangeTaskState> = mutableState.asStateFlow()
 
     /**
-     * 提交新主口令（[newPasswordChars] 所有权移交本方法，见类 KDoc 的擦除契约）。
+     * 提交凭据变更（[newPasswordChars] 所有权移交本方法，见类 KDoc 的擦除契约）。
      *
      * ISSUE-P3-428：[keyFileIntent] 透传对密钥文件第二因子的意图（默认 Keep 沿用
      * 既有语义）；`Use` 携带的字节同为借用语义——仓库侧只读不擦除，**清零责任在本
      * 方法的 `finally`**（与密码数组同一收尾窗口），成败与异常路径均不遗留。
+     * ISSUE-P3-430：[newPasswordChars] 为**空数组** = 密码分量不变，走
+     * [VaultRepository.changeKeyFileOnly]（仅改绑密钥文件；此时 [keyFileIntent] 必须非
+     * `Keep`，否则无任何改动——同步拒绝并留痕，不产生假回执）；重封印入参对应传 null。
      */
     fun submit(
         newPasswordChars: CharArray,
         keyFileIntent: ChangeKeyFileIntent = ChangeKeyFileIntent.Keep,
         activity: FragmentActivity? = null
     ) {
+        val keepPassword = newPasswordChars.isEmpty()
+        if (keepPassword && keyFileIntent == ChangeKeyFileIntent.Keep) {
+            // 无任何改动（对话框闸门本应拦住）：原样清零，不进任务、不报错
+            newPasswordChars.fill('0')
+            keyFileIntent.eraseBorrowedBytes()
+            return
+        }
         if (mutableState.value.isChanging) {
             newPasswordChars.fill('0')
             keyFileIntent.eraseBorrowedBytes()
@@ -75,7 +86,11 @@ internal class SettingsMasterKeyChangeController(
         mutableState.update { it.copy(isChanging = true) }
         scope.launch {
             try {
-                val result = repository.changeMasterPassword(newPasswordChars, keyFileIntent)
+                val result = if (keepPassword) {
+                    repository.changeKeyFileOnly(keyFileIntent)
+                } else {
+                    repository.changeMasterPassword(newPasswordChars, keyFileIntent)
+                }
                 mutableState.update {
                     it.copy(
                         feedback = when (result) {
@@ -85,7 +100,7 @@ internal class SettingsMasterKeyChangeController(
                     )
                 }
                 if (result is KdbxResult.Success) {
-                    resealAfterChange?.invoke(activity, newPasswordChars)
+                    resealAfterChange?.invoke(activity, newPasswordChars.takeIf { !keepPassword })
                 }
             } finally {
                 newPasswordChars.fill('0')

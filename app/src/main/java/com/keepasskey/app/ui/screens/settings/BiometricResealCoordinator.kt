@@ -13,6 +13,7 @@ import com.keepasskey.app.ui.screens.unlock.BiometricSealedPayloadCodec
 import com.keepasskey.app.ui.screens.unlock.SealedKeyProvision
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.crypto.Cipher
 
@@ -55,10 +56,17 @@ internal class BiometricResealCoordinator(
     private val activeDbId: () -> String?,
     /** 会话绑定的密钥文件因子提供者（null = 未携带）；封印前快照克隆、用毕清零 */
     private val sessionKeyFileBytes: () -> ByteArray?,
+    /**
+     * 会话当前主密码快照提供者（ISSUE-P3-430：[resealAfterMasterKeyChange] 入参为 null＝
+     * 密码分量未变，从这里取克隆快照封印）；调用方（本协调器）用毕清零。仅纯 JVM 单测可缺省。
+     */
+    private val sessionPasswordChars: () -> CharArray? = { null },
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val strings: StringsProvider,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    /** ISSUE-P1-429：重封印 keystore 密算与供给的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
+    private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) {
 
     /** 测试替身：替代真实封印密钥供给（生产恒 null → [defaultSealKeyProvision]） */
@@ -89,10 +97,15 @@ internal class BiometricResealCoordinator(
     }
 
     /**
-     * 改密成功后以 [newPasswordChars] 重封印活动库的快速解锁凭据。
+     * 凭据变更成功后以新凭据重封印活动库的快速解锁凭据（ISSUE-P3-430 语义扩展）。
+     *
+     * @param newPasswordChars 改密后的新主密码；**null = 密码分量未变**（仅改绑密钥文件，
+     *   ISSUE-P3-430）——此时从 [sessionPasswordChars] 取会话当前主密码快照封印，
+     *   该快照归本方法所有、用毕 `finally` 清零。取不到（仅密钥文件会话等）时留痕跳过，
+     *   交由下次主密码解锁的登记路径自然重封印。
      * 幂等安全：任意前置不满足即空操作；绝不抛出（调用方为改密任务收尾段）。
      */
-    suspend fun resealAfterMasterKeyChange(activity: FragmentActivity?, newPasswordChars: CharArray) {
+    suspend fun resealAfterMasterKeyChange(activity: FragmentActivity?, newPasswordChars: CharArray?) {
         val dbId = activeDbId() ?: return
         val storage = biometricCredentialStorage ?: return
         val settings = settingsRepository.getSettings().first()
@@ -104,7 +117,10 @@ internal class BiometricResealCoordinator(
         storage.clearCredential(dbId)
         debugLog.info(TAG, "改密成功，摘除陈旧封印凭据并尝试重封印")
 
-        val provision = (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
+        // ISSUE-P1-429：供给含 keystore binder 调用（建钥 / 落位探测），移 IO 线程执行
+        val provision = withContext(cryptoDispatcher) {
+            (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
+        }
         if (provision == null) {
             debugLog.warn(TAG, "重封印中止：封印密钥供给失败（下次主密码解锁后自动重新封印）")
             return
@@ -128,15 +144,36 @@ internal class BiometricResealCoordinator(
             return
         }
 
-        sealCompositePayload(authManager, activity, provision, newPasswordChars)?.let { sealed ->
-            // 弹窗挂起期间开关可能已被关闭（关闭 = 删除）：落库前复核偏好，
-            // 杜绝「撤销刚执行、重封印又写回」的竞态（与登记路径 ISSUE-P2-253 同一批关闸）
-            if (!settingsRepository.getSettings().first().biometricEnabled) {
-                debugLog.info(TAG, "重封印授权挂起期间生物识别开关已关闭，放弃落库")
+        // ISSUE-P3-430：入参 null = 密码分量未变（仅改绑密钥文件），从会话取当前主密码
+        // 快照封印；快照归本方法所有，sealCompositePayload 返回后（成败皆然）就地清零。
+        // 取不到（仅密钥文件会话等）时留痕跳过，交由下次主密码解锁的登记路径自然重封印。
+        val passwordChars: CharArray
+        val erasePassword: Boolean
+        if (newPasswordChars != null) {
+            passwordChars = newPasswordChars
+            erasePassword = false
+        } else {
+            val snapshot = sessionPasswordChars()
+            if (snapshot == null) {
+                debugLog.warn(TAG, "重封印中止：密码分量未变但取不到会话主密码快照")
                 return
             }
-            storage.saveEncryptedCredential(dbId, sealed.first, sealed.second)
-            debugLog.info(TAG, "生物识别封印凭据已随改密重封印")
+            passwordChars = snapshot
+            erasePassword = true
+        }
+        try {
+            sealCompositePayload(authManager, activity, provision, passwordChars)?.let { sealed ->
+                // 弹窗挂起期间开关可能已被关闭（关闭 = 删除）：落库前复核偏好，
+                // 杜绝「撤销刚执行、重封印又写回」的竞态（与登记路径 ISSUE-P2-253 同一批关闸）
+                if (!settingsRepository.getSettings().first().biometricEnabled) {
+                    debugLog.info(TAG, "重封印授权挂起期间生物识别开关已关闭，放弃落库")
+                    return
+                }
+                storage.saveEncryptedCredential(dbId, sealed.first, sealed.second)
+                debugLog.info(TAG, "生物识别封印凭据已随改密重封印")
+            }
+        } finally {
+            if (erasePassword) passwordChars.fill('0')
         }
     }
 
@@ -179,7 +216,9 @@ internal class BiometricResealCoordinator(
                     debugLog.warn(TAG, "重封印未取得授权 Cipher，跳过")
                     null
                 } else {
-                    authedCipher.doFinal(payload)
+                    // ISSUE-P1-429：授权 Cipher 的 keystore 密算（StrongBox 分块加密可达秒级）
+                    // 绝不上主线程——载荷含密钥文件字节时最大 1 MiB
+                    withContext(cryptoDispatcher) { authedCipher.doFinal(payload) }
                 }
             }
             is BiometricResult.Cancelled -> {

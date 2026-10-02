@@ -143,18 +143,18 @@ class SettingsViewModel @Inject constructor(
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
         debugLog = debugLogBuffer,
-        // ISSUE-P2-398：改密重封印载荷的密钥文件因子来源（复用会话导出通道）
-        sessionKeyFileBytes = { databaseSession?.exportKeyFileBytes() }
+        // ISSUE-P2-398 密钥文件因子来源；ISSUE-P3-430 sessionPasswordChars = 仅改绑密钥文件时重封印的会话密码快照（清零在协调器）
+        sessionKeyFileBytes = { databaseSession?.exportKeyFileBytes() },
+        sessionPasswordChars = { databaseSession?.passwordSnapshot() }
     )
 
     /** 开关动作即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
     private val biometricToggleState = biometricGate.toggleState
-    private val masterKeyChange =
-        SettingsMasterKeyChangeController(vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange)
+    private val masterKeyChange = SettingsMasterKeyChangeController(vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange)
 
-    /** P2-354/P2-398/P3-428 改密链路收口：提交（含密钥文件三态）直用控制器；读取通道见 features.keyFileReader */
+    // P2-354/P2-398/P3-428/P3-430 改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
     internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange
-    internal val keyFileReader get() = features.keyFileReader
+    internal val keyFileReader get() = features.keyFileReader // ISSUE-P3-428：改密对话框 SAF 读取通道（全仓唯一）
 
     /** ISSUE-P2-354 AC③：换密回执经 Snackbar 展示后清除（一次性消息语义）。 */
     fun clearMasterKeyChangeFeedback() = masterKeyChange.clearFeedback()

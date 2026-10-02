@@ -25,7 +25,9 @@ internal class SettingsBiometricGate(
     strings: StringsProvider,
     debugLog: DebugLogBuffer,
     /** ISSUE-P2-398：改密重封印的密钥文件因子来源（会话导出通道；null 仅纯 JVM 单测注入） */
-    private val sessionKeyFileBytes: () -> ByteArray? = { null }
+    private val sessionKeyFileBytes: () -> ByteArray? = { null },
+    /** ISSUE-P3-430：仅改绑密钥文件（密码分量未变）重封印的会话主密码快照来源（null 仅单测注入） */
+    private val sessionPasswordChars: () -> CharArray? = { null }
 ) {
     /** 活动库 id（封印凭据就绪判定的数据源）；随仓库库列表流更新 */
     private var activeDatabaseId: String? = null
@@ -53,6 +55,7 @@ internal class SettingsBiometricGate(
         settingsRepository = settingsRepository,
         activeDbId = { activeDatabaseId },
         sessionKeyFileBytes = sessionKeyFileBytes,
+        sessionPasswordChars = sessionPasswordChars,
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
@@ -62,8 +65,12 @@ internal class SettingsBiometricGate(
     fun setEnabled(enabled: Boolean, activity: FragmentActivity? = null) =
         coordinator.setEnabled(enabled, activity)
 
-    /** ISSUE-P2-398：改密任务成功后的重封印挂点（前置不满足即空操作，详见协调器 KDoc） */
-    suspend fun resealAfterMasterKeyChange(activity: FragmentActivity?, newPasswordChars: CharArray) =
+    /**
+     * ISSUE-P2-398：改密任务成功后的重封印挂点（前置不满足即空操作，详见协调器 KDoc）；
+     * ISSUE-P3-430：[newPasswordChars] 为 null = 密码分量未变（仅改绑密钥文件），
+     * 由协调器自会话取当前主密码快照封印。
+     */
+    suspend fun resealAfterMasterKeyChange(activity: FragmentActivity?, newPasswordChars: CharArray?) =
         resealCoordinator.resealAfterMasterKeyChange(activity, newPasswordChars)
 }
 

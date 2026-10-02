@@ -129,8 +129,8 @@ class MasterKeyChangeTaskTest {
         val resealCalls = mutableListOf<Pair<FragmentActivity?, CharArray>>()
         var intactAtReseal = false
         val controller = SettingsMasterKeyChangeController(repository, this) { activity, chars ->
-            intactAtReseal = chars.all { it != '0' }
-            resealCalls.add(activity to chars.copyOf())
+            intactAtReseal = chars?.all { it != '0' } == true
+            resealCalls.add(activity to chars!!.copyOf())
         }
 
         val password = "Reseal-New-Pass#1".toCharArray()
@@ -196,6 +196,47 @@ class MasterKeyChangeTaskTest {
         controller.submit("Tri-State#3".toCharArray())
         advanceUntilIdle()
         assertEquals("缺省必须为 Keep（沿用既有单参语义）", ChangeKeyFileIntent.Keep, received.last())
+    }
+
+    // ── ISSUE-P3-430：留空密码 = 仅改绑密钥文件的通道分派 ────────────────
+
+    @Test
+    fun `留空密码走changeKeyFileOnly且重封印入参为null、空提交被拒`() = runTest {
+        val changeMasterCalls = mutableListOf<ChangeKeyFileIntent>()
+        val changeKeyFileOnlyCalls = mutableListOf<ChangeKeyFileIntent>()
+        val resealPasswords = mutableListOf<CharArray?>()
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun changeMasterPassword(
+                newPassword: CharArray,
+                keyFileIntent: ChangeKeyFileIntent
+            ): KdbxResult<Unit> {
+                changeMasterCalls.add(keyFileIntent)
+                return KdbxResult.Success(Unit)
+            }
+
+            override suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> {
+                changeKeyFileOnlyCalls.add(keyFileIntent)
+                return KdbxResult.Success(Unit)
+            }
+        }
+        val controller = SettingsMasterKeyChangeController(repository, this) { _, pwd ->
+            resealPasswords.add(pwd?.copyOf())
+        }
+
+        // 留空密码 + Use：必须走 changeKeyFileOnly，重封印收到 null（密码分量未变）
+        val bytes = ByteArray(4) { 0x22 }
+        controller.submit(CharArray(0), ChangeKeyFileIntent.Use(bytes))
+        advanceUntilIdle()
+        assertTrue("留空密码必须走仅改绑通道", changeMasterCalls.isEmpty())
+        assertTrue(changeKeyFileOnlyCalls.single() is ChangeKeyFileIntent.Use)
+        assertTrue("借用字节必须清零", bytes.all { it == 0.toByte() })
+        assertEquals("重封印必须以 null 密码触发（取会话快照）", 1, resealPasswords.size)
+        assertNull(resealPasswords.single())
+
+        // 留空密码 + Keep：无任何改动，必须被同步拒绝（不进任务、不产生回执）
+        controller.submit(CharArray(0), ChangeKeyFileIntent.Keep)
+        advanceUntilIdle()
+        assertEquals("空提交不得进入任何通道", 1, changeKeyFileOnlyCalls.size)
     }
 
     private suspend fun buildViewModel(repository: VaultRepository): SettingsViewModel {

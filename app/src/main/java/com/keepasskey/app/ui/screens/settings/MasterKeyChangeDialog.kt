@@ -56,6 +56,8 @@ import kotlinx.coroutines.launch
  * 保持现状 / 绑定或更换（SAF 选文件，经 [onReadKeyFile] 全仓唯一读取通道）/ 解绑。
  * 选定文件的字节为借用语义：换选与关闭路径就地清零；提交时所有权随 [ChangeKeyFileIntent.Use]
  * 移交控制器（其 `finally` 统一清零），本对话框只丢引用、不再补刀。
+ * ISSUE-P3-430：两个密码框整体留空 = 保持当前主密码（仅改绑密钥文件）；留空 + Keep
+ * 属空提交，提交钮禁用。
  *
  * 结果反馈不再由本对话框发 Snackbar：结果经 UiState 回执，由宿主 `SettingsContent`
  * 的既有 Snackbar 路径展示（这样切 Tab 错过时反馈也不丢）；busy 回落时对话框自行关闭。
@@ -135,8 +137,13 @@ internal fun MasterKeyChangeDialog(
     val strengthBits = rememberMasterPasswordStrengthBits(newPasswordChars)
     var showWeakConfirm by remember { mutableStateOf(false) }
 
-    val passwordsMatch = newPasswordChars.isNotEmpty() &&
-        newPasswordChars.contentEquals(confirmPasswordChars)
+    val passwordsMatch = newPasswordChars.contentEquals(confirmPasswordChars)
+    // ISSUE-P3-430：两个密码框都留空 = 保持当前主密码（仅改绑密钥文件）；否则按原改密校验
+    val keepPassword = newPasswordChars.isEmpty() && confirmPasswordChars.isEmpty()
+    val passwordValid = keepPassword ||
+        (passwordsMatch && newPasswordChars.size >= MasterPasswordPolicy.MIN_LENGTH)
+    // ISSUE-P3-430：至少要有一处改动（密码或密钥文件），避免「全部留空」的空提交
+    val hasAnyChange = !keepPassword || keyFileChoice != KeyFileChoice.KEEP
     // ISSUE-P3-428：「绑定或更换」必须已成功读到文件才可提交（fail-closed）
     val keyFileChoiceSatisfied = keyFileChoice != KeyFileChoice.USE || pickedKeyFile != null
 
@@ -148,7 +155,7 @@ internal fun MasterKeyChangeDialog(
 
     /** 门槛闸后的真实提交（原 onClick 内联逻辑；提交动作只移交数组，不再自持协程） */
     fun submitNewPassword() {
-        if (isBusy || submitted || !passwordsMatch || !keyFileChoiceSatisfied) return
+        if (isBusy || submitted || !passwordValid || !hasAnyChange || !keyFileChoiceSatisfied) return
         submitted = true
         val pwdChars = newPasswordChars.copyOf()
         val intent = intentOfChoice()
@@ -230,13 +237,15 @@ internal fun MasterKeyChangeDialog(
                 // ISSUE-P2-288 AC①：长度下限硬阻断（单一判据，与建库向导共用）
                 // ISSUE-P2-354 AC③：忙时禁用 + 内嵌进度
                 // ISSUE-P3-428：「绑定或更换」未选定文件时禁提交
-                enabled = passwordsMatch &&
-                    newPasswordChars.size >= MasterPasswordPolicy.MIN_LENGTH &&
+                // ISSUE-P3-430：密码框可整体留空（仅改密钥文件）；但至少要有一处改动
+                enabled = passwordValid &&
+                    hasAnyChange &&
                     keyFileChoiceSatisfied &&
                     !isBusy && !submitted,
                 showProgress = isBusy || submitted,
                 onClick = {
-                    if (MasterPasswordPolicy.verdictOf(newPasswordChars.size, strengthBits) ==
+                    if (!keepPassword &&
+                        MasterPasswordPolicy.verdictOf(newPasswordChars.size, strengthBits) ==
                         MasterPasswordPolicy.Verdict.WEAK_REQUIRES_CONFIRM
                     ) {
                         showWeakConfirm = true
@@ -385,6 +394,13 @@ private fun MasterKeyChangePasswordFields(
         onPasswordChanged = onConfirmPassword,
         isPasswordVisible = passwordVisible,
         onToggleVisibility = onToggleVisibility
+    )
+
+    // ISSUE-P3-430：留空语义告知（不换密码、只改密钥文件的通道）
+    Text(
+        text = stringResource(R.string.set_master_key_keep_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
 

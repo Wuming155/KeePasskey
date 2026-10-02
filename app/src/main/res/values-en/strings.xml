@@ -672,6 +672,7 @@
     <string name="set_about_entry_sub">Version %1$s</string>
     <string name="set_master_key_updated">Master password updated, encryption key re-derived</string>
     <string name="set_master_key_dialog_desc">Changing the master password re-derives the key with %1$s and re-encrypts the whole database. This cannot be undone</string>
+    <string name="set_master_key_keep_hint">Leave both password fields empty to keep the current master password and only change the key file</string>
     <string name="set_new_master_password">New master password</string>
     <string name="set_confirm_master_password">Confirm new master password</string>
     <string name="set_save_changes">Save changes</string>

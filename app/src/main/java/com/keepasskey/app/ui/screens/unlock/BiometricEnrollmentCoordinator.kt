@@ -14,6 +14,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.crypto.Cipher
 
@@ -34,7 +35,9 @@ internal class BiometricEnrollmentCoordinator(
     private val keyFileBytes: () -> ByteArray?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    /** ISSUE-P1-429：封印 keystore 密算与供给的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
+    private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) {
 
     /**
@@ -109,7 +112,10 @@ internal class BiometricEnrollmentCoordinator(
         }
 
         // ISSUE-P1-22：封印密钥供给 + 实际落位探测（先建钥后探测，见类 KDoc 次序约束）
-        val provision = (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
+        // ISSUE-P1-429：供给含 keystore binder 调用（建钥 / 落位探测），移 IO 线程执行
+        val provision = withContext(cryptoDispatcher) {
+            (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
+        }
         if (provision == null) {
             debugLog.warn(TAG, "生物识别凭据未登记：封印密钥不可用，跳过封印（fail-closed）")
             return
@@ -236,7 +242,9 @@ internal class BiometricEnrollmentCoordinator(
                     debugLog.warn(TAG, "生物识别登记未取得授权 Cipher，跳过封印")
                     null
                 } else {
-                    authedCipher.doFinal(payload)
+                    // ISSUE-P1-429：授权 Cipher 的 keystore 密算（StrongBox 分块加密可达秒级）
+                    // 绝不上主线程——载荷含密钥文件字节时最大 1 MiB
+                    withContext(cryptoDispatcher) { authedCipher.doFinal(payload) }
                 }
             }
             is BiometricResult.Cancelled -> {

@@ -197,6 +197,30 @@ internal class SessionPersistence(
     }
 
     /**
+     * 仅更换密钥文件因子，**主密码分量原样保留**（ISSUE-P3-430）。
+     *
+     * 语义＝以 [SessionCredentialCache.passwordSnapshot] 克隆出的当前主密码 + [newKeyFileData]
+     * 走双参 [changeCredentials]（密码分量不变，密钥文件改绑 / 解绑）。会话无主密码分量
+     * （仅密钥文件）且 [newKeyFileData] 为 `null` 时，改绑后将**不剩任何因子**，fail-closed 拒绝。
+     *
+     * @param newKeyFileData 新密钥文件字节（null = 解绑）；借用语义同双参 [changeCredentials]。
+     */
+    suspend fun changeKeyFileOnly(newKeyFileData: ByteArray?): KdbxResult<Unit> {
+        val pwdSnapshot = credentials.passwordSnapshot()
+        if (pwdSnapshot == null && newKeyFileData == null) {
+            return KdbxResult.Failure(
+                IllegalStateException("会话无主密码分量，解绑密钥文件将不剩任何解锁因子"),
+                "仅密钥文件会话不能解绑唯一解锁因子"
+            )
+        }
+        return try {
+            changeCredentials(pwdSnapshot, newKeyFileData)
+        } finally {
+            pwdSnapshot?.fill('0')
+        }
+    }
+
+    /**
      * 整库序列化（三条写盘路径的**唯一**实现）。
      *
      * ISSUE-P3-118：序列化缓冲必须**具名**并在用毕后清零——`toByteArray()` 只返回副本，

@@ -71,6 +71,15 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
+     * 仅更换密钥文件因子，主密码分量原样保留（ISSUE-P3-430）。
+     * 仅接受 [ChangeKeyFileIntent.Use] / [ChangeKeyFileIntent.Remove]——
+     * `Keep` 意味着无任何改动，返回 Failure（fail-closed，不静默成功）。
+     */
+    suspend fun changeKeyFileOnly(
+        keyFileIntent: ChangeKeyFileIntent
+    ): com.keepasskey.core.result.KdbxResult<Unit>
+
+    /**
      * 锁定当前密码库，清空内存凭据与活动树
      */
     suspend fun lockDatabase()

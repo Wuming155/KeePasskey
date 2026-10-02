@@ -155,6 +155,10 @@ class RealVaultRepository @Inject constructor(
         keyFileIntent: ChangeKeyFileIntent
     ): KdbxResult<Unit> = lifecycle.changeMasterPassword(newPassword, keyFileIntent)
 
+    /** ISSUE-P3-430：仅改绑密钥文件下沉 [VaultLifecycleCoordinator]（主密码分量保留）。 */
+    override suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> =
+        lifecycle.changeKeyFileOnly(keyFileIntent)
+
     /** ISSUE-P3-305：锁定与刷新下沉 [VaultLifecycleCoordinator]。 */
     override suspend fun lockDatabase() = lifecycle.lockDatabase()
 

@@ -90,7 +90,8 @@ class QuickUnlockSealDowngradeTest {
             settings,
             BiometricAuthManager(KeystoreManager(context = null)),
             null,
-            DebugLogBuffer()
+            DebugLogBuffer(),
+            cryptoDispatcher = testDispatcher
         )
         // ISSUE-P1-22 AC③：注入假封印密钥落位探测（替代真实 Keystore 探测）
         viewModel.installSealKeyProvisionForTest(provision)

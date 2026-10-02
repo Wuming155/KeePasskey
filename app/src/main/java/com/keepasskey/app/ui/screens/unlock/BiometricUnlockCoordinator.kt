@@ -11,10 +11,12 @@ import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
 
 /**
@@ -35,7 +37,9 @@ internal class BiometricUnlockCoordinator(
     private val activeDbId: () -> String?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    /** ISSUE-P1-429：解封 keystore 密算的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
+    private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) {
 
     /**
@@ -244,7 +248,11 @@ internal class BiometricUnlockCoordinator(
         }
         scope.launch {
             try {
-                val decryptedBytes = authedCipher.doFinal(sealedCiphertext)
+                // ISSUE-P1-429：解封密算（载荷含密钥文件字节时最大 1 MiB，StrongBox 可达秒级）
+                // 绝不上主线程
+                val decryptedBytes = withContext(cryptoDispatcher) {
+                    authedCipher.doFinal(sealedCiphertext)
+                }
                 // ISSUE-P3-327：解锁断言层已整体移除，快速解锁 = 生物识别授权 → 解封封印凭据
                 completeBiometricUnlock(decryptedBytes, storage, dbId)
             } catch (e: Exception) {

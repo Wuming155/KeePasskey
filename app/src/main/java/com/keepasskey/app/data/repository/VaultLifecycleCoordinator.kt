@@ -347,6 +347,26 @@ internal class VaultLifecycleCoordinator(
         return result
     }
 
+    /**
+     * 仅更换密钥文件因子，主密码分量原样保留（ISSUE-P3-430）：
+     * `Use` → 会话 `changeKeyFileOnly(字节)`；`Remove` → `changeKeyFileOnly(null)`（解绑）；
+     * `Keep` 意味着无任何改动，fail-closed 返回 Failure（不静默成功）。仅成功时刷新库列表。
+     */
+    suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> {
+        val result = when (keyFileIntent) {
+            ChangeKeyFileIntent.Keep -> KdbxResult.Failure(
+                IllegalArgumentException("Keep 意图不构成任何改动"),
+                "未指定任何改动"
+            )
+            is ChangeKeyFileIntent.Use -> databaseSession.changeKeyFileOnly(keyFileIntent.bytes)
+            ChangeKeyFileIntent.Remove -> databaseSession.changeKeyFileOnly(null)
+        }
+        if (result is KdbxResult.Success) {
+            refresh()
+        }
+        return result
+    }
+
     /** 锁定当前库并刷新库列表（顺序与拆分前一致：先 `lock()` 再刷新）。 */
     suspend fun lockDatabase() {
         databaseSession.lock()
