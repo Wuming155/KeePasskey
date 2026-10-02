@@ -138,7 +138,12 @@ internal class BiometricUnlockCoordinator(
         val dbId = activeDbId()
 
         if (activity == null || storage == null || authManager == null || dbId == null) {
-            // fail-closed：无真实生物识别上下文时不得伪造解锁成功
+            // fail-closed：无真实生物识别上下文时不得伪造解锁成功（§411 补日志：此前完全静默）
+            debugLog.warn(
+                TAG,
+                "生物识别解锁 fail-closed: hasActivity=${activity != null}, hasStorage=${storage != null}, " +
+                    "hasAuthManager=${authManager != null}, hasDbId=${dbId != null}"
+            )
             uiState.update {
                 it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
             }
@@ -148,6 +153,8 @@ internal class BiometricUnlockCoordinator(
 
         val cred = storage.getEncryptedCredential(dbId)
         if (cred == null) {
+            // §411 补日志：凭据缺失（被清除 / 键不一致）此前完全静默，真机无从定位
+            debugLog.warn(TAG, "快速解锁凭据缺失，回落主密码模式")
             uiState.update {
                 it.copy(
                     isQuickUnlockAvailable = false,
@@ -228,6 +235,8 @@ internal class BiometricUnlockCoordinator(
             is BiometricResult.Failed -> {
                 // ISSUE-P2-355 AC①：快速解锁比对失败不再静默——置失败提示并回落主密码模式
                 // （原实现在 QUICK 模式仅置 errorMessage，卡片无错误槽位 ⇒ 全程静默）
+                // §411 补日志：单次比对未通过此前零留痕，真机无从区分「未按指纹」与「传感器拒识」
+                debugLog.info(TAG, "生物识别单次比对未通过（指纹不匹配），回落主密码模式")
                 uiState.update {
                     it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
                 }
