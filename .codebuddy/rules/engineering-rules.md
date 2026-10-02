@@ -41,6 +41,14 @@
   （`content: @Composable BoxScope.() -> Unit`），Box 的兄弟节点**互相叠放**而非上下流动 ⇒ 多子节点必须
   自己包进 `Column` / `Row`。该形态编译期不报错、预览也可能看不见（见下条），已挂 `hygiene-gate` 机检
   `python tools/doc/check_box_slot_children.py`（读数须连「检查过的调用点数」一起看，站点数为 0 的绿无鉴别力）。
+- **框架给的内容槽同样是 `Box`**（`ISSUE-P3-457` 立规）：Material3 文本框把 `label` / `prefix` / `suffix` /
+  `leadingIcon` / `trailingIcon` / `supportingText` **各自包在 `Box(...)` 里**（`TextFieldImpl.kt`），
+  且 `supportingText` 槽外层只 `heightIn(min = MinSupportingTextLineHeight)` ⇒ 量到的是**最高子节点**。
+  往这类槽里平铺两行以上文案会**压在同一行**（真机事故：解锁页「生物识别验证未通过或已取消」与
+  「已自动载入记住的密钥文件: usr.dat」叠成一行乱码；`SecurePasswordField.supportingText` 只接受
+  **单个**节点，多行须自包 `Column`）。
+  **反向也红**：槽里只写一个「顶层发射 ≥2 节点」的 `@Composable` 助手（多发射助手函数），兄弟照样落进同一个
+  Box —— 两条判据都已并入上述机检。
 - **给组件新增「可见性开关」参数（带字面量默认值的 `Boolean`）时，同一批必须补该态的 `@Preview`**
   （`ISSUE-P3-340` 立规）。理由不是洁癖：预览只画默认态 ⇒ 布局重叠 / 截断 / 对比度不足这类缺陷
   **在编译期和预览导出图里都隐形**，只有真机肉眼能看见，等于把回归测试外包给用户。

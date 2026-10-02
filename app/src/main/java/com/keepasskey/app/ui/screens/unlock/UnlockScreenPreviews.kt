@@ -2,6 +2,8 @@ package com.keepasskey.app.ui.screens.unlock
 
 import android.content.res.Configuration
 import androidx.compose.runtime.Composable
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
@@ -51,6 +53,45 @@ internal fun UnlockContentAbnormalCloseNoticePreview() {
                 unlockMode = UnlockMode.STANDARD,
                 isQuickUnlockAvailable = true,
                 lastSessionAbnormalCloseNotice = true
+            ),
+            currentTheme = AppThemeMode.SYSTEM,
+            onThemeToggle = {},
+            onPasswordChange = {},
+            onTogglePasswordVisibility = {},
+            onSelectKeyFile = {},
+            onClearKeyFile = {},
+            onToggleReadOnly = {},
+            onSwitchMode = {},
+            onUnlock = {},
+            onBiometricUnlock = {},
+            onDowngradeDecision = {},
+            onNavigateToDatabasePicker = {},
+            onOpenExistingVault = {}
+        )
+    }
+}
+
+// ISSUE-P3-457：错误态 + 「已自动载入记住的密钥文件」info **同屏**——这正是真机走查拍到叠字的
+// 组合（用户原话「自动加载密钥文件的提示文字和…取消重叠」；「取消」实为生物识别失败文案
+// `sec_biometric_auth_failed` 的尾三字，非系统弹窗按钮）。该态此前**没有任何预览**，
+// 于是「两行文案压在同一个 y 上」在编译期与预览导出图里全部隐形，只有真机肉眼能撞见。
+// 补本态后，此槽的上下分离在预览图上直接可查（不变量由 check_box_slot_children.py 机检）。
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 错误与密钥文件 info 同屏 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 错误与密钥文件 info 同屏 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockContentErrorWithKeyFileInfoPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        UnlockContent(
+            uiState = UnlockUiState().copy(
+                hasDatabase = true,
+                databaseName = "Preview Vault.kdbx",
+                databaseStatus = "Ready",
+                unlockMode = UnlockMode.STANDARD,
+                isQuickUnlockAvailable = true,
+                hasKeyFile = true,
+                keyFileName = "usr.dat",
+                errorMessage = UiMessage(R.string.sec_biometric_auth_failed),
+                infoMessage = UiMessage(R.string.keyfile_restored_from_memory, listOf("usr.dat"))
             ),
             currentTheme = AppThemeMode.SYSTEM,
             onThemeToggle = {},

@@ -235,43 +235,57 @@ internal fun UnlockQuickUnlockCard(
  * ISSUE-P2-355 AC②：锁定期倒计时由 throttleLockoutRemainingMs 状态直驱、每秒刷新——
  * 一次性快照会随用户输入（onPasswordChangeSecure 清提示）消失，直驱行冲不掉；
  * 下方 errorMessage 的锁定快照与此行同源，锁定期内不重复渲染。
+ *
+ * ISSUE-P3-457（**单节点契约**）：本函数是 `OutlinedTextField.supportingText` 槽的内容，而该槽在
+ * Material3 侧落在 `Box(Modifier.layoutId(SupportingId))` 内部（`TextFieldImpl.kt` 的
+ * `TextFieldLayout` / `CutoutTextFieldLayout` 两处同形）——**Box 的同层兄弟互相叠放**，
+ * 而非上下流动；且外层只 `heightIn(min = MinSupportingTextLineHeight).wrapContentHeight()`，
+ * 量到的是**最高子节点**而非子节点之和。⇒ 本槽只能发射**一个**节点：此前四行 Text 平铺直出，
+ * 任意两行同时成立即压在同一行上（真机实证：生物识别失败文案「生物识别验证未通过或已取消」
+ * 与「已自动载入记住的密钥文件: usr.dat」叠成一行乱码；「主密码错误…」+「剩余 N 次尝试」
+ * 同样命中——后者是开启了失败节流时**每次输错都会出现**的常态组合）。
+ * 此槽的叠放风险由 `tools/doc/check_box_slot_children.py` 机检（含框架槽与「多发射助手函数」）。
  */
 @Composable
 private fun UnlockPasswordSupportingText(uiState: UnlockUiState) {
-    val lockoutMs = uiState.throttleLockoutRemainingMs
-    val countdownShown = lockoutMs > 0L
-    if (countdownShown) {
-        Text(
-            text = lockoutUiMessage(lockoutMs).resolveText(),
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall
-        )
-    }
-    uiState.errorMessage?.let { message ->
-        if (!(countdownShown && message.isLockoutCountdown())) {
+    // ISSUE-P3-457：Column 是**契约**而非排版偏好——它把四行文案从「Box 同层兄弟」变成
+    // 「Column 顺序子节点」，逐行上下分离；单行成立时渲染结果与平铺直出逐像素等价。
+    Column {
+        val lockoutMs = uiState.throttleLockoutRemainingMs
+        val countdownShown = lockoutMs > 0L
+        if (countdownShown) {
+            Text(
+                text = lockoutUiMessage(lockoutMs).resolveText(),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        uiState.errorMessage?.let { message ->
+            if (!(countdownShown && message.isLockoutCountdown())) {
+                Text(
+                    text = message.resolveText(),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（节流关闭 / 锁定态 / 已输入时为 null 不呈现）
+        if (uiState.errorMessage != null) {
+            uiState.throttleAttemptsRemaining?.let { remaining ->
+                Text(
+                    text = stringResource(R.string.unlock_attempts_remaining, remaining),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        uiState.infoMessage?.let { message ->
             Text(
                 text = message.resolveText(),
-                color = MaterialTheme.colorScheme.error,
+                color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.bodySmall
             )
         }
-    }
-    // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（节流关闭 / 锁定态 / 已输入时为 null 不呈现）
-    if (uiState.errorMessage != null) {
-        uiState.throttleAttemptsRemaining?.let { remaining ->
-            Text(
-                text = stringResource(R.string.unlock_attempts_remaining, remaining),
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-    }
-    uiState.infoMessage?.let { message ->
-        Text(
-            text = message.resolveText(),
-            color = MaterialTheme.colorScheme.primary,
-            style = MaterialTheme.typography.bodySmall
-        )
     }
 }
 

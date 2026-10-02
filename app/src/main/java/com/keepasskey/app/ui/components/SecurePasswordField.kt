@@ -46,6 +46,11 @@ import com.keepasskey.app.ui.theme.MonospacePasswordStyle
  * 5. [initialPassword] 支持既有密码一次性预填（编辑场景）：按 [initialKey] 消费一次，
  *    仅注入组件内部显示态，不回写 [onPasswordChanged]（预填非用户编辑，不触发脏标记；
  *    长期持有由数据层自行管理，加解密审查 2026-09 M1 整改）。
+ *
+ * ISSUE-P3-457：[supportingText] 槽的内容由 Material3 落在 `Box(Modifier.layoutId(SupportingId))`
+ * 之内（`TextFieldImpl.kt`）——**Box 的同层兄弟互相叠放**，故该槽只接受**单个**节点；
+ * 需要多行辅助 / 错误 / 提示文案时，调用方须自行包一层 `Column`（真机事故：解锁页四行文案
+ * 平铺直出，两行同时成立即压成一行乱码）。机检见 `tools/doc/check_box_slot_children.py`。
  */
 @Composable
 fun SecurePasswordField(
