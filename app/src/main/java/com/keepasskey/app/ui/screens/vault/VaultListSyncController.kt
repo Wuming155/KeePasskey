@@ -56,6 +56,12 @@ internal class VaultListSyncController(
      */
     fun triggerPullRefresh() {
         if (isSyncingFlow.value) return
+        // §410 走查：未配置云同步时如实提示，不进入同步周期——SAF 库无本地 File，
+        // 周期内 currentFile 早退的「当前无打开的密码库文件」会掩盖真实原因
+        if (!syncCoordinator.isSyncConfigured()) {
+            onMessage(UiMessage(R.string.sync_feedback_not_configured))
+            return
+        }
         scope.launch {
             isSyncingFlow.value = true
             val outcome = syncCoordinator.syncNow()

@@ -285,6 +285,11 @@ private fun ColumnScope.EntryEditGeneratorSection(
     // MotionScheme 的空间（展开/收起）与效果（淡化）spec。
     val generatorFade = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val generatorSize = MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()
+    // §410 走查：点闪电打开生成器即出密码（此前首开为空，须再点长度/字符池才生成）；
+    // 仅在密码框为空时自动生成——重开面板不覆盖用户手输或既有密码（要换密码点刷新钮）
+    LaunchedEffect(uiState.showGenerator) {
+        if (uiState.showGenerator && uiState.passwordLength == 0) onGeneratePassword()
+    }
     AnimatedVisibility(
         visible = uiState.showGenerator,
         enter = fadeIn(generatorFade) + expandVertically(generatorSize),

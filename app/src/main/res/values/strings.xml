@@ -877,6 +877,8 @@
     <string name="vault_conflict_action">去解决冲突</string>
     <string name="op_failed">操作失败：%1$s</string>
     <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
+    <!-- §410 走查：未配置云同步时下拉刷新的如实提示（不进同步周期） -->
+    <string name="sync_feedback_not_configured">尚未设置云同步，可在「设置 → 云端同步」中配置</string>
     <string name="sync_vault_binding_mismatch">云端副本登记为另一密码库，已中止同步以保护其数据</string>
     <string name="sync_vault_takeover_title">整库覆盖云端副本？</string>
     <string name="sync_vault_takeover_message">云端副本登记为另一个密码库所有。确认后将以当前库的完整内容覆盖云端副本，原属于另一库的云端数据将被整体替换且无法恢复。建议先确认另一库已另行备份。</string>
