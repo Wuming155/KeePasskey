@@ -30,7 +30,10 @@ sealed class Screen(val route: String) {
     data object SettingsSync : Screen("settings/sync")
     data object SettingsAutofill : Screen("settings/autofill")
 
-    /** 特权浏览器白名单（CM 通道通行密钥可用性；自自动填充页进入） */
+    /** 通行密钥 (Passkey) 二级设置页（ISSUE-P3-432：CM 凭据管理器通道自自动填充页拆出） */
+    data object SettingsPasskey : Screen("settings/passkey")
+
+    /** 特权浏览器白名单（CM 通道通行密钥可用性；自通行密钥页进入） */
     data object SettingsPrivilegedBrowsers : Screen("settings/privileged_browsers")
     data object SettingsSecurity : Screen("settings/security")
     data object SettingsTheme : Screen("settings/theme")

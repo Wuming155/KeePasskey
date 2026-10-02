@@ -18,6 +18,7 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
     settingsDatabaseRoute(navController)
     settingsSyncRoute(navController)
     settingsAutofillRoute(navController)
+    settingsPasskeyRoute(navController)
     settingsPrivilegedBrowsersRoute(navController)
     settingsSecurityRoute(navController)
     settingsThemeRoute(navController)

@@ -37,12 +37,14 @@ class DalSkipSwitchCopyWiringTest {
 
     private val componentsSource: String
         get() = readSource(
-            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsComponents.kt"
+            // ISSUE-P3-432：DAL 降级开关行自 AutofillSettingsComponents.kt 迁入通行密钥设置页
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/PasskeySettingsScreen.kt"
         )
 
     private val screenSource: String
         get() = readSource(
-            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsScreen.kt"
+            // ISSUE-P3-432：装配点由 AutofillSettingsScreen 改为路由文件中的 passkey 路由
+            "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraphRoutes.kt"
         )
 
     private val uiStateSource: String
@@ -120,7 +122,12 @@ class DalSkipSwitchCopyWiringTest {
             "变更必须上行到 onSkipDalVerificationToggle",
             componentsSource.contains("onCheckedChange = onSkipDalVerificationToggle")
         )
-        assertTrue("二级页装配须透传该回调", screenSource.contains("onSkipDalVerificationToggle"))
+        assertTrue(
+            // ISSUE-P3-432 拆分后：装配锚点改指路由文件中通行密钥页的 ViewModel 接线
+            // （自「二级页透传」升级为「路由 → ViewModel」整段在场，锁定强度不降）
+            "路由装配须接线 setSkipDalVerification",
+            screenSource.contains("onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification")
+        )
     }
 
     @Test

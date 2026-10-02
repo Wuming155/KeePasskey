@@ -87,9 +87,10 @@ class SettingsSubscreenScaffoldWiringTest {
 
         val TOP_BAR_ARGS = listOf("topBarContainerColor =", "topBarTitleContentColor =")
 
-        /** 沿用默认配色的其余九页（例外页不在其中，由第二个用例单独钉） */
+        /** 沿用默认配色的其余页（例外页不在其中，由第二个用例单独钉；ISSUE-P3-432 新增 PasskeySettingsScreen） */
         val MAJORITY_PAGES = listOf(
-            "AboutSettingsScreen", "ThemeSettingsScreen", "AutofillSettingsScreen", "TotpSettingsScreen",
+            "AboutSettingsScreen", "ThemeSettingsScreen", "AutofillSettingsScreen", "PasskeySettingsScreen",
+            "TotpSettingsScreen",
             "DebugSettingsScreen", "CloudSyncScreen", "SecuritySettingsScreen",
             "HealthCheckScreen", "DatabaseSettingsScreen"
         )

@@ -14,6 +14,7 @@ import com.keepasskey.app.ui.screens.settings.subscreens.AutofillSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.DatabaseSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.DebugSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.HealthCheckScreen
+import com.keepasskey.app.ui.screens.settings.subscreens.PasskeySettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.PrivilegedBrowserSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.SecuritySettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.ThemeSettingsScreen
@@ -132,7 +133,7 @@ internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController)
     }
 }
 
-/** 9. 二级设置页面：自动填充与 Passkey */
+/** 9. 二级设置页面：自动填充 (AutofillService 通道；ISSUE-P3-432 自 CM 通道拆分后) */
 internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostController) {
     composable(Screen.SettingsAutofill.route) {
         val settingsViewModel: SettingsViewModel = hiltViewModel()
@@ -145,8 +146,6 @@ internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostControl
         AutofillSettingsScreen(
             uiState = settingsState,
             onBackClick = { navController.popBackStack() },
-            onCredentialProviderToggle = settingsViewModel::setCredentialProviderEnabled,
-            onPasskeySupportToggle = settingsViewModel::setPasskeySupportEnabled,
             onAutofillServiceToggle = settingsViewModel::setAutofillServiceEnabled,
             onAutofillLegacyAccessibilityToggle = settingsViewModel::setAutofillLegacyAccessibilityEnabled,
             onAutoClearClipboardToggle = settingsViewModel::setAutoClearClipboard,
@@ -155,16 +154,11 @@ internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostControl
             onAutoReturnFromQueryToggle = settingsViewModel::setAutoReturnFromQuery,
             onAutofillCopyTotpToggle = settingsViewModel::setAutofillCopyTotp,
             onAutofillShowTotpNotificationToggle = settingsViewModel::setAutofillShowTotpNotification,
-            onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
             onOverrideNoAutofillToggle = settingsViewModel::setOverrideNoAutofill,
             onAutofillSessionGrantToggle = settingsViewModel::setAutofillSessionGrantEnabled,
             // ISSUE-P3-376：候选呈现面两开关
             onAutofillManualPickerToggle = settingsViewModel::setAutofillManualPickerEnabled,
             onAutofillOfferCreateToggle = settingsViewModel::setAutofillOfferCreateEntry,
-            // ISSUE-P3-359 AC③：三级设置页下钻同样补 launchSingleTop
-            onOpenPrivilegedBrowsers = {
-                navController.navigate(Screen.SettingsPrivilegedBrowsers.route) { launchSingleTop = true }
-            },
             blockedPackages = blockedPackages,
             onBlockAutofillPackage = settingsViewModel::blockAutofillPackage,
             onUnblockAutofillPackage = settingsViewModel::unblockAutofillPackage,
@@ -173,6 +167,25 @@ internal fun NavGraphBuilder.settingsAutofillRoute(navController: NavHostControl
             onUnblockSavePackage = settingsViewModel::unblockSavePackage,
             blockedFieldCount = blockedFieldCount,
             onClearBlockedFields = settingsViewModel::clearBlockedFields
+        )
+    }
+}
+
+/** 9a. 二级设置页面：通行密钥 (Passkey；ISSUE-P3-432 自自动填充页拆出的 CM 通道) */
+internal fun NavGraphBuilder.settingsPasskeyRoute(navController: NavHostController) {
+    composable(Screen.SettingsPasskey.route) {
+        val settingsViewModel: SettingsViewModel = hiltViewModel()
+        val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+        PasskeySettingsScreen(
+            uiState = settingsState,
+            onBackClick = { navController.popBackStack() },
+            onCredentialProviderToggle = settingsViewModel::setCredentialProviderEnabled,
+            onPasskeySupportToggle = settingsViewModel::setPasskeySupportEnabled,
+            onSkipDalVerificationToggle = settingsViewModel::setSkipDalVerification,
+            // ISSUE-P3-359 AC③：三级设置页下钻同样补 launchSingleTop
+            onOpenPrivilegedBrowsers = {
+                navController.navigate(Screen.SettingsPrivilegedBrowsers.route) { launchSingleTop = true }
+            }
         )
     }
 }

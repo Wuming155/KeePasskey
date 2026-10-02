@@ -249,8 +249,11 @@
     <string name="settings_health_sub">Weak passwords, reuse detection, breach checking</string>
     <string name="settings_cat_preferences">Autofill</string>
     <string name="settings_cat_display">Interface &amp; Display</string>
-    <string name="settings_autofill">Autofill &amp; Passkey</string>
-    <string name="settings_autofill_sub">System credential provider, Passkeys, clipboard protection</string>
+    <!-- ISSUE-P3-432：autofill and passkey split into two settings entries -->
+    <string name="settings_autofill">Autofill</string>
+    <string name="settings_autofill_sub">System autofill service, blocklists, TOTP integration, clipboard protection</string>
+    <string name="settings_passkey">Passkeys</string>
+    <string name="settings_passkey_sub">Credential Manager, privileged browsers, registration ownership checks</string>
     <string name="settings_theme">Appearance &amp; Theme</string>
     <string name="settings_theme_sub">Theme mode, language preference, list display options</string>
     <string name="settings_about">About KeePasskey</string>
@@ -973,6 +976,8 @@
 
     <!-- ===== Autofill settings subscreen ===== -->
     <string name="autofill_section_provider">Fill services</string>
+    <string name="passkey_section_provider">Credential provider</string>
+    <string name="passkey_section_policy">Registration ownership checks &amp; browser compatibility</string>
     <string name="autofill_cm_title">Credential Manager</string>
     <string name="autofill_cm_sub">Passkeys and passwords filled through the Android 16+ system credential manager</string>
     <string name="autofill_passkey_title">Passkey support</string>

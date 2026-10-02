@@ -12,12 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentPasteGo
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -25,7 +23,6 @@ import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -62,12 +59,15 @@ internal fun AutofillSectionHeader(@StringRes titleRes: Int) {
     )
 }
 
-/** 1. Android 系统级凭据提供程序 (Credential Provider) 分区卡。 */
+/**
+ * 1. Android 系统级自动填充服务 (AutofillService 通道) 分区卡。
+ *
+ * ISSUE-P3-432：CM 凭据管理器通道（凭据管理器 / Passkey 支持）两行已迁至
+ * `PasskeySettingsScreen`——两通道系统服务相互独立，入口随之分开。
+ */
 @Composable
 internal fun AutofillProviderCard(
     uiState: SettingsUiState,
-    onCredentialProviderToggle: (Boolean) -> Unit,
-    onPasskeySupportToggle: (Boolean) -> Unit,
     onAutofillServiceToggle: (Boolean) -> Unit,
     onAutofillSessionGrantToggle: (Boolean) -> Unit,
     // ISSUE-P3-324：旧版无障碍自动填充通道（默认关闭；需系统侧启用本应用无障碍服务）
@@ -80,22 +80,6 @@ internal fun AutofillProviderCard(
         backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            AutofillSwitchRow(
-                icon = Icons.Default.VpnKey,
-                title = stringResource(R.string.autofill_cm_title),
-                subtitle = stringResource(R.string.autofill_cm_sub),
-                checked = uiState.credentialProviderEnabled,
-                onCheckedChange = onCredentialProviderToggle
-            )
-
-            AutofillSwitchRow(
-                icon = Icons.Default.Key,
-                title = stringResource(R.string.autofill_passkey_title),
-                subtitle = stringResource(R.string.autofill_passkey_sub),
-                checked = uiState.passkeySupportEnabled,
-                onCheckedChange = onPasskeySupportToggle
-            )
-
             AutofillSwitchRow(
                 icon = Icons.Default.Password,
                 title = stringResource(R.string.autofill_service_title),
@@ -228,7 +212,6 @@ internal fun AutofillCaptureCard(
     uiState: SettingsUiState,
     onOfferSaveCredentialsToggle: (Boolean) -> Unit,
     onOverrideNoAutofillToggle: (Boolean) -> Unit,
-    onSkipDalVerificationToggle: (Boolean) -> Unit,
     // ISSUE-P3-376：无匹配「就地新建」入口开关（选择器空态按钮 + CM 新建 Action）
     onAutofillOfferCreateToggle: (Boolean) -> Unit,
     blockedPackages: List<String>,
@@ -236,8 +219,7 @@ internal fun AutofillCaptureCard(
     blockedFieldCount: Int,
     onOpenBlacklist: () -> Unit,
     onOpenSaveBlacklist: () -> Unit,
-    onOpenFieldBlock: () -> Unit,
-    onOpenPrivilegedBrowsers: () -> Unit
+    onOpenFieldBlock: () -> Unit
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -260,29 +242,7 @@ internal fun AutofillCaptureCard(
                 onCheckedChange = onOverrideNoAutofillToggle
             )
 
-            // ISSUE-P2-240：本行的真实语义是**通行密钥注册的站点归属声明校验降级**——
-            // 消费方是 `PasskeyCreateActivity` 的 `PasskeyRegistrationGate`，决定是否对调用方执行
-            // `DigitalAssetLinksVerifier` 远程声明校验。原文案（「跳过浏览器兼容层 / 不通过浏览器
-            // 兼容适配直接填充原生表单」）描述的是另一件事，且不存在任何实现或偏好项，属措辞漂移，
-            // 已更正；文案与 KDoc 的锚定关系由 `DalSkipSwitchCopyWiringTest` 锁定。
-            AutofillSwitchRow(
-                icon = Icons.Default.Block,
-                title = stringResource(R.string.autofill_skip_dal_title),
-                subtitle = stringResource(R.string.autofill_skip_dal_sub),
-                checked = uiState.skipDalVerification,
-                onCheckedChange = onSkipDalVerificationToggle
-            )
-
             AutofillOfferCreateRow(uiState = uiState, onToggle = onAutofillOfferCreateToggle)
-
-            // CM 通道特权浏览器白名单：内置仅收录已取证浏览器（Chrome / Firefox），
-            // 其余浏览器须在此显式启用，否则其上的通行密钥不会出现在候选里
-            AutofillManageEntryRow(
-                icon = Icons.Default.Public,
-                title = stringResource(R.string.settings_passkey_privileged_browsers),
-                subtitle = stringResource(R.string.settings_passkey_privileged_sub),
-                onClick = onOpenPrivilegedBrowsers
-            )
 
             // 一级：按应用屏蔽填充（TASK-44）
             AutofillManageEntryRow(
@@ -455,15 +415,13 @@ internal fun AutofillSwitchRow(
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 // 说明：为遵守「不新增 import 语句」约束，@Preview 采用全限定名写法
-@androidx.compose.ui.tooling.preview.Preview(name = "自动填充凭据提供程序卡 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "自动填充凭据提供程序卡 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@androidx.compose.ui.tooling.preview.Preview(name = "自动填充服务卡 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "自动填充服务卡 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun AutofillProviderCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
         AutofillProviderCard(
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
-            onCredentialProviderToggle = {},
-            onPasskeySupportToggle = {},
             onAutofillServiceToggle = {},
             onAutofillSessionGrantToggle = {},
             onAutofillLegacyAccessibilityToggle = {},

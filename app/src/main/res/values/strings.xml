@@ -259,8 +259,11 @@
     <string name="settings_health_sub">弱密码、密码复用、数据泄露比对</string>
     <string name="settings_cat_preferences">自动填充</string>
     <string name="settings_cat_display">界面与显示</string>
-    <string name="settings_autofill">自动填充与 Passkey</string>
-    <string name="settings_autofill_sub">系统凭据提供者、通行密钥、剪贴板保护</string>
+    <!-- ISSUE-P3-432：自动填充与通行密钥拆为两个设置项 -->
+    <string name="settings_autofill">自动填充</string>
+    <string name="settings_autofill_sub">系统自动填充服务、黑名单、TOTP 联动、剪贴板保护</string>
+    <string name="settings_passkey">通行密钥 (Passkey)</string>
+    <string name="settings_passkey_sub">凭据管理器、特权浏览器、注册归属校验</string>
     <string name="settings_theme">外观与主题</string>
     <string name="settings_theme_sub">深浅色主题、语言偏好、列表视图设置</string>
     <string name="settings_about">关于 KeePasskey</string>
@@ -985,6 +988,8 @@
 
     <!-- ===== 自动填充设置子页 (AutofillSettingsScreen) ===== -->
     <string name="autofill_section_provider">填充服务</string>
+    <string name="passkey_section_provider">凭据提供程序</string>
+    <string name="passkey_section_policy">注册归属校验与浏览器兼容</string>
     <string name="autofill_cm_title">凭据管理器 (Credential Manager)</string>
     <string name="autofill_cm_sub">密码与通行密钥经 Android 16+ 系统凭据管理统一填充</string>
     <string name="autofill_passkey_title">通行密钥 (Passkey) 支持</string>

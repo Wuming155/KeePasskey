@@ -258,6 +258,7 @@ internal fun NavGraphBuilder.settingsHomeRoute(
             onNavigateToDatabase = { navController.navigate(Screen.SettingsDatabase.route) { launchSingleTop = true } },
             onNavigateToSync = { navController.navigate(Screen.SettingsSync.route) { launchSingleTop = true } },
             onNavigateToAutofill = { navController.navigate(Screen.SettingsAutofill.route) { launchSingleTop = true } },
+            onNavigateToPasskey = { navController.navigate(Screen.SettingsPasskey.route) { launchSingleTop = true } },
             onNavigateToSecurity = { navController.navigate(Screen.SettingsSecurity.route) { launchSingleTop = true } },
             onNavigateToTheme = { navController.navigate(Screen.SettingsTheme.route) { launchSingleTop = true } },
             onNavigateToHealth = { navController.navigate(Screen.SettingsHealth.route) { launchSingleTop = true } },

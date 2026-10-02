@@ -31,15 +31,16 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
 /**
- * 表单自动填充与通行密钥 (Passkey) 二级设置页 (整合 KeePass2Android 完整自动填充策略)
+ * 表单自动填充 (AutofillService 通道) 二级设置页 (整合 KeePass2Android 完整自动填充策略)。
+ *
+ * ISSUE-P3-432：CM 凭据管理器通道（凭据管理器 / Passkey 支持 / DAL 归属校验 / 特权浏览器）
+ * 已拆至 [PasskeySettingsScreen]——两通道系统服务与健康判项相互独立，入口随之分开。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutofillSettingsScreen(
     uiState: SettingsUiState,
     onBackClick: () -> Unit,
-    onCredentialProviderToggle: (Boolean) -> Unit,
-    onPasskeySupportToggle: (Boolean) -> Unit,
     onAutofillServiceToggle: (Boolean) -> Unit,
     // ISSUE-P3-324：旧版无障碍自动填充通道开关
     onAutofillLegacyAccessibilityToggle: (Boolean) -> Unit = {},
@@ -57,8 +58,6 @@ fun AutofillSettingsScreen(
     // ISSUE-P3-376：候选呈现面两开关（手动选择器兜底数据集 / 无匹配就地新建入口）
     onAutofillManualPickerToggle: (Boolean) -> Unit = {},
     onAutofillOfferCreateToggle: (Boolean) -> Unit = {},
-    // CM 通道特权浏览器白名单入口（让 Chrome / Firefox 之外的浏览器也能用通行密钥）
-    onOpenPrivilegedBrowsers: () -> Unit = {},
     // TASK-44：自动填充黑名单真实条目与增删通道（替代原无写入方的禁用计数）
     blockedPackages: List<String> = emptyList(),
     onBlockAutofillPackage: (String) -> Boolean = { false },
@@ -115,8 +114,6 @@ fun AutofillSettingsScreen(
             item {
                 AutofillProviderCard(
                     uiState = uiState,
-                    onCredentialProviderToggle = onCredentialProviderToggle,
-                    onPasskeySupportToggle = onPasskeySupportToggle,
                     onAutofillServiceToggle = onAutofillServiceToggle,
                     onAutofillSessionGrantToggle = onAutofillSessionGrantToggle,
                     onAutofillLegacyAccessibilityToggle = onAutofillLegacyAccessibilityToggle,
@@ -161,15 +158,13 @@ fun AutofillSettingsScreen(
                     uiState = uiState,
                     onOfferSaveCredentialsToggle = onOfferSaveCredentialsToggle,
                     onOverrideNoAutofillToggle = onOverrideNoAutofillToggle,
-                    onSkipDalVerificationToggle = onSkipDalVerificationToggle,
                     onAutofillOfferCreateToggle = onAutofillOfferCreateToggle,
                     blockedPackages = blockedPackages,
                     saveBlockedPackages = saveBlockedPackages,
                     blockedFieldCount = blockedFieldCount,
                     onOpenBlacklist = { showBlacklistDialog = true },
                     onOpenSaveBlacklist = { showSaveBlacklistDialog = true },
-                    onOpenFieldBlock = { showFieldBlockDialog = true },
-                    onOpenPrivilegedBrowsers = onOpenPrivilegedBrowsers
+                    onOpenFieldBlock = { showFieldBlockDialog = true }
                 )
             }
 
@@ -231,8 +226,6 @@ internal fun AutofillSettingsScreenPreview() {
         AutofillSettingsScreen(
             uiState = SettingsUiState(),
             onBackClick = {},
-            onCredentialProviderToggle = {},
-            onPasskeySupportToggle = {},
             onAutofillServiceToggle = {},
             onAutoClearClipboardToggle = {},
             blockedPackages = listOf("com.example.previewapp"),

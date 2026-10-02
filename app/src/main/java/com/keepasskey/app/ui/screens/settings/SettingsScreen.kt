@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Storage
@@ -64,6 +65,8 @@ fun SettingsScreen(
     onNavigateToDatabase: () -> Unit,
     onNavigateToSync: () -> Unit,
     onNavigateToAutofill: () -> Unit,
+    // ISSUE-P3-432：通行密钥 (Passkey) 独立设置项（CM 凭据管理器通道自自动填充入口拆出）
+    onNavigateToPasskey: () -> Unit,
     onNavigateToSecurity: () -> Unit,
     onNavigateToTheme: () -> Unit,
     onNavigateToHealth: () -> Unit,
@@ -86,6 +89,7 @@ fun SettingsScreen(
         onNavigateToDatabase = onNavigateToDatabase,
         onNavigateToSync = onNavigateToSync,
         onNavigateToAutofill = onNavigateToAutofill,
+        onNavigateToPasskey = onNavigateToPasskey,
         onNavigateToSecurity = onNavigateToSecurity,
         onNavigateToTheme = onNavigateToTheme,
         onNavigateToHealth = onNavigateToHealth,
@@ -114,6 +118,8 @@ fun SettingsContent(
     onNavigateToDatabase: () -> Unit,
     onNavigateToSync: () -> Unit,
     onNavigateToAutofill: () -> Unit,
+    // ISSUE-P3-432：通行密钥 (Passkey) 独立设置项
+    onNavigateToPasskey: () -> Unit,
     onNavigateToSecurity: () -> Unit,
     onNavigateToTheme: () -> Unit,
     onNavigateToHealth: () -> Unit,
@@ -244,7 +250,7 @@ fun SettingsContent(
                 )
             }
 
-            // 分类 3: 自动填充 (Autofill)
+            // 分类 3: 自动填充 (Autofill)——ISSUE-P3-432：自动填充与通行密钥拆为两个设置项
             ModernSectionHeader(title = stringResource(R.string.settings_cat_preferences))
             SettingsGroupCard {
                 ModernSettingsRow(
@@ -253,6 +259,14 @@ fun SettingsContent(
                     title = stringResource(R.string.settings_autofill),
                     subtitle = stringResource(R.string.settings_autofill_sub),
                     onClick = onNavigateToAutofill
+                )
+                SettingsItemDivider()
+                ModernSettingsRow(
+                    icon = Icons.Default.Key,
+                    iconTint = securityColors.passkey,
+                    title = stringResource(R.string.settings_passkey),
+                    subtitle = stringResource(R.string.settings_passkey_sub),
+                    onClick = onNavigateToPasskey
                 )
             }
 
@@ -321,6 +335,7 @@ internal fun SettingsContentPreview() {
             onNavigateToDatabase = {},
             onNavigateToSync = {},
             onNavigateToAutofill = {},
+            onNavigateToPasskey = {},
             onNavigateToSecurity = {},
             onNavigateToTheme = {},
             onNavigateToHealth = {},
@@ -346,6 +361,7 @@ internal fun SettingsContentWithBackPreview() {
             onNavigateToDatabase = {},
             onNavigateToSync = {},
             onNavigateToAutofill = {},
+            onNavigateToPasskey = {},
             onNavigateToSecurity = {},
             onNavigateToTheme = {},
             onNavigateToHealth = {},
