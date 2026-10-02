@@ -3,13 +3,13 @@
 > **文档定位**：面向 UI 设计、操作体验、功能完整性三个维度的结构化竞品对比分析报告。
 > **对比对象**：三个同类安卓应用＝参考项目中的 KeePassDX（🥇 核心参考）、keepass2android（🥈 云同步参考）、
 > Monica（🥉 UI / 本地优先辅助）；KeePassXC / KeePass 官方为桌面端格式裁决者，不在本次对比范围。
-> **核实时间点**：2026-10-02。
-> **核实方式**：① 竞品事实全部取自 `docs/references/` 既有分析文档（`KeePassDX-架构分析.md`、
-> `keepass2android-架构分析.md`、`Monica-架构分析.md`、`交互体验的参考项目对照.md`），**未扫描** `参考项目/` 源码
-> （AGENTS.md 规则 3）；② 本仓事实取自 `app` 模块 UI 层逐文件走查（正文以 `文件:行号` 引用）。
-> **证据边界声明**：本报告**未实机运行三款参考应用**，故用户要求的「对比截图」以「说明 + 出处」承载；
-> 竞品侧 UI 事实均为**据架构分析文档转述**（各文档原文即声明其为架构分析而非 UI 专项分析），
-> 凡文档未覆盖的维度一律显式标注「文档未提及」，**不得**据其绿推定「竞品无此能力」。
+> **核实时间点**：2026-10-02（首版据 `docs/references/` 分析文档转述；**同日补证**：经用户指令**定向直读三家竞品
+> UI/视觉代码**（只读、未修改/复制任何文件），视觉面结论全部升级为 `文件:行号` 代码级证据；与既有架构分析
+> 文档不符处，**以代码直读为准**并显式标注修正）。
+> **核实方式**：① 竞品事实——三家竞品 UI 代码定向取证（主题/布局/动效/反馈/手势/无障碍等 12 节逐项）；
+> 本仓事实——`app` 模块 UI 层逐文件走查（正文以 `文件:行号` 引用）。
+> **证据边界声明**：本报告**未实机运行三款参考应用**，「对比截图」以「代码出处说明」承载；
+> 取证为定向 UI 面阅读，非全仓扫描，非 UI 面结论仍以架构分析文档为准。
 > **结论分流纪律**：改进点分三档——**已登记**（进 `ACTIVE_ISSUES.md`）/ **待裁决**（属产品取舍，
 > 待用户拍板前不进待办）/ **已裁决不跟进**（与 [`../architecture/产品裁决登记.md`](../architecture/产品裁决登记.md)
 > 既有 PD 条目冲突，仅引用不重复登记）。
@@ -20,87 +20,96 @@
 
 | | KeePasskey（本仓） | KeePassDX | keepass2android | Monica |
 |---|---|---|---|---|
-| UI 技术栈 | 单 Activity + Jetpack Compose + **Material 3 Expressive**（`app/build.gradle.kts:263-280`）+ Navigation Compose | View 体系（XML + Fragment + Material Components），Activity 跳转式 | 传统 Activity/XML（MAUI 单项目形态但**未用** MAUI UI） | 100% 纯声明式 Compose + Navigation Compose |
-| 主浏览界面 | 单 NavHost + 底部 Tab / 宽屏 NavigationRail | `GroupActivity`（1536 行）内 GroupFragment/SearchFragment 切换 + 面包屑 | `PasswordActivity → GroupActivity → EntryActivity` 跳转链 | NavHost + `Screen` 密封类路由 |
-| 文档对 UI 描述的完备度 | 本报告直接走查代码 | 集中于其架构分析 §6.2/§6.5/§6.7/§7 | §7 交互链较全，**视觉面未涉及** | §2.2/§2.3/§2.6 较全 |
-
-> 本仓 UI 层文件结构、主题、导航、反馈、手势、动效、无障碍、响应式的逐项事实清单见本次走查结论
-> （关键锚点：`app/src/main/java/com/keepasskey/app/ui/` 各 screen 包、`ui/theme/Theme.kt`、
-> `ui/navigation/AppNavigationMotion.kt`、`ui/components/AppBottomBar.kt`）。
+| UI 技术栈 | 单 Activity + Jetpack Compose + **Material 3 Expressive**（`app/build.gradle.kts:263-280`）+ Navigation Compose | View 体系（XML + Fragment + **Material 3** 主题基座，`styles.xml:28,124`） | View 体系 + **Material 3 DayNight**（`Resources/values/themes.xml:2,53`） | 100% 纯声明式 Compose + Navigation Compose |
+| 主浏览界面 | 单 NavHost + 底部 Tab / 宽屏 NavigationRail | `GroupActivity`：**DrawerLayout + NavigationView**（`activity_group.xml:20,183-187`）+ 面包屑 + FAB | `GroupActivity`（ListView + 顶栏 ActionBar，**主列表无抽屉**） | `AdaptiveMainScaffold`：窄屏 NavigationBar / 宽屏 NavigationRail（`AdaptiveMainScaffold.kt:22-103`） |
 
 ---
 
-## §2 UI 设计维度对比
+## §2 UI 设计维度对比（视觉面均为代码直读证据）
 
 ### §2.1 视觉风格与主题系统
 
 - **本仓**：`MaterialExpressiveTheme` + `MotionScheme.expressive()`（`ui/theme/Theme.kt:116-121`）；三态模式
-  LIGHT/DARK/SYSTEM；Android 12+ 动态取色（Material You）与 5 套品牌调色盘（SAPPHIRE/EMERALD/AMETHYST/
-  AMBER_SUNSET/OBSIDIAN）互斥单选（`ThemeMode.kt:27-44, 50-199`）；OLED 纯黑深色模式（`Theme.kt:69-73`）；
-  **语义安全色独立于主题**——passkey/success/warning/danger 四族经 `LocalSecurityColors` 提供、不随壁纸漂移
-  （`Theme.kt:34-50, 174-190`）。
-- **KeePassDX**：`Stylish` 主题引擎 + chroma（AndroidClearChroma）动态取色；跟随系统日夜换算；free flavor 禁用
-  8 个主题（出处：其架构分析 §6.7）。
-- **Monica**：Monet 动态取色 + **Catppuccin 四型**（Latte/Frappe/Macchiato/Mocha）+ 浅/深/**纯黑**三模式
-  （出处：其架构分析 §2.2）。
-- **keepass2android**：**文档未提及**视觉设计。
+  LIGHT/DARK/SYSTEM；Android 12+ 动态取色与 5 套品牌调色盘互斥单选（`ThemeMode.kt:27-44, 50-199`）；
+  OLED 纯黑（`Theme.kt:69-73`）；语义安全色独立于主题（`Theme.kt:34-50`）。
+- **KeePassDX**：Material3 Light/Night 双父主题（`styles.xml:28,124`）+ **9 组具名色系 × 明/暗 + Dynamic =
+  17 个 StyleRes**（`Stylish.kt:129-150`；每色系一对 styles_*.xml）；动态取色实为 **Material DynamicColors**
+  （`StylishActivity.kt:104-106`）——**修正**：架构分析文档曾记「chroma 做动态取色」，代码直读证实 chroma
+  （AndroidClearChroma）仅用于**数据库自定义颜色选择器**（`ColorPickerDialogFragment.kt:10,19`），不承全局主题；
+  主题切换经 `Stylish.getThemeId()` 做系统日夜等价换算（`Stylish.kt:50-102`）。
+- **keepass2android**：`Theme.Material3.DayNight` 基座 + 完整 **md_theme Material You 调色板**
+  （`colors_kp2a.xml:4-144`，primary #4B662C 绿系 / secondary #31628D 蓝系 + container/fixed/高对比变体），
+  明暗经 values-night 覆盖（`values-night/colors.xml:4-19`）；对外仅绿/蓝两套强调色活动主题
+  （`themes.xml:252-261`）。**未发现动态取色**（全仓 grep `DynamicColors` 零命中）。
+- **Monica**：动态取色默认开（`AppSettings.kt:532`）+ **7 套具名方案 × 明/暗 + Catppuccin 四型 × 明/暗
+  （168 个 `Cat*` 色值，`Color.kt`）+ 自定义五种子色生成器**（`CustomColorSchemeGenerator.kt`：种子色 → M3
+  scheme 生成管线，`Theme.kt:878-942`）+ OLED 纯黑覆写 `withPureBlackSurfaces()`（`Theme.kt:1229-1284`）。
 
-**判定**：主题四要素（动态取色 / 暗色 / 纯黑 / 多预设）本仓已具备前三者与 5 套预设，处于第一梯队。
-残余差距仅「主题预设广度」（Monica 的 Catppuccin 系社区审美预设、KeePassDX 8+ 主题）——见 §5 编号 G7（待裁决，低优先）。
+**判定**：动态取色 / 明暗 / 纯黑三要素本仓均已具备。「主题预设广度」的真实差距＝Monica 的 11 套静态方案 +
+**用户自定义种子色生成**、KeePassDX 的 17 主题 vs 本仓 5 套调色盘——见 §5 G7（待裁决，中低优先，
+Monica 的「自定义种子色」是可低成本借鉴的形态）。
 
 ### §2.2 图标体系
 
-- **本仓**：`material-icons-extended` 全矢量；条目图标 = KDBX 内置 68 图标 + 库内自定义位图（`ui/model/EntryIcon.kt`、
-  `IconBitmapCache.kt`、`IconPickerDialog.kt`、`EntryEditIconCodec.kt`）。
-- **KeePassDX**：独立 `icon-pack` Gradle 模块（classic/material 两个子包）**插件式图标包** + KDBX 自定义图标池 +
-  图标编辑 UI（其架构分析 §2.1/§2.4/§9.4）。
-- **Monica / keepass2android**：文档未提及。
+- **本仓**：`material-icons-extended` 全矢量；条目图标 = KDBX 内置 68 图标 + 库内自定义位图 + 选择器。
+- **KeePassDX**：icon-pack 双包——material 包 **69 个 vector**（`material_00_32dp.xml` 数字索引命名）+ classic 包
+  PNG 位图；`IconDrawableFactory` 装配、列表 32dp 渲染并 `setColorFilter` 着色（`NodesAdapter.kt:446-449`）；
+  应用 UI 图标 92 个自命名 vector（`ic_<语义>_<色>_24dp` 约定）。
+- **keepass2android**：标准条目图标为 **PNG 多分辨率位图**（ic00–ic68 + 文件夹变体，明暗两套）+ **可插换图标包**
+  （`DrawableFactory.cs:69-92` 经 `Resources.GetIdentifier` 从外部图标包应用解析，失败回落 ic99_blank）+
+  `IconSetPreference` 图标包选择 UI——**两家均具备图标包机制**，Kp2a 甚至支持外部应用形式图标包。
+- **Monica**：文档级证据（emoji/上传图标/favicon/应用图标 40dp 图标链，`PasswordEntryCard.kt:108-207`）。
 
-**判定**：核心面（KDBX 内置 + 自定义图标 + 选择器）已对齐；差距仅在「图标包扩展生态」——
-KeePassDX 的 icon-pack 是**独立模块加载外部包**形态，本仓单库产品定位下收益有限，列 §5 G8（待裁决，低优先）。
+**判定**：核心面对齐；差距在「图标包扩展机制」（两家先例），维持 §5 G8 待裁决（低优先）。
 
 ### §2.3 排版与布局
 
-- **本仓**：固定 Typography + 全局 CJK 断行策略 `LineBreak(Strict, Phrase)`（`ui/theme/Type.kt:17-33`，中文排版
-  专项）；密码/TOTP 等宽样式；列表密度偏好（紧凑/标准，`vault/ListDensitySpec.kt`）。
-- **三家竞品**：排版/字体/密度均**文档未提及**。
+- **本仓**：固定 Typography + 全局 CJK 断行 `LineBreak(Strict, Phrase)`（`Type.kt:17-33`）；密码/TOTP 等宽样式；
+  列表密度偏好（紧凑/标准）。
+- **KeePassDX**：完整 TextAppearance 阶梯（`styles.xml:384-478`）；**内嵌 Fira Mono 等宽字体用于密码字段且默认
+  开启**（`assets/fonts/FiraMono-Regular.ttf` + `ViewUtil.kt:73-76` + `donottranslate.xml:230-231`
+  `monospace_font_fields_enable` 默认 true）——本仓等宽密码为硬编码样式，无「等宽开关」偏好。
+- **keepass2android**：25 个自定义 style（EntryItem 系文字样式 + BottomBarButton 等，`styles.xml:22-247`）。
+- **Monica**：仅定制 bodyLarge（`Type.kt:10-17`），其余 M3 默认；等宽经 `FontFamily.Monospace` 内联散布 10+ 文件。
 
-**判定**：无差距证据；本仓 CJK 断行与密度偏好反系可引用的领先点。
+**判定**：本仓 CJK 断行与密度偏好领先；「等宽字体开关」为 KeePassDX 独有偏好项，并入 §5 G7 邻近的界面偏好
+（与 G14 界面缩放同族，待裁决）。
 
 ### §2.4 控件使用一致性
 
-- **本仓**：BentoCard 卡片体系 + 全局唯一 Snackbar 宿主（跨导航存活、支持 undo，`AppGlobalSnackbarHost.kt:19-50`）+
-  设置二级页统一 `SettingsSubscreenScaffold` + 触觉反馈全站收口（`Haptics.kt:21-33`）。
-- **残余不一致**：Toast 仍有 3 处残留（`ClipboardSecurityManager.kt:282`、`EntryDetailUrlActions.kt:108`、
-  `OpenVaultEntryActivity.kt:108`），与全局 Snackbar 通道并存。
-- **竞品**：KeePassDX 23 个 DialogFragment 各自为政、`PreferencesUtil` 静态读写（其文档自评为应规避形态）；
-  Kp2a 事件总线广播驱动刷新（其文档 §9.3 自评应换 Flow/diff）。
-
-**判定**：本仓控件一致性显著优于三家的自评状态；残余为 Toast 清扫项，列 §5 G9（低优先，可随手批处理）。
+- **本仓**：BentoCard + 全局唯一 Snackbar 宿主（跨导航存活 + undo）+ `SettingsSubscreenScaffold` + 触觉全站收口
+  （`Haptics.kt:21-33`）；**残余 Toast 3 处**（`ClipboardSecurityManager.kt:282` 等）。
+- **竞品对照（grep 计数）**：KeePassDX Snackbar 32 / Toast 48；**Kp2a Snackbar 26 / Toast 7 且有统一
+  `ChainedSnackbarPresenter` + 各页 `SnackbarAnchorView`**（`LockingActivity.cs:97-109`）；
+  **Monica Snackbar 23 / Toast 393——Toast 为主通道**，触觉反馈 6 类语义封装（`HapticFeedbackHelper.kt:11-24`，
+  全仓 70 处引用）。
+- **判定**：反馈通道一致性本仓与 Kp2a 同级、显著优于 KeePassDX/Monica；Toast 清扫项维持 G9（低优先）。
 
 ### §2.5 响应式适配
 
-- **本仓**：≥600dp 切换 BottomBar↔NavigationRail（`KeePasskeyApp.kt:315, 346-353`）；预测式返回已启用且配专属
-  90% 缩放转场（manifest `android:enableOnBackInvokedCallback="true"` + `KeePasskeyApp.kt:364-366`）；
-  全局 `imePadding` + 解锁页 IME 避让修正。
-- **未使用** WindowSizeClass API、无双栏布局。
-- **竞品**：Kp2a 有辅助屏检测跳转 `NoSecureDisplayActivity`（防投屏泄露，其架构分析 §8.3）；其余文档未提及。
+- **本仓**：≥600dp BottomBar↔NavigationRail（`KeePasskeyApp.kt:315, 346-353`）；预测式返回 + 90% 缩放转场；
+  全局 imePadding。
+- **Monica**：`AdaptiveMainScaffold` 同为窄屏 NavigationBar / 宽屏 NavigationRail（`AdaptiveMainScaffold.kt:33-100`）
+  ——**形态与本仓一致**。
+- **Kp2a**：无宽屏适配证据；解锁页有 CollapsingToolbar + predictive back（`PasswordActivity.cs:1060-1103`）。
 
-**判定**：宽屏双栏（ListDetail）**已被 PD-43 裁决不做**（用户明示「不考虑大屏幕」）——Kp2a/Monica 即便有类似能力
-也不构成差距，本报告**不登记**。WindowSizeClass 化属实现细节替换（现口径 `screenWidthDp>=600` 语义等价），
-无用户可感知收益，不单列。
+**判定**：无差距（PD-43 双栏不做维持）；Monica 证实「宽屏换 Rail」是同类共识形态而非本仓特有偏航。
 
 ### §2.6 动效设计与过渡
 
-- **本仓**：`AppNavigationMotion.kt` 全量定标四类转场（下钻共享轴 X + 视差、顶层 Tab 双向交叉淡化、预测返回缩放、
-  内容层 MotionScheme spec），并有源码守卫锁定「全仓不得再出现裸 `tween(`」；列表增删 `Modifier.animateItem()`；
-  主题胶囊 `AnimatedContent`、骨架 `Animatable` 淡入。
-- **PD 已定标**：PD-26（双栏定标）→ PD-44（降档复定标）、PD-27（Tab 用 Fade Through、下钻共享轴 X，有意偏离
-  Android Auto 口径）、PD-28（预测返回保留 90% 缩放）、PD-29（**不做**列表→详情共享元素过渡）。
-- **竞品**：Monica 用 `SharedTransitionCompat` 横滑 + 淡入淡出（其架构分析 §2.2）；KeePassDX 文档未提及动效。
+- **本仓**：`AppNavigationMotion.kt` 全量定标四类转场 + 守卫测试（禁裸 `tween(`）；`animateItem` 列表动画。
+- **KeePassDX**：res/anim 仅 8 个滑动插值；Activity 统一 fade 转场（`StylishActivity.kt:75-86`）；**列表变更动画
+  三处显式关闭**（`FileDatabaseSelectActivity.kt:154` 等）；无 animator 资源。
+- **keepass2android**：**全部 overridePendingTransition 均被注释（活跃 0 处）**、无 ItemAnimator——动效面基本
+  关闭，仅靠 Material 组件自带 CollapsingToolbar 滚动视差。
+- **Monica**：动效密度最高——`AnimatedVisibility` 约 160 处 / `AnimatedContent` 36 处 / `animate*AsState` 128 处；
+  **`sharedBounds` 共享元素 11 处**（列表卡片 → 详情，`PasswordEntryCard.kt:71-76` key=`password_card_${id}`）；
+  自定转场 spec（右滑入 1/8 屏宽 + 视差退出，`NavTransitions.kt:22-35`）；**带全局动效降级开关**
+  `LocalReduceAnimations`（`ui/LocalSharedTransition.kt:10-18`，注释指明为规避 HyperOS 2 / Android 15 卡顿）。
 
-**判定**：动效面**已裁决定标且经测试锁定**，Monica 的 SharedTransition 先例与 PD-29 冲突，**不登记**。
-本维度无开放改进点。
+**判定**：动效已按 PD-26/27/28/29/44 定标并被守卫锁定，Monica 的共享元素先例与 PD-29 冲突**不跟进**；
+Monica 的「动效降级开关」（低端机 / ROM 兼容性）是本仓没有的**可感知性保险丝**，与本仓 MotionScheme 定标不冲突，
+列为待裁决候选（并入 §5 G7 邻近的界面偏好组，中低优先）。
 
 ---
 
@@ -108,94 +117,93 @@ KeePassDX 的 icon-pack 是**独立模块加载外部包**形态，本仓单库�
 
 ### §3.1 解锁 / 建库流程
 
-- **本仓现状**：双模式（生物识别 QuickUnlock ↔ 主密码完整解锁，`UnlockScreen.kt:316-338`）；生物识别自动唤起
-  一次性意图；`SecurePasswordField` 等宽 + `semantics { password() }`；密钥文件走 SAF；只读开关；无库空态就地
-  弹导入/新建框；离开页面清空密码缓冲（`UnlockScreen.kt:80-93`）。
-- **竞品**：KeePassDX 解锁页三项凭据 + 进度对话框贯穿加解密全流程（`ProgressTaskUpdater`，其文档 §6.3/§8.2 第 10 条
-  并点名为「大库在低端机上的可感知性」）+ 记住凭据快速校验；Kp2a QuickUnlock 尾部 N 字素 + 通知栏快捷解锁 +
-  `AppKilledInfo`「上次被系统杀死」提示（其架构分析 §6.3/§8.4）；Monica 生物识别释放会话密钥 + 三档自动锁定策略。
-- **差距与处置**：
-  - **G1 解锁全过程零进度反馈**（本仓 `UnlockScreen.kt` 无任何 CircularProgressIndicator/LinearProgress/过程文案，
-    `strings.xml` `unlock_*` 无「正在派生/正在解锁」类条目——2026-10-02 grep 核实）：KDF 派生秒级乃至弱机数十秒
-    （`ISSUE-P1-431` 实测 StrongBox 分块 700 KB 达数十秒）期间界面无任何变化，用户只能猜。**已登记
-    `ISSUE-P3-437`**。
-  - **G2 封印载荷性能**：已登记 `ISSUE-P1-431`（方案已裁决），本报告不重复。
-  - **G3 进程被杀后无「上次会话未正常关闭」提示**：Kp2a `AppKilledInfo` 先例；本仓仅有编辑面「上次未保存的改动
-    已丢弃」（`strings.xml:399`），锁库/会话面无对应说明。**已登记 `ISSUE-P3-438`**（低优先）。
-  - **G4 PIN/口令包装解锁**（Monica `unlock_methods` 表：PIN/Password/Security Key 包装 Vault Key）：现口径
-    PD-46＝快速解锁只留「封印凭据 + per-operation 生物识别」，增加 PIN 通道属产品取舍，列 §5 待裁决。
+- **本仓**：双模式（生物识别 ↔ 主密码）+ 自动唤起 + `SecurePasswordField`（等宽 + `semantics{password()}`）+
+  SAF 密钥文件 + 只读开关 + 离场清零。**解锁全程零进度指示**（`UnlockScreen.kt` 无任何进度节点，
+  `strings.xml` `unlock_*` 无过程文案——2026-10-02 grep 核实）。
+- **KeePassDX**：`ProgressTaskDialogFragment` 进度对话框（标题 + 消息 + **警告行 + 取消按钮**，
+  `fragment_progress.xml:70`）贯穿加解密；解锁页三层布局，生物识别以 Fragment 容器嵌入
+  （`MainCredentialActivity.kt:138`）；新建凭据为分卡表单（密码/密钥文件/硬件密钥三 CardView）。
+- **keepass2android**：解锁页 = DrawerLayout + CollapsingToolbar 大头部（背景图视差）+ 表单（主密钥类型
+  Spinner → 密码框 + 显隐 + 指纹钮 → 密钥文件区 → OTP 区）；**QuickUnlock 独立布局**（专用背景 + 4 字符
+  小输入框 + `QuickUnlockBlocked` 降级提示容器，`QuickUnlock.xml`）；进度三形态
+  （`LoadingDialog` / `SimpleLoadingDialog` / 页内嵌 `BackgroundOperationContainer`）。
+- **Monica**：**界面代码中未找到全屏解锁 Composable 与 PIN 数字盘**（grep `PinPad|Keypad|NumberPad` 零命中）
+  ——**修正**：架构分析文档所记 `unlock_methods` 表（PIN/Password/Security Key 包装）在 UI 层无对应实现面；
+  解锁实为分散的 BiometricPrompt 调用（`BiometricHelper.kt:26` + 7+ 消费方）。§5 G4（PIN 包装）的竞品 UI 先例
+  **弱化为数据层声明**，待裁决优先级下调为低。
 
 ### §3.2 条目浏览与搜索
 
-- **已对齐（勿重复整改）**：`ISSUE-P3-352` 已整条结案（批次 §348）——① 搜索空态专用文案 +「新建凭据条目 / 清除
-  搜索」双出口 + 搜索词一次性预填（走 `CreateEntryPrefillHost` 内存单例）；② 应用内搜索域名感知档（加性 OR：
-  父子域 + `www.` 剥离，`DomainMatcher` 零改动）；③ 剪贴板定时擦除实际清掉才 Toast。
-- **本仓仍领先处**：常驻胶囊搜索框 + 300ms 防抖即时过滤（Kp2a 为回车才搜，出处 `交互体验的参考项目对照.md` §2）。
-- **残余差距（均属此前对照文档 C 档「待裁决」，本报告维持该分流）**：
-  - **G5 高级搜索选项**（Kp2a `SearchActivity.cs:93-115`：字段勾选 / 正则 / 大小写 / 排除过期）；本仓仅
-    CONTAINS/ALL_TERMS 两档。正则引入注入面与性能预算，需单独评估。
-  - **G6「记住搜索词」自愈**（Kp2a `AppTask.cs:494-534`：用户手选条目后询问把搜索词写进条目 URL，一次操作修正
-    匹配错误）；涉及选择结果回灌链路成本。
+- **已对齐（勿重复整改）**：`ISSUE-P3-352` 已整条结案——搜索空态专用文案 +「新建 / 清除搜索」双出口 +
+  域名感知档 + 剪贴板实际清掉才提示。
+- **竞品搜索空态现状（代码直读）**：**Kp2a 至今仍为单一 `no_results`（"No search results"）TextView，无出口**
+  （`group_empty.xml:20-32`、`strings.xml:228`）；**Monica 两处搜索空态（Vault 与密码列表）均无出口按钮**
+  （`VaultOverviewSearch.kt:90-93`、`PasswordListScrollableContent.kt:227`）；KeePassDX 无空态视图。
+  ⇒ 本仓搜索空态（双出口 + 预填）**为四者唯一**，此前对照结论获代码级坐实。
+- **即时过滤对照**：本仓 300ms 防抖 ≈ Monica 80ms 防抖 + Rust 后台索引（`VaultOverviewSearch.kt:63-66`）≫
+  Kp2a 回车才搜；搜索框形态三者趋同（本仓与 Monica 均为顶栏胶囊，Monica 另支持横拖展开）。
 
 ### §3.3 条目详情与编辑
 
-- **本仓已覆盖**：版本历史 diff + 回滚（`EntryDetailRevisionController`）、TOTP 三通道（手输/扫码/图库）、
-  Passkey 绑定/解绑、自定义字段逐字段显隐复制、附件预览 + SAF 导出二次确认、{REF} 引用展开、过期卡、
-  图标选择器、内嵌口令生成器、条目模板（`entry_edit` 路由带 `templateId`）、丢弃未保存确认。
-- **竞品**：KeePassDX 模板引擎 + 字段引用引擎 + 附件查看 Activity + 剪贴板倒计时清除通知；Kp2a 模板编辑 + SPR
-  占位符 + 插件菜单项；Monica 字段级历史 + 单条/全库回滚 + 多态条目类型（card/identity/ssh-key 等）。
+- **本仓已覆盖**：版本历史 diff + 回滚、TOTP 三通道、Passkey 绑定/解绑、自定义字段、附件、{REF} 展开、模板、
+  图标选择器、丢弃确认。
+- **竞品**：KeePassDX 列表项即含 **TOTP 徽标（OtpDisplayView 自定义 view）+ 标签横排 + 所在路径显示**
+  （`item_list_nodes_entry.xml:127-169`）——本仓列表行内 TOTP 倒计时徽标已对齐；Kp2a 列表项含 TOTP 区块 +
+  倒计时进度条（`entry_list_entry.xml:16-94`）；Monica 卡片内嵌平滑 TOTP 进度动画（`PasswordEntryCard.kt:317-369`）
+  + **字段级显示配置**（`passwordCardDisplayFields`，用户可选列表项展示哪些字段）。
 
-**判定**：本仓对 KeePassDX/Kp2a 的详情-编辑面已基本对齐。Monica 的**多态条目类型**（银行卡/身份/WiFi/SSH 等
-卡片式条目）是真实差异，但属产品定位取舍（本仓定位＝凭据 + Passkey 密码库），列 §5 G10（待裁决）。
-AutoType 键入序列本仓「兼容保存、不实现执行方」＝PD-42 已裁决，不登记。
+**判定**：详情-编辑面无结构性差距；Monica 的「列表项字段显示自定义」并入 §5 待裁决（G13 邻近的界面偏好组）。
 
 ### §3.4 反馈机制（加载态 / 错误 / 空态 / 冲突）
 
-- **本仓**：骨架屏（列表/详情，静态块 + MotionScheme 淡入）、全幅遮罩进度圈（编辑载入）、建库进行中页顶进度条
-  （`DatabasePickerScreen.kt:219-235`）、全局 Snackbar + undo、外部修改三选对话框（`ExternalModificationDialogHost`）、
-  独立冲突可视化页（`ConflictResolutionScreen`：对比 + FilterChip 三选 + 批量合并前确认）、SAF 授权失效重授卡片、
-  弱口令显式二次确认（PD-38）、空态三形态（列表/库选择/详情未找到）。
-- **竞品**：KeePassDX 进度对话框 + 外部修改对话框 + 四个通知族；Kp2a 缓存监督六回调外抛 Snackbar/通知 + 两级
-  进度消息（可取消）+ 前台同步服务进度通知；Monica 冲突管理面板（Local/Incoming 字段对比）+ 数据库健康诊断
-  修复计划 UI（先演练后替换）。
-
-**判定**：冲突面本仓已是三者中最完整的显式 UI；**缺口收敛到「长操作过程可感知性」**——本仓解锁/云同步/导入导出
-均为「结果型反馈」（起点转圈或终态 Snackbar），无分阶段/进度型反馈；Kp2a 的两级进度消息 + 可取消 + 前台服务
-进度通知是明确先例。与 §3.1 G1 合并为 `ISSUE-P3-437` 一条整改面（解锁 KDF 派生、同步上传下载、导入导出三类
-长操作）。
+- **本仓**：骨架屏（列表/详情）+ 编辑全幅遮罩 + 建库页顶进度 + Snackbar+undo + 外部修改三选 + 冲突可视化页 +
+  SAF 重授卡片 + 空态三形态（含双出口搜索空态）。
+- **竞品空态/加载现状（代码直读）**：**KeePassDX 全应用无专门空态视图**（layout 无 empty 文件，空列表即裸
+  RecyclerView）；**Monica 无 shimmer/skeleton**，通用 `EmptyState` 无出口按钮参数（`EmptyState.kt:19-56`）；
+  Kp2a 空态极简（见 §3.2）。加载态：KeePassDX 进度对话框 + 页内 loading 视图；Kp2a 三形态（§3.1）。
+- **判定**：**空态/骨架面本仓为四者最完整**。缺口仍收敛于「长操作过程可感知性」（KeePassDX 的可取消进度对话框
+  与 Kp2a 的页内进度容器均为先例）——`ISSUE-P3-437` 已登记，本节证据由文档转述升级为代码直读，条目前提不变。
 
 ### §3.5 手势操作
 
-- **本仓**：长按进批量模式（含首次一次性引导 `VaultListBatchGuide`）、下拉刷新（带「上次同步时间」自定义指示器）、
-  逐层 BackHandler 优先级链（批量→清搜索→返上级→交还系统）、顶层返回键可配锁库。
-- **竞品**：Kp2a 多选 + MoveElementsTask；Monica 批量选择模式（仅顺带提及）；**滑动操作三家文档均未提及**。
+- **本仓**：长按批量（+一次性引导）、下拉刷新（带上次同步时间）、逐层 BackHandler 链、顶层返回可配锁库。
+- **Monica（代码直读，修正此前「无先例」结论）**：**自研双向滑动手势 `SwipeActions`——左滑删除（红）/ 右滑选择
+  （蓝），过卡宽 50% 触发、弹簧回弹**（`ui/gestures/SwipeActions.kt:22-42`，8 个列表页使用）；下拉体系七文件
+  （`ui/common/pull/`，含五态指示器）。
+- **Kp2a / KeePassDX**：无滑动手势证据（Kp2a 为多选 + 底部提示条；KeePassDX 文档与布局均未见）。
 
-**判定**：无差距证据（无竞品先例支撑引入 SwipeToDismiss）；不登记。
+**判定**：Monica 提供了滑动操作的**真实同类先例**，推翻本报告首版「三家均未提及 ⇒ 无差距证据」的判定——
+新增 §5 G12（待裁决，中低优先）。
 
 ### §3.6 功能入口可达性
 
-- **本仓**：底部 4 Tab（验证器/生成器可隐藏）+ FAB 新建类型选择 + 溢出菜单（排序/锁定/扫码/选择/退出）+ 设置页
-  五卡分组 14 个二级页 + 条目级「禁用自动填充」开关 + 系统设置页直达（§27 限界内如实降级）。
-- **竞品**：KeePassDX 设置散落多个 PreferenceFragment + 独立设置 Activity；Kp2a 协议前缀即云入口 + 插件管理页；
-  Monica 按数据源分页面。
-
-**判定**：无结构性差距。Kp2a 的「插件可注入条目菜单」依赖插件宿主（PD-56 不评估不接入），不登记。
+- **本仓**：底部 4 Tab（验证器/生成器可隐藏）+ FAB + 溢出菜单 + 设置五分组 14 二级页。
+- **Monica（代码直读）**：**底栏 10 个 Tab（8 数据 + 设置），顺序与可见性均用户可配**
+  （`BottomNavModel.kt:25-34` + `SimpleMainScreen.kt:909-920` 的 `bottomNavOrder`/`bottomNavVisibility`）；
+  单 Tab 时可自动隐藏底栏（`:922`）。**设置页带内置搜索**（`SettingsSearchSupport.kt:23`）与 iOS 式连续圆角
+  分组（`SettingsScreen.kt:113-125`）。
+- **Kp2a**：解锁页抽屉（仅 4 按钮：换库/设置/捐赠/关于，`password.xml:441-474`）+ 启动页存储类型 GridView +
+  4 起始按钮；**主列表无抽屉**；设置 8 组 10+ PreferenceScreen。**5-FAB 展开簇**（新建组/条目/搜索/TOTP 总览，
+  `group.xml:379-433`）。KeePassDX：主界面抽屉（NavigationView + tree/recycle_bin 菜单）+ 双 FAB（新建/锁定）。
+- **判定**：**底栏 Tab 顺序/显隐自定义**为 Monica 独有且形态轻（本仓已有「隐藏 Tab」的半壁）——新增 §5 G13
+  （待裁决，中低优先）；设置页搜索并入待裁决界面偏好组（G14 邻近）。
 
 ### §3.7 错误处理友好度
 
-- **本仓**：凭据错误统一映射、KDF 超内存/OOM 专属提示（对齐 KeePassDX 的 `KDFMemoryDatabaseException` 口径）、
-  远端失败不丢数据只上报、外部修改三选、冲突页、重授卡片。
-- **Kp2a 独有先例**：只读原因**细分到用户可读**（`OptionalOut<UiStringKey> reason`：只读标志 / KitKat 限制 /
-  本地备份文件三型）；自签名证书用户裁决（信任记忆）。
-- **判定**：本仓只读态已有「只读会话」分区提示，但**未核实**是否细分原因文案；自签证书 WebDAV 场景的交互
-  **未核实**（本仓全站 HTTPS-only、零证书固定，是否允许用户裁决自签证书属安全口径而非纯 UX）——两者均列入
-  §6 未核实声明，不登记。
+- **本仓**：凭据错误统一映射、KDF 超内存/OOM 专属提示、外部修改三选、冲突页、重授卡片、弱口令二次确认（PD-38）。
+- **Kp2a**：只读原因细分（三型 `UiStringKey`）+ 自签证书用户裁决——本仓两项**仍未核实**（维持 §6 声明 3）。
+- **判定**：不变。
 
 ### §3.8 引导与帮助
 
-- **本仓**：仅批量模式一次性引导；无 onboarding / 内嵌帮助。
-- **竞品**：KeePassDX `education/` 包 taptargetview 首用引导；Kp2a `Kp2aShortHelpView` 内嵌短帮助（其文档自评弱）。
-- **判定**：此前对照文档已列 C 档待裁决（价值取决于目标用户群），本报告维持——列 §5 G11。
+- **本仓**：仅批量模式一次性引导。
+- **KeePassDX（代码直读）**：taptargetview 引导覆盖 **5 个 Activity 场景**（组页/条目/编辑/文件列表/解锁页，
+  `education/` 6 文件 + `MainCredentialActivity.kt:559-568`），一次性 + 偏好持久化。
+- **Kp2a（代码直读）**：**无 onboarding 向导**；引导形态 = ⓘ 内嵌短帮助（FontAwesome 渲染，5+ 处）
+  **+ 主列表 6 套可关闭提示条**（autofill/指纹/只读库/子库/通知渠道/通知权限，`group.xml:39-347`，均带
+  "don't show again"）——提示条形态比全屏引导轻，更贴近本仓 `VaultListBatchGuide` 既有模式。
+
+**判定**：维持 §5 G11 待裁决；Kp2a 的「可关闭提示条」先例使实施成本评估更低。
 
 ---
 
@@ -205,42 +213,41 @@ AutoType 键入序列本仓「兼容保存、不实现执行方」＝PD-42 已�
 
 | 功能 | KeePasskey（本仓） | KeePassDX | keepass2android | Monica |
 |---|---|---|---|---|
-| KDBX v4 读写 | ✅（v4，PD-53 明确不做 v4 以前格式） | ✅ 全版本含 .kdb v3 | ✅ 含 .kdb | ✅（Kotpass） |
-| 生物识别解锁 | ✅ 封印凭据 + per-op 验证 | ✅ StrongBox + 按库加密凭据 | ✅ 指纹 + QuickUnlock | ✅ 会话密钥释放 |
-| 密钥文件 | ✅ SAF + 记忆位置 | ✅ | ✅ | 文档未提及 |
-| 应用内搜索 | ✅ 即时过滤 + 域名感知 + 空态双出口 | ✅ SearchFragment | ✅ 跨已开库 + 系统 SearchProvider | ✅ Rust 模糊搜索 |
-| 标签 / 收藏 | ✅ FilterChip | ✅ 标签池 | ✅（能力位） | ✅ 分类 + 收藏 |
-| 回收站 | ✅ 警示横幅 + 恢复/彻底删 | ✅ 可配置 | ✅（CanRecycle） | 文档未提及 |
-| 版本历史 | ✅ diff + 回滚 | ✅ EntryHistoryFragment | 文档未提及 | ✅ 快照 + 回滚 |
-| TOTP | ✅ 详情卡 + **独立验证器页** + 扫码/图库 + Steam Guard（PD-62） | ✅ | ✅ 定时刷新 | ✅ 含 Steam 映射 |
-| Passkey（CM） | ✅ 生成/存储/验证端到端 + 就地新建（口令维度，PD-51） | ✅ 四象限 | 文档未提及 CM | ✅ + KPEX 互通 |
-| 附件 | ✅ 预览 + SAF 导出 | ✅ 大文件缓存落盘 | ✅ | ✅ 一等公民分块 |
-| 条目模板 | ✅（templateId） | ✅ 伪语言引擎 | ✅ | 文档未提及 |
-| 云同步 | ✅ WebDAV/S3 + 冲突可视化页 | ✅ 三方合并 | ✅ 离线缓存决策树 + 后台秒开 | ✅ 多源聚合 |
-| 口令生成器 | ✅ 独立页 + 历史 + 锁库可用（PD-37） | ✅ 密码+口令短语+熵估算 | ✅ profile + 用户熵混入 | ✅ zxcvbn 实时评估 |
-| 剪贴板保护 | ✅ 定时擦除 + 实际清掉才提示 | ✅ 倒计时清除通知 | ✅ + 通知快捷动作 | 文档未提及 |
-| 截屏防护 | ✅ FLAG_SECURE 动态守卫 + 遮挡触摸过滤 + 反悬浮窗 | 文档未提及细节 | ✅ + 辅助屏检测 | ✅ 可配置 |
-| 多语言 | ✅ 中文/英文 + **应用内热切换** | ✅ per-app language | 文档未提及 | 文档未提及 |
-| 子库 / 多库 | ✅ 子库挂载（只读分区） | 文档未提及 | ✅ 多库同时打开 | ✅ 多源混排 |
+| KDBX v4 读写 | ✅（PD-53 不做 v4 以前） | ✅ 全版本含 .kdb | ✅ 含 .kdb | ✅（Kotpass） |
+| 生物识别解锁 | ✅ 封印凭据 + per-op 验证 | ✅ Fragment 容器嵌入 | ✅ + QuickUnlock 独立页 | ✅ 分散 BiometricPrompt |
+| 密钥文件 | ✅ SAF + 记忆位置 | ✅ | ✅ | 未见 UI 面 |
+| 应用内搜索 | ✅ 即时 + 域名感知 + **双出口空态** | ✅（无空态视图） | ✅（空态无出口） | ✅ 80ms 防抖 + Rust 索引（空态无出口） |
+| 标签 / 收藏 | ✅ FilterChip | ✅ 标签横排于列表项 | ✅ | ✅ |
+| 回收站 | ✅ 横幅 + 恢复/彻底删 | ✅ 抽屉菜单含回收站 | ✅ | 未见 |
+| 版本历史 | ✅ diff + 回滚 | ✅ | 未提及 | ✅ 快照 + 回滚 |
+| TOTP | ✅ 详情卡 + **独立验证器页** + 扫码/图库 + Steam（PD-62） | ✅ 列表内徽标 | ✅ 列表内区块 | ✅ 平滑进度动画 |
+| Passkey（CM） | ✅ 端到端 + 就地新建（口令维度，PD-51） | ✅ 四象限 | 未提及 CM | ✅ KPEX 互通 |
+| 附件 | ✅ 预览 + SAF 导出 | ✅ 大文件落盘缓存 | ✅ | ✅ 分块 |
+| 条目模板 | ✅ | ✅ 伪语言引擎 | ✅ | 未见 |
+| 云同步 | ✅ WebDAV/S3 + 冲突页 | ✅ 三方合并 | ✅ 离线缓存决策树 | ✅ 多源 |
+| 口令生成器 | ✅ 独立页 + 历史 + 锁库可用（PD-37） | ✅ + 熵估算 | ✅ profile | ✅ zxcvbn |
+| 剪贴板保护 | ✅ 定时擦除 + 实际清掉才提示 | ✅ 倒计时通知 | ✅ + 通知快捷动作 | 未提及 |
+| 截屏防护 | ✅ 动态 FLAG_SECURE + 遮挡过滤 + 反悬浮窗 | 未提及细节 | ✅ + 辅助屏检测 | ✅ |
+| 多语言 | ✅ + 应用内热切换 | ✅ per-app | 未提及 | ✅（设置项） |
+| 子库 / 多库 | ✅ 子库只读分区 | 未提及 | ✅ 多库同时打开 | ✅ 多源混排 |
 
 ### §4.2 特色差异化
 
-- **本仓强点**（对三家形成差异，应保持并对外传达）：独立验证器页（集中 TOTP 管理，三家皆无对应形态）、
-  生成器历史记录、健康检查页（弱口令体检）、冲突可视化三选页、语言热切换、外部修改三选对话框、
-  语义安全色不随壁纸漂移、遮挡触摸过滤全站接线。
-- **竞品强点但已被裁决不跟进**（引用原 PD，**不得**登记为缺陷）：硬件密钥 Yubikey（KeePassDX/Kp2a，
-  PD-54）、自定义键盘填充（Magikeyboard/KP2A Keyboard，PD-55）、插件宿主与插件注入菜单（PD-56）、
-  多库同时打开（本仓以子库 + 切库覆盖大半，产品定位单库，无需 PD 亦有先例分流）、老格式兼容（PD-53）、
-  宽屏双栏（PD-43）、列表→详情共享元素（PD-29）、零候选新建通行密钥（PD-51，安全红线）。
-- **待裁决的竞品强点**：多态条目类型（G10）、PIN 包装解锁（G4）、高级搜索（G5）等见 §5。
+- **本仓强点**（代码直读后仍成立，部分被坐实为四者唯一）：搜索空态双出口 + 搜索词预填（四者唯一）、
+  独立验证器页、冲突可视化页、骨架屏（Monica/Kp2a 均无）、语义安全色、语言热切换、遮挡触摸过滤全站接线。
+- **竞品强点但已被裁决不跟进**：硬件密钥（PD-54）、键盘（PD-55）、插件（PD-56）、双栏（PD-43）、
+  共享元素过渡（PD-29，Monica 11 处先例）、老格式（PD-53）、零候选新建 passkey（PD-51）、AutoType 执行方（PD-42）。
+- **待裁决的竞品强点**：见 §5 G3~G14。
 
 ### §4.3 辅助功能（无障碍）
 
-- **本仓**：74 个 UI 文件含 contentDescription、装饰性图标传 null；`semantics { password() }`、
-  `clearAndSetSemantics`（验证器卡）、骨架读屏加载标签、`Role` 声明、对比度专项整改留痕（`Color.kt:15-36` 注释）。
-- **三家竞品**：无障碍维度**文档均未提及**。
-
-**判定**：无差距证据；本仓现状可作内部基线保持（后续若做无障碍专项审计应另行立项，本报告不预登记）。
+- **本仓**：74 个 UI 文件含 contentDescription、装饰图标传 null、`semantics{password()}`、读屏加载标签、
+  `Role` 声明、对比度专项整改。
+- **竞品（代码直读计数）**：**Monica 最强——contentDescription 1588 处 / semantics 132 处**，装饰图标显式置空、
+  操作图标全带本地化描述；KeePassDX 中等——63 处 + `importantForAccessibility="no"` 用于装饰控件；
+  **Kp2a 最弱——contentDescription 仅 3 处**（密码框另有 11 处安全向 `importantForAccessibility="no"`，
+  是防读屏而非增强）。
+- **判定**：本仓处中上水位（密度低于 Monica、远高于 Kp2a）；无障碍专项审计建议另行立项，本报告不预登记。
 
 ---
 
@@ -249,49 +256,53 @@ AutoType 键入序列本仓「兼容保存、不实现执行方」＝PD-42 已�
 > 处置栏：**已登记**＝已按 ACTIVE_ISSUES 维护规则补登；**待裁决**＝属产品取舍，待用户拍板，裁决前不实施；
 > **不跟进**＝与既有 PD/限界冲突或无差距证据。
 
-| 编号 | 维度 | 问题描述 | 对比依据 | 改进建议 | 预期效果 | 优先级 | 处置 |
+| 编号 | 维度 | 问题描述 | 对比依据（代码直读） | 改进建议 | 预期效果 | 优先级 | 处置 |
 |---|---|---|---|---|---|---|---|
-| G1 | 操作体验·反馈 | 解锁（KDF 派生 + 密钥文件读取 + 封印解封）全过程零进度指示，弱机数十秒界面无变化；云同步、导入导出同为「结果型反馈」无过程反馈 | KeePassDX `ProgressTaskUpdater` 进度对话框贯穿加解密（其架构分析 §6.3/§8.2-10）；Kp2a 两级进度消息 + 可取消 + 前台同步进度通知（§6.2/§7.6） | ① 解锁页接入状态驱动的过程指示（「正在派生密钥…」「正在读取密钥文件…」阶段文案起步，Argon2 原生侧回调进度为进阶）；② 同步/导入导出复用同一过程反馈通道 | 大库/弱机用户不再「猜卡没卡」；与 P1-431 修复叠加后快速解锁等待可解释 | **高** | **已登记 `ISSUE-P3-437`** |
-| G2 | 操作体验·反馈 | 进程被系统杀死后再次打开无「上次会话未正常关闭」说明，用户不理解为何要重输主密码 | Kp2a `AppKilledInfo`（其架构分析 §8.4） | 解锁页在检测到上次异常退出（非用户主动锁库）时展示一次性轻提示 | 降低「应用丢了我的会话」困惑，强化自动锁定的可感知安全性 | 低 | **已登记 `ISSUE-P3-438`** |
-| G3 | 操作体验·搜索 | 无高级搜索选项（字段勾选 / 正则 / 大小写 / 排除过期），仅 CONTAINS/ALL_TERMS 两档 | Kp2a `SearchActivity.cs:93-115`（`交互体验的参考项目对照.md` §4C-35） | 设置内或搜索面板加字段范围勾选与「排除过期」开关；正则档须单独评估注入面与性能预算后再裁决 | 高级用户跨大库检索效率提升 | 中 | 待裁决 |
-| G4 | 操作体验·解锁 | 解锁通道无 PIN/口令包装档位（仅生物识别 ↔ 全长主密码二选） | Monica `unlock_methods` 表 PIN/Password/Security Key 包装（其架构分析 §3.4）；本仓 PD-46 现口径为「封印凭据 + 生物识别」 | 若裁决引入：PIN 仅作生物识别不可用时的降级档，按「可撤销派生凭证而非密码本体」设计（Kp2a QuickUnlock 主密码驻留教训，其文档 §9.3） | 生物识别失效场景的可用性补充 | 中 | 待裁决（涉 PD-46 边界） |
-| G5 | 操作体验·搜索 | 手选搜索结果后无「把搜索词写进条目」自愈询问 | Kp2a `AppTask.cs:494-534`「Remember search text?」（交互对照 §4C-34） | 评估「选择结果回灌」链路成本后裁决 | 匹配错误一次操作永久修正 | 中低 | 待裁决 |
-| G6 | 操作体验·通知 | 前台通知无「复制用户名/密码/TOTP」快捷动作（本仓常驻通知已有「立即锁定」） | Kp2a `CopyToClipboardService.cs:111-156`（交互对照 §4C-36） | 若裁决引入：须先过安全复核——敏感字段经通知动作复制的暴露口径 | 高频复制少一次进 App | 中 | 待裁决（须安全复核） |
-| G7 | UI 设计·主题 | 主题预设广度：5 套品牌调色盘 vs Monica Catppuccin 四型、KeePassDX 8+ 主题 | Monica 架构分析 §2.2；KeePassDX §6.7 | 低成本扩充 `ThemeMode` 调色盘枚举（纯数据追加，复用现有三族覆写管线） | 个性化选择面扩大 | 低 | 待裁决 |
-| G8 | UI 设计·图标 | 无外部图标包扩展（KDBX 内置 68 + 自定义位图已覆盖核心面） | KeePassDX `icon-pack` 模块化图标包（其架构分析 §2.1/§9.4） | 单库产品定位下收益有限；如引入宜等插件生态（PD-56）裁决联动 | — | 低 | 待裁决 |
-| G9 | UI 设计·一致性 | Toast 残留 3 处与全局 Snackbar 通道并存 | 本仓走查（`ClipboardSecurityManager.kt:282` 等 3 处） | 收敛进 `AppSnackbarChannel`，行为语义不变 | 反馈通道单一化 | 低 | 待裁决（可随手批处理） |
-| G10 | 功能完整性 | 条目类型单一（凭据 + Passkey），无银行卡/身份/WiFi/SSH 等多态卡片条目 | Monica 多态 `SecureItem` / Entry 类型（其架构分析 §3.2） | 属产品定位取舍：若扩展建议从「自定义字段模板预设」轻量形态起步，勿直接引入多态 schema | 覆盖更多记忆场景 | 低 | 待裁决 |
-| G11 | 操作体验·引导 | 无 onboarding / 内嵌短帮助（仅批量模式一次性引导） | KeePassDX `education/` + taptargetview；Kp2a `Kp2aShortHelpView`（交互对照 §4C-37） | 待裁决；若做，优先「设置项旁问号说明」轻形态而非全屏引导 | 首用理解成本下降 | 低 | 待裁决 |
-| — | UI 设计·响应式 | 宽屏双栏 ListDetail | Kp2a/Monica 多源混排形态 | — | — | — | **不跟进**（PD-43） |
-| — | UI 设计·动效 | 列表→详情共享元素过渡 | Monica `SharedTransitionCompat` | — | — | — | **不跟进**（PD-29；动效已按 PD-26/27/28/44 定标并被守卫测试锁定） |
-| — | 功能完整性 | 硬件密钥 / 键盘填充 / 插件 / 老格式 / 零候选新建 passkey / AutoType 执行方 | KeePassDX、Kp2a 相应能力 | — | — | — | **不跟进**（PD-54/55/56/53/51/42） |
-| — | 各维度 | 滑动手势（SwipeToDismiss）、抽屉导航、底部导航形态、无障碍专项 | 三家文档均未提及对应先例 | — | — | — | **不跟进**（无差距证据） |
+| G1 | 操作体验·反馈 | 解锁（KDF 派生 / 密钥文件 / 封印解封）零进度指示；同步与导入导出无过程反馈 | KeePassDX `ProgressTaskDialogFragment`（含警告行 + 取消按钮，`fragment_progress.xml:70`）贯穿加解密；Kp2a `LoadingDialog`/`SimpleLoadingDialog`/页内 `BackgroundOperationContainer` 三形态 | ① 解锁页状态驱动阶段文案（「正在派生密钥…」起步）；② 同步/导入导出复用同一过程反馈通道 | 大库/弱机用户不再「猜卡没卡」 | **高** | **已登记 `ISSUE-P3-437`** |
+| G2 | 操作体验·反馈 | 进程被系统杀死后无「上次会话未正常关闭」提示 | Kp2a `AppKilledInfo`（其架构分析 §8.4） | 解锁页一次性轻提示（仅异常退出时） | 消除「会话丢了」困惑 | 低 | **已登记 `ISSUE-P3-438`** |
+| G3 | 操作体验·搜索 | 无高级搜索选项（字段勾选/正则/大小写/排除过期），仅两档 | Kp2a `SearchActivity.cs:93-115`（交互对照 §4C） | 字段范围勾选 + 排除过期先行；正则档单独评估 | 大库检索效率 | 中 | 待裁决 |
+| G4 | 操作体验·解锁 | 无 PIN/口令包装解锁档 | Monica 架构分析记 `unlock_methods` 表，**但 UI 层未找到 PIN 盘实现**（`grep PinPad|Keypad` 零命中）——先例弱化为数据层声明 | 若引入按「可撤销派生凭证」设计；优先级下调 | 生物识别失效场景补充 | 低（下调） | 待裁决（涉 PD-46） |
+| G5 | 操作体验·搜索 | 手选结果后无「把搜索词写进条目」自愈 | Kp2a `AppTask.cs:494-534` | 评估回灌链路成本 | 匹配错误一次修正 | 中低 | 待裁决 |
+| G6 | 操作体验·通知 | 前台通知无复制快捷动作（已有「立即锁定」） | Kp2a `CopyToClipboardService.cs:111-156` | 须先过安全复核（通知面敏感字段暴露口径） | 高频复制少一步 | 中 | 待裁决（须安全复核） |
+| G7 | UI 设计·主题 | 主题预设 5 套 vs Monica 11 套静态方案 + **自定义种子色生成器** + KeePassDX 17 主题 | Monica `CustomColorSchemeGenerator.kt`（五种子色 → M3 scheme，`Theme.kt:878-942`）；KeePassDX `Stylish.kt:129-150` | ① 低成本扩充调色盘枚举；② 更有价值的是「自定义种子色」入口（复用现有三族覆写管线，取一色生成全方案） | 个性化面扩大 | 中低 | 待裁决 |
+| G8 | UI 设计·图标 | 无图标包扩展机制 | KeePassDX icon-pack 双包（material 69 vector + classic PNG）；**Kp2a 支持外部应用形式可插换图标包**（`DrawableFactory.cs:69-92` GetIdentifier） | 待插件生态（PD-56）联动裁决 | — | 低 | 待裁决 |
+| G9 | UI 设计·一致性 | Toast 残留 3 处 | 本仓走查（对照：Kp2a 统一 Presenter 仅 7 处 Toast；Monica 393 处为反面参照） | 收敛进 `AppSnackbarChannel` | 通道单一化 | 低 | 待裁决（可随手批处理） |
+| G10 | 功能完整性 | 条目类型单一（凭据 + Passkey） | Monica 多态条目（其架构分析 §3.2） | 若扩展从「字段模板预设」轻形态起步 | 覆盖更多记忆场景 | 低 | 待裁决 |
+| G11 | 操作体验·引导 | 无 onboarding / 内嵌帮助 | KeePassDX taptargetview 覆盖 5 个 Activity 场景（`education/`）；Kp2a ⓘ 短帮助 + **6 套可关闭提示条**（`group.xml:39-347`）——提示条形态最轻 | 优先「设置项旁 ⓘ」与「可关闭提示条」轻形态 | 首用理解成本下降 | 低 | 待裁决 |
+| G12 | 操作体验·手势 | 列表无滑动快捷操作 | **Monica 自研 `SwipeActions`（左滑删/右滑选，50% 阈值弹簧回弹，8 个列表页使用，`SwipeActions.kt:22-42`）**——修正首版「无先例」结论 | 若裁决引入：右滑快捷复制（用户名/密码）比左滑删除更贴密码库安全语义 | 高频操作少一步 | 中低 | 待裁决 |
+| G13 | UI 设计·导航 | 底栏 Tab 顺序不可调（仅验证器/生成器可隐藏） | Monica `bottomNavOrder` + `bottomNavVisibility` 用户可配（`SimpleMainScreen.kt:909-920`），单 Tab 自动隐藏底栏（`:922`） | 在既有「隐藏 Tab」设置上追加排序（数据结构相近） | 高频页可前置 | 中低 | 待裁决 |
+| G14 | UI 设计·排版偏好 | 无界面缩放/字号偏好、无等宽字体开关、设置页无搜索 | Monica `InterfaceScaleSettingsItem` + BottomSheet（`SettingsScreen.kt:747-752`）与 `SettingsSearchField`（`SettingsSearchSupport.kt:23`）；KeePassDX 等宽开关默认开（`donottranslate.xml:230-231`） | 「界面偏好」一组：界面缩放（或跟随系统字体缩放自检）+ 等宽开关 + 设置页搜索 | 可达性与个性化 | 中低 | 待裁决 |
+| — | UI 设计·动效 | 动效降级开关（低端机/ROM 兼容保险丝） | Monica `LocalReduceAnimations`（`ui/LocalSharedTransition.kt:10-18`，为 HyperOS 2 / Android 15 卡顿设） | 并入 G14「界面偏好」组一并裁决 | 低端机可用性 | 低 | 待裁决（并入 G14） |
+| — | UI 设计·响应式 | 宽屏双栏 ListDetail | — | — | — | — | **不跟进**（PD-43；Monica 同为「宽屏换 Rail」，形态共识） |
+| — | UI 设计·动效 | 列表→详情共享元素过渡 | Monica `sharedBounds` 11 处先例 | — | — | — | **不跟进**（PD-29） |
+| — | 功能完整性 | 硬件密钥/键盘/插件/老格式/零候选新建 passkey/AutoType 执行方 | — | — | — | — | **不跟进**（PD-54/55/56/53/51/42） |
+| — | 操作体验·搜索 | 即时过滤改回车制、系统 SearchProvider | — | — | — | — | **不跟进**（本仓即时过滤 + Monica 80ms 先例证实现口径更优；交互对照 B 档） |
 
 ---
 
 ## §6 未命中与未核实声明
 
-1. **竞品视觉细节大量缺证**：Kp2a 的视觉设计/图标/主题/抽屉导航在其架构分析中通篇未涉及；三家的空态、
-   骨架屏、Snackbar/Toast 用法、无障碍、排版均「文档未提及」。本报告在这些维度不作「本仓领先」的强断言，
-   仅在有正向证据处（如 Kp2a 事件总线自评、KeePassDX 巨型类自评）作对照。
-2. **未实机运行参考应用**：所有竞品交互均为据架构分析文档转述；「对比截图」以出处说明替代。
-3. **本仓两项未核实**：① 只读会话提示是否细分原因文案（Kp2a 三型先例，§3.7）；② WebDAV 自签名证书场景的
-   交互形态（涉安全口径，非纯 UX）。两项目前均未登记。
-4. **已知限界交叉**：本报告不重复限界表已承接的面——相机实拍扫码可扫性（§35「摄像机问题，不解决」）、
-   系统设置直达可用性（§27）、SAF 写回非原子文案如实呈现（§24）、弱 KDF 导入告警（§8，设置页 KDF 标注为
-   已登记「更优」解除方向）。
-5. **编号与登记纪律**：本报告新增登记条目从 `ISSUE-P3-437` 起（§406 已用至 436）；待裁决项**不进**
+1. **取证方式升级**：首版「竞品视觉细节大量缺证」已于 2026-10-02 经用户指令**定向直读三家竞品 UI 代码**补证
+   （只读；每条结论附 `文件:行号`）；非 UI 面结论仍以 `docs/references/` 架构分析文档为准。两处以代码为准的
+   **修正**：① KeePassDX 动态取色实为 Material DynamicColors，chroma 仅用于库内颜色选择器；② Monica UI 层
+   **未见** PIN 解锁盘（文档所记 `unlock_methods` 为数据层声明）。
+2. **未实机运行参考应用**：交互结论为代码 + 文档推定；涉及真机手感（动效流畅度、震动强度等）不在断言范围。
+3. **本仓两项未核实**：① 只读会话提示是否细分原因文案（Kp2a 三型先例，§3.7）；② WebDAV 自签名证书场景
+   交互形态（涉安全口径）。两项目前均未登记。
+4. **已知限界交叉**：相机实拍扫码可扫性（§35「摄像机问题，不解决」）、系统设置直达可用性（§27）、SAF 写回
+   非原子文案（§24）、弱 KDF 导入告警（§8）均由限界表承接，本报告不重复。
+5. **编号与登记纪律**：新增登记条目从 `ISSUE-P3-437` 起（§406 已用至 436）；待裁决项（G3~G14）**不进**
    `ACTIVE_ISSUES.md`，裁决后由用户指认再补登。
 
 ---
 
 ## §7 总体结论
 
-本仓 UI/体验面相对三家参考应用**无结构性落后**：视觉（M3 Expressive + 动态取色 + OLED + 语义安全色）、
-反馈（骨架屏/空态/Snackbar undo/冲突可视化页）、动效（全量定标 + 守卫测试）、无障碍（semantics 体系 +
-对比度专项）均处于第一梯队或领先；搜索空态、域名感知、剪贴板反馈等历史差距已经 `ISSUE-P3-352` 闭环。
+代码直读补证后，首版判断**增强并局部修正**：本仓 UI/体验面相对三家**无结构性落后**，且多项面被坐实为
+四者最完整（搜索空态双出口、骨架屏、冲突可视化页、语义安全色）；视觉面四家均为 Material 3 基座，差异在
+预设广度与个性化入口（Monica 领先：11 方案 + 自定义种子色 + 界面缩放）。
 
-**真实残余差距收敛为一类**：**长操作的过程可感知性**（解锁 KDF 派生 / 同步 / 导入导出缺进度与阶段反馈），
-已登记 `ISSUE-P3-437`（高优先）；其余为若干低优先增量项与产品取舍（§5 待裁决档），其中「进程被杀提示」
-已登记 `ISSUE-P3-438`（低优先）。竞品确有而本仓裁决不做的能力（硬件密钥、键盘、插件、双栏、共享元素等）
-全部有 PD 条目承接，本报告仅引用、不重复登记。
+**真实残余差距仍收敛为一类**：**长操作的过程可感知性**（`ISSUE-P3-437`，高优先；KeePassDX 可取消进度对话框
+与 Kp2a 页内进度容器均为代码级先例）。此外，直读新增了三个有真实代码先例的待裁决项——滑动快捷操作（G12）、
+底栏 Tab 排序自定义（G13）、界面偏好组（G14：缩放/等宽开关/设置页搜索/动效降级），均为中低优先的轻量增量；
+其余维持「已裁决不跟进」引用原 PD 条目。
