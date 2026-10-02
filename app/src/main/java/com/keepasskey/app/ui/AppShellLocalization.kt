@@ -67,3 +67,22 @@ internal suspend fun localizedContextForAppLanguage(
     context.resources.configuration,
     localeFor(settings.getSettings().first().appLanguage)
 )
+
+/**
+ * 沿 ContextWrapper 链解回宿主 FragmentActivity（§411 装机走查 P1 修复）。
+ *
+ * `localizedContextOf` 产出的本地化上下文是 **ContextWrapper 包住 Activity**——
+ * Compose `LocalContext.current` 拿到的是 Wrapper 本体，`context as? FragmentActivity`
+ * 直接强转必然失败（null）：解锁页全部生物识别入口（自动唤起 / 手动按钮 / 登记）
+ * 因此静默 fail-closed，用户表现为「设置了指纹也永远无法使用」。
+ * **本仓任何把 LocalContext 强转为 Activity 的代码一律改走本函数**，不得直转。
+ */
+fun Context?.unwrapToFragmentActivity(): androidx.fragment.app.FragmentActivity? {
+    var ctx: Context? = this
+    while (ctx is ContextWrapper) {
+        val candidate = ctx as? androidx.fragment.app.FragmentActivity
+        if (candidate != null) return candidate
+        ctx = ctx.baseContext
+    }
+    return null
+}

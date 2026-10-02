@@ -48,18 +48,9 @@
   ③ 敏感字节清零链与失败语义零变化；强生物识别 / 降级确认闸门不动；
   ④ 单测覆盖「解封 + 记忆重读成功送达两因子」「重读失败回落」；全量 test 绿 + 门禁全 PASS；真机装包 ~700 KB 密钥文件指纹解锁秒级完成（用户走查）。
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### ISSUE-P2-456：杀后台重进后生物识别解锁报「未通过或已取消」，必须手输密码（真机走查）
-
-- **核实时间点**：2026-10-02；**核实方式**：用户真机（M332BF，debug 包 com.keepasskey.debug）走查原话「解锁后，杀后台重新进入，依然需要手动输入密码，并且使用生物识别提示未通过或取消」；文案=`sec_biometric_auth_failed`（`values/strings.xml:429`）。
-- **取证进展（§411，2026-10-02）**：真机 `run-as` 实测——`biometric_credentials.xml` 为空 map（**封印凭据不存在**，非「指纹认证失败」）；keymint 传感器为 strongbox-nxp（STRONG ✓，排除设备能力不符）。**根因修正**：①设置页开启指纹只落偏好不封印（凭据登记只发生在主密码解锁成功的 `requestBiometricEnrollment`，用户从未完成过该次登记）；②`ANR 热修复期间` 强生物识别验证成功（logcat `Succeeded isStrongBiometric=true`）但登记落库链仍被切断的精确分支待进一步日志。**整改（当场封印）**：`BiometricResealCoordinator` 增加 `allowInitialSeal`（允许无既有凭据时首次封印，会话密码快照可用）；`BiometricEnableCoordinator.onVerified(sealReady=false)` 后经 `SettingsBiometricGate` 注入的回调当场补登记（第二次 BiometricPrompt 完成授权封印）——开启指纹即生效，不再依赖「下次解锁」。
-- **候选根因（待真机 logcat 取证分型）**：① `BiometricUnlockCoordinator.unlockWithBiometric` catch 兜底（`prepareDecryptCipher` 抛错，如 Keystore 密钥失效/设备不支持请求的认证器集合）；② `BiometricResult.Error` 未知错误码兜底映射（如设备仅 Class 2 指纹与 `BIOMETRIC_STRONG` 不符）；③ 密钥文件因子缺失致解库失败——但该路径应报 `unlock_error_invalid_password` 而非本文案，可能性低；注意 §408 后封印载荷只装主密码、密钥文件靠记忆重读（§411 起另有私有目录副本兜底）。
-- **取证入口**：`debugLog.warn` 留痕有「生物识别认证失败: code=N / 生物识别解锁启动异常 / 生物识别解封失败」三类；配合 `adb shell dumpsys biometric`（传感器强度）定位。
-- **验收标准**：
-  ① logcat 取证定位真实失败分支（错误码 / 异常类型）并记录；
-  ② 按分型整改：密钥失效 → 清陈旧凭据引导重登记（通道既有须核实生效）；错误码映射细化（`BiometricFailureMessagePolicy` 不再吞未知码为「未通过或取消」）；设备能力不符 → 解锁模式推导如实降级；
-  ③ 修复后真机走查：杀后台重进 → 指纹解锁直达库列表；全量 test 绿 + 门禁全 PASS。
+> **暂无开放项**。
 
 ## P3 低危问题、特性接线与体验优化（9 项）
 

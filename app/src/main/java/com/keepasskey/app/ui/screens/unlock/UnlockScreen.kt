@@ -46,6 +46,7 @@ import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.screens.database.DatabasePickerViewModel
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.HeroTitleStyle
+import com.keepasskey.app.ui.unwrapToFragmentActivity
 
 /**
  * 有状态解锁页面（Route），负责收集 ViewModel 状态与事件转发
@@ -67,7 +68,9 @@ fun UnlockScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val activity = androidx.compose.runtime.remember(context) { context as? androidx.fragment.app.FragmentActivity }
+    // §411 装机走查 P1 修复：本地化上下文是 ContextWrapper（§409）——`as? FragmentActivity`
+    // 直转必然失败 → 全部生物识别入口 fail-closed「验证未通过或已取消」。必须沿链解包。
+    val activity = androidx.compose.runtime.remember(context) { context.unwrapToFragmentActivity() }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
