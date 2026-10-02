@@ -35,14 +35,17 @@ class VaultFileBaselineHolder @Inject constructor(
         databaseSession.removeLockObserver(observer)
     }
 
-    /** 打开成功后留存基线；[file] 为 null 时按本地路径自读，仍不可读则清空 */
+    /**
+     * 打开成功后留存基线；[file] 为 null 时（SAF / content:// 通道）**不落基线**。
+     *
+     * 2026-10-02 真机实测修复：此前此处以 `fromMetadata(path, 0, 0)` 占位——假基线与
+     * 保存时的 null current 相遇按策略恒判漂移，SAF 库**每一次保存**都被
+     * `ext_mod_save_aborted` 中止（fail-closed 误报面）。按 [VaultFileDriftPolicy]
+     * 既有口径「元数据不可读 ⇒ 基线为 null ⇒ 宁可不提示」处理；真实 SAF 元数据
+     * （DocumentFile lastModified/size）管道另行立项接入后恢复漂移防护。
+     */
     fun capture(pathIdentifier: String, file: File?) {
-        val local = file?.let { VaultFileBaseline.fromFile(it) }
-        baseline = local ?: VaultFileBaseline.fromMetadata(
-            pathIdentifier = pathIdentifier,
-            lastModifiedMillis = 0L,
-            sizeBytes = 0L
-        )
+        baseline = file?.let { VaultFileBaseline.fromFile(it) }
     }
 
     /** 锁定 / 关闭 / 换库后清空 */

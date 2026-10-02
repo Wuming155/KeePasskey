@@ -37,6 +37,12 @@ data class EntryEditUiState(
     /** 密码长度（非敏感元数据，用于强度条）；密码明文本身经 ViewModel CharArray 链路 */
     val passwordLength: Int = 0,
     /**
+     * 生成结果回显的消费键（非敏感标记对象，无任何凭据材料）：每次 `generatePassword`
+     * 换新实例驱动 [com.keepasskey.app.ui.components.SecurePasswordField] 重新消费预填通道
+     * （组件显示态内聚，同键幂等不重放）；null = 按既有条目预填口径（initialKey = entryId）。
+     */
+    val passwordPrefillToken: Any? = null,
+    /**
      * ISSUE-P2-286 AC①：密码真实熵位数（crypto 内核 `guessesLog10`，与详情页同一实现；
      * null = 未评估 / 评估不可用，强度条隐藏）。熵由 ViewModel 在 `Dispatchers.Default`
      * 按最新输入异步评估——密码明文不回流本状态类（铁律不变）。

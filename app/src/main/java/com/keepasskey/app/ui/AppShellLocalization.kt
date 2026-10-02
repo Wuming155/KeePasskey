@@ -1,7 +1,9 @@
 package com.keepasskey.app.ui
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.Configuration
+import android.content.res.Resources
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.data.repository.SettingsRepository
 import kotlinx.coroutines.flow.first
@@ -30,12 +32,26 @@ internal fun localizedConfigurationOf(base: Configuration, locale: Locale?): Con
     return cfg
 }
 
-/** 供 `LocalContext` 使用的本地化上下文；`null` 语言时退回原上下文 */
+/**
+ * 供 `LocalContext` 使用的本地化上下文；`null` 语言时退回原上下文。
+ *
+ * **必须保住 ContextWrapper 链**（2026-10-02 真机实测 P0）：此前直接返回
+ * `context.createConfigurationContext(...)` 派生上下文——其以 ContextImpl 为基座、
+ * 无法沿链解回宿主 Activity，应用内语言 ≠ 跟随系统时设置页全部 `hiltViewModel()`
+ * 抛 `Expected an activity context`（切英文即闪退，语言偏好落盘后冷启动崩溃循环）。
+ * 改为 ContextWrapper 包住 base（Activity），仅覆写 `getResources()` 走本地化
+ * Configuration——`stringResource` / `getString` 仍按目标语言解析，Activity 查找不受影响。
+ */
 internal fun localizedContextOf(context: Context, base: Configuration, locale: Locale?): Context =
     if (locale == null) {
         context
     } else {
-        context.createConfigurationContext(localizedConfigurationOf(base, locale))
+        object : ContextWrapper(context) {
+            private val localizedResources: Resources =
+                context.createConfigurationContext(localizedConfigurationOf(base, locale)).resources
+
+            override fun getResources(): Resources = localizedResources
+        }
     }
 
 /**

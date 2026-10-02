@@ -214,7 +214,8 @@ internal fun ColumnScope.EntryEditAccountSection(
                 onPasswordChanged = onPasswordChangeSecure,
                 isPasswordVisible = uiState.isPasswordVisible,
                 initialPassword = loadedPassword,
-                initialKey = uiState.entryId ?: "new-entry",
+                // 生成回显：passwordPrefillToken 非空时随每次生成换键，驱动组件重新消费预填通道
+                initialKey = uiState.passwordPrefillToken ?: (uiState.entryId ?: "new-entry"),
                 // ISSUE-P3-359 AC①：Done → 收起键盘（默认 `{}` 会吞掉框架收键盘行为，
                 // 按完成键无反应）。不接保存：底栏/顶栏保存是既有交互语义，避免误提交
                 onDone = rememberEntryEditHideKeyboard(),

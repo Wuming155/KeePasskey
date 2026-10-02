@@ -133,11 +133,17 @@ class EntryEditViewModel @Inject constructor(
     /** 非空即「解除绑定」确认对话框可见。 */
     val showUnbindPasskeyConfirm: StateFlow<Boolean> = passkeyUnbind.confirm
 
-    /** ISSUE-P3-342 期间按行数分档闸门拆出的两个纯 UI 状态协作者（行为逐字不变，见各自 KDoc）。 */
+    /** ISSUE-P3-342 期间按行数分档闸门拆出的纯 UI 状态协作者（行为逐字不变，见各自 KDoc）。 */
     private val generator = EntryEditPasswordGenerator(
         state = { _uiState.value },
         update = _uiState::update,
-        emitPassword = this::onPasswordChangeSecure
+        emitPassword = this::onPasswordChangeSecure,
+        // 生成结果回显（§409）：显示态内聚于 SecurePasswordField——经预填通道注入 + 换键重消费
+        pushEcho = { generated ->
+            _loadedPassword.value?.fill('0')
+            _loadedPassword.value = generated.copyOf()
+            _uiState.update { it.copy(passwordPrefillToken = Any()) }
+        }
     )
 
     private val attachments = EntryEditAttachmentDraft(strings = strings, update = _uiState::update)
@@ -251,7 +257,8 @@ class EntryEditViewModel @Inject constructor(
                 _loadedProtectedFields.value.values.forEach { it.fill('0') }
                 protectedFieldChars.putAll(loadedProtected.mapValues { (_, v) -> v.copyOf() })
                 _loadedProtectedFields.value = loadedProtected
-                _uiState.update { applyLoadedEntry(it, entry, password?.size ?: 0) }
+                // §409：重置生成回显消费键（回退按 entryId 消费的既有预填口径）
+                _uiState.update { applyLoadedEntry(it, entry, password?.size ?: 0).copy(passwordPrefillToken = null) }
                 // ISSUE-P2-286：载入既有条目时同步评估强度（编辑页与详情页同一真相源）
                 if (password != null && password.isNotEmpty()) {
                     entropyRefresh.refresh(password)
@@ -300,8 +307,7 @@ class EntryEditViewModel @Inject constructor(
     fun onIconChange(icon: String) = _uiState.update { it.copy(iconName = icon, customIconId = null, isDirty = true) }
 
     /** TASK-15：选择/清除（null）自定义图标引用 */
-    fun onCustomIconSelected(iconId: String?) =
-        _uiState.update { current -> current.copy(customIconId = iconId, isDirty = current.customIconId != iconId) }
+    fun onCustomIconSelected(iconId: String?) = _uiState.update { it.copy(customIconId = iconId, isDirty = it.customIconId != iconId) }
 
     /** TASK-15：上传 PNG 字节为库级自定义图标并选中；失败如实上浮 */
     fun onCustomIconUploaded(pngBytes: ByteArray) {
@@ -312,9 +318,7 @@ class EntryEditViewModel @Inject constructor(
                     _uiState.update { it.copy(customIconId = result.data, isDirty = true) }
                 }
                 is com.keepasskey.core.result.KdbxResult.Failure ->
-                    _uiState.update {
-                        it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(result.message)))
-                    }
+                    _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(result.message))) }
             }
         }
     }
@@ -406,18 +410,15 @@ class EntryEditViewModel @Inject constructor(
     fun onGroupChange(groupId: String?) = _uiState.update { it.copy(groupId = groupId, isDirty = true) }
 
     fun addCustomField() = customFields.add()
-
     /** 非受保护字段明文 / 键名 / 保护标记编辑入口（被锁的通行密钥字段就地拒绝，见执行者 KDoc）。 */
-    fun updateCustomField(id: String, key: String, value: String, isProtected: Boolean) =
-        customFields.updateField(id, key, value, isProtected)
+    fun updateCustomField(id: String, key: String, value: String, isProtected: Boolean) = customFields.updateField(id, key, value, isProtected)
 
     /**
      * TASK-10：受保护字段明文输入的 CharArray 桥接上行（语义同 [onPasswordChangeSecure]）。
      * AC⑪①：私钥 PEM / `userHandle` 等被锁字段在 [EntryEditCustomFieldEditor.updateProtectedValue]
      * 内直接拒收。
      */
-    fun updateProtectedFieldValue(id: String, chars: CharArray) =
-        customFields.updateProtectedValue(id, chars)
+    fun updateProtectedFieldValue(id: String, chars: CharArray) = customFields.updateProtectedValue(id, chars)
 
     fun removeCustomField(id: String) = customFields.remove(id)
 
@@ -425,8 +426,7 @@ class EntryEditViewModel @Inject constructor(
      * 断点1 整改：真实附件添加——读取用户经 SAF 选择文件的字节并随编辑会话驻留内存，
      * 保存时随条目提交入库（保存时经去重器入池）。同名附件视为替换。
      */
-    fun addAttachment(fileName: String, fileSizeFormatted: String, data: ByteArray) =
-        attachments.add(fileName, fileSizeFormatted, data)
+    fun addAttachment(fileName: String, fileSizeFormatted: String, data: ByteArray) = attachments.add(fileName, fileSizeFormatted, data)
 
     fun removeAttachment(id: String) = attachments.remove(id)
 

@@ -18,7 +18,9 @@ import java.security.SecureRandom
 internal class EntryEditPasswordGenerator(
     private val state: () -> EntryEditUiState,
     private val update: ((EntryEditUiState) -> EntryEditUiState) -> Unit,
-    private val emitPassword: (CharArray) -> Unit
+    private val emitPassword: (CharArray) -> Unit,
+    /** 生成结果回显（§409）：经编辑页一次性预填通道注入组件显示态——显示态内聚于组件，模型侧只管持有 */
+    private val pushEcho: (CharArray) -> Unit = {}
 ) {
 
     fun togglePasswordVisibility() = update { it.copy(isPasswordVisible = !it.isPasswordVisible) }
@@ -50,10 +52,12 @@ internal class EntryEditPasswordGenerator(
         generate()
     }
 
-    /** M1 整改：生成结果直达 CharArray，不经 String 中转；清零点保留在本方法内。 */
+    /** M1 整改：生成结果直达 CharArray，不经 String 中转；清零点保留在本方法内。
+     *  §409：`pushEcho` 在模型侧上行后触发（编辑页经预填通道回显组件显示态）。 */
     fun generate() {
         val newPassword = generatePasswordChars(state(), SecureRandom())
         emitPassword(newPassword)
+        pushEcho(newPassword)
         newPassword.fill('0')
     }
 }
