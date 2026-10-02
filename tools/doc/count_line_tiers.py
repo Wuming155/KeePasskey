@@ -18,8 +18,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULES = ["app", "database", "crypto", "sync", "core"]
-# §280 收工读数 37；棘轮只紧不松，降档后下调本常量（改此处须在批次文档留痕）。
-TIER2_BUDGET = 37
+# ISSUE-P3-433 收工读数 36（改密对话框渲染面下沉新文件，MasterKeyChangeDialog.kt 降至 tier2 以下）；棘轮只紧不松，降档后下调本常量（改此处须在批次文档留痕）。
+TIER2_BUDGET = 36
 
 
 def main() -> int:

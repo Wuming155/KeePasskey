@@ -3,17 +3,13 @@ package com.keepasskey.app.ui.screens.settings
 import android.content.res.Configuration
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,7 +19,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -35,7 +30,6 @@ import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.security.SecureDialog
 import com.keepasskey.app.ui.components.MasterPasswordPolicy
 import com.keepasskey.app.ui.components.MasterPasswordWeakConfirmDialog
-import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.components.rememberMasterPasswordStrengthBits
 import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
 import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
@@ -50,14 +44,16 @@ import kotlinx.coroutines.launch
  * - [isBusy]（真相源 = `SettingsUiState.isChangingMasterKey`，由 `SettingsViewModel` 的
  *   `viewModelScope` 承载）：提交后对话框**保持打开并呈现进度**，忙时不可重复提交、不可关闭，
  *   直到全库 Argon2 重派生 + 重加密完成——任务不跑在任何 UI scope 上，切 Tab 不取消；
- * - 本对话框只持有表单本地态（两个 CharArray、可见性、弱口令确认闸与 `submitted` 防抖）。
+ * - 本对话框只持有表单本地态（开关、两个 CharArray、可见性、弱口令确认闸与 `submitted` 防抖）。
  *
- * ISSUE-P3-428：新增密钥文件第二因子三态（[KeyFileChoice] → [ChangeKeyFileIntent]）——
+ * ISSUE-P3-428：密钥文件第二因子三态（[KeyFileChoice] → [ChangeKeyFileIntent]）——
  * 保持现状 / 绑定或更换（SAF 选文件，经 [onReadKeyFile] 全仓唯一读取通道）/ 解绑。
  * 选定文件的字节为借用语义：换选与关闭路径就地清零；提交时所有权随 [ChangeKeyFileIntent.Use]
  * 移交控制器（其 `finally` 统一清零），本对话框只丢引用、不再补刀。
- * ISSUE-P3-430：两个密码框整体留空 = 保持当前主密码（仅改绑密钥文件）；留空 + Keep
- * 属空提交，提交钮禁用。
+ * ISSUE-P3-433（ISSUE-P3-430 语义改造）：「修改主密码」改为**显式开关**（KeePassDX
+ * `SetMainCredentialDialogFragment` 卡片开关口径）——默认关＝保持当前主密码，密码框不渲染，
+ * 取代「两框整体留空＝保持」的暗示语义；开关关仍传空数组走控制器既有 `changeKeyFileOnly`
+ * 通道，提交管线零改动。至少一处改动的空提交防护保留（判据从「留空」改为「开关」）。
  *
  * 结果反馈不再由本对话框发 Snackbar：结果经 UiState 回执，由宿主 `SettingsContent`
  * 的既有 Snackbar 路径展示（这样切 Tab 错过时反馈也不丢）；busy 回落时对话框自行关闭。
@@ -83,6 +79,8 @@ internal fun MasterKeyChangeDialog(
     var newPasswordChars by remember { mutableStateOf(CharArray(0)) }
     var confirmPasswordChars by remember { mutableStateOf(CharArray(0)) }
     var passwordVisible by remember { mutableStateOf(false) }
+    // ISSUE-P3-433：「修改主密码」显式开关——关闭即就地擦除两框字节（不留悬空副本）
+    var passwordChangeEnabled by remember { mutableStateOf(false) }
     // ISSUE-P3-428：密钥文件三态本地选择与已读取文件（字节借用语义，见类 KDoc）
     var keyFileChoice by remember { mutableStateOf(KeyFileChoice.KEEP) }
     var pickedKeyFile by remember { mutableStateOf<PickedKeyFile?>(null) }
@@ -118,6 +116,7 @@ internal fun MasterKeyChangeDialog(
         newPasswordChars = CharArray(0)
         confirmPasswordChars.fill('0')
         confirmPasswordChars = CharArray(0)
+        passwordChangeEnabled = false
         pickedKeyFile?.erase()
         pickedKeyFile = null
         keyFileReadFailed = false
@@ -138,12 +137,14 @@ internal fun MasterKeyChangeDialog(
     var showWeakConfirm by remember { mutableStateOf(false) }
 
     val passwordsMatch = newPasswordChars.contentEquals(confirmPasswordChars)
-    // ISSUE-P3-430：两个密码框都留空 = 保持当前主密码（仅改绑密钥文件）；否则按原改密校验
-    val keepPassword = newPasswordChars.isEmpty() && confirmPasswordChars.isEmpty()
+    // ISSUE-P3-433：开关关＝保持当前主密码（字段已随关闭就地清零）；开＝按原改密校验
+    val keepPassword = !passwordChangeEnabled
     val passwordValid = keepPassword ||
         (passwordsMatch && newPasswordChars.size >= MasterPasswordPolicy.MIN_LENGTH)
-    // ISSUE-P3-430：至少要有一处改动（密码或密钥文件），避免「全部留空」的空提交
-    val hasAnyChange = !keepPassword || keyFileChoice != KeyFileChoice.KEEP
+    // ISSUE-P3-430→P3-433：至少要有一处改动（密码开关开且有输入，或密钥文件三态非 Keep），
+    // 避免「无任何改动」的空提交
+    val hasAnyChange = (!keepPassword && newPasswordChars.isNotEmpty()) ||
+        keyFileChoice != KeyFileChoice.KEEP
     // ISSUE-P3-428：「绑定或更换」必须已成功读到文件才可提交（fail-closed）
     val keyFileChoiceSatisfied = keyFileChoice != KeyFileChoice.USE || pickedKeyFile != null
 
@@ -198,9 +199,25 @@ internal fun MasterKeyChangeDialog(
             // Recents 预览，见 SecureDialog KDoc 与官方 "Excluding views from assistants"）
             SecureDialog {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MasterKeyChangePasswordFields(
-                        kdfAlgorithm = kdfAlgorithm,
+                    Text(
+                        text = stringResource(R.string.set_master_key_dialog_desc, kdfAlgorithm),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    MasterKeyChangePasswordSection(
+                        changeEnabled = passwordChangeEnabled,
                         passwordVisible = passwordVisible,
+                        enabled = !isBusy && !submitted,
+                        onToggleChange = { checked ->
+                            if (!checked) {
+                                // 关闭开关即擦除已输入的字节（不留悬空副本）
+                                newPasswordChars.fill('0')
+                                newPasswordChars = CharArray(0)
+                                confirmPasswordChars.fill('0')
+                                confirmPasswordChars = CharArray(0)
+                            }
+                            passwordChangeEnabled = checked
+                        },
                         onNewPassword = { chars ->
                             newPasswordChars.fill('0')
                             newPasswordChars = chars.copyOf()
@@ -237,7 +254,7 @@ internal fun MasterKeyChangeDialog(
                 // ISSUE-P2-288 AC①：长度下限硬阻断（单一判据，与建库向导共用）
                 // ISSUE-P2-354 AC③：忙时禁用 + 内嵌进度
                 // ISSUE-P3-428：「绑定或更换」未选定文件时禁提交
-                // ISSUE-P3-430：密码框可整体留空（仅改密钥文件）；但至少要有一处改动
+                // ISSUE-P3-433：密码开关关且密钥文件 Keep 时禁提交（无任何改动）
                 enabled = passwordValid &&
                     hasAnyChange &&
                     keyFileChoiceSatisfied &&
@@ -273,135 +290,19 @@ internal fun MasterKeyChangeDialog(
 /**
  * 改密对话框内密钥文件三态的本地选择（ISSUE-P3-428，映射 [ChangeKeyFileIntent]）。
  * 刻意用枚举而非 `Boolean` 开关——三态语义在类型层面闭合，不重蹈「虚假开关」覆辙。
+ * （ISSUE-P3-433：`internal` 供同包渲染面 [MasterKeyFileChoiceSection] 作参数类型。）
  */
-private enum class KeyFileChoice { KEEP, USE, REMOVE }
+internal enum class KeyFileChoice { KEEP, USE, REMOVE }
 
 /**
  * 已读取的用户选定密钥文件（ISSUE-P3-428）。
  * [bytes] 为借用语义：换选、关闭路径由对话框就地清零，提交时所有权随意图移交。
+ * （ISSUE-P3-433：`internal` 供同包渲染面 [MasterKeyFileChoiceSection] 作参数类型。）
  */
-private class PickedKeyFile(val bytes: ByteArray, val displayName: String) {
+internal class PickedKeyFile(val bytes: ByteArray, val displayName: String) {
     fun erase() {
         bytes.fill(0)
     }
-}
-
-/**
- * 密钥文件第二因子三态选择段（ISSUE-P3-428）。
- * 只搬渲染面：状态持有与意图映射留在 [MasterKeyChangeDialog] 现场（擦除链「单一现场」口径）；
- * 整段随 [enabled] 冻结（忙 / 已提交时不可再改选择，与密码字段同口径）。
- */
-@Composable
-private fun MasterKeyFileChoiceSection(
-    choice: KeyFileChoice,
-    picked: PickedKeyFile?,
-    readFailed: Boolean,
-    enabled: Boolean,
-    onChoiceSelect: (KeyFileChoice) -> Unit,
-    onPickFile: () -> Unit
-) {
-    Column {
-        Text(
-            text = stringResource(R.string.set_master_keyfile_section),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        KeyFileChoiceRow(
-            label = stringResource(R.string.set_master_keyfile_keep),
-            selected = choice == KeyFileChoice.KEEP,
-            enabled = enabled,
-            onSelect = { onChoiceSelect(KeyFileChoice.KEEP) }
-        )
-        KeyFileChoiceRow(
-            label = picked?.let { stringResource(R.string.set_master_keyfile_selected, it.displayName) }
-                ?: stringResource(R.string.set_master_keyfile_use),
-            selected = choice == KeyFileChoice.USE,
-            enabled = enabled,
-            onSelect = {
-                onChoiceSelect(KeyFileChoice.USE)
-                onPickFile()
-            }
-        )
-        KeyFileChoiceRow(
-            label = stringResource(R.string.set_master_keyfile_remove),
-            selected = choice == KeyFileChoice.REMOVE,
-            enabled = enabled,
-            onSelect = { onChoiceSelect(KeyFileChoice.REMOVE) }
-        )
-        if (readFailed) {
-            Text(
-                text = stringResource(R.string.unlock_keyfile_read_failed),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
-    }
-}
-
-/** 三态选择段的单行（渲染面；选中态与点击上行，无本地状态） */
-@Composable
-private fun KeyFileChoiceRow(
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onSelect: () -> Unit
-) {
-    Row(
-        modifier = Modifier.clickable(enabled = enabled) { onSelect() },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        RadioButton(selected = selected, onClick = null, enabled = enabled)
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(start = 8.dp)
-        )
-    }
-}
-
-/**
- * 新 / 确认两行主密码输入字段（§208 自 [MasterKeyChangeDialog] 下沉）。
- *
- * **只搬渲染面**：`onPasswordChanged` 回调原样上行（含调用方的 fill(0) + copyOf 擦除链），
- * 密码字节不经过本段落驻留；提交链路（copyOf → wipe → 移交 ViewModel 的 viewModelScope 任务，
- * 由其负责任何结果路径的清零）仍留在对话框现场发起（擦除链「单一现场」口径，勿为行数外搬）。
- * `SecureDialog {` 包裹与 `AlertDialog` 本体留在宿主文件——`SecureDialogFlagPolicyTest`
- * 以 `SecureDialog {` 调用点计数锚定该文件（§193 清单锁）。
- */
-@Composable
-private fun MasterKeyChangePasswordFields(
-    kdfAlgorithm: String,
-    passwordVisible: Boolean,
-    onNewPassword: (CharArray) -> Unit,
-    onConfirmPassword: (CharArray) -> Unit,
-    onToggleVisibility: () -> Unit
-) {
-    Text(
-        text = stringResource(R.string.set_master_key_dialog_desc, kdfAlgorithm),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-
-    SecurePasswordField(
-        label = stringResource(R.string.set_new_master_password),
-        onPasswordChanged = onNewPassword,
-        isPasswordVisible = passwordVisible,
-        onToggleVisibility = onToggleVisibility
-    )
-
-    SecurePasswordField(
-        label = stringResource(R.string.set_confirm_master_password),
-        onPasswordChanged = onConfirmPassword,
-        isPasswordVisible = passwordVisible,
-        onToggleVisibility = onToggleVisibility
-    )
-
-    // ISSUE-P3-430：留空语义告知（不换密码、只改密钥文件的通道）
-    Text(
-        text = stringResource(R.string.set_master_key_keep_hint),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
 }
 
 /**
