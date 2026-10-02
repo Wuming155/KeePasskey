@@ -300,8 +300,11 @@ open class SyncCoordinator @Inject constructor(
      * 与 [SyncProviderResolver.resolveRemotePath] 同源；默认文件名取活动库名或常量兜底。
      */
     fun resolveRemotePathForProbe(): String? {
+        // §411（ISSUE-P3-447 局部收口）：SAF 库 currentFile 为 null 时以库名兜底，
+        // 与 runSyncCycle / takeoverVaultBinding 的远端路径解析同口径
         val activeName = databaseSession.currentFile?.name
-            ?: return if (isSyncConfigured()) null else null
+            ?: databaseSession.databaseFlow.value?.databaseName?.let { "$it.kdbx" }
+            ?: return null
         if (!isSyncConfigured()) return null
         return try {
             providers.resolveRemotePath(activeName)

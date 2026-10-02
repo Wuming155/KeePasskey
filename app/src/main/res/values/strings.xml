@@ -682,7 +682,8 @@
     <string name="dbset_keyfile_export_warn_message">即将导出的是本库的密钥文件（第二重凭据）：\n· 单文件即可配合库文件尝试开库，请与 .kdbx 分开存放；\n· 写入下载目录或云盘后，任何可访问该位置的应用或人员都能取得该因子；\n· 需自行删除：本应用不会代为清理。</string>
     <!-- ISSUE-P3-436：导入密钥文件（为当前库改绑第二因子的直达入口） -->
     <string name="dbset_keyfile_import_title">导入密钥文件</string>
-    <string name="dbset_keyfile_import_sub">选择外部密钥文件作为本库第二因子</string>
+    <string name="dbset_keyfile_import_sub">把解锁时所选的密钥文件导入应用私有目录，此后解锁不再依赖文件授权</string>
+    <string name="dbset_keyfile_import_memory_done">已将密钥文件导入应用私有目录，此后解锁将自动载入该文件，不再依赖文件授权</string>
     <string name="dbset_keyfile_import_warn_title">确认导入密钥文件</string>
     <string name="dbset_keyfile_import_warn_message">即将把所选文件设为本库的密钥文件（第二重凭据）：\n· 本库将以「主密码 + 该密钥文件」重新派生并保存；\n· 此前绑定的密钥文件此后不再能解锁本库；\n· 导入完成后请先确认新凭据可正常解锁，再处置旧密钥文件。</string>
     <string name="dbset_keyfile_import_confirm">确认导入</string>

@@ -72,6 +72,9 @@ class UnlockViewModel @Inject constructor(
     // ISSUE-P3-438：会话开合跨进程标记（消费「上次会话未正常关闭」一次性轻提示）。
     // nullable 仅用于纯 JVM 单测；生产 DI 注入 @Singleton 真实实例（MainApplication 冷启动初始化）
     private val sessionCloseMarker: com.keepasskey.app.security.SessionCloseMarker? = null,
+    // §411（ISSUE-P3-448）：密钥文件私有目录收编副本通道。nullable 仅用于纯 JVM 单测；
+    // 生产 DI 注入 @Singleton 真实实例（Keystore 加密落盘 filesDir/keyfiles）
+    private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
     // ISSUE-P1-429：封印 / 解封 keystore 密算的调度器（生产 DI 注入 @SealCryptoDispatcher = IO；
     // 默认值仅供未触 crypto 路径的既有 JVM 单测沿用，触路径的用例注入 TestDispatcher 保确定性）
     @com.keepasskey.app.di.SealCryptoDispatcher private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
@@ -93,7 +96,10 @@ class UnlockViewModel @Inject constructor(
         scope = viewModelScope,
         uiState = _uiState,
         keyFileAccess = keyFileAccess,
-        debugLog = debugLog
+        debugLog = debugLog,
+        // §411（ISSUE-P3-448）：私有目录副本收编 / 副本优先恢复（无副本键时通道整体旁路）
+        vaultCopyStore = keyFileVaultCopyStore,
+        activeDbId = { activeDatabaseId }
     )
 
     /** 生物识别解锁协调器（ISSUE-P3-25）：解锁模式/自动唤起/解封与解锁收尾 */

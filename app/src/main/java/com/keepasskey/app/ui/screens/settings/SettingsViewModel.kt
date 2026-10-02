@@ -78,7 +78,8 @@ class SettingsViewModel @Inject constructor(
     // ISSUE-P2-212：封印凭据存在性判定（决定「立即可用」还是「下次解锁后登记」）
     private val biometricCredentialStorage: BiometricCredentialStorage? = null,
     // ISSUE-P2-378：外部修改漂移协调器（null 仅纯 JVM 单测；生产 Hilt 注入 @Singleton）
-    private val vaultFileDriftCoordinator: com.keepasskey.app.security.VaultFileDriftCoordinator? = null
+    private val vaultFileDriftCoordinator: com.keepasskey.app.security.VaultFileDriftCoordinator? = null,
+    private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null
 ) : ViewModel() {
 
     companion object {
@@ -147,11 +148,12 @@ class SettingsViewModel @Inject constructor(
         // ISSUE-P1-431：封印载荷不再含密钥文件字节，原 sessionKeyFileBytes 通道退役
         sessionPasswordChars = { databaseSession?.passwordSnapshot() }
     )
-
     /** 开关动作即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
     private val biometricToggleState = biometricGate.toggleState
-    private val masterKeyChange = SettingsMasterKeyChangeController(vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange, keyFileAccess) // ISSUE-P3-434：第4参＝改绑/解绑成功后同步「记住的密钥文件位置」
-
+    private val masterKeyChange = SettingsMasterKeyChangeController(
+        vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange, keyFileAccess,
+        keyFileVaultCopyStore // ISSUE-P3-434：第4参记忆位置同步；§411（P3-448）：副本同步 + 「导入密钥文件」收编
+    )
     // P2-354/P2-398/P3-428/P3-430 改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
     internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange
     internal val keyFileReader get() = features.keyFileReader // ISSUE-P3-428：改密对话框 SAF 读取通道（全仓唯一）

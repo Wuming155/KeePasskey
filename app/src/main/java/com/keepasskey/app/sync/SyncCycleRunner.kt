@@ -104,11 +104,13 @@ class SyncCycleRunner @Inject constructor(
      * `return@withLock` 语义由返回值等价承载。
      */
     suspend fun runSyncCycle(): SyncOutcome = session.mutex.withLock {
-        val activeFile = databaseSession.currentFile
-            ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_no_open_vault_file))
-
         val currentDb = databaseSession.databaseFlow.value
             ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_vault_not_unlocked))
+        // §411 走查（ISSUE-P3-447 局部收口）：SAF（自选位置）通道的库 `associatedFile == null`，
+        // 此前在首行即早退报「当前无打开的密码库文件」，既掩盖真实原因又使 SAF 库完全无法云同步。
+        // 同步周期对本地文件的唯一依赖是「远端路径默认名」——本地字节恒由内存树序列化而来，
+        // 故以活动文件名优先、库名兜底（`<库名>.kdbx`）解析远端路径，SAF 库得以进入同一周期。
+        val vaultFileName = databaseSession.currentFile?.name ?: "${currentDb.databaseName}.kdbx"
 
         // Wave 14 全站强制 HTTPS：遗留的 http:// 端点在 Provider 构造期被拒，
         // 此处将类型化错误上浮为用户可理解的同步失败反馈
@@ -123,7 +125,7 @@ class SyncCycleRunner @Inject constructor(
             // 大库下为数百毫秒至秒级，并与凭据提供者的应答预算争用同一条主线程队列。
             // 下沉点选在**调用处整体包裹**而非逐个函数改造：装配段内任何后续新增的同步 IO 调用
             // 自动获得同一保障（对本条四类缺陷一次性收口，且不扩散 `SyncCache` 的 API 变更面）。
-            val setup = withContext(Dispatchers.IO) { setupCycleContext(activeFile, currentDb) }
+            val setup = withContext(Dispatchers.IO) { setupCycleContext(vaultFileName, currentDb) }
             if (setup.outcome != null) return@withLock setup.outcome
             val ctx = setup.context!!
             providerForErase = ctx.provider
@@ -217,17 +219,17 @@ class SyncCycleRunner @Inject constructor(
      * 3. 新库身份键下的缓存 / 基线 / 防回滚从空开始，由本次上传建立。
      */
     suspend fun takeoverVaultBinding(): SyncOutcome = session.mutex.withLock {
-        val activeFile = databaseSession.currentFile
-            ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_no_open_vault_file))
         val currentDb = databaseSession.databaseFlow.value
             ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_vault_not_unlocked))
+        // §411：与 runSyncCycle 同口径——SAF 库 currentFile 为 null 时以库名兜底解析远端路径
+        val vaultFileName = databaseSession.currentFile?.name ?: "${currentDb.databaseName}.kdbx"
 
         var providerForErase: SyncProvider? = null
         try {
             val provider = session.testSyncProvider ?: providerResolver.resolveProvider()
                 ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials))
             providerForErase = provider
-            val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(activeFile.name)
+            val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
             val vaultScope = vaultBindingStore?.let { currentDb.rootGroup.id.toHexString() }
             val cacheScope = vaultScope.orEmpty()
 

@@ -1,14 +1,19 @@
 package com.keepasskey.app.ui.screens.unlock
 
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.security.KeyFileVaultCopyStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * ISSUE-P3-25 结构拆分的敏感数据回归锁：密钥文件驻留字节的借用 / 克隆 / 清零路径
@@ -97,5 +102,98 @@ class KeyFileSessionCoordinatorTest {
         subject.wipe()
         assertArrayEquals("销毁收尾必须清零驻留字节", ByteArray(3) { 0 }, onCleared)
         assertNull("销毁收尾后不得残留字节引用", subject.keyFileData)
+    }
+
+    // ===== §411（ISSUE-P3-448）：私有目录收编副本通道 =====
+
+    /** 带收编副本通道的协调器（假封印挂钩，见 KeyFileVaultCopyStoreTest 同范式） */
+    private fun coordinatorWithCopy(
+        scope: CoroutineScope,
+        access: FakeKeyFileAccess,
+        dbId: String = "db-1"
+    ): Triple<KeyFileSessionCoordinator, KeyFileVaultCopyStore, MutableStateFlow<UnlockUiState>> {
+        val dir = File.createTempFile("kfc", "").parentFile
+            .resolve("kfc-${System.nanoTime()}")
+        val store = KeyFileVaultCopyStore(
+            context = null,
+            keystoreManager = null
+        ).also { it.baseDirOverride = dir }
+        store.encryptHook = { plaintext ->
+            val iv = ByteArray(12) { it.toByte() }
+            iv to plaintext.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
+        }
+        store.decryptHook = { iv, ciphertext ->
+            ciphertext.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
+        }
+        val uiState = MutableStateFlow(UnlockUiState())
+        val subject = KeyFileSessionCoordinator(
+            scope = scope,
+            uiState = uiState,
+            keyFileAccess = access,
+            debugLog = DebugLogBuffer(),
+            vaultCopyStore = store,
+            activeDbId = { dbId }
+        )
+        return Triple(subject, store, uiState)
+    }
+
+    @Test
+    fun `解锁成功使用密钥文件即收编副本`() = runTest {
+        val access = FakeKeyFileAccess()
+        val (subject, store, _) = coordinatorWithCopy(this, access)
+        subject.onKeyFileSelected(FakeKeyFileAccess.FAKE_KEY_FILE_BYTES, FakeKeyFileAccess.DISPLAY_NAME)
+
+        subject.rememberKeyFileOnSuccess(usedKeyFile = true, displayName = FakeKeyFileAccess.DISPLAY_NAME)
+
+        val copy = store.load("db-1")
+        assertNotNull("解锁成功使用密钥文件必须收编副本", copy)
+        assertArrayEquals(
+            "副本字节必须与会话驻留字节一致",
+            FakeKeyFileAccess.FAKE_KEY_FILE_BYTES,
+            copy!!.bytes
+        )
+        assertEquals(FakeKeyFileAccess.DISPLAY_NAME, copy.displayName)
+        copy.bytes.fill(0)
+    }
+
+    @Test
+    fun `冷启动恢复优先消费私有目录副本（授权失效不再阻断）`() = runTest {
+        val access = FakeKeyFileAccess(permissionValid = false, persistPermissionSucceeds = false)
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        val (subject, store, uiState) = coordinatorWithCopy(this, access)
+        assertTrue(store.save("db-1", FakeKeyFileAccess.FAKE_KEY_FILE_BYTES, FakeKeyFileAccess.DISPLAY_NAME))
+
+        subject.restoreRememberedKeyFile()
+
+        assertArrayEquals(
+            "授权失效时副本必须仍能恢复第二因子",
+            FakeKeyFileAccess.FAKE_KEY_FILE_BYTES,
+            subject.keyFileData!!
+        )
+        assertTrue("恢复后必须呈现「已选择密钥文件」", uiState.value.hasKeyFile)
+    }
+
+    @Test
+    fun `未使用密钥文件解锁成功清除旧副本`() = runTest {
+        val access = FakeKeyFileAccess()
+        val (subject, store, _) = coordinatorWithCopy(this, access)
+        assertTrue(store.save("db-1", byteArrayOf(1, 2, 3), "old.keyx"))
+
+        subject.rememberKeyFileOnSuccess(usedKeyFile = false, displayName = "")
+
+        assertNull("标准解锁未携带密钥文件时旧副本必须清除", store.load("db-1"))
+    }
+
+    @Test
+    fun `偏好关闭时恢复路径清除记录与副本`() = runTest {
+        val access = FakeKeyFileAccess(rememberEnabled = false)
+        val (subject, store, _) = coordinatorWithCopy(this, access)
+        assertTrue(store.save("db-1", byteArrayOf(4, 5), "a.keyx"))
+
+        subject.restoreRememberedKeyFile()
+
+        assertNull("偏好关闭 = 不留任何密钥文件元数据与副本", store.load("db-1"))
+        assertNull(subject.keyFileData)
     }
 }

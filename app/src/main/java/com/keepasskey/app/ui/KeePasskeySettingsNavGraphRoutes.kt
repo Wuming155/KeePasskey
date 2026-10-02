@@ -76,6 +76,10 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
                 settingsViewModel.masterKeyChangeController.submit(CharArray(0), intent, hostActivity)
             },
             keyFileImportBusy = settingsState.isChangingMasterKey,
+            // §411（ISSUE-P3-448）：先收编解锁所选（记忆）的密钥文件；无记忆回落手选改绑
+            onImportRememberedKeyFile = {
+                settingsViewModel.masterKeyChangeController.importRememberedCopy()
+            },
             keyFileImportFeedback = settingsState.masterKeyChangeFeedback,
             onClearKeyFileImportFeedback = settingsViewModel::clearMasterKeyChangeFeedback,
             onInstallTemplates = settingsViewModel::installEntryTemplates,

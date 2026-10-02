@@ -63,6 +63,9 @@ internal fun DatabaseImportExportCard(
     onReadKeyFile: suspend (String) -> KeyFileReadResult,
     onKeyFileImport: (ChangeKeyFileIntent) -> Unit,
     keyFileImportBusy: Boolean,
+    // §411（ISSUE-P3-448）：点击先尝试「收编解锁所选（记忆）的密钥文件」；
+    // 返回 true = 已处理（回执走反馈位），false = 无记忆 → 回落下方 SAF 手选改绑流程
+    onImportRememberedKeyFile: suspend () -> Boolean = { false },
     keyFileImportFeedback: UiMessage? = null,
     onClearKeyFileImportFeedback: () -> Unit = {}
 ) {
@@ -122,12 +125,19 @@ internal fun DatabaseImportExportCard(
                 onClick = onKeyFileExportClick
             )
 
-            // ISSUE-P3-436：第四行——导入密钥文件（改绑进行中禁用）
+            // ISSUE-P3-436：第四行——导入密钥文件（改绑进行中禁用）；
+            // §411（P3-448）：点击先收编记忆文件，无记忆才回落 SAF 手选
             DatabaseActionRow(
                 icon = Icons.Default.Key,
                 title = stringResource(R.string.dbset_keyfile_import_title),
                 subtitle = stringResource(R.string.dbset_keyfile_import_sub),
-                onClick = { importKeyFileLauncher.launch(arrayOf("*/*")) },
+                onClick = {
+                    keyFileImportScope.launch {
+                        if (!onImportRememberedKeyFile()) {
+                            importKeyFileLauncher.launch(arrayOf("*/*"))
+                        }
+                    }
+                },
                 enabled = !keyFileImportBusy
             )
 

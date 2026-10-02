@@ -54,7 +54,9 @@ class DatabasePickerViewModel @Inject constructor(
     // 快照/预填读取的调度器（Keystore 解封为阻塞操作，限定符见 di/PickerIoDispatcher.kt）；
     // 单测注入 Unconfined 以获得确定性推进
     @com.keepasskey.app.di.PickerIoDispatcher
-    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    // §411（ISSUE-P3-448）：密钥文件收编副本通道——删库成功即清除该库副本（nullable 仅单测）
+    private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null
 ) : ViewModel() {
 
     /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文） */
@@ -302,6 +304,8 @@ class DatabasePickerViewModel @Inject constructor(
         viewModelScope.launch {
             val result = vaultRepository.removeDatabase(id, kind)
             if (result is KdbxResult.Success) {
+                // §411（ISSUE-P3-448）：删库成功即清除其密钥文件收编副本（尽力清除，失败不影响回执）
+                keyFileVaultCopyStore?.clear(id)
                 publishPickerMessage(UiMessage(R.string.db_picker_msg_removed))
             } else {
                 publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).message)))

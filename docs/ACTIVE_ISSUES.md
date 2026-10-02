@@ -48,11 +48,28 @@
   ③ 敏感字节清零链与失败语义零变化；强生物识别 / 降级确认闸门不动；
   ④ 单测覆盖「解封 + 记忆重读成功送达两因子」「重读失败回落」；全量 test 绿 + 门禁全 PASS；真机装包 ~700 KB 密钥文件指纹解锁秒级完成（用户走查）。
 
-## P2 中危缺陷与协议/测试缺口（0 项）
+## P2 中危缺陷与协议/测试缺口（1 项）
 
-> **暂无开放项（全量待办归零）**。
+### ISSUE-P2-456：杀后台重进后生物识别解锁报「未通过或已取消」，必须手输密码（真机走查）
 
-## P3 低危问题、特性接线与体验优化（8 项）
+- **核实时间点**：2026-10-02；**核实方式**：用户真机（M332BF，debug 包 com.keepasskey.debug）走查原话「解锁后，杀后台重新进入，依然需要手动输入密码，并且使用生物识别提示未通过或取消」；文案=`sec_biometric_auth_failed`（`values/strings.xml:429`）。
+- **候选根因（待真机 logcat 取证分型）**：① `BiometricUnlockCoordinator.unlockWithBiometric` catch 兜底（`prepareDecryptCipher` 抛错，如 Keystore 密钥失效/设备不支持请求的认证器集合）；② `BiometricResult.Error` 未知错误码兜底映射（如设备仅 Class 2 指纹与 `BIOMETRIC_STRONG` 不符）；③ 密钥文件因子缺失致解库失败——但该路径应报 `unlock_error_invalid_password` 而非本文案，可能性低；注意 §408 后封印载荷只装主密码、密钥文件靠记忆重读（§411 起另有私有目录副本兜底）。
+- **取证入口**：`debugLog.warn` 留痕有「生物识别认证失败: code=N / 生物识别解锁启动异常 / 生物识别解封失败」三类；配合 `adb shell dumpsys biometric`（传感器强度）定位。
+- **验收标准**：
+  ① logcat 取证定位真实失败分支（错误码 / 异常类型）并记录；
+  ② 按分型整改：密钥失效 → 清陈旧凭据引导重登记（通道既有须核实生效）；错误码映射细化（`BiometricFailureMessagePolicy` 不再吞未知码为「未通过或取消」）；设备能力不符 → 解锁模式推导如实降级；
+  ③ 修复后真机走查：杀后台重进 → 指纹解锁直达库列表；全量 test 绿 + 门禁全 PASS。
+
+## P3 低危问题、特性接线与体验优化（9 项）
+
+### ISSUE-P3-457：解锁页错误态「已自动载入密钥文件」提示与生物识别弹窗「取消」按钮视觉重叠（真机走查）
+
+- **核实时间点**：2026-10-02；**核实方式**：用户真机（M332BF）走查原话「解锁密码库界面，输入密码错误会导致自动加载密钥文件的提示文字和xxx取消重叠」。
+- **背景**：错误文案渲染于 `SecurePasswordField` 的 `supportingText` 槽（`UnlockPasswordSupportingText` 同槽最多堆 4 行：倒计时/错误/剩余次数/「已自动载入记住的密钥文件」info），其下 12dp 即 `DismissibleHelpTip`；布局为纯 Column 无叠放——「取消」疑为生物识别系统弹窗负向按钮（`BiometricAuthManager.authenticate` 置 `btn_cancel`）与页面内容的视觉叠加。需真机复现取证（`android layout --flat`）后定性：可能是 supportingText 多行堆叠密度问题，也可能是弹窗叠加期页面元素过密。
+- **验收标准**：
+  ① 真机复现取证：输错密码触发错误态 + 生物识别弹窗同屏，取布局树与截图定性；
+  ② 按定性整改（如 supportingText 拆槽 / 错误态收起 info 行 / 密钥文件提示条间距重排），错误态下无任何文字交叠；
+  ③ 文案双语；全量 test 绿 + 门禁全 PASS；真机走查留痕。
 
 ### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室）——**浏览器半环搁置**
 
@@ -90,6 +107,7 @@
 
 ### ISSUE-P3-447：SAF（自选位置）通道是「二等公民」——本地建库无法云同步 + 外部修改漂移防护缺真实元数据管道
 
+- **进展（§411，2026-10-02）**：**AC① 已收口**——同步周期对本地文件的唯一依赖是「远端路径默认名」，`runSyncCycle` / `takeoverVaultBinding` / `resolveRemotePathForProbe` 三处改为「活动文件名优先、库 meta 名兜底（`<库名>.kdbx`）」，SAF 库得以进入同一同步周期；绑定 / 缓存 / 防回滚键同构不变。用户反馈的「下滑提示当前无打开的密码库文件」根因即此（该库已配置云同步，`isSyncConfigured` 为 true，进周期后在 `currentFile` 早退）。剩余 ②③ 未动。
 - **核实时间点**：2026-10-02；**核实方式**：用户 §408 批次装机走查反馈「云端同步不能将本地建的库同步到云端」「保存失败并提示磁盘文件被修改」；代码直读 + 真机取证（`run-as com.keepasskey.debug` 私有目录无 `.kdbx` ⇒ 走查库为 SAF 自选位置通道）。
 - **背景**：SAF 库的会话无本地 `File`（`DatabaseSession.currentFile` = null），三处按本地文件假设实现的功能对 SAF 失效：① `SyncCycleRunner.runSyncCycle` 首行 `currentFile ?: Error(sync_error_no_open_vault_file)`——SAF 库同步恒报错（同步本体只需内存树 + 文件名，`activeFile` 仅用于推导远端文件名）；② 漂移防护（P2-378）：基线在 SAF 打开时曾落 `fromMetadata(path,0,0)` 占位假值、保存时 `current` 恒 null ⇒ 恒判漂移 ⇒ **SAF 库每次保存被中止**（2026-10-02 临时止血：`VaultFileBaselineHolder.capture` 对 `file == null` 不落基线，按「元数据不可读 ⇒ 宁可不提示」口径放行，SAF 库保存恢复可用，但漂移防护在 SAF 通道**暂缺位**）；③ 保存中止后列表仍呈现内存态未落库条目，用户无从分辨「已保存 / 仅内存」（P2-378 设计如此，缺可感知性）。
 - **验收标准**：
@@ -100,6 +118,7 @@
 
 ### ISSUE-P3-448：「导入密钥文件」语义改「把解锁所选密钥文件导入应用私有目录」（用户裁决）
 
+- **进展（§411，2026-10-02）**：**代码面已实施**——① 方案裁决落 `KeyFileVaultCopyStore`（专用 Keystore AES-256-GCM 非认证密钥加密整载荷落 `filesDir/keyfiles/<dbId>.kfc`，`requireUserAuth=false` 取舍与 `SyncCredentialSealer` 同判据；与「记住密钥文件位置」**并存**：Uri 记忆保留为元数据，副本为内容层，恢复链副本优先、Uri 现读兜底）；② 收编时机＝解锁成功使用密钥文件（`rememberKeyFileOnSuccess`）/ 设置页改绑成功（`syncRememberedKeyFile`）/ 设置页「导入密钥文件」行新语义（`importRememberedCopy`：副本已存在幂等成功 → 记忆 Uri 现读收编 → 无记忆回落原手选改绑）；③ 清除时机＝解绑 / 换绑 / 偏好关闭 / 未使用密钥文件解锁成功 / 删库；④ 解锁链 `restoreRememberedKeyFile` 副本优先（SAF 授权失效不再阻断）。**待真机走查留痕后整条归档。**
 - **核实时间点**：2026-10-02；**核实方式**：用户 §408 批次装机走查原话「导入密钥文件应该是将在解锁时选择的密钥文件导入私有目录，而不是要用户自己选择」。
 - **背景**：§406 实现的「导入密钥文件」（设置页改绑入口）走 SAF 让用户**再次**选取密钥文件完成第二因子改绑；用户预期语义是**收编**——把解锁时已经选过的密钥文件内容复制进应用私有目录，此后解锁无需再次授权 SAF（对比：`rememberKeyFileLocation` 仅记忆 SAF Uri，仍依赖持久化读授权且受提供方限制）。
 - **验收标准**：

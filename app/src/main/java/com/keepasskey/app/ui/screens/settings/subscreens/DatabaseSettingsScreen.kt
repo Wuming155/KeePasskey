@@ -59,18 +59,18 @@ fun DatabaseSettingsScreen(
     // ISSUE-P3-73：通用明文 CSV 导出（同明文 XML 语义，需二次确认）
     onExportCsv: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     onExportKeyFile: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
-    // ISSUE-P3-436：导入密钥文件（改绑第二因子直达入口；SAF 读取走全仓唯一 KeyFileAccess 通道，
-    // 提交复用改主密钥任务的仅改绑分支 changeKeyFileOnly，含忙守卫与记忆位置同步）
+    // ISSUE-P3-436：导入密钥文件（SAF 读取走 KeyFileAccess 通道，提交复用仅改绑分支 changeKeyFileOnly）
     onReadKeyFile: suspend (String) -> KeyFileReadResult = { _ -> KeyFileReadResult.Unreadable },
     onKeyFileImport: (ChangeKeyFileIntent) -> Unit = {},
     keyFileImportBusy: Boolean = false,
+    // §411（P3-448）：先收编记忆文件，false = 无记忆回落 SAF 手选
+    onImportRememberedKeyFile: suspend () -> Boolean = { false },
     keyFileImportFeedback: UiMessage? = null,
     onClearKeyFileImportFeedback: () -> Unit = {},
     onInstallTemplates: () -> Unit = {},
-    // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）。
-    // 状态由 VaultImportController 的 StateFlow 上抬，本屏只透传与呈现，不含业务逻辑。
-    importState: ImportUiState = ImportUiState.Idle,
+    // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框；状态上抬，本屏只透传）。
     // ISSUE-P3-384：`.kdbx` 并入状态（AwaitingMergeCredentials 等）
+    importState: ImportUiState = ImportUiState.Idle,
     mergeState: ImportUiState = ImportUiState.Idle,
     onImportFileSelected: (ImportSource, Uri) -> Unit = { _, _ -> },
     onImportReportDismiss: () -> Unit = {},
@@ -224,6 +224,7 @@ fun DatabaseSettingsScreen(
                     onReadKeyFile = onReadKeyFile,
                     onKeyFileImport = onKeyFileImport,
                     keyFileImportBusy = keyFileImportBusy,
+                    onImportRememberedKeyFile = onImportRememberedKeyFile,
                     keyFileImportFeedback = keyFileImportFeedback,
                     onClearKeyFileImportFeedback = onClearKeyFileImportFeedback
                 )

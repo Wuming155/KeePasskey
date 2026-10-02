@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -47,6 +48,11 @@ internal data class MasterKeyChangeTaskState(
  * ISSUE-P3-434：**改绑/解绑成功后**同步「记住的密钥文件位置」（[keyFileAccess]，可空 =
  * 未装配 / 单测）——`Use` 按偏好与持久授权登记新来源或清除旧记录，`Remove` 清除记录；
  * 记忆记录是冷启动记忆恢复与指纹现读链（P1-431 第③步）的唯一指向，陈旧记录必须清除。
+ *
+ * §411（ISSUE-P3-448）：上述同步同时维护**应用私有目录收编副本**（[vaultCopyStore]，可空 =
+ * 单测未装配）——`Use` 成功即收编新文件字节（不再依赖持久授权），`Remove` / 偏好关闭清除副本；
+ * 另承载设置页「导入密钥文件」行的新语义入口 [importRememberedCopy]：把解锁时所选（记忆）
+ * 的密钥文件收编进私有目录，不再要求用户重复手选。
  */
 internal class SettingsMasterKeyChangeController(
     private val repository: VaultRepository,
@@ -55,7 +61,16 @@ internal class SettingsMasterKeyChangeController(
      * ISSUE-P3-430：密码入参可为 null = 密码分量未变（仅改绑密钥文件，由会话快照封印） */
     private val resealAfterChange: (suspend (FragmentActivity?, CharArray?) -> Unit)? = null,
     /** ISSUE-P3-434：记忆记录同步通道（生产 = `SafKeyFileAccess`；null 时不同步，单测可注入假实现） */
-    private val keyFileAccess: KeyFileAccess? = null
+    private val keyFileAccess: KeyFileAccess? = null,
+    /** §411（ISSUE-P3-448）：私有目录收编副本通道（null 时副本面整体旁路，单测未装配） */
+    private val vaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
+    /**
+     * 活动库 id（副本键）。默认实现＝活动库登记 id（副本面与解锁页 `activeDatabaseId` 同源）；
+     * 注入缺失（单测）时副本面整体旁路。
+     */
+    private val activeDbId: suspend () -> String? = {
+        repository.getDatabases().first().firstOrNull { it.isActive }?.id
+    }
 ) {
 
     private val mutableState = MutableStateFlow(MasterKeyChangeTaskState())
@@ -109,7 +124,8 @@ internal class SettingsMasterKeyChangeController(
                     )
                 }
                 if (result is KdbxResult.Success) {
-                    // ISSUE-P3-434：记忆记录必须与新绑定的密钥文件一致（先于重封印）
+                    // ISSUE-P3-434：记忆记录必须与新绑定的密钥文件一致（先于重封印）；
+                    // §411（P3-448）：副本随同一裁决收编 / 清除
                     syncRememberedKeyFile(keyFileIntent)
                     resealAfterChange?.invoke(activity, newPasswordChars.takeIf { !keepPassword })
                 }
@@ -135,20 +151,83 @@ internal class SettingsMasterKeyChangeController(
      */
     private suspend fun syncRememberedKeyFile(intent: ChangeKeyFileIntent) {
         val access = keyFileAccess ?: return
+        val dbId = activeDbId()
         if (!access.isRememberEnabled()) {
             access.forget()
+            // §411（P3-448）：偏好关闭 = 不留任何密钥文件元数据，副本一并清除
+            if (dbId != null) vaultCopyStore?.clear(dbId)
             return
         }
         when (intent) {
-            is ChangeKeyFileIntent.Use ->
+            is ChangeKeyFileIntent.Use -> {
                 if (intent.sourceUri.isNotBlank() && access.persistReadPermission(intent.sourceUri)) {
                     access.remember(intent.sourceUri, intent.displayName)
                 } else {
                     access.forget()
                 }
-            ChangeKeyFileIntent.Remove -> access.forget()
+                // §411（P3-448 AC②）：改绑成功即收编新文件字节进私有目录副本——
+                // 不再依赖持久授权；持久授权失败只影响 Uri 记忆，不影响副本
+                if (dbId != null) vaultCopyStore?.save(dbId, intent.bytes, intent.displayName)
+            }
+            ChangeKeyFileIntent.Remove -> {
+                access.forget()
+                if (dbId != null) vaultCopyStore?.clear(dbId)
+            }
             ChangeKeyFileIntent.Keep -> Unit
         }
+    }
+
+    /**
+     * §411（ISSUE-P3-448）：设置页「导入密钥文件」行的新语义入口——**收编**。
+     *
+     * 把解锁时所选（记忆）的密钥文件导入应用私有目录，不再要求用户重复手选：
+     * 1. 副本已存在 → 视为已收编，直接成功回执（幂等）；
+     * 2. 记忆 Uri 存在 → 经 [KeyFileAccess.read] 现读并收编（授权失效则显式失败回执）；
+     * 3. 无记忆亦无副本 → 返回 false，调用方回落原「SAF 手选 → 改绑」流程
+     *    （该库尚无第二因子，收编无从谈起；改绑成功后经 [syncRememberedKeyFile] 收编）。
+     *
+     * @return true = 已按新语义处理（成败均有回执）；false = 无记忆，回落手选流程。
+     */
+    suspend fun importRememberedCopy(): Boolean {
+        val access = keyFileAccess ?: return false
+        val dbId = activeDbId() ?: return false
+        // 1. 副本已存在（幂等收编）
+        val existing = vaultCopyStore?.load(dbId)
+        if (existing != null) {
+            existing.bytes.fill(0)
+            mutableState.update {
+                it.copy(feedback = UiMessage(R.string.dbset_keyfile_import_memory_done))
+            }
+            return true
+        }
+        // 2. 记忆 Uri 现读收编
+        val remembered = access.loadRemembered()
+        if (remembered != null) {
+            when (val outcome = access.read(remembered.uri)) {
+                is com.keepasskey.app.ui.screens.unlock.KeyFileReadResult.Success -> {
+                    val saved = vaultCopyStore?.save(dbId, outcome.bytes, outcome.displayName)
+                    outcome.bytes.fill(0)
+                    mutableState.update {
+                        it.copy(
+                            feedback = if (saved == true) {
+                                UiMessage(R.string.dbset_keyfile_import_memory_done)
+                            } else {
+                                UiMessage(R.string.unlock_keyfile_read_failed)
+                            }
+                        )
+                    }
+                }
+                else -> {
+                    // 授权失效 / 读取失败：显式回执，绝不静默（ISSUE-P3-04 口径）
+                    mutableState.update {
+                        it.copy(feedback = UiMessage(R.string.unlock_keyfile_read_failed))
+                    }
+                }
+            }
+            return true
+        }
+        // 3. 无记忆：回落手选改绑流程
+        return false
     }
 
     /** 回执经 Snackbar 展示后清除（一次性消息语义）。 */

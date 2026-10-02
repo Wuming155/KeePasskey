@@ -22,7 +22,14 @@ internal class KeyFileSessionCoordinator(
     private val scope: CoroutineScope,
     private val uiState: MutableStateFlow<UnlockUiState>,
     private val keyFileAccess: KeyFileAccess?,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    /**
+     * §411（ISSUE-P3-448）：应用私有目录收编副本通道（可空 = 单测未装配）。
+     * 冷启动恢复**优先消费副本**（不依赖 SAF 持久授权），解锁成功且使用密钥文件时收编字节。
+     */
+    private val vaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
+    /** 活动库 id 副本键（可空 = 单测未装配；null 时副本通道整体旁路，行为与既有一致） */
+    private val activeDbId: () -> String? = { null }
 ) {
 
     /**
@@ -169,8 +176,48 @@ internal class KeyFileSessionCoordinator(
     suspend fun restoreRememberedKeyFile() {
         val access = keyFileAccess ?: return
         if (keyFileUserTouched) return
+        // §411（ISSUE-P3-448 AC②）：偏好关闭 = 用户明确不要记忆 → 记录与副本一并清除。
+        // 顺序硬约束：本判定必须先于 loadRemembered 早退——记录缺失 ≠ 偏好未关，
+        // 孤儿副本（记录丢失而内容仍在）也必须在此路径清掉。
+        // forget 仅在确有记录时调用（幂等空操作也会污染计数型断言与日志语义）。
         val rememberEnabled = access.isRememberEnabled()
+        if (!rememberEnabled) {
+            debugLog.info(TAG, "密钥文件记忆偏好关闭，清除记录与副本")
+            if (access.loadRemembered() != null) {
+                access.forget()
+            }
+            vaultCopyStore?.let { store -> activeDbId()?.let { store.clear(it) } }
+            return
+        }
         val remembered = access.loadRemembered() ?: return
+        // §411（ISSUE-P3-448 AC②）：**优先消费私有目录副本**——不依赖 SAF 持久授权，
+        // 授权失效不再阻断解锁。副本缺失 / 损坏时回落既有 SAF Uri 通道（下方不变）。
+        val dbId = activeDbId()
+        if (dbId != null && vaultCopyStore != null) {
+            val copy = vaultCopyStore.load(dbId)
+            if (copy != null) {
+                if (keyFileUserTouched) {
+                    // 读取期间用户已显式选择其它密钥文件：丢弃恢复结果，尊重用户选择
+                    copy.bytes.fill(0)
+                    return
+                }
+                try {
+                    adoptKeyFile(copy.bytes, copy.displayName)
+                } finally {
+                    copy.bytes.fill(0)
+                }
+                keyFileSourceUri = remembered.uri
+                uiState.update {
+                    it.copy(
+                        infoMessage = UiMessage(
+                            R.string.keyfile_restored_from_memory,
+                            listOf(copy.displayName.ifBlank { remembered.displayName })
+                        )
+                    )
+                }
+                return
+            }
+        }
         val permissionValid = access.hasPersistedReadPermission(remembered.uri)
         if (!KeyFileRememberPolicy.canRestore(rememberEnabled, remembered, permissionValid)) {
             debugLog.info(
@@ -218,27 +265,41 @@ internal class KeyFileSessionCoordinator(
     }
 
     /**
-     * 解锁成功后按偏好记忆密钥文件（ISSUE-P3-04）。
+     * 解锁成功后按偏好记忆密钥文件（ISSUE-P3-04；§411 扩展收编副本）。
      *
-     * - 偏好开启 + 本次使用且可定位来源的密钥文件 → 记住 Uri 与显示名（非密钥元数据）；
-     * - 偏好开启 + 本次未使用密钥文件 → 清除旧记录：标准解锁在「未携带密钥文件」下成功，
-     *   只可能是密码库本身不含密钥文件因子（携带不匹配的密钥文件必然凭据失败），
+     * - 偏好开启 + 本次使用密钥文件 → 记住 Uri 与显示名（非密钥元数据），
+     *   **并将字节收编进应用私有目录副本**（ISSUE-P3-448 AC②：无论来源 Uri 是否取得
+     *   持久化授权，副本都让下次冷启动恢复不再依赖授权——这正是收编的价值）；
+     * - 偏好开启 + 本次未使用密钥文件 → 清除旧记录与旧副本：标准解锁在「未携带密钥文件」
+     *   下成功，只可能是密码库本身不含密钥文件因子（携带不匹配的密钥文件必然凭据失败），
      *   此时旧记录归属其它库或已失效，留存会误导下次解锁；
-     * - 偏好关闭 → 一并清除，不残留任何密钥文件元数据。
+     * - 偏好关闭 → 一并清除记录与副本，不残留任何密钥文件元数据。
      *
-     * 全程**不落任何密钥字节**：字节仍只驻留单次解锁尝试内，成功后立即清零。
+     * 全程**不落任何密钥字节**到 UiState：字节仍只驻留单次解锁尝试内（本方法在
+     * `MasterPasswordUnlockSession` 的擦除点**之前**调用，会话驻留字节此刻仍存活）。
      */
     suspend fun rememberKeyFileOnSuccess(usedKeyFile: Boolean, displayName: String) {
         val access = keyFileAccess ?: return
+        val dbId = activeDbId()
         if (!access.isRememberEnabled()) {
             access.forget()
+            if (dbId != null) vaultCopyStore?.clear(dbId)
             return
         }
-        val sourceUri = keyFileSourceUri
-        if (usedKeyFile && !sourceUri.isNullOrBlank()) {
-            access.remember(sourceUri, displayName)
-        } else if (!usedKeyFile) {
+        if (usedKeyFile) {
+            val sourceUri = keyFileSourceUri
+            if (!sourceUri.isNullOrBlank()) {
+                access.remember(sourceUri, displayName)
+            }
+            // §411（ISSUE-P3-448 AC②）：收编字节进私有目录（副本密钥经 Keystore 加密，见 Store KDoc）
+            val bytes = keyFileData
+            if (dbId != null && bytes != null && vaultCopyStore != null) {
+                val saved = vaultCopyStore.save(dbId, bytes, displayName)
+                debugLog.info(TAG, "密钥文件副本收编: $saved")
+            }
+        } else {
             access.forget()
+            if (dbId != null) vaultCopyStore?.clear(dbId)
         }
     }
 

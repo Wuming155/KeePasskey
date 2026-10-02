@@ -62,7 +62,7 @@ internal data class CycleSetup(val outcome: SyncOutcome?, val context: SyncCycle
  * 两段之间的调用点即原内联体的物理分界，早退语义与求值顺序逐行未变。
  */
 internal suspend fun SyncCycleRunner.setupCycleContext(
-    activeFile: File,
+    vaultFileName: String,
     currentDb: KdbxDatabase
 ): CycleSetup {
     val provider = try {
@@ -72,7 +72,7 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
         return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_invalid_endpoint)))
     } ?: return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials)))
 
-    val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(activeFile.name)
+    val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
 
     // ISSUE-P2-291 AC①：库身份（根分组 UUID，建库随机生成、跨保存稳定）参与
     // 缓存 / 基线 / 防回滚的键——同一 remotePath 被不同库共用时，各库的同步状态
