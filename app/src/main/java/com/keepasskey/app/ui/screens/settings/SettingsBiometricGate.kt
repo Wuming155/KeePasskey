@@ -24,8 +24,6 @@ internal class SettingsBiometricGate(
     biometricCredentialStorage: BiometricCredentialStorage?,
     strings: StringsProvider,
     debugLog: DebugLogBuffer,
-    /** ISSUE-P2-398：改密重封印的密钥文件因子来源（会话导出通道；null 仅纯 JVM 单测注入） */
-    private val sessionKeyFileBytes: () -> ByteArray? = { null },
     /** ISSUE-P3-430：仅改绑密钥文件（密码分量未变）重封印的会话主密码快照来源（null 仅单测注入） */
     private val sessionPasswordChars: () -> CharArray? = { null }
 ) {
@@ -54,7 +52,6 @@ internal class SettingsBiometricGate(
     private val resealCoordinator = BiometricResealCoordinator(
         settingsRepository = settingsRepository,
         activeDbId = { activeDatabaseId },
-        sessionKeyFileBytes = sessionKeyFileBytes,
         sessionPasswordChars = sessionPasswordChars,
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,

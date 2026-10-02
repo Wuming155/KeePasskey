@@ -103,7 +103,11 @@ class UnlockViewModel @Inject constructor(
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         debugLog = debugLog,
-        cryptoDispatcher = cryptoDispatcher
+        cryptoDispatcher = cryptoDispatcher,
+        // ISSUE-P1-431（方案一）：封印载荷只装主密码，密钥文件因子从会话驻留取 /
+        // 记忆现读（restoreRememberedKeyFile 内部走 ISSUE-P3-04 的 SAF 通道）
+        sessionKeyFileData = { keyFileSession.keyFileData },
+        restoreRememberedKeyFile = { keyFileSession.restoreRememberedKeyFile() }
     )
 
     /** 生物识别凭据登记协调器（ISSUE-P3-25）：解锁成功后的首次封印（best-effort） */
@@ -111,8 +115,6 @@ class UnlockViewModel @Inject constructor(
         uiState = _uiState,
         settingsRepository = settingsRepository,
         activeDbId = { activeDatabaseId },
-        // ISSUE-P2-23：携带密钥文件时一并封印（复合载荷），不再整体跳过登记
-        keyFileBytes = { keyFileSession.keyFileData },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         debugLog = debugLog,

@@ -54,8 +54,6 @@ import javax.crypto.Cipher
 internal class BiometricResealCoordinator(
     private val settingsRepository: SettingsRepository,
     private val activeDbId: () -> String?,
-    /** 会话绑定的密钥文件因子提供者（null = 未携带）；封印前快照克隆、用毕清零 */
-    private val sessionKeyFileBytes: () -> ByteArray?,
     /**
      * 会话当前主密码快照提供者（ISSUE-P3-430：[resealAfterMasterKeyChange] 入参为 null＝
      * 密码分量未变，从这里取克隆快照封印）；调用方（本协调器）用毕清零。仅纯 JVM 单测可缺省。
@@ -188,9 +186,10 @@ internal class BiometricResealCoordinator(
         newPasswordChars: CharArray
     ): Pair<ByteArray, ByteArray>? {
         return try {
-            val keyFileSnapshot = sessionKeyFileBytes()?.copyOf()
-            val bytes = BiometricSealedPayloadCodec.encode(newPasswordChars, keyFileSnapshot)
-            keyFileSnapshot?.fill(0)
+            // ISSUE-P1-431（方案一，对齐 KeePassDX/kp2a 口径）：封印载荷只装主密码——
+            // 密钥文件字节不再进入 Keystore 载荷（ISSUE-P2-23 的复合封印退役），
+            // 指纹解封后由解封侧经「记住的密钥文件位置」重读组合。
+            val bytes = BiometricSealedPayloadCodec.encode(newPasswordChars, null)
             try {
                 authorizeAndSeal(authManager, activity, provision.cipher, bytes)
             } finally {

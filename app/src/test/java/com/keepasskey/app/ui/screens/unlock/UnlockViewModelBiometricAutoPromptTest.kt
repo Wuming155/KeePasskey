@@ -29,6 +29,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -169,7 +170,8 @@ class UnlockViewModelBiometricAutoPromptTest {
     private fun TestScope.createViewModel(
         settings: FakeSettingsRepository,
         storage: BiometricCredentialStorage?,
-        repository: VaultRepository = FakeVaultRepository()
+        repository: VaultRepository = FakeVaultRepository(),
+        keyFileAccess: KeyFileAccess? = null
     ): UnlockViewModel {
         val viewModel = UnlockViewModel(
             vaultRepository = repository,
@@ -179,7 +181,8 @@ class UnlockViewModelBiometricAutoPromptTest {
             biometricCredentialStorage = storage,
             debugLog = DebugLogBuffer(),
             // ISSUE-P1-429：keystore 密算调度器注入 TestDispatcher，保证 withContext 段的测试确定性
-            cryptoDispatcher = testDispatcher
+            cryptoDispatcher = testDispatcher,
+            keyFileAccess = keyFileAccess
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
@@ -410,15 +413,16 @@ class UnlockViewModelBiometricAutoPromptTest {
     }
 
     /**
-     * ISSUE-P2-23 验收标准 ③：复合封印载荷（主密码 + 密钥文件）解封后，
-     * 两因子必须**原样**送达既有 `unlockActiveDatabase` 管线——
-     * 「带密钥文件解锁后指纹可用」的数据通路证明。
+     * `ISSUE-P1-431` 存量兼容：P2-23 复合封印（主密码 + 密钥文件）载荷解封后，
+     * 两因子仍须**原样**送达既有 `unlockActiveDatabase` 管线（不带魔数回落 / v1 帧解析不变）；
+     * 且因复合封印属大载荷（StrongBox 数十秒），成功后**必须清除封印**，
+     * 引导下次主密码解锁以「仅主密码」小载荷重新登记（一次性迁移）。
      */
     @Test
-    fun `复合封印载荷解封后以两因子送达既有解锁管线`() = runTest {
+    fun `存量复合封印解封后两因子送达且成功后清除封印`() = runTest {
         val secret = "Composite#Pass✓"
         val keyFile = ByteArray(96) { (it * 11 + 5).toByte() }
-        // 以生产同源编解码器构造复合载荷明文，再以真实 JDK AES-GCM 封印
+        // 以生产同源编解码器构造复合载荷明文（P2-23 存量形态），再以真实 JDK AES-GCM 封印
         val payload = BiometricSealedPayloadCodec.encode(secret.toCharArray(), keyFile)
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
         val encryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
@@ -452,8 +456,125 @@ class UnlockViewModelBiometricAutoPromptTest {
 
         assertTrue("复合载荷解封后必须发出解锁成功事件", unlocked)
         assertEquals("主密码因子必须原样送达", secret, repository.lastUnlockPassword)
-        assertArrayEquals("密钥文件因子必须原样送达", keyFile, repository.lastUnlockKeyFileData)
+        assertArrayEquals("密钥文件因子必须原样送达（存量兼容）", keyFile, repository.lastUnlockKeyFileData)
         assertFalse(viewModel.uiState.value.isLoading)
+        assertFalse(
+            "存量复合封印（大载荷）成功后必须清除，引导以小载荷重登记",
+            storage.storage.hasEncryptedCredential(activeDbId)
+        )
+    }
+
+    /**
+     * `ISSUE-P1-431` 新口径：封印载荷只装主密码（不再含密钥文件字节），
+     * 解封后密钥文件因子经「记忆的密钥文件」现读（ISSUE-P3-04 通道）送达两因子——
+     * KeePassDX/kp2a 同款口径的数据通路证明。
+     */
+    @Test
+    fun `新口径封印解封后经记忆重读密钥文件送达两因子`() = runTest {
+        val secret = "Remembered#Pass✓"
+        val keyFile = FakeKeyFileAccess.FAKE_KEY_FILE_BYTES
+        val keyFileAccess = FakeKeyFileAccess().apply {
+            // 预置「已记忆的密钥文件」：偏好开启 + 持久授权有效 + 可读
+            putSource(FakeKeyFileAccess.KEY_FILE_URI, keyFile)
+            remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        }
+        // 新口径封印载荷：仅主密码（生产 BiometricEnrollmentCoordinator / ResealCoordinator 自本批起同此形态）
+        val payload = BiometricSealedPayloadCodec.encode(secret.toCharArray(), null)
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val encryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        val iv = encryptCipher.iv
+        val sealedCiphertext = encryptCipher.doFinal(payload)
+        payload.fill(0)
+
+        val storage = InMemorySealedCredentialStore().also {
+            it.storage.saveEncryptedCredential(activeDbId, iv, sealedCiphertext)
+        }
+        val repository = RecordingVaultRepository(FakeVaultRepository())
+        val viewModel = createViewModel(enabledSettings(), storage.storage, repository, keyFileAccess)
+
+        var unlocked = false
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { event -> if (event is UnlockEvent.UnlockSuccess) unlocked = true }
+        }
+        testScheduler.runCurrent()
+        assertTrue(viewModel.onBiometricAutoPromptRequested(null))
+
+        val decryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+        }
+        viewModel.handleBiometricResult(
+            BiometricResult.Success(decryptCipher),
+            storage.storage,
+            activeDbId,
+            sealedCiphertext
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertTrue("解封 + 记忆重读后必须发出解锁成功事件", unlocked)
+        assertEquals("主密码因子必须原样送达", secret, repository.lastUnlockPassword)
+        assertArrayEquals("密钥文件因子必须经记忆重读送达", keyFile, repository.lastUnlockKeyFileData)
+        assertTrue("新口径小载荷封印不得被清除", storage.storage.hasEncryptedCredential(activeDbId))
+        assertFalse(viewModel.uiState.value.isLoading)
+    }
+
+    /**
+     * `ISSUE-P1-431` 回落语义：解封成功但记忆的密钥文件不可读（文件被移除 / 授权失效）时，
+     * 以仅主密码尝试——对「密码 + 密钥文件」保护的库必然凭据失败 ⇒
+     * 清陈旧封印、回落主密码模式（恢复通道既有），绝不假解锁。
+     */
+    @Test
+    fun `记忆密钥文件不可读时回落主密码模式并清封印`() = runTest {
+        val secret = "Needs#KeyFile#1"
+        val keyFileAccess = FakeKeyFileAccess(failRead = true).apply {
+            remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        }
+        val payload = BiometricSealedPayloadCodec.encode(secret.toCharArray(), null)
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val encryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        val iv = encryptCipher.iv
+        val sealedCiphertext = encryptCipher.doFinal(payload)
+        payload.fill(0)
+
+        val storage = InMemorySealedCredentialStore().also {
+            it.storage.saveEncryptedCredential(activeDbId, iv, sealedCiphertext)
+        }
+        val base = RecordingVaultRepository(FakeVaultRepository())
+        // 仅主密码必然打不开「密码 + 密钥文件」库：keyFileData == null 时拒绝
+        val repository = object : VaultRepository by base {
+            override suspend fun unlockActiveDatabase(
+                passwordChars: CharArray,
+                keyFileData: ByteArray?,
+                readOnly: Boolean
+            ): KdbxResult<Unit> =
+                if (keyFileData == null) {
+                    KdbxResult.Failure(IllegalStateException("需要密钥文件因子"), "复合密钥缺第二因子")
+                } else {
+                    base.unlockActiveDatabase(passwordChars, keyFileData, readOnly)
+                }
+        }
+        val viewModel = createViewModel(enabledSettings(), storage.storage, repository, keyFileAccess)
+        testScheduler.runCurrent()
+
+        assertTrue(viewModel.onBiometricAutoPromptRequested(null))
+        val decryptCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+        }
+        viewModel.handleBiometricResult(
+            BiometricResult.Success(decryptCipher),
+            storage.storage,
+            activeDbId,
+            sealedCiphertext
+        )
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals("解库失败必须回落主密码模式", UnlockMode.STANDARD, state.unlockMode)
+        assertNotNull("必须如实渲染错误提示", state.errorMessage)
+        assertFalse(
+            "解库失败的陈旧封印必须清除（下次主密码解锁重新登记）",
+            storage.storage.hasEncryptedCredential(activeDbId)
+        )
+        assertFalse(state.isLoading)
     }
 
     /** 授权 Cipher 缺失（系统未回传 CryptoObject）时：不得解锁、不得发成功事件，且必须解除加载态 */

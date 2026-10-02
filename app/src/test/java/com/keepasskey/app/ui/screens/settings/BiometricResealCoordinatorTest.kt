@@ -16,6 +16,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.lang.reflect.Proxy
@@ -46,8 +47,7 @@ class BiometricResealCoordinatorTest {
     fun `改密后陈旧封印被新密码封印替换且载荷可解码出新密码`() = runTest {
         val storage = inMemoryCredentialStorage()
         storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
-        val keyFile = "key-file-bytes-0123456789".toByteArray()
-        val coordinator = createCoordinator(storage = storage, keyFileBytes = { keyFile })
+        val coordinator = createCoordinator(storage = storage)
 
         coordinator.resealAfterMasterKeyChange(activity = null, newPasswordChars = NEW_PASSWORD)
 
@@ -60,7 +60,8 @@ class BiometricResealCoordinatorTest {
         val decoded = BiometricSealedPayloadCodec.decode(payload)
         try {
             assertArrayEquals("封印载荷必须承载新密码", NEW_PASSWORD, decoded.passwordChars)
-            assertArrayEquals("复合密钥库的密钥文件因子必须随载荷重封印", keyFile, decoded.keyFileData)
+            // ISSUE-P1-431：封印载荷不再承载密钥文件因子（StrongBox 大载荷不可用）
+            assertNull("新口径封印载荷不得再携带密钥文件字节", decoded.keyFileData)
         } finally {
             decoded.wipe()
             payload.fill(0)
@@ -73,7 +74,7 @@ class BiometricResealCoordinatorTest {
         // 排除「存进去的是旧载荷」的假阳性
         val storage = inMemoryCredentialStorage()
         storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
-        val coordinator = createCoordinator(storage = storage, keyFileBytes = { null })
+        val coordinator = createCoordinator(storage = storage)
 
         coordinator.resealAfterMasterKeyChange(activity = null, newPasswordChars = NEW_PASSWORD)
 
@@ -95,8 +96,7 @@ class BiometricResealCoordinatorTest {
         storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
         val coordinator = createCoordinator(
             storage = storage,
-            biometricEnabled = false,
-            keyFileBytes = { null }
+            biometricEnabled = false
         )
 
         coordinator.resealAfterMasterKeyChange(activity = null, newPasswordChars = NEW_PASSWORD)
@@ -110,7 +110,7 @@ class BiometricResealCoordinatorTest {
     @Test
     fun `无已封印凭据时不弹窗且不落库`() = runTest {
         val storage = inMemoryCredentialStorage()
-        val coordinator = createCoordinator(storage = storage, keyFileBytes = { null })
+        val coordinator = createCoordinator(storage = storage)
         var promptCalls = 0
         coordinator.promptOverride = { _, _, _ -> promptCalls++ }
 
@@ -123,7 +123,7 @@ class BiometricResealCoordinatorTest {
     @Test
     fun `无活动库时整体空操作`() = runTest {
         val storage = inMemoryCredentialStorage()
-        val coordinator = createCoordinator(storage = storage, databaseId = null, keyFileBytes = { null })
+        val coordinator = createCoordinator(storage = storage, databaseId = null)
         storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
 
         coordinator.resealAfterMasterKeyChange(activity = null, newPasswordChars = NEW_PASSWORD)
@@ -139,7 +139,7 @@ class BiometricResealCoordinatorTest {
     fun `用户取消授权时陈旧封印已摘除且新封印不落库`() = runTest {
         val storage = inMemoryCredentialStorage()
         storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
-        val coordinator = createCoordinator(storage = storage, keyFileBytes = { null })
+        val coordinator = createCoordinator(storage = storage)
         coordinator.promptOverride = { _, _, onResult -> onResult(BiometricResult.Cancelled) }
 
         coordinator.resealAfterMasterKeyChange(activity = null, newPasswordChars = NEW_PASSWORD)
@@ -151,7 +151,7 @@ class BiometricResealCoordinatorTest {
     fun `封印密钥供给失败时摘除陈旧封印且不落库`() = runTest {
         val storage = inMemoryCredentialStorage()
         storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
-        val coordinator = createCoordinator(storage = storage, keyFileBytes = { null })
+        val coordinator = createCoordinator(storage = storage)
         coordinator.sealKeyProvisionOverride = { null }
         var promptCalls = 0
         coordinator.promptOverride = { _, _, _ -> promptCalls++ }
@@ -172,7 +172,6 @@ class BiometricResealCoordinatorTest {
         val coordinator = BiometricResealCoordinator(
             settingsRepository = settings,
             activeDbId = { ACTIVE_DB_ID },
-            sessionKeyFileBytes = { null },
             biometricAuthManager = BiometricAuthManager(KeystoreManager(null)),
             biometricCredentialStorage = storage,
             strings = StringsProvider { _, _ -> "" },
@@ -193,7 +192,7 @@ class BiometricResealCoordinatorTest {
     fun `无强生物识别时摘除陈旧封印且不落库`() = runTest {
         val storage = inMemoryCredentialStorage()
         storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
-        val coordinator = createCoordinator(storage = storage, keyFileBytes = { null })
+        val coordinator = createCoordinator(storage = storage)
         coordinator.strongBiometricCheckOverride = { false }
         var promptCalls = 0
         coordinator.promptOverride = { _, _, _ -> promptCalls++ }
@@ -207,17 +206,13 @@ class BiometricResealCoordinatorTest {
     // ── AC⑤：敏感缓冲不驻留（源码守卫） ─────────────────────────────────
 
     @Test
-    fun `载荷明文与密钥文件快照必须在密封后清零`() {
+    fun `载荷明文必须在密封后清零`() {
         val source = readSource(RESEAL_COORDINATOR_PATH)
         val encode = source.substringAfter("val bytes = BiometricSealedPayloadCodec.encode")
         val sealBlock = encode.substringBefore("} catch (e: Exception)")
         assertTrue(
             "载荷明文必须在密封完成后 finally 清零（敏感数据铁律）",
             Regex("""try\s*\{[^}]*authorizeAndSeal[^}]*\}\s*finally\s*\{\s*bytes\.fill\(0\)""").containsMatchIn(sealBlock)
-        )
-        assertTrue(
-            "密钥文件快照必须在编码后立即清零",
-            Regex("""keyFileSnapshot\?\.fill\(0\)""").containsMatchIn(encode.substringBefore("try"))
         )
     }
 
@@ -226,15 +221,13 @@ class BiometricResealCoordinatorTest {
     private suspend fun createCoordinator(
         storage: BiometricCredentialStorage,
         databaseId: String? = ACTIVE_DB_ID,
-        biometricEnabled: Boolean = true,
-        keyFileBytes: () -> ByteArray?
+        biometricEnabled: Boolean = true
     ): BiometricResealCoordinator {
         val settings = FakeSettingsRepository()
         settings.setBiometricEnabled(biometricEnabled)
         val coordinator = BiometricResealCoordinator(
             settingsRepository = settings,
             activeDbId = { databaseId },
-            sessionKeyFileBytes = keyFileBytes,
             biometricAuthManager = BiometricAuthManager(KeystoreManager(null)),
             biometricCredentialStorage = storage,
             strings = StringsProvider { _, _ -> "" },

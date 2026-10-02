@@ -31,8 +31,6 @@ internal class BiometricEnrollmentCoordinator(
     private val uiState: MutableStateFlow<UnlockUiState>,
     private val settingsRepository: SettingsRepository,
     private val activeDbId: () -> String?,
-    // ISSUE-P2-23：本次解锁使用的密钥文件字节提供者（null = 未携带；封印前快照克隆）
-    private val keyFileBytes: () -> ByteArray?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val debugLog: DebugLogBuffer,
@@ -211,11 +209,10 @@ internal class BiometricEnrollmentCoordinator(
     ): Pair<ByteArray, ByteArray>? {
         val cipher = provision.cipher
         return try {
-            // ISSUE-P2-23：密钥文件先快照克隆（登记跨 BiometricPrompt 挂起，原字节归会话所有），
-            // 快照在载荷编码完成后立即清零；载荷明文在其自身 finally 中清零。
-            val keyFileSnapshot = keyFileBytes()?.copyOf()
-            val bytes = BiometricSealedPayloadCodec.encode(passwordChars, keyFileSnapshot)
-            keyFileSnapshot?.fill(0)
+            // ISSUE-P1-431（方案一，对齐 KeePassDX/kp2a 口径）：封印载荷只装主密码——
+            // 密钥文件字节不再进入 Keystore 载荷（700 KB 级载荷令 StrongBox 分块加密达数十秒），
+            // 指纹解封后由解封侧经「记住的密钥文件位置」重读组合（见 BiometricUnlockCoordinator）。
+            val bytes = BiometricSealedPayloadCodec.encode(passwordChars, null)
             try {
                 authorizeAndSeal(authManager, activity, cipher, bytes)
             } finally {

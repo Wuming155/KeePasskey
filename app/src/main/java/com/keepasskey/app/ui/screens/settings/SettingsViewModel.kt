@@ -143,8 +143,8 @@ class SettingsViewModel @Inject constructor(
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
         debugLog = debugLogBuffer,
-        // ISSUE-P2-398 密钥文件因子来源；ISSUE-P3-430 sessionPasswordChars = 仅改绑密钥文件时重封印的会话密码快照（清零在协调器）
-        sessionKeyFileBytes = { databaseSession?.exportKeyFileBytes() },
+        // ISSUE-P3-430：sessionPasswordChars = 仅改绑密钥文件时重封印的会话密码快照（清零在协调器）。
+        // ISSUE-P1-431：封印载荷不再含密钥文件字节，原 sessionKeyFileBytes 通道退役
         sessionPasswordChars = { databaseSession?.passwordSnapshot() }
     )
 

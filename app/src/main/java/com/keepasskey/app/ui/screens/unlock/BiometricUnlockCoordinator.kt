@@ -39,7 +39,13 @@ internal class BiometricUnlockCoordinator(
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val debugLog: DebugLogBuffer,
     /** ISSUE-P1-429：解封 keystore 密算的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
-    private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
+    private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+    /**
+     * ISSUE-P1-431（方案一）：封印载荷只装主密码后，密钥文件第二因子从会话驻留字节取
+     * （冷启动记忆恢复已有）；为 null 时经 [restoreRememberedKeyFile] 现读一次。
+     */
+    private val sessionKeyFileData: () -> ByteArray? = { null },
+    private val restoreRememberedKeyFile: (suspend () -> Unit)? = null
 ) {
 
     /**
@@ -274,11 +280,19 @@ internal class BiometricUnlockCoordinator(
     }
 
     /**
-     * 解封出凭据后的解锁收尾（ISSUE-P3-01 可测性拆分 / ISSUE-P2-23 复合载荷）：
-     * 载荷经 [BiometricSealedPayloadCodec] 解析（v1 复合帧 = 主密码 + 可选密钥文件；
-     * 不带魔数回落历史格式 = 纯主密码）→ 既有 [VaultRepository.unlockActiveDatabase]
-     * 管线（两因子原样送达），成功即发解锁事件。全程 `ByteArray` / `CharArray` 承载，
-     * 用毕在 `finally` 中显式清零，绝不落地为 `String`。
+     * 解封出凭据后的解锁收尾（ISSUE-P3-01 可测性拆分）。
+     *
+     * 载荷解析（[BiometricSealedPayloadCodec]）：v1 复合帧（ISSUE-P2-23 存量，主密码 + 可选
+     * 密钥文件）/ 不带魔数的历史格式（纯主密码）/ ISSUE-P1-431 起新封印只装主密码。
+     *
+     * 密钥文件第二因子解析链（ISSUE-P1-431，方案一，对齐 KeePassDX/kp2a 口径）：
+     * ① 存量载荷自带 → 原样使用（兼容旧封印，成功后清封印引导以小载荷重登）；
+     * ② 会话驻留字节（冷启动记忆恢复）→ 直接用；
+     * ③ 都没有 → 经 [restoreRememberedKeyFile] 现读一次（IO 线程，ISSUE-P3-04 通道）；
+     * ④ 仍没有 → 以仅主密码尝试（密码库本就可能不含密钥文件因子）；若该库实际需要密钥文件，
+     *    落入下方 Failure 分支——清陈旧封印回落密码模式（恢复通道既有）。
+     *
+     * 全程 `ByteArray` / `CharArray` 承载，用毕在 `finally` 中显式清零，绝不落地为 `String`。
      * 帧结构损坏（异常抛出）由调用方按「凭据陈旧」清除并引导重新封印。
      */
     internal suspend fun completeBiometricUnlock(
@@ -287,10 +301,17 @@ internal class BiometricUnlockCoordinator(
         dbId: String
     ) {
         val payload = BiometricSealedPayloadCodec.decode(decryptedBytes)
+        // ③ 现读一次：仅在「载荷没带密钥文件且会话驻留也没有」时才走 IO 重读
+        if (payload.keyFileData == null && sessionKeyFileData() == null) {
+            restoreRememberedKeyFile?.invoke()
+        }
+        val legacyKeyFileInPayload = payload.keyFileData != null
         try {
             when (val unlockResult = vaultRepository.unlockActiveDatabase(
                 payload.passwordChars,
-                keyFileData = payload.keyFileData,
+                // ①存量载荷自带 → ②/③会话驻留或记忆现读（字节归 [KeyFileSessionCoordinator]
+                //   所有，清零由其既有路径承担）→ ④null（密码-only 库 / 或落 Failure 分支）
+                keyFileData = payload.keyFileData ?: sessionKeyFileData(),
                 // ISSUE-P2-343：只读开关此前**只被口令路径消费**，指纹路径连实参都不传
                 // ⇒ 落到接口默认 `false`，用户在口令页打开「只读」再切到指纹解锁，
                 // 会以可写模式解开而界面毫无提示（保护态被静默吞掉）。
@@ -298,6 +319,12 @@ internal class BiometricUnlockCoordinator(
                 readOnly = uiState.value.openReadOnly
             )) {
                 is KdbxResult.Success -> {
+                    if (legacyKeyFileInPayload) {
+                        // ISSUE-P1-431 迁移：存量复合封印（大载荷）解锁成功后清除，
+                        // 下次主密码解锁将以「仅主密码」小载荷重新登记（一次性过渡）
+                        storage.clearCredential(dbId)
+                        debugLog.info(TAG, "存量复合封印已迁移清除，下次主密码解锁后以小载荷重登记")
+                    }
                     uiState.update {
                         it.copy(
                             isLoading = false,
