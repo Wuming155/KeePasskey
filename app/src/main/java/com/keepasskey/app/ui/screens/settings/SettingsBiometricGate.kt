@@ -37,18 +37,8 @@ internal class SettingsBiometricGate(
         activeDatabaseId = id
     }
 
-    private val coordinator = BiometricEnableCoordinator(
-        scope = scope,
-        settingsRepository = settingsRepository,
-        activeDbId = { activeDatabaseId },
-        biometricAuthManager = biometricAuthManager,
-        biometricCredentialStorage = biometricCredentialStorage,
-        strings = strings,
-        debugLog = debugLog,
-        state = toggleState
-    )
-
-    // ISSUE-P2-398：改密成功后以新密码重封印活动库快速解锁凭据（复用本类的活动库跟踪）
+    // ISSUE-P2-398：改密成功后以新密码重封印活动库快速解锁凭据（复用本类的活动库跟踪）；
+    // §411 走查（用户回执③）：须先于 coordinator 装配——开启指纹的「当场补登记」回调复用它
     private val resealCoordinator = BiometricResealCoordinator(
         settingsRepository = settingsRepository,
         activeDbId = { activeDatabaseId },
@@ -57,6 +47,22 @@ internal class SettingsBiometricGate(
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
         debugLog = debugLog
+    )
+
+    private val coordinator = BiometricEnableCoordinator(
+        scope = scope,
+        settingsRepository = settingsRepository,
+        activeDbId = { activeDatabaseId },
+        biometricAuthManager = biometricAuthManager,
+        biometricCredentialStorage = biometricCredentialStorage,
+        strings = strings,
+        debugLog = debugLog,
+        state = toggleState,
+        // §411 走查（用户回执③）：开启验证通过但凭据未登记 → 当场以会话密码快照封印
+        // （第二次 BiometricPrompt 完成授权），消灭「开关已开、须再解锁一次才生效」的断裂
+        onVerifiedFallbackSeal = { activity ->
+            resealCoordinator.resealAfterMasterKeyChange(activity, null, allowInitialSeal = true)
+        }
     )
 
     fun setEnabled(enabled: Boolean, activity: FragmentActivity? = null) =

@@ -851,6 +851,12 @@
     <string name="sync_browse_use_path">使用此路径</string>
     <string name="sync_browse_close">关闭</string>
     <string name="sync_browse_select_file_hint">点选 .kdbx 文件以回填远程路径；点选文件夹可继续下钻</string>
+    <!-- ISSUE-P3-452：保存/首传态（远端目录可选作保存位置） -->
+    <string name="sync_browse_save_hint">导航到目标文件夹，输入文件名后点「保存到当前目录」；点选 .kdbx 文件可直接以该文件为保存目标</string>
+    <string name="sync_browse_file_name_label">远端文件名</string>
+    <string name="sync_browse_save_here">保存到当前目录</string>
+    <!-- §411 走查：导入密钥文件记忆失效回落 -->
+    <string name="dbset_keyfile_import_memory_stale">记住的密钥文件已无法读取（文件授权可能失效），请重新选择密钥文件</string>
     <string name="sync_browse_back_up">返回上一级</string>
     <string name="sync_browse_cd_back_up">返回上一级目录</string>
     <string name="sync_browse_kdbx_only">只看密码库文件</string>

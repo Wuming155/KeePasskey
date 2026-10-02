@@ -30,7 +30,10 @@ internal fun RemoteBrowseSection(
     onBrowseWebDav: (String, String, CharArray, String, String?) -> Unit,
     onBrowseS3: (String, String, String, CharArray, CharArray, String, Boolean, String?) -> Unit,
     onSelectFile: (RemoteListEntry) -> Unit,
-    onDismissBrowse: () -> Unit
+    onDismissBrowse: () -> Unit,
+    // ISSUE-P3-452：保存/首传态——非 null 时对话框出现「保存到当前目录」（建议文件名，如 `<库名>.kdbx`）
+    saveTarget: String? = null,
+    onSelectDirectory: (String) -> Unit = {}
 ) {
     if (!visible) return
     val listing = browseState as? RemoteBrowseUiState.Listing
@@ -69,6 +72,8 @@ internal fun RemoteBrowseSection(
                 )
             }
         },
-        onClose = onDismissBrowse
+        onClose = onDismissBrowse,
+        saveTarget = saveTarget,
+        onSelectDirectory = onSelectDirectory
     )
 }

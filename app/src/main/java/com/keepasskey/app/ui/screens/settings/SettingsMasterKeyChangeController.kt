@@ -152,22 +152,21 @@ internal class SettingsMasterKeyChangeController(
     private suspend fun syncRememberedKeyFile(intent: ChangeKeyFileIntent) {
         val access = keyFileAccess ?: return
         val dbId = activeDbId()
-        if (!access.isRememberEnabled()) {
-            access.forget()
-            // §411（P3-448）：偏好关闭 = 不留任何密钥文件元数据，副本一并清除
-            if (dbId != null) vaultCopyStore?.clear(dbId)
-            return
-        }
+        val rememberEnabled = access.isRememberEnabled()
         when (intent) {
             is ChangeKeyFileIntent.Use -> {
+                // §411 走查（用户回执①）：副本收编与记忆偏好解耦——改绑成功即收编新文件
+                // 字节进私有目录（不依赖持久授权），偏好关闭只停用 Uri 记忆、不影响副本
+                if (dbId != null) vaultCopyStore?.save(dbId, intent.bytes, intent.displayName)
+                if (!rememberEnabled) {
+                    access.forget()
+                    return
+                }
                 if (intent.sourceUri.isNotBlank() && access.persistReadPermission(intent.sourceUri)) {
                     access.remember(intent.sourceUri, intent.displayName)
                 } else {
                     access.forget()
                 }
-                // §411（P3-448 AC②）：改绑成功即收编新文件字节进私有目录副本——
-                // 不再依赖持久授权；持久授权失败只影响 Uri 记忆，不影响副本
-                if (dbId != null) vaultCopyStore?.save(dbId, intent.bytes, intent.displayName)
             }
             ChangeKeyFileIntent.Remove -> {
                 access.forget()
@@ -218,10 +217,14 @@ internal class SettingsMasterKeyChangeController(
                     }
                 }
                 else -> {
-                    // 授权失效 / 读取失败：显式回执，绝不静默（ISSUE-P3-04 口径）
+                    // §411 走查（用户回执①）：授权失效 / 读取失败 → 清陈旧记录并**回落手选**
+                    // （返回 false 让调用方直接弹 SAF 选择器，重选成功即经改绑流程收编副本），
+                    // 不再死报「无法读取」让用户无路可走
+                    access.forget()
                     mutableState.update {
-                        it.copy(feedback = UiMessage(R.string.unlock_keyfile_read_failed))
+                        it.copy(feedback = UiMessage(R.string.dbset_keyfile_import_memory_stale))
                     }
+                    return false
                 }
             }
             return true

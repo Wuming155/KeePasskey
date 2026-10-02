@@ -101,19 +101,30 @@ internal class BiometricResealCoordinator(
      *   ISSUE-P3-430）——此时从 [sessionPasswordChars] 取会话当前主密码快照封印，
      *   该快照归本方法所有、用毕 `finally` 清零。取不到（仅密钥文件会话等）时留痕跳过，
      *   交由下次主密码解锁的登记路径自然重封印。
+     * @param allowInitialSeal §411 走查（用户回执③）：**允许无既有凭据时执行首次封印**——
+     *   设置页开启指纹（验证刚通过、会话密码快照可用）即当场完成封印登记，消灭
+     *   「开关已开、凭据未登、必须再解锁一次才生效」的 UX 断裂；默认 false 保持原语义。
      * 幂等安全：任意前置不满足即空操作；绝不抛出（调用方为改密任务收尾段）。
      */
-    suspend fun resealAfterMasterKeyChange(activity: FragmentActivity?, newPasswordChars: CharArray?) {
+    suspend fun resealAfterMasterKeyChange(
+        activity: FragmentActivity?,
+        newPasswordChars: CharArray?,
+        allowInitialSeal: Boolean = false
+    ) {
         val dbId = activeDbId() ?: return
         val storage = biometricCredentialStorage ?: return
         val settings = settingsRepository.getSettings().first()
         if (!settings.biometricEnabled) return
-        // 未登记过封印（指纹解锁本就未启用在库）→ 无陈旧载荷，交由下次解锁自然登记
-        if (!storage.hasEncryptedCredential(dbId)) return
+        val hadCredential = storage.hasEncryptedCredential(dbId)
+        // 未登记过封印（指纹解锁本就未启用在库）→ 无陈旧载荷，交由下次解锁自然登记；
+        // allowInitialSeal（设置页开启即封印）例外：当场完成登记，不留「下次再说」
+        if (!hadCredential && !allowInitialSeal) return
 
         // 先摘除陈旧封印：内含旧密码，已确定失效；此后任何失败都不残留「注定失败态」
-        storage.clearCredential(dbId)
-        debugLog.info(TAG, "改密成功，摘除陈旧封印凭据并尝试重封印")
+        if (hadCredential) {
+            storage.clearCredential(dbId)
+            debugLog.info(TAG, "改密成功，摘除陈旧封印凭据并尝试重封印")
+        }
 
         // ISSUE-P1-429：供给含 keystore binder 调用（建钥 / 落位探测），移 IO 线程执行
         val provision = withContext(cryptoDispatcher) {

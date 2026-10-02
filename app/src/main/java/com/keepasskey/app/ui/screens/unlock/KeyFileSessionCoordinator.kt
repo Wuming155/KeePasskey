@@ -176,22 +176,12 @@ internal class KeyFileSessionCoordinator(
     suspend fun restoreRememberedKeyFile() {
         val access = keyFileAccess ?: return
         if (keyFileUserTouched) return
-        // §411（ISSUE-P3-448 AC②）：偏好关闭 = 用户明确不要记忆 → 记录与副本一并清除。
-        // 顺序硬约束：本判定必须先于 loadRemembered 早退——记录缺失 ≠ 偏好未关，
-        // 孤儿副本（记录丢失而内容仍在）也必须在此路径清掉。
-        // forget 仅在确有记录时调用（幂等空操作也会污染计数型断言与日志语义）。
+        // §411 走查（用户回执①语义裁决）：副本归「导入密钥文件」功能管，**与记忆偏好解耦**——
+        // 「记住密钥文件位置」偏好只关「Uri 记忆 + 解锁成功自动收编」；用户显式导入的副本
+        // （改绑 / 设置页导入）是导入承诺的存储形态，偏好关闭也必须自动载入。
         val rememberEnabled = access.isRememberEnabled()
-        if (!rememberEnabled) {
-            debugLog.info(TAG, "密钥文件记忆偏好关闭，清除记录与副本")
-            if (access.loadRemembered() != null) {
-                access.forget()
-            }
-            vaultCopyStore?.let { store -> activeDbId()?.let { store.clear(it) } }
-            return
-        }
-        val remembered = access.loadRemembered() ?: return
-        // §411（ISSUE-P3-448 AC②）：**优先消费私有目录副本**——不依赖 SAF 持久授权，
-        // 授权失效不再阻断解锁。副本缺失 / 损坏时回落既有 SAF Uri 通道（下方不变）。
+        val remembered = access.loadRemembered()
+        // 副本优先载入（不依赖 SAF 持久授权；缺失 / 损坏时回落既有 SAF Uri 通道）
         val dbId = activeDbId()
         if (dbId != null && vaultCopyStore != null) {
             val copy = vaultCopyStore.load(dbId)
@@ -206,18 +196,32 @@ internal class KeyFileSessionCoordinator(
                 } finally {
                     copy.bytes.fill(0)
                 }
-                keyFileSourceUri = remembered.uri
+                // 偏好关闭：即便走副本载入，Uri 记忆仍须清除（副本归导入功能，不受影响）
+                if (!rememberEnabled && remembered != null) {
+                    access.forget()
+                }
+                keyFileSourceUri = remembered?.uri
                 uiState.update {
                     it.copy(
                         infoMessage = UiMessage(
                             R.string.keyfile_restored_from_memory,
-                            listOf(copy.displayName.ifBlank { remembered.displayName })
+                            listOf(
+                                copy.displayName.ifBlank { remembered?.displayName.orEmpty() }
+                            )
                         )
                     )
                 }
                 return
             }
         }
+        if (!rememberEnabled) {
+            // 偏好关闭且无副本：清 Uri 记忆（有则清），静默降级为未记住
+            if (remembered != null) {
+                access.forget()
+            }
+            return
+        }
+        if (remembered == null) return
         val permissionValid = access.hasPersistedReadPermission(remembered.uri)
         if (!KeyFileRememberPolicy.canRestore(rememberEnabled, remembered, permissionValid)) {
             debugLog.info(
@@ -273,7 +277,8 @@ internal class KeyFileSessionCoordinator(
      * - 偏好开启 + 本次未使用密钥文件 → 清除旧记录与旧副本：标准解锁在「未携带密钥文件」
      *   下成功，只可能是密码库本身不含密钥文件因子（携带不匹配的密钥文件必然凭据失败），
      *   此时旧记录归属其它库或已失效，留存会误导下次解锁；
-     * - 偏好关闭 → 一并清除记录与副本，不残留任何密钥文件元数据。
+     * - 偏好关闭 → 清 Uri 记忆；**副本保留**（§411 走查裁决：副本归「导入密钥文件」功能管，
+     *   用户显式导入/改绑产生的副本不随偏好清除，仅停用「解锁自动收编」）。
      *
      * 全程**不落任何密钥字节**到 UiState：字节仍只驻留单次解锁尝试内（本方法在
      * `MasterPasswordUnlockSession` 的擦除点**之前**调用，会话驻留字节此刻仍存活）。
@@ -281,9 +286,10 @@ internal class KeyFileSessionCoordinator(
     suspend fun rememberKeyFileOnSuccess(usedKeyFile: Boolean, displayName: String) {
         val access = keyFileAccess ?: return
         val dbId = activeDbId()
-        if (!access.isRememberEnabled()) {
+        val rememberEnabled = access.isRememberEnabled()
+        if (!rememberEnabled) {
+            // 偏好关闭：只清 Uri 记忆，副本归导入功能（不被解锁动作清除）
             access.forget()
-            if (dbId != null) vaultCopyStore?.clear(dbId)
             return
         }
         if (usedKeyFile) {
@@ -291,7 +297,7 @@ internal class KeyFileSessionCoordinator(
             if (!sourceUri.isNullOrBlank()) {
                 access.remember(sourceUri, displayName)
             }
-            // §411（ISSUE-P3-448 AC②）：收编字节进私有目录（副本密钥经 Keystore 加密，见 Store KDoc）
+            // §411（ISSUE-P3-448 AC②）：收编字节进私有目录（副本密钥经 Keystore 封 DEK + 软件层加密）
             val bytes = keyFileData
             if (dbId != null && bytes != null && vaultCopyStore != null) {
                 val saved = vaultCopyStore.save(dbId, bytes, displayName)
@@ -299,6 +305,7 @@ internal class KeyFileSessionCoordinator(
             }
         } else {
             access.forget()
+            // 库无密钥文件因子却存在副本 ⇒ 副本必属陈旧因子（或其它库），清除
             if (dbId != null) vaultCopyStore?.clear(dbId)
         }
     }

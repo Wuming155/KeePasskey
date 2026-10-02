@@ -53,6 +53,7 @@
 ### ISSUE-P2-456：杀后台重进后生物识别解锁报「未通过或已取消」，必须手输密码（真机走查）
 
 - **核实时间点**：2026-10-02；**核实方式**：用户真机（M332BF，debug 包 com.keepasskey.debug）走查原话「解锁后，杀后台重新进入，依然需要手动输入密码，并且使用生物识别提示未通过或取消」；文案=`sec_biometric_auth_failed`（`values/strings.xml:429`）。
+- **取证进展（§411，2026-10-02）**：真机 `run-as` 实测——`biometric_credentials.xml` 为空 map（**封印凭据不存在**，非「指纹认证失败」）；keymint 传感器为 strongbox-nxp（STRONG ✓，排除设备能力不符）。**根因修正**：①设置页开启指纹只落偏好不封印（凭据登记只发生在主密码解锁成功的 `requestBiometricEnrollment`，用户从未完成过该次登记）；②`ANR 热修复期间` 强生物识别验证成功（logcat `Succeeded isStrongBiometric=true`）但登记落库链仍被切断的精确分支待进一步日志。**整改（当场封印）**：`BiometricResealCoordinator` 增加 `allowInitialSeal`（允许无既有凭据时首次封印，会话密码快照可用）；`BiometricEnableCoordinator.onVerified(sealReady=false)` 后经 `SettingsBiometricGate` 注入的回调当场补登记（第二次 BiometricPrompt 完成授权封印）——开启指纹即生效，不再依赖「下次解锁」。
 - **候选根因（待真机 logcat 取证分型）**：① `BiometricUnlockCoordinator.unlockWithBiometric` catch 兜底（`prepareDecryptCipher` 抛错，如 Keystore 密钥失效/设备不支持请求的认证器集合）；② `BiometricResult.Error` 未知错误码兜底映射（如设备仅 Class 2 指纹与 `BIOMETRIC_STRONG` 不符）；③ 密钥文件因子缺失致解库失败——但该路径应报 `unlock_error_invalid_password` 而非本文案，可能性低；注意 §408 后封印载荷只装主密码、密钥文件靠记忆重读（§411 起另有私有目录副本兜底）。
 - **取证入口**：`debugLog.warn` 留痕有「生物识别认证失败: code=N / 生物识别解锁启动异常 / 生物识别解封失败」三类；配合 `adb shell dumpsys biometric`（传感器强度）定位。
 - **验收标准**：
@@ -119,6 +120,7 @@
 ### ISSUE-P3-448：「导入密钥文件」语义改「把解锁所选密钥文件导入应用私有目录」（用户裁决）
 
 - **进展（§411，2026-10-02）**：**代码面已实施**——① 方案裁决落 `KeyFileVaultCopyStore`（专用 Keystore AES-256-GCM 非认证密钥加密整载荷落 `filesDir/keyfiles/<dbId>.kfc`，`requireUserAuth=false` 取舍与 `SyncCredentialSealer` 同判据；与「记住密钥文件位置」**并存**：Uri 记忆保留为元数据，副本为内容层，恢复链副本优先、Uri 现读兜底）；② 收编时机＝解锁成功使用密钥文件（`rememberKeyFileOnSuccess`）/ 设置页改绑成功（`syncRememberedKeyFile`）/ 设置页「导入密钥文件」行新语义（`importRememberedCopy`：副本已存在幂等成功 → 记忆 Uri 现读收编 → 无记忆回落原手选改绑）；③ 清除时机＝解绑 / 换绑 / 偏好关闭 / 未使用密钥文件解锁成功 / 删库；④ 解锁链 `restoreRememberedKeyFile` 副本优先（SAF 授权失效不再阻断）。**待真机走查留痕后整条归档。**
+- **热修复（§411 装机回执①，2026-10-02）**：走查发现副本收编与「记住密钥文件位置」偏好错误耦合——偏好关闭时改绑收编的副本被立即清除、恢复链拒绝载入（keyfiles 目录恒空）。**语义再裁决：副本归「导入密钥文件」功能管**——偏好关闭只停用「Uri 记忆 + 解锁自动收编」；改绑/导入收编、恢复链副本载入与偏好无关；「未使用密钥文件解锁成功」仍清副本（库无因子 ⇒ 副本必属陈旧因子）；`importRememberedCopy` 记忆读取失败（授权失效）改为**清陈旧记录 + 自动回落 SAF 手选**（不再死报「无法读取」）。
 - **核实时间点**：2026-10-02；**核实方式**：用户 §408 批次装机走查原话「导入密钥文件应该是将在解锁时选择的密钥文件导入私有目录，而不是要用户自己选择」。
 - **背景**：§406 实现的「导入密钥文件」（设置页改绑入口）走 SAF 让用户**再次**选取密钥文件完成第二因子改绑；用户预期语义是**收编**——把解锁时已经选过的密钥文件内容复制进应用私有目录，此后解锁无需再次授权 SAF（对比：`rememberKeyFileLocation` 仅记忆 SAF Uri，仍依赖持久化读授权且受提供方限制）。
 - **验收标准**：
@@ -128,6 +130,7 @@
 
 ### ISSUE-P3-452：远端目录浏览区分「打开云端文件」与「保存到云端目录」——保存侧可选文件夹（用户点名参考 keepass2android）
 
+- **进展（§411，2026-10-02）**：**代码面已实施（AC①）**——`RemoteBrowseDialog` 双模：`saveTarget` 非 null 时提示换「保存态」、底部出现可编辑「远端文件名」（默认 `<库名>.kdbx`）与「保存到当前目录」确认钮，回填 `当前目录 + / + 文件名`（WebDAV/S3 同语义）；设置页云端同步浏览装配保存态；点选已有 .kdbx 文件路径的既有行为保留（`DatabasePickerRemoteBrowse` 打开态不变）。**待真机走查后随 AC②③ 归档。**
 - **核实时间点**：2026-10-02；**核实方式**：用户真机走查原话「远程路径只能选择具体的文件不能选择文件夹，这样就无法选择保存的路径，这个应该区分打开云端文件和保存本地文件到云端同步的区别，具体你参考KeePass2Android」。
 - **背景**：`RemoteBrowseSection`（P3-387）选中远端条目一律把 `entry.path` 回填 `remotePath`——语义只有「打开云端那个文件」；当本地库要**首传到云端**（或另存远端新路径）时，用户无法选一个**目录**作为保存位置（KeePass2Android 的远端选择器区分「选文件打开 / 选目录保存」，保存侧选中目录即以其为父目录拼接库名）。
 - **验收标准**：

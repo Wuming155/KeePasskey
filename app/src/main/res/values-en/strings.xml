@@ -841,6 +841,12 @@
     <string name="sync_browse_use_path">Use this path</string>
     <string name="sync_browse_close">Close</string>
     <string name="sync_browse_select_file_hint">Tap a .kdbx file to fill the remote path; tap a folder to navigate</string>
+    <!-- ISSUE-P3-452: save/first-upload mode (remote directory selectable as save location) -->
+    <string name="sync_browse_save_hint">Navigate to the target folder, enter the file name and tap \"Save to this directory\"; tap a .kdbx file to use that file as the save target directly</string>
+    <string name="sync_browse_file_name_label">Remote file name</string>
+    <string name="sync_browse_save_here">Save to this directory</string>
+    <!-- §411 walkthrough: remembered key file import fallback -->
+    <string name="dbset_keyfile_import_memory_stale">The remembered key file can no longer be read (its access grant may have expired); please pick the key file again</string>
     <string name="sync_browse_back_up">Back to parent</string>
     <string name="sync_browse_cd_back_up">Back to parent directory</string>
     <string name="sync_browse_kdbx_only">Vault files only</string>

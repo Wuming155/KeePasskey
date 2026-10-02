@@ -186,14 +186,21 @@ class KeyFileSessionCoordinatorTest {
     }
 
     @Test
-    fun `偏好关闭时恢复路径清除记录与副本`() = runTest {
+    fun `偏好关闭时副本仍自动载入且清 Uri 记忆`() = runTest {
+        // §411 走查语义裁决：副本归「导入密钥文件」功能管——偏好关闭只停用 Uri 记忆，
+        // 显式导入/改绑产生的副本仍须自动载入（导入承诺：此后解锁不再依赖授权）
         val access = FakeKeyFileAccess(rememberEnabled = false)
+        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         val (subject, store, _) = coordinatorWithCopy(this, access)
-        assertTrue(store.save("db-1", byteArrayOf(4, 5), "a.keyx"))
+        assertTrue(store.save("db-1", FakeKeyFileAccess.FAKE_KEY_FILE_BYTES, FakeKeyFileAccess.DISPLAY_NAME))
 
         subject.restoreRememberedKeyFile()
 
-        assertNull("偏好关闭 = 不留任何密钥文件元数据与副本", store.load("db-1"))
-        assertNull(subject.keyFileData)
+        assertArrayEquals(
+            "偏好关闭时显式导入的副本必须仍自动载入",
+            FakeKeyFileAccess.FAKE_KEY_FILE_BYTES,
+            subject.keyFileData!!
+        )
+        assertEquals("偏好关闭时 Uri 记忆仍须清除", 1, access.forgetCount)
     }
 }

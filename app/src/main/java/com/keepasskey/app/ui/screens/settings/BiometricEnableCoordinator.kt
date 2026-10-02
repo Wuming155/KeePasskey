@@ -75,7 +75,13 @@ internal class BiometricEnableCoordinator(
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val strings: StringsProvider,
     private val debugLog: DebugLogBuffer,
-    private val state: MutableStateFlow<BiometricToggleUiState> = MutableStateFlow(BiometricToggleUiState())
+    private val state: MutableStateFlow<BiometricToggleUiState> = MutableStateFlow(BiometricToggleUiState()),
+    /**
+     * §411 走查（用户回执③）：验证通过、偏好落库后、但封印凭据未就绪（[onVerified] 的
+     * sealReady=false）时的**当场补登记**挂点——设置页有会话密码快照，可立即完成封印，
+     * 消灭「开关已开、必须再解锁一次才生效」的 UX 断裂；可空 = 单测未装配。
+     */
+    private val onVerifiedFallbackSeal: suspend (FragmentActivity?) -> Unit = {}
 ) {
 
     /** 测试替身：替代真实「设备是否具备可用强生物识别」探测（生产恒 null） */
@@ -131,7 +137,14 @@ internal class BiometricEnableCoordinator(
             }
 
             when (val result = awaitVerification(activity, cipher)) {
-                is BiometricResult.Success -> onVerified(cipher != null)
+                is BiometricResult.Success -> {
+                    onVerified(cipher != null)
+                    // §411 走查（用户回执③）：凭据未就绪时当场补登记（会话密码快照封印，
+                    // 第二次 BiometricPrompt 完成授权加密）——杀后台重进即可指纹解锁
+                    if (cipher == null) {
+                        onVerifiedFallbackSeal(activity)
+                    }
+                }
                 is BiometricResult.Cancelled -> {
                     debugLog.info(TAG, "用户取消生物识别验证，开关保持关闭")
                     state.update { it.copy(notice = UiMessage(R.string.sec_biometric_auth_failed)) }

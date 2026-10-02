@@ -342,6 +342,17 @@ fun CloudSyncScreen(
                                 showBrowseDialog = false
                                 onDismissBrowse()
                             },
+                            // ISSUE-P3-452：保存/首传态——选目录回填 `<目录>/<库名>.kdbx`（可编辑）
+                            saveTarget = uiState.databaseName.ifBlank { "KeePass" }.let { "$it.kdbx" },
+                            onSelectDirectory = { fullPath ->
+                                if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
+                                    webdavRemotePath = fullPath
+                                } else {
+                                    s3ObjectKey = fullPath
+                                }
+                                showBrowseDialog = false
+                                onDismissBrowse()
+                            },
                             onDismissBrowse = {
                                 showBrowseDialog = false
                                 onDismissBrowse()

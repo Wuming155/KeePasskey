@@ -13,11 +13,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +45,11 @@ import com.keepasskey.sync.model.RemoteListEntry
  * - **面包屑**路径段可点跳转（仿安卓资源管理器 / Kp2a getParentPath）；
  * - **默认只看**目录 + `.kdbx`（可切换显示全部）；
  * - 文件行展示大小与修改时间（PROPFIND 已带）。
+ *
+ * **双模（ISSUE-P3-452）**：[saveTarget] 为 null = 打开态（选文件，既有行为）；
+ * 非 null = **保存/首传态**——底部出现可编辑文件名（默认 `<库名>.kdbx`）与
+ * 「保存到当前目录」确认钮，回填 `当前目录 + / + 文件名`；文件行点击（选已有文件
+ * 作为远端目标）与目录导航照常，两种用途同一对话框覆盖。
  */
 @Composable
 fun RemoteBrowseDialog(
@@ -51,7 +58,10 @@ fun RemoteBrowseDialog(
     onNavigate: (RemoteListEntry) -> Unit,
     onNavigateToPath: (String) -> Unit,
     onLoadMore: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    // ISSUE-P3-452：保存/首传态（建议文件名，如 `<库名>.kdbx`）；null = 打开态（无保存钮）
+    saveTarget: String? = null,
+    onSelectDirectory: (String) -> Unit = {}
 ) {
     AlertDialog(
         onDismissRequest = onClose,
@@ -78,7 +88,9 @@ fun RemoteBrowseDialog(
                             onSelectFile = onSelectFile,
                             onNavigate = onNavigate,
                             onNavigateToPath = onNavigateToPath,
-                            onLoadMore = onLoadMore
+                            onLoadMore = onLoadMore,
+                            saveTarget = saveTarget,
+                            onSelectDirectory = onSelectDirectory
                         )
                     }
                 }
@@ -99,7 +111,9 @@ private fun RemoteBrowseListingBody(
     onSelectFile: (RemoteListEntry) -> Unit,
     onNavigate: (RemoteListEntry) -> Unit,
     onNavigateToPath: (String) -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    saveTarget: String? = null,
+    onSelectDirectory: (String) -> Unit = {}
 ) {
     if (state.loading) BrowseLoadingIndicator()
     if (state.lastError != null) {
@@ -125,11 +139,19 @@ private fun RemoteBrowseListingBody(
         )
         Switch(checked = kdbxOnly, onCheckedChange = onKdbxOnlyChange)
     }
-    Text(
-        text = stringResource(R.string.sync_browse_select_file_hint),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    if (saveTarget == null) {
+        Text(
+            text = stringResource(R.string.sync_browse_select_file_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    } else {
+        Text(
+            text = stringResource(R.string.sync_browse_save_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
     val visible = if (kdbxOnly) {
         state.accumulated.filter { RemoteBrowsePaths.visibleUnderKdbxOnly(it.isDirectory, it.name) }
     } else {
@@ -143,6 +165,29 @@ private fun RemoteBrowseListingBody(
         onNavigate = onNavigate,
         onLoadMore = onLoadMore
     )
+    // ISSUE-P3-452：保存/首传态——可编辑文件名 + 「保存到当前目录」（回填 目录 + / + 文件名）
+    if (saveTarget != null) {
+        var fileName by remember(state.directoryPath) {
+            mutableStateOf(saveTarget)
+        }
+        OutlinedTextField(
+            value = fileName,
+            onValueChange = { fileName = it },
+            singleLine = true,
+            label = { Text(stringResource(R.string.sync_browse_file_name_label)) },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = {
+                val base = state.directoryPath.trimEnd('/')
+                onSelectDirectory("$base/${fileName.trimStart('/')}")
+            },
+            enabled = !state.loading && fileName.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.sync_browse_save_here))
+        }
+    }
 }
 
 @Composable
