@@ -1,7 +1,9 @@
 package com.keepasskey.app.ui
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraphBuilder
@@ -42,6 +44,8 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
         val mergeState by settingsViewModel.mergeState.collectAsStateWithLifecycle()
         // ISSUE-P3-20：子库挂载状态流（真实挂载记录 + 运行时状态 + 操作反馈）
         val childDatabaseState by settingsViewModel.childDatabaseState.collectAsStateWithLifecycle()
+        // ISSUE-P3-436：导入密钥文件的重封印弹窗宿主（与 SettingsScreen 同一经 LocalActivity 直取的口径）
+        val hostActivity = LocalActivity.current as? FragmentActivity
         DatabaseSettingsScreen(
             uiState = settingsState,
             onBackClick = { navController.popBackStack() },
@@ -61,6 +65,16 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             onExportXml = settingsViewModel::exportVaultXmlTo,
             onExportCsv = settingsViewModel::exportVaultCsvTo,
             onExportKeyFile = settingsViewModel::exportKeyFileTo,
+            // ISSUE-P3-436：导入密钥文件——SAF 读取走全仓唯一 KeyFileAccess 通道；提交复用改主密钥控制器
+            // 的仅改绑分支（空密码 + Use 意图 → changeKeyFileOnly，忙守卫 / 字节清零 / 记忆同步 /
+            // 会话快照重封印全部既有），主密钥变更与导入共用同一忙态（isChangingMasterKey）
+            onReadKeyFile = settingsViewModel.keyFileReader,
+            onKeyFileImport = { intent ->
+                settingsViewModel.masterKeyChangeController.submit(CharArray(0), intent, hostActivity)
+            },
+            keyFileImportBusy = settingsState.isChangingMasterKey,
+            keyFileImportFeedback = settingsState.masterKeyChangeFeedback,
+            onClearKeyFileImportFeedback = settingsViewModel::clearMasterKeyChangeFeedback,
             onInstallTemplates = settingsViewModel::installEntryTemplates,
             // ISSUE-P3-19：导入链路（选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）
             importState = importState,

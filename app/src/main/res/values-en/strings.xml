@@ -644,6 +644,12 @@
     <!-- ISSUE-P3-128: key file export confirmation (the key file is the second unlock factor) -->
     <string name="dbset_keyfile_export_warn_title">Confirm key file export</string>
     <string name="dbset_keyfile_export_warn_message">You are about to export this vault\u2019s key file (the second unlock factor):\n- This single file can be combined with the vault file to attempt an unlock, so store it separately from the .kdbx;\n- Once written to Downloads or a cloud drive, any app or person with access to that location can obtain the factor;\n- Delete it yourself: this app will not clean it up.</string>
+    <!-- ISSUE-P3-436: import key file (direct entry to rebind this vault&#39;s second factor) -->
+    <string name="dbset_keyfile_import_title">Import key file</string>
+    <string name="dbset_keyfile_import_sub">Pick an external key file as this vault\u2019s second factor</string>
+    <string name="dbset_keyfile_import_warn_title">Confirm key file import</string>
+    <string name="dbset_keyfile_import_warn_message">The selected file will become this vault\u2019s key file (the second unlock factor):\n- The vault will be re-derived and saved with "master password + this key file";\n- The previously bound key file will no longer unlock this vault;\n- After the import, verify the new credentials unlock the vault before disposing of the old key file.</string>
+    <string name="dbset_keyfile_import_confirm">Confirm import</string>
     <string name="dbset_import_dialog_title">Choose import source</string>
     <string name="dbset_import_preparing">Parsing %1$s data...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>

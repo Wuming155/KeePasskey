@@ -18,10 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderShared
-import androidx.compose.material.icons.filled.Upload
-import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -100,14 +97,17 @@ internal fun DatabaseActionRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    /** ISSUE-P3-436：临界写进行中禁用入口（改绑 Argon2 重派生期间不可再次触发） */
+    enabled: Boolean = true
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             // ISSUE-P3-358 AC④：操作行补 Role.Button（原裸 clickable 无可播报角色）
-            .clickable(onClick = onClick, role = Role.Button)
+            .clickable(enabled = enabled, onClick = onClick, role = Role.Button)
+            .alpha(if (enabled) 1f else 0.5f)
             .padding(vertical = 6.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -330,49 +330,12 @@ internal fun DatabaseExtensionsCard(
     }
 }
 
-/** 4. 数据导入与导出 (KP2A 特性) */
-@Composable
-internal fun DatabaseImportExportCard(
-    onImportClick: () -> Unit,
-    onExportClick: () -> Unit,
-    onKeyFileExportClick: () -> Unit
-) {
-    BentoCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            DatabaseActionRow(
-                icon = Icons.Default.Download,
-                title = stringResource(R.string.dbset_import_title),
-                subtitle = stringResource(R.string.dbset_import_sub),
-                onClick = onImportClick
-            )
-
-            DatabaseActionRow(
-                icon = Icons.Default.Upload,
-                title = stringResource(R.string.dbset_export_title),
-                subtitle = stringResource(R.string.dbset_export_sub),
-                onClick = onExportClick
-            )
-
-            DatabaseActionRow(
-                icon = Icons.Default.VpnKey,
-                title = stringResource(R.string.dbset_keyfile_export_title),
-                subtitle = stringResource(R.string.dbset_keyfile_export_sub),
-                onClick = onKeyFileExportClick
-            )
-        }
-    }
-}
-
 /**
- * 5. 完整性与高级规则 (KP2A 特性)：TAN 一次性失效与重复 UUID 检查
+ * 4. 数据导入与导出 (KP2A 特性)
  *
- * ISSUE-P3-65 整改：两个开关此前可拨动但既无持久化也无任何行为消费方（假开关）。
- * 在补齐真实语义前如实禁用交互并以「暂不支持」标注，checked 恒为 false，
- * 不再呈现「已开启」的假状态。
- * （2026-09-12 文案收口：原「即将支持」隐含路线图承诺但无实施计划，改为「暂不支持」如实陈述现状。）
+ * ISSUE-P3-436：本卡整体迁出至 `DatabaseImportExportCard.kt`（同包独立文件）——
+ * 导入密钥文件直达改绑入口（SAF 选取 + 二次确认 + 待选字节持有态）并入该卡后，
+ * 渲染面 + 敏感态合计超出本文件行数闸门余量，按仓内下沉范式整卡搬移、逐字未改。
  */
 @Composable
 internal fun DatabaseIntegrityCard() {

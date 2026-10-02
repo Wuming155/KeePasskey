@@ -21,8 +21,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.importer.ImportSource
+import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.importer.ImportUiState
+import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
 import com.keepasskey.app.ui.screens.settings.ExportTicket
@@ -55,6 +57,13 @@ fun DatabaseSettingsScreen(
     // ISSUE-P3-73：通用明文 CSV 导出（同明文 XML 语义，需二次确认）
     onExportCsv: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     onExportKeyFile: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
+    // ISSUE-P3-436：导入密钥文件（改绑第二因子直达入口；SAF 读取走全仓唯一 KeyFileAccess 通道，
+    // 提交复用改主密钥任务的仅改绑分支 changeKeyFileOnly，含忙守卫与记忆位置同步）
+    onReadKeyFile: suspend (String) -> KeyFileReadResult = { _ -> KeyFileReadResult.Unreadable },
+    onKeyFileImport: (ChangeKeyFileIntent) -> Unit = {},
+    keyFileImportBusy: Boolean = false,
+    keyFileImportFeedback: UiMessage? = null,
+    onClearKeyFileImportFeedback: () -> Unit = {},
     onInstallTemplates: () -> Unit = {},
     // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）。
     // 状态由 VaultImportController 的 StateFlow 上抬，本屏只透传与呈现，不含业务逻辑。
@@ -208,7 +217,13 @@ fun DatabaseSettingsScreen(
                     onKeyFileExportClick = {
                         // TASK-13 整改：呼起 SAF 另存为，会话绑定密钥文件经仓库真实导出
                         exportKeyFileLauncher.launch("keepasskey.keyx")
-                    }
+                    },
+                    // ISSUE-P3-436：导入密钥文件（选取 / 确认 / 反馈在卡内闭环）
+                    onReadKeyFile = onReadKeyFile,
+                    onKeyFileImport = onKeyFileImport,
+                    keyFileImportBusy = keyFileImportBusy,
+                    keyFileImportFeedback = keyFileImportFeedback,
+                    onClearKeyFileImportFeedback = onClearKeyFileImportFeedback
                 )
             }
 
