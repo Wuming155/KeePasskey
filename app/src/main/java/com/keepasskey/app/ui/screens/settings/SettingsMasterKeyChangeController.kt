@@ -5,6 +5,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,13 +43,19 @@ internal data class MasterKeyChangeTaskState(
  * 未装配 / 单测），同任务内串行执行——此时新密码仍在入参数组中存活（`finally` 才清零），
  * 是唯一能以新密码重封印的窗口；重封印任何失败都 fail-safe（不影响已成功的改密回执），
  * 且不改变 busy 语义（对话框在 BiometricPrompt 收起后才回落）。
+ *
+ * ISSUE-P3-434：**改绑/解绑成功后**同步「记住的密钥文件位置」（[keyFileAccess]，可空 =
+ * 未装配 / 单测）——`Use` 按偏好与持久授权登记新来源或清除旧记录，`Remove` 清除记录；
+ * 记忆记录是冷启动记忆恢复与指纹现读链（P1-431 第③步）的唯一指向，陈旧记录必须清除。
  */
 internal class SettingsMasterKeyChangeController(
     private val repository: VaultRepository,
     private val scope: CoroutineScope,
     /** 忙守卫 + ISSUE-P2-398：改密成功后的重封印挂点（activity 宿主由 UI 层透传；null 时不重封印）；
      * ISSUE-P3-430：密码入参可为 null = 密码分量未变（仅改绑密钥文件，由会话快照封印） */
-    private val resealAfterChange: (suspend (FragmentActivity?, CharArray?) -> Unit)? = null
+    private val resealAfterChange: (suspend (FragmentActivity?, CharArray?) -> Unit)? = null,
+    /** ISSUE-P3-434：记忆记录同步通道（生产 = `SafKeyFileAccess`；null 时不同步，单测可注入假实现） */
+    private val keyFileAccess: KeyFileAccess? = null
 ) {
 
     private val mutableState = MutableStateFlow(MasterKeyChangeTaskState())
@@ -65,6 +72,8 @@ internal class SettingsMasterKeyChangeController(
      * ISSUE-P3-430：[newPasswordChars] 为**空数组** = 密码分量不变，走
      * [VaultRepository.changeKeyFileOnly]（仅改绑密钥文件；此时 [keyFileIntent] 必须非
      * `Keep`，否则无任何改动——同步拒绝并留痕，不产生假回执）；重封印入参对应传 null。
+     * ISSUE-P3-434：成功后同步「记住的密钥文件位置」（[syncRememberedKeyFile]），
+     * 在重封印（可能等待 BiometricPrompt 用户授权）之前完成——纯偏好层 IO，不阻塞用户。
      */
     fun submit(
         newPasswordChars: CharArray,
@@ -100,6 +109,8 @@ internal class SettingsMasterKeyChangeController(
                     )
                 }
                 if (result is KdbxResult.Success) {
+                    // ISSUE-P3-434：记忆记录必须与新绑定的密钥文件一致（先于重封印）
+                    syncRememberedKeyFile(keyFileIntent)
                     resealAfterChange?.invoke(activity, newPasswordChars.takeIf { !keepPassword })
                 }
             } finally {
@@ -107,6 +118,36 @@ internal class SettingsMasterKeyChangeController(
                 keyFileIntent.eraseBorrowedBytes()
                 mutableState.update { it.copy(isChanging = false) }
             }
+        }
+    }
+
+    /**
+     * 改绑 / 解绑成功后同步「记住的密钥文件位置」（ISSUE-P3-434）。
+     *
+     * 与解锁页 `rememberKeyFileOnSuccess` 同口径（ISSUE-P3-04）：
+     * - 偏好关闭 → 清除记录（不留任何密钥文件元数据）；
+     * - `Use`：偏好开启 + 来源 Uri 非空 + 对其取得**持久化读授权** → 登记新来源；
+     *   任一不满足 → 清除旧记录（旧记录指向已解绑的文件，留存必然误导下次冷启动）；
+     * - `Remove` → 清除记录（改后库无第二因子）；
+     * - `Keep` → 不动（密钥文件未变，记录仍有效）。
+     *
+     * 全程只触碰 Uri / 显示名（非密钥元数据）；任何失败都不影响已成功的改密回执。
+     */
+    private suspend fun syncRememberedKeyFile(intent: ChangeKeyFileIntent) {
+        val access = keyFileAccess ?: return
+        if (!access.isRememberEnabled()) {
+            access.forget()
+            return
+        }
+        when (intent) {
+            is ChangeKeyFileIntent.Use ->
+                if (intent.sourceUri.isNotBlank() && access.persistReadPermission(intent.sourceUri)) {
+                    access.remember(intent.sourceUri, intent.displayName)
+                } else {
+                    access.forget()
+                }
+            ChangeKeyFileIntent.Remove -> access.forget()
+            ChangeKeyFileIntent.Keep -> Unit
         }
     }
 

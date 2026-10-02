@@ -91,6 +91,14 @@ sealed interface ChangeKeyFileIntent {
      * [bytes] 为**借用语义**：与 [CreateKeyFileFactor.Existing] 同一口径——
      * 实现方只读取（派生复合密钥并克隆写入会话缓存），不持有引用、不擦除；
      * 调用方用毕必须在 `finally` 中显式 `fill(0)`。刻意不做 `data class`（理由同上）。
+     *
+     * [sourceUri] / [displayName] 为**非密钥元数据**（ISSUE-P3-434）：SAF 来源定位与
+     * 文档显示名，供提交成功后同步「记住的密钥文件位置」（P3-04 记忆记录）——
+     * 缺省空串保既有构造点（单测 / 无记忆语义的调用方）兼容。
      */
-    class Use(val bytes: ByteArray) : ChangeKeyFileIntent
+    class Use(
+        val bytes: ByteArray,
+        val sourceUri: String = "",
+        val displayName: String = ""
+    ) : ChangeKeyFileIntent
 }

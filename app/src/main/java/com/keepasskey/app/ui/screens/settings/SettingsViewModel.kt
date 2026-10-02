@@ -150,7 +150,7 @@ class SettingsViewModel @Inject constructor(
 
     /** 开关动作即时状态（验证中 / 一次性反馈），经投影层并入 [uiState] */
     private val biometricToggleState = biometricGate.toggleState
-    private val masterKeyChange = SettingsMasterKeyChangeController(vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange)
+    private val masterKeyChange = SettingsMasterKeyChangeController(vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange, keyFileAccess) // ISSUE-P3-434：第4参＝改绑/解绑成功后同步「记住的密钥文件位置」
 
     // P2-354/P2-398/P3-428/P3-430 改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
     internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange

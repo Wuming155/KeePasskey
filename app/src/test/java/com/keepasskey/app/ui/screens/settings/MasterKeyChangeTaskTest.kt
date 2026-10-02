@@ -16,6 +16,9 @@ import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
+import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
+import com.keepasskey.app.ui.screens.unlock.RememberedKeyFile
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CompletableDeferred
@@ -128,10 +131,10 @@ class MasterKeyChangeTaskTest {
         val repository = FakeVaultRepository()
         val resealCalls = mutableListOf<Pair<FragmentActivity?, CharArray>>()
         var intactAtReseal = false
-        val controller = SettingsMasterKeyChangeController(repository, this) { activity, chars ->
+        val controller = SettingsMasterKeyChangeController(repository, this, resealAfterChange = { activity, chars ->
             intactAtReseal = chars?.all { it != '0' } == true
             resealCalls.add(activity to chars!!.copyOf())
-        }
+        })
 
         val password = "Reseal-New-Pass#1".toCharArray()
         controller.submit(password, ChangeKeyFileIntent.Keep, HOST_ACTIVITY)
@@ -155,9 +158,9 @@ class MasterKeyChangeTaskTest {
                 KdbxResult.Failure(IllegalStateException("boom"), "改密失败")
         }
         var resealCalls = 0
-        val controller = SettingsMasterKeyChangeController(repository, this) { _, _ ->
+        val controller = SettingsMasterKeyChangeController(repository, this, resealAfterChange = { _, _ ->
             resealCalls++
-        }
+        })
 
         val password = "Should-Not-Reseal".toCharArray()
         controller.submit(password, ChangeKeyFileIntent.Keep, HOST_ACTIVITY)
@@ -219,9 +222,9 @@ class MasterKeyChangeTaskTest {
                 return KdbxResult.Success(Unit)
             }
         }
-        val controller = SettingsMasterKeyChangeController(repository, this) { _, pwd ->
+        val controller = SettingsMasterKeyChangeController(repository, this, resealAfterChange = { _, pwd ->
             resealPasswords.add(pwd?.copyOf())
-        }
+        })
 
         // 留空密码 + Use：必须走 changeKeyFileOnly，重封印收到 null（密码分量未变）
         val bytes = ByteArray(4) { 0x22 }
@@ -237,6 +240,122 @@ class MasterKeyChangeTaskTest {
         controller.submit(CharArray(0), ChangeKeyFileIntent.Keep)
         advanceUntilIdle()
         assertEquals("空提交不得进入任何通道", 1, changeKeyFileOnlyCalls.size)
+    }
+
+    // ── ISSUE-P3-434：改绑/解绑成功后同步「记住的密钥文件位置」 ────────────
+
+    @Test
+    fun `改绑成功后记忆更新为新来源、解绑成功后记忆清除`() = runTest {
+        val access = FakeKeyFileAccess().apply {
+            remembered = RememberedKeyFile("old://keyfile", "old.pem")
+        }
+        val controller = SettingsMasterKeyChangeController(
+            FakeVaultRepository(), this, keyFileAccess = access
+        )
+
+        val bytes = ByteArray(4) { 0x33 }
+        controller.submit(CharArray(0), ChangeKeyFileIntent.Use(bytes, "new://keyfile", "new.pem"))
+        advanceUntilIdle()
+        assertEquals(
+            "改绑成功后记忆必须指向新来源（冷启动恢复与指纹现读据此读新文件）",
+            RememberedKeyFile("new://keyfile", "new.pem"),
+            access.remembered
+        )
+        assertEquals(
+            "必须为新来源申请持久化读授权（否则下次冷启动授权校验即降级）",
+            listOf("new://keyfile"),
+            access.persistRequests
+        )
+        assertTrue("借用字节必须清零", bytes.all { it == 0.toByte() })
+
+        controller.submit(CharArray(0), ChangeKeyFileIntent.Remove)
+        advanceUntilIdle()
+        assertNull("解绑成功后记忆必须清除（改后库无第二因子）", access.remembered)
+    }
+
+    @Test
+    fun `Keep不改密钥文件时记忆原样保留`() = runTest {
+        val old = RememberedKeyFile("old://keyfile", "old.pem")
+        val access = FakeKeyFileAccess().apply { remembered = old }
+        val controller = SettingsMasterKeyChangeController(
+            FakeVaultRepository(), this, keyFileAccess = access
+        )
+
+        controller.submit("Keep-Cred#1".toCharArray(), ChangeKeyFileIntent.Keep)
+        advanceUntilIdle()
+        assertEquals("Keep 意图不触碰记忆记录（密钥文件未变，记录仍有效）", old, access.remembered)
+        assertTrue("Keep 不得扩大持久授权面", access.persistRequests.isEmpty())
+    }
+
+    @Test
+    fun `改绑失败不动记忆，偏好关闭授权失败与Uri缺失一律清旧记录`() = runTest {
+        val failing = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun changeKeyFileOnly(
+                keyFileIntent: ChangeKeyFileIntent
+            ): KdbxResult<Unit> = KdbxResult.Failure(IllegalStateException("boom"), "仅改绑失败")
+        }
+        val intact = FakeKeyFileAccess().apply {
+            remembered = RememberedKeyFile("old://keyfile", "old.pem")
+        }
+        SettingsMasterKeyChangeController(failing, this, keyFileAccess = intact)
+            .submit(CharArray(0), ChangeKeyFileIntent.Use(ByteArray(4), "new://keyfile", "new.pem"))
+        advanceUntilIdle()
+        assertEquals(
+            "改密失败路径不得触碰记忆记录（改绑并未发生）",
+            RememberedKeyFile("old://keyfile", "old.pem"),
+            intact.remembered
+        )
+        assertTrue("失败路径不得申请持久化授权", intact.persistRequests.isEmpty())
+
+        // 偏好关闭：无论意图为何，旧记录一律清除（不留密钥文件元数据）
+        val disabled = FakeKeyFileAccess(rememberEnabled = false).apply {
+            remembered = RememberedKeyFile("old://keyfile", "old.pem")
+        }
+        SettingsMasterKeyChangeController(FakeVaultRepository(), this, keyFileAccess = disabled)
+            .submit(CharArray(0), ChangeKeyFileIntent.Use(ByteArray(4), "new://keyfile", "new.pem"))
+        advanceUntilIdle()
+        assertNull("偏好关闭必须清除旧记录（与解锁页 rememberKeyFileOnSuccess 同口径）", disabled.remembered)
+
+        // 持久授权不可得：清旧记录（新来源无法在冷启动恢复，旧来源指向已解绑文件）
+        val noPermission = FakeKeyFileAccess(persistPermission = false).apply {
+            remembered = RememberedKeyFile("old://keyfile", "old.pem")
+        }
+        SettingsMasterKeyChangeController(FakeVaultRepository(), this, keyFileAccess = noPermission)
+            .submit(CharArray(0), ChangeKeyFileIntent.Use(ByteArray(4), "new://keyfile", "new.pem"))
+        advanceUntilIdle()
+        assertNull("授权不可得必须清旧记录，绝不留陈旧指向", noPermission.remembered)
+
+        // Uri 缺失（无记忆语义的构造点）：同样清旧记录
+        val blankUri = FakeKeyFileAccess().apply {
+            remembered = RememberedKeyFile("old://keyfile", "old.pem")
+        }
+        SettingsMasterKeyChangeController(FakeVaultRepository(), this, keyFileAccess = blankUri)
+            .submit(CharArray(0), ChangeKeyFileIntent.Use(ByteArray(4)))
+        advanceUntilIdle()
+        assertNull("来源 Uri 缺失必须清旧记录", blankUri.remembered)
+    }
+
+    private class FakeKeyFileAccess(
+        private val rememberEnabled: Boolean = true,
+        private val persistPermission: Boolean = true
+    ) : KeyFileAccess {
+        var remembered: RememberedKeyFile? = null
+        val persistRequests = mutableListOf<String>()
+
+        override suspend fun isRememberEnabled(): Boolean = rememberEnabled
+        override suspend fun read(uri: String): KeyFileReadResult = KeyFileReadResult.Unreadable
+        override suspend fun persistReadPermission(uri: String): Boolean {
+            persistRequests.add(uri)
+            return persistPermission
+        }
+        override suspend fun hasPersistedReadPermission(uri: String): Boolean = persistPermission
+        override suspend fun loadRemembered(): RememberedKeyFile? = remembered
+        override suspend fun remember(uri: String, displayName: String) {
+            remembered = RememberedKeyFile(uri, displayName)
+        }
+        override suspend fun forget() {
+            remembered = null
+        }
     }
 
     private suspend fun buildViewModel(repository: VaultRepository): SettingsViewModel {

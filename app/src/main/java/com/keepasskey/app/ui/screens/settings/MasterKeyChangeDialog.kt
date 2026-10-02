@@ -98,7 +98,7 @@ internal fun MasterKeyChangeDialog(
             when (val outcome = onReadKeyFile(uri.toString())) {
                 is KeyFileReadResult.Success -> {
                     pickedKeyFile?.erase()
-                    pickedKeyFile = PickedKeyFile(outcome.bytes, outcome.displayName)
+                    pickedKeyFile = PickedKeyFile(outcome.bytes, outcome.displayName, uri.toString())
                     keyFileReadFailed = false
                 }
                 // 「读不到」分型一律显式反馈，绝不静默当成功（fail-closed，ISSUE-P3-04 口径）
@@ -126,8 +126,10 @@ internal fun MasterKeyChangeDialog(
     // 其余两态不该残留已选文件，就地擦除兜底
     fun intentOfChoice(): ChangeKeyFileIntent = when (keyFileChoice) {
         KeyFileChoice.KEEP -> ChangeKeyFileIntent.Keep
-        KeyFileChoice.USE -> pickedKeyFile?.let { ChangeKeyFileIntent.Use(it.bytes) }
-            ?: ChangeKeyFileIntent.Keep
+        // ISSUE-P3-434：来源 Uri + 显示名随意图上行（非密钥元数据），供成功后同步记忆记录
+        KeyFileChoice.USE -> pickedKeyFile?.let {
+            ChangeKeyFileIntent.Use(it.bytes, it.sourceUri, it.displayName)
+        } ?: ChangeKeyFileIntent.Keep
         KeyFileChoice.REMOVE -> ChangeKeyFileIntent.Remove
     }
 
@@ -296,10 +298,16 @@ internal enum class KeyFileChoice { KEEP, USE, REMOVE }
 
 /**
  * 已读取的用户选定密钥文件（ISSUE-P3-428）。
- * [bytes] 为借用语义：换选、关闭路径由对话框就地清零，提交时所有权随意图移交。
+ * [bytes] 为借用语义：换选、关闭路径由对话框就地清零，提交时所有权随意图移交；
+ * [sourceUri] / [displayName] 为非密钥元数据，随 [ChangeKeyFileIntent.Use] 上行，
+ * 供提交成功后同步「记住的密钥文件位置」（ISSUE-P3-434）。
  * （ISSUE-P3-433：`internal` 供同包渲染面 [MasterKeyFileChoiceSection] 作参数类型。）
  */
-internal class PickedKeyFile(val bytes: ByteArray, val displayName: String) {
+internal class PickedKeyFile(
+    val bytes: ByteArray,
+    val displayName: String,
+    val sourceUri: String
+) {
     fun erase() {
         bytes.fill(0)
     }
