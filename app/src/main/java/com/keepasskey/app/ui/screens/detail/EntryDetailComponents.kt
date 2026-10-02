@@ -71,7 +71,7 @@ internal fun SectionTitle(@StringRes textRes: Int, modifier: Modifier = Modifier
  *
  * ISSUE-P2-353 AC③：URL 文本行可点击——与「打开网址」按钮共用 [rememberOpenUrlAction]
  * （http(s) 呼起浏览器；失败 / 非 http(s) 回退复制并如实提示）。[onShowMessage] 缺省为
- * null 时执行器回退 Toast，调用方签名无需变化。
+ * null 时执行器改发全局 Snackbar 通道（ISSUE-P3-446），调用方签名无需变化。
  */
 @Composable
 internal fun EntryHeaderSection(

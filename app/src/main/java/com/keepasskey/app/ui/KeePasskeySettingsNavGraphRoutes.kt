@@ -278,8 +278,7 @@ internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController
             onListDensitySelected = settingsViewModel::setListDensity,
             onAutoActivateSearchOnOpenToggle = settingsViewModel::setAutoActivateSearchOnOpen,
             onSearchMatchModeSelected = settingsViewModel::setSearchMatchMode,
-            onShowAuthenticatorTabToggle = settingsViewModel::setShowAuthenticatorTab,
-            onShowGeneratorTabToggle = settingsViewModel::setShowGeneratorTab
+            onBottomNavOrderChange = settingsViewModel::setBottomNavOrder
         )
     }
 }

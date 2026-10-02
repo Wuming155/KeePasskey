@@ -394,8 +394,8 @@ class SettingsViewModel @Inject constructor(
     fun setHideFabOnScroll(enabled: Boolean) = preferences.setHideFabOnScroll(enabled)
     fun setHapticFeedbackEnabled(enabled: Boolean) = preferences.setHapticFeedbackEnabled(enabled)
     fun setSyncOnColdStart(enabled: Boolean) = preferences.setSyncOnColdStart(enabled)
-    fun setShowAuthenticatorTab(enabled: Boolean) = preferences.setShowAuthenticatorTab(enabled)
-    fun setShowGeneratorTab(enabled: Boolean) = preferences.setShowGeneratorTab(enabled)
+    /** ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化配置（有序可见 Tab 名单） */
+    fun setBottomNavOrder(order: List<String>) = preferences.setBottomNavOrder(order)
 
     // ===== 安全锁定规则控制 =====
     fun setLockWhenScreenOff(enabled: Boolean) = extendedPreferences.setLockWhenScreenOff(enabled)

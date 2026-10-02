@@ -5,12 +5,14 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
+import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import javax.inject.Inject
@@ -37,7 +39,9 @@ import kotlinx.coroutines.launch
  * - SEND 的文字 extras（EXTRA_TEXT）一律忽略，只取 `EXTRA_STREAM` 的二进制对象。
  *
  * 转交主界面后落在解锁页（`importExternalDatabase` 已把新库置为活动库）；
- * 无法解析显示名的对象按非法输入拒绝。导入失败以 Toast 如实提示后仍回落主界面。
+ * 无法解析显示名的对象按非法输入拒绝。导入失败如实提示后仍回落主界面
+ * （ISSUE-P3-446：提示改发全局 Snackbar 通道——本页随即拉起 `MainActivity`，
+ * 外壳宿主组合后即消费缓冲中的事件；不再用 Toast）。
  */
 @AndroidEntryPoint
 class OpenVaultEntryActivity : FragmentActivity() {
@@ -54,7 +58,7 @@ class OpenVaultEntryActivity : FragmentActivity() {
         val displayName = uri?.let { resolveDisplayName(it) }
         if (uri == null || displayName == null || !displayName.endsWith(".kdbx", ignoreCase = true)) {
             AppLog.i(TAG, "外部打开请求被拒绝：非 KDBX 库文件")
-            toast(R.string.external_open_invalid)
+            notifyUi(R.string.external_open_invalid)
             launchMainAndFinish()
             return
         }
@@ -64,7 +68,7 @@ class OpenVaultEntryActivity : FragmentActivity() {
             if (result is KdbxResult.Failure) {
                 // 不透传异常 message（可能含路径形态）；仅记录类型
                 AppLog.w(TAG, "外部打开登记失败: ${result.error.javaClass.simpleName}")
-                toast(R.string.external_open_failed)
+                notifyUi(R.string.external_open_failed)
             }
             launchMainAndFinish()
         }
@@ -104,8 +108,13 @@ class OpenVaultEntryActivity : FragmentActivity() {
         finish()
     }
 
-    private fun toast(resId: Int) {
-        Toast.makeText(this, resId, Toast.LENGTH_LONG).show()
+    /**
+     * ISSUE-P3-446：反馈改发全局 Snackbar 通道（文案不变）。
+     * 本页立即 `launchMainAndFinish()`：事件缓冲于 `AppSnackbarChannel`（容量 64 + DROP_OLDEST），
+     * `MainActivity` 外壳组合后由全局宿主即时消费——主界面既存则当屏显示，冷启动则落解锁页后显示。
+     */
+    private fun notifyUi(resId: Int) {
+        AppSnackbarChannel.trySend(AppSnackbarEvent(UiMessage(resId)))
     }
 
     private companion object {

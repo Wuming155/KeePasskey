@@ -390,6 +390,8 @@
     <string name="unlock_attempts_remaining">%1$d attempts remaining</string>
     <!-- ISSUE-P2-355 AC3: one-time notice on the unlock screen after a lock discarded unsaved edits -->
     <string name="unlock_unsaved_edits_discarded">Unsaved changes from last time were discarded</string>
+    <!-- ISSUE-P3-438: one-time neutral notice on the unlock screen when the process died with the vault still unlocked -->
+    <string name="unlock_last_session_abnormal_close">The app did not close properly last time; the vault was locked automatically</string>
     <string name="unlock_biometric_title">Biometric Unlock</string>
     <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
     <string name="unlock_biometric_enroll_title">Enable Biometric Unlock</string>
@@ -954,10 +956,11 @@
     <string name="theme_hide_fab_title">Hide create button on scroll</string>
     <string name="theme_hide_fab_sub">Collapse the create button while the list scrolls</string>
     <string name="theme_section_navbar">Bottom navigation</string>
-    <string name="theme_show_auth_tab_title">Show authenticator tab</string>
-    <string name="theme_show_auth_tab_sub">Show the two-factor entry in the bottom bar</string>
-    <string name="theme_show_gen_tab_title">Show generator tab</string>
-    <string name="theme_show_gen_tab_sub">Show the password generator entry in the bottom bar</string>
+    <!-- ISSUE-P3-443: combined bottom-tab order and visibility -->
+    <string name="theme_nav_tabs_desc">Use the arrows to reorder tabs; toggle to show or hide</string>
+    <string name="theme_nav_tab_pinned_sub">Always shown, cannot be hidden</string>
+    <string name="cd_move_tab_up">Move up</string>
+    <string name="cd_move_tab_down">Move down</string>
     <string name="theme_section_nav_search">Navigation &amp; search</string>
     <string name="theme_group_in_search_title">Group in search results</string>
     <string name="theme_group_in_search_sub">Annotate the folder of each entry in global search</string>

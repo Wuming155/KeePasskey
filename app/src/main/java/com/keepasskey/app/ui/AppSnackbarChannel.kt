@@ -4,6 +4,8 @@ import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
@@ -43,6 +45,21 @@ object AppSnackbarChannel {
     /** 发布一条消息（非挂起；缓冲满时丢弃最旧一条以保证调用方永不阻塞）。 */
     fun trySend(event: AppSnackbarEvent) {
         channel.trySend(event)
+    }
+
+    private val _hostActive = MutableStateFlow(false)
+
+    /**
+     * ISSUE-P3-446：全局宿主当前是否在组合中（即发入本通道的消息能否被**即时**显示）。
+     * 由 [AppGlobalSnackbarHost] 进入 / 离开组合时置位 / 复位。
+     * 非宿主可达场景（无前台主界面组合）的调用方——如剪贴板定时清空提示——
+     * 据此改走 Toast 兜底，避免消息滞留缓冲、迟至下次打开主界面才弹出陈旧提示。
+     */
+    val hostActive: StateFlow<Boolean> get() = _hostActive
+
+    /** 仅供 [AppGlobalSnackbarHost] 在组合进出时维护 [hostActive]；外部调用方不得使用。 */
+    fun markHostActive(active: Boolean) {
+        _hostActive.value = active
     }
 
     private const val CHANNEL_CAPACITY = 64

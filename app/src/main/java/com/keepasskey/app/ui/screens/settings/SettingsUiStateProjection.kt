@@ -224,8 +224,7 @@ internal fun buildSettingsUiState(
     listDensity = extState.listDensity,
     autoActivateSearchOnOpen = extState.autoActivateSearchOnOpen,
     searchMatchMode = extState.searchMatchMode,
-    showAuthenticatorTab = userSettings.showAuthenticatorTab,
-    showGeneratorTab = userSettings.showGeneratorTab,
+    bottomNavOrder = userSettings.bottomNavOrder,
 
     // 6. TOTP 规范字段映射
     totpSeedFieldName = extState.totpSeedFieldName,

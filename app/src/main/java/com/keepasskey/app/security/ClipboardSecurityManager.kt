@@ -14,6 +14,9 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.session.SessionLockObserver
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -274,16 +277,17 @@ class ClipboardSecurityManager @Inject constructor(
     }
 
     /**
-     * ISSUE-P3-352 AC③：定时擦除后的可见反馈（文案口径参照 Kp2a "Clipboard cleared."）。
-     * 选 Toast 而非 Snackbar：清空时刻可能落在任意界面（十个 Screen 各持 SnackbarHost、
-     * 无全局宿主），Toast 与 Kp2a 同型、零接线成本；[scope] 恒为主线程，满足 Toast 线程要求。
+     * ISSUE-P3-352 AC③：定时擦除后的可见反馈（文案参照 Kp2a "Clipboard cleared."）。
+     * ISSUE-P3-446：全局宿主可达即发 Snackbar；不可达**如实保留 Toast 兜底**
+     * （发通道会滞留缓冲、迟至下次开主界面才弹出陈旧提示；后台 Toast 本就被系统抑制）。
+     * 熄屏 / 后台 / 锁定 / 冷启动对账路径仍刻意不提示：用户不在场。
      */
     private fun notifyClipboardCleared() {
-        Toast.makeText(
-            context,
-            context.getString(R.string.clipboard_auto_cleared),
-            Toast.LENGTH_SHORT
-        ).show()
+        if (AppSnackbarChannel.hostActive.value) {
+            AppSnackbarChannel.trySend(AppSnackbarEvent(UiMessage(R.string.clipboard_auto_cleared)))
+        } else {
+            Toast.makeText(context, R.string.clipboard_auto_cleared, Toast.LENGTH_SHORT).show()
+        }
     }
 
     /**

@@ -69,6 +69,9 @@ class UnlockViewModel @Inject constructor(
     // ISSUE-P2-355 AC③：全局脏表单注册表（消费「锁定丢弃未保存编辑」一次性告知）。
     // nullable 仅用于纯 JVM 单测；生产 DI 注入 @Singleton 真现实例
     private val unsavedEditRegistry: com.keepasskey.app.security.UnsavedEditRegistry? = null,
+    // ISSUE-P3-438：会话开合跨进程标记（消费「上次会话未正常关闭」一次性轻提示）。
+    // nullable 仅用于纯 JVM 单测；生产 DI 注入 @Singleton 真实实例（MainApplication 冷启动初始化）
+    private val sessionCloseMarker: com.keepasskey.app.security.SessionCloseMarker? = null,
     // ISSUE-P1-429：封印 / 解封 keystore 密算的调度器（生产 DI 注入 @SealCryptoDispatcher = IO；
     // 默认值仅供未触 crypto 路径的既有 JVM 单测沿用，触路径的用例注入 TestDispatcher 保确定性）
     @com.keepasskey.app.di.SealCryptoDispatcher private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
@@ -139,6 +142,12 @@ class UnlockViewModel @Inject constructor(
         // 同一实例只呈现一次，下次真丢弃（再次锁定且编辑页脏）才会重新登记
         if (unsavedEditRegistry?.consumeDiscardNotice() == true) {
             _uiState.update { it.copy(unsavedEditsDiscardedNotice = true) }
+        }
+
+        // ISSUE-P3-438：上次会话未正常关闭的一次性轻提示——SessionCloseMarker 已在
+        // MainApplication 冷启动点取走持久化事实，此处仅消费内存态（幂等，二次调用恒 false）
+        if (sessionCloseMarker?.consumeAbnormalClose() == true) {
+            _uiState.update { it.copy(lastSessionAbnormalCloseNotice = true) }
         }
 
         viewModelScope.launch {

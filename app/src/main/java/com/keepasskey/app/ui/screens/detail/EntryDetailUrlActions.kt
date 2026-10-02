@@ -5,11 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.model.UiMessage
 
 /**
@@ -48,8 +49,8 @@ internal fun resolveOpenUrlAction(rawUrl: String): OpenUrlAction {
  * `startActivity` 走 [runCatching] 兜底：无浏览器可处理、URL 非法等一律回落复制分支，
  * 绝不向调用方抛裸异常（UI 层错误处理口径）。
  *
- * @param onShowMessage 反馈通道（详情页为 Snackbar 上行口）；null 时 [notify] 回退 Toast，
- *   保证「如实提示」在未接线的区域（如头部 Hero）也不丢。
+ * @param onShowMessage 反馈通道（详情页为 Snackbar 上行口）；null 时 [notify] 改发全局
+ *   Snackbar 通道（ISSUE-P3-446），保证「如实提示」在未接线的区域（如头部 Hero）也不丢。
  */
 internal fun executeOpenUrl(
     rawUrl: String,
@@ -59,7 +60,7 @@ internal fun executeOpenUrl(
     val url = rawUrl.trim()
     when (resolveOpenUrlAction(url)) {
         OpenUrlAction.MISSING ->
-            notify(UiMessage(R.string.detail_url_missing), context, onShowMessage)
+            notify(UiMessage(R.string.detail_url_missing), onShowMessage)
         OpenUrlAction.COPY_FALLBACK ->
             copyUrlWithNotice(url, context, onShowMessage)
         OpenUrlAction.LAUNCH -> {
@@ -67,7 +68,7 @@ internal fun executeOpenUrl(
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             }.isSuccess
             if (launched) {
-                notify(UiMessage(R.string.detail_opening_browser), context, onShowMessage)
+                notify(UiMessage(R.string.detail_opening_browser), onShowMessage)
             } else {
                 copyUrlWithNotice(url, context, onShowMessage)
             }
@@ -82,7 +83,7 @@ private fun copyUrlWithNotice(
     onShowMessage: ((UiMessage) -> Unit)?
 ) {
     copyUrlToClipboard(url, context)
-    notify(UiMessage(R.string.detail_url_fallback_copied), context, onShowMessage)
+    notify(UiMessage(R.string.detail_url_fallback_copied), onShowMessage)
 }
 
 /**
@@ -97,19 +98,14 @@ internal fun copyUrlToClipboard(url: String, context: Context) {
 
 private fun notify(
     message: UiMessage,
-    context: Context,
     onShowMessage: ((UiMessage) -> Unit)?
 ) {
     if (onShowMessage != null) {
         onShowMessage(message)
     } else {
-        // 未接 Snackbar 通道的区域以 Toast 兜底（仓内先例：ClipboardSecurityManager
-        // 的清空提示同样选 Toast——各 Screen 各持 SnackbarHost、无全局宿主）
-        Toast.makeText(
-            context,
-            context.getString(message.resId, *message.args.toTypedArray()),
-            Toast.LENGTH_SHORT
-        ).show()
+        // 未接 Snackbar 通道的区域改发全局宿主通道（ISSUE-P3-446 清退 Toast）：
+        // 本执行器只被主界面外壳内的组合调用，全局宿主必可达
+        AppSnackbarChannel.trySend(AppSnackbarEvent(message))
     }
 }
 

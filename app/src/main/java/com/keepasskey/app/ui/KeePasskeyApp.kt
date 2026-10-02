@@ -104,11 +104,9 @@ fun KeePasskeyApp() {
             val currentRoute = navBackStackEntry?.destination?.route
             val showBottomBar = BottomNavItem.isTopLevelRoute(currentRoute)
 
-            val visibleNavItems = remember(appSettings.showAuthenticatorTab, appSettings.showGeneratorTab) {
-                BottomNavItem.getVisibleItems(
-                    showAuthenticator = appSettings.showAuthenticatorTab,
-                    showGenerator = appSettings.showGeneratorTab
-                )
+            // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化——底栏 / 侧栏消费同一配置源
+            val visibleNavItems = remember(appSettings.bottomNavOrder) {
+                BottomNavItem.resolveVisibleItems(appSettings.bottomNavOrder)
             }
 
             val autoLockManager = (context as? com.keepasskey.app.MainActivity)?.autoLockManager
@@ -123,8 +121,7 @@ fun KeePasskeyApp() {
                 currentRoute = currentRoute,
                 autoLockManager = autoLockManager,
                 lockWhenNavigateBack = appSettings.lockWhenNavigateBack,
-                showAuthenticatorTab = appSettings.showAuthenticatorTab,
-                showGeneratorTab = appSettings.showGeneratorTab
+                visibleNavItems = visibleNavItems
             )
 
             AppShellScaffold(
@@ -189,16 +186,16 @@ internal fun nextThemeMode(themeMode: AppThemeMode): AppThemeMode = when (themeM
 /**
  * 用户关闭正在浏览的 Tab 时应回落的路由（§185 下沉为纯函数，可 JVM 单测）。
  *
- * 仅当「当前正停在该 Tab 且该 Tab 已被隐藏」时返回密码库路由，否则 null（不导航）。
+ * ISSUE-P3-443：可见性改由「有序可见 Tab 名单」解析出的 [visibleItems] 裁决——
+ * 仅当「当前正停在顶层 Tab 且该 Tab 已被隐藏」时返回密码库路由，否则 null（不导航）。
  */
 internal fun hiddenTabRedirectRoute(
     currentRoute: String?,
-    showAuthenticatorTab: Boolean,
-    showGeneratorTab: Boolean
-): String? = when {
-    currentRoute == Screen.Authenticator.route && !showAuthenticatorTab -> Screen.VaultList.route
-    currentRoute == Screen.Generator.route && !showGeneratorTab -> Screen.VaultList.route
-    else -> null
+    visibleItems: List<BottomNavItem>
+): String? {
+    if (currentRoute == null) return null
+    val isVisible = visibleItems.any { it.route == currentRoute }
+    return if (currentRoute in BottomNavItem.routes && !isVisible) Screen.VaultList.route else null
 }
 
 /**
@@ -250,15 +247,13 @@ private fun AppShellNavigationEffects(
     currentRoute: String?,
     autoLockManager: AutoLockManager?,
     lockWhenNavigateBack: Boolean,
-    showAuthenticatorTab: Boolean,
-    showGeneratorTab: Boolean
+    visibleNavItems: List<BottomNavItem>
 ) {
     // 若用户在设置中关闭了当前正在浏览的 Tab，平滑重定向回密码库
-    LaunchedEffect(currentRoute, showAuthenticatorTab, showGeneratorTab) {
+    LaunchedEffect(currentRoute, visibleNavItems) {
         hiddenTabRedirectRoute(
             currentRoute = currentRoute,
-            showAuthenticatorTab = showAuthenticatorTab,
-            showGeneratorTab = showGeneratorTab
+            visibleItems = visibleNavItems
         )?.let { fallback ->
             navController.navigate(fallback) {
                 popUpTo(navController.graph.findStartDestination().id) { inclusive = false }

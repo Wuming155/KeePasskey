@@ -194,8 +194,9 @@ data class SettingsUiState(
     val listDensity: ListDensity = ListDensity.NORMAL, // KP2A: 列表显示紧凑度
     val autoActivateSearchOnOpen: Boolean = false, // KP2A: 打开数据库后自动聚焦搜索栏
     val searchMatchMode: SearchMatchMode = SearchMatchMode.CONTAINS, // ISSUE-P3-309: 全文搜索匹配档
-    val showAuthenticatorTab: Boolean = true, // 是否在底部导航栏显示「验证码」
-    val showGeneratorTab: Boolean = true, // 是否在底部导航栏显示「密码生成器」
+    // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化配置——有序可见 Tab 名单
+    // （元素为 BottomNavTabNames 规范名；解析与排序语义见 BottomNavItem.resolveVisibleItems）
+    val bottomNavOrder: List<String> = com.keepasskey.app.data.repository.BottomNavTabNames.DEFAULT_ORDER,
 
     // 6. 两步验证与 TOTP 高级规范映射 (Tray TOTP / Custom Fields)
     val totpSeedFieldName: String = "TOTP Seed", // KP2A: 密钥种子字段名

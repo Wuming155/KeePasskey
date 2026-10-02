@@ -104,12 +104,8 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(syncOnColdStart = enabled) }
     }
 
-    override suspend fun setShowAuthenticatorTab(enabled: Boolean) {
-        settingsFlow.update { it.copy(showAuthenticatorTab = enabled) }
-    }
-
-    override suspend fun setShowGeneratorTab(enabled: Boolean) {
-        settingsFlow.update { it.copy(showGeneratorTab = enabled) }
+    override suspend fun setBottomNavOrder(order: List<String>) {
+        settingsFlow.update { it.copy(bottomNavOrder = order) }
     }
 
     /** ISSUE-P3-04：密钥文件「非密钥元数据」入内存流（与生产 DataStore 语义一致） */

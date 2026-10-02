@@ -34,7 +34,7 @@ import com.keepasskey.app.ui.screens.settings.SettingsUiState
  */
 
 /**
- * 4. 列表展示密度与排版（含底部导航栏页签开关）。
+ * 4. 列表展示密度与排版（含底栏 Tab「显隐 + 排序」一体化设置，ISSUE-P3-443）。
  *
  * ISSUE-P3-17：`listDensity` 已由 `ListDensityPresenter`/`ListDensitySpec` 真实驱动行高、内边距与字号。
  */
@@ -47,8 +47,7 @@ internal fun LazyListScope.themeListSection(
     onShowUrlInList: (Boolean) -> Unit,
     onHideFabOnScrollToggle: (Boolean) -> Unit,
     onHapticFeedbackToggle: (Boolean) -> Unit,
-    onShowAuthenticatorTabToggle: (Boolean) -> Unit,
-    onShowGeneratorTabToggle: (Boolean) -> Unit
+    onBottomNavOrderChange: (List<String>) -> Unit
 ) {
     item { ThemeSectionTitle(stringResource(R.string.theme_section_list)) }
 
@@ -116,18 +115,10 @@ internal fun LazyListScope.themeListSection(
                     color = MaterialTheme.colorScheme.primary
                 )
 
-                DisplayPrefRow(
-                    title = stringResource(R.string.theme_show_auth_tab_title),
-                    subtitle = stringResource(R.string.theme_show_auth_tab_sub),
-                    checked = uiState.showAuthenticatorTab,
-                    onCheckedChange = onShowAuthenticatorTabToggle
-                )
-
-                DisplayPrefRow(
-                    title = stringResource(R.string.theme_show_gen_tab_title),
-                    subtitle = stringResource(R.string.theme_show_gen_tab_sub),
-                    checked = uiState.showGeneratorTab,
-                    onCheckedChange = onShowGeneratorTabToggle
+                // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化（替代原两行显隐开关）
+                BottomNavTabOrderCard(
+                    orderNames = uiState.bottomNavOrder,
+                    onOrderChange = onBottomNavOrderChange
                 )
             }
         }

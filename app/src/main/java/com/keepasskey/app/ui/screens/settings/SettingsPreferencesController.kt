@@ -449,15 +449,10 @@ internal class SettingsPreferencesController(
         }
     }
 
-    fun setShowAuthenticatorTab(enabled: Boolean) {
+    /** ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化配置（有序可见 Tab 名单） */
+    fun setBottomNavOrder(order: List<String>) {
         scope.launch {
-            settingsRepository.setShowAuthenticatorTab(enabled)
-        }
-    }
-
-    fun setShowGeneratorTab(enabled: Boolean) {
-        scope.launch {
-            settingsRepository.setShowGeneratorTab(enabled)
+            settingsRepository.setBottomNavOrder(order)
         }
     }
 

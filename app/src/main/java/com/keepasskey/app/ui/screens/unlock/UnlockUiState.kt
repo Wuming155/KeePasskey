@@ -68,5 +68,9 @@ data class UnlockUiState(
     val quickUnlockDowngraded: Boolean = false,
     // ISSUE-P2-355 AC③：上次锁定时丢弃了未保存编辑——解锁页一次性告知
     // （UnlockViewModel.init 消费 UnsavedEditRegistry 后置位，随本页面生命周期呈现）
-    val unsavedEditsDiscardedNotice: Boolean = false
+    val unsavedEditsDiscardedNotice: Boolean = false,
+    // ISSUE-P3-438：上次进程死亡时会话仍处于打开态（未正常关闭）——解锁页一次性轻提示
+    // （UnlockViewModel.init 消费 SessionCloseMarker 后置位；仅异常退出呈现，
+    // 主动锁库 / 超时锁定不呈现；中性文案，不渲染为错误告警）
+    val lastSessionAbnormalCloseNotice: Boolean = false
 )

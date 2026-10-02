@@ -13,6 +13,22 @@ enum class AppLanguage(val label: String, val code: String) {
 }
 
 /**
+ * 底栏 Tab 名单的存储规范名（ISSUE-P3-443）。
+ *
+ * 值与 `com.keepasskey.app.ui.components.BottomNavItem` 枚举 `name` 一致；存储层不引 UI 类型，
+ * 借本常量收敛字面量（解析 / 排序语义在 UI 层 `BottomNavItem.resolveVisibleItems`）。
+ */
+object BottomNavTabNames {
+    const val VAULT = "VAULT"
+    const val AUTHENTICATOR = "AUTHENTICATOR"
+    const val GENERATOR = "GENERATOR"
+    const val SETTINGS = "SETTINGS"
+
+    /** 出厂默认：全部可见，枚举序 */
+    val DEFAULT_ORDER = listOf(VAULT, AUTHENTICATOR, GENERATOR, SETTINGS)
+}
+
+/**
  * 用户安全与外观设置模型
  */
 data class UserSettings(
@@ -47,9 +63,11 @@ data class UserSettings(
     val clipboardTimeoutSeconds: Int = 30,
     // 冷启动自动与云端同步 (杀死进程重新启动时自动触发)
     val syncOnColdStart: Boolean = true,
-    // 底部导航项可见性配置
-    val showAuthenticatorTab: Boolean = true,
-    val showGeneratorTab: Boolean = true,
+    // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化配置——**有序可见 Tab 名单**
+    // （元素为 [BottomNavTabNames] 规范名；不在名单中的 Tab 为隐藏；空 / 损坏名单由
+    // UI 解析层 `BottomNavItem.resolveVisibleItems` fail-safe 兜底）。
+    // 旧「show_authenticator_tab / show_generator_tab」布尔键由仓库层装载时迁移（RealSettingsRepository）。
+    val bottomNavOrder: List<String> = BottomNavTabNames.DEFAULT_ORDER,
     // ISSUE-P3-04：上次成功解锁使用的密钥文件「非密钥元数据」——SAF Uri 与文档显示名。
     // 绝不承载密钥文件字节或派生密钥；是否记忆由用户偏好开关
     // （ExtendedSettings.rememberKeyFileLocation，设置页「密钥文件策略」）控制，
@@ -99,8 +117,12 @@ interface SettingsRepository {
     suspend fun setHapticFeedbackEnabled(enabled: Boolean)
     suspend fun setClipboardTimeout(seconds: Int)
     suspend fun setSyncOnColdStart(enabled: Boolean)
-    suspend fun setShowAuthenticatorTab(enabled: Boolean)
-    suspend fun setShowGeneratorTab(enabled: Boolean)
+
+    /**
+     * ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化配置——持久化**有序可见 Tab 名单**
+     * （元素为 [BottomNavTabNames] 规范名，不在名单中的 Tab 即隐藏）。
+     */
+    suspend fun setBottomNavOrder(order: List<String>)
 
     /**
      * ISSUE-P3-04：记住上次成功解锁使用的密钥文件（仅 SAF Uri 与文档显示名，

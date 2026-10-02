@@ -56,8 +56,8 @@ fun ThemeSettingsScreen(
     onShowUrlInList: (Boolean) -> Unit = {},
     onHideFabOnScrollToggle: (Boolean) -> Unit = {},
     onHapticFeedbackToggle: (Boolean) -> Unit = {},
-    onShowAuthenticatorTabToggle: (Boolean) -> Unit = {},
-    onShowGeneratorTabToggle: (Boolean) -> Unit = {},
+    // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化回调（有序可见 Tab 名单）
+    onBottomNavOrderChange: (List<String>) -> Unit = {},
     // KP2A 扩展显示操作
     onMaskPasswordsDefaultToggle: (Boolean) -> Unit = {},
     onMaskTotpDefaultToggle: (Boolean) -> Unit = {},
@@ -110,8 +110,7 @@ fun ThemeSettingsScreen(
                 onShowUrlInList = onShowUrlInList,
                 onHideFabOnScrollToggle = onHideFabOnScrollToggle,
                 onHapticFeedbackToggle = onHapticFeedbackToggle,
-                onShowAuthenticatorTabToggle = onShowAuthenticatorTabToggle,
-                onShowGeneratorTabToggle = onShowGeneratorTabToggle
+                onBottomNavOrderChange = onBottomNavOrderChange
             )
 
             themeNavSearchSection(

@@ -66,6 +66,10 @@ class MainApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var clipboardSecurityManager: ClipboardSecurityManager
 
+    // ISSUE-P3-438：会话开合跨进程标记（冷启动一次性取走「上次异常关闭」事实后采集会话态）
+    @Inject
+    lateinit var sessionCloseMarker: com.keepasskey.app.security.SessionCloseMarker
+
     // ISSUE-P3-116：同步缓存销毁器（`cacheDir/sync` 的 KDBX 密文快照）。
     // 与 fileBinaryStore 一起构成「彻底退出应用」前的易失缓存清理面。
     @Inject
@@ -127,6 +131,9 @@ class MainApplication : Application(), Configuration.Provider {
         // ISSUE-P3-84：同时注册熄屏广播与「切到后台即清空」观察者（主线程冷启动点，幂等）。
         clipboardSecurityManager.initialize()
         clipboardSecurityManager.reconcileOnColdStart()
+        // ISSUE-P3-438：会话开合标记——必须在任何 StateFlow 采集启动前同步取走持久化值
+        //（时序契约见 SessionCloseMarker.initialize），否则「上次异常关闭」会被首值覆写冲掉
+        sessionCloseMarker.initialize()
         // ISSUE-P0-01 (ZT-01)：自动锁定守护下沉至进程级唯一冷启动点——
         // 应用存在 AutofillUnlockActivity / CredentialUnlockActivity 两条不经 MainActivity
         // 的独立冷启动入口，守护（ProcessLifecycleOwner + 熄屏广播）必须在进程创建时注册，

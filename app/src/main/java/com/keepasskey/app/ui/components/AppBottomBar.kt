@@ -37,35 +37,41 @@ import com.keepasskey.app.ui.navigation.Screen
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 
 /**
- * 底部导航栏项定义 (支持动态开关验证码与生成器入口)
+ * 底部导航栏项定义 (支持动态开关验证码与生成器入口；ISSUE-P3-443 起显隐与排序一体化可配)
  */
 enum class BottomNavItem(
     val route: String,
     val labelRes: Int,
+    /** ISSUE-P3-443：是否允许用户隐藏（密码库为隐藏回落目标、设置为常驻入口，二者固定显示） */
+    val canHide: Boolean,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
     VAULT(
         route = Screen.VaultList.route,
         labelRes = R.string.nav_vault,
+        canHide = false,
         selectedIcon = Icons.Filled.Key,
         unselectedIcon = Icons.Outlined.Key
     ),
     AUTHENTICATOR(
         route = Screen.Authenticator.route,
         labelRes = R.string.nav_authenticator,
+        canHide = true,
         selectedIcon = Icons.Filled.Security,
         unselectedIcon = Icons.Outlined.Security
     ),
     GENERATOR(
         route = Screen.Generator.route,
         labelRes = R.string.nav_generator,
+        canHide = true,
         selectedIcon = Icons.Filled.AutoAwesome,
         unselectedIcon = Icons.Outlined.AutoAwesome
     ),
     SETTINGS(
         route = Screen.Settings.route,
         labelRes = R.string.nav_settings,
+        canHide = false,
         selectedIcon = Icons.Filled.Settings,
         unselectedIcon = Icons.Outlined.Settings
     );
@@ -74,14 +80,28 @@ enum class BottomNavItem(
         val routes = entries.map { it.route }
         fun isTopLevelRoute(route: String?): Boolean = route in routes
 
-        fun getVisibleItems(showAuthenticator: Boolean, showGenerator: Boolean): List<BottomNavItem> {
-            return entries.filter { item ->
-                when (item) {
-                    AUTHENTICATOR -> showAuthenticator
-                    GENERATOR -> showGenerator
-                    else -> true
-                }
-            }
+        /**
+         * ISSUE-P3-443：由「有序可见 Tab 名单」（[com.keepasskey.app.data.repository.UserSettings.bottomNavOrder]，
+         * 元素为本枚举 `name`）解析底栏可见项——名单即显示顺序，不在名单中的 Tab 为隐藏。
+         *
+         * 兜底（fail-safe）：名单为空 / 全部非法时回落「全部可见、枚举序」；
+         * 密码库 Tab 是隐藏回落目标（`hiddenTabRedirectRoute`），任何配置下不得缺失，
+         * 缺失时回插队首。纯函数，JVM 单测直测。
+         */
+        fun resolveVisibleItems(orderNames: List<String>): List<BottomNavItem> {
+            val byName = entries.associateBy { it.name }
+            val ordered = orderNames.mapNotNull(byName::get).distinct()
+            if (ordered.isEmpty()) return entries.toList()
+            return if (VAULT in ordered) ordered else listOf(VAULT) + ordered
+        }
+
+        /**
+         * ISSUE-P3-443：设置页展示用**完整**序列——可见部分按配置顺序在前，
+         * 隐藏项按枚举序殿后（显隐 + 排序一体设置面的行序来源）。纯函数，JVM 单测直测。
+         */
+        fun displayOrderFor(orderNames: List<String>): List<BottomNavItem> {
+            val visible = resolveVisibleItems(orderNames)
+            return visible + entries.filter { it !in visible }
         }
     }
 }

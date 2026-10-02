@@ -397,6 +397,8 @@
     <string name="unlock_attempts_remaining">剩余 %1$d 次尝试</string>
     <!-- ISSUE-P2-355 AC③：锁定销毁未保存编辑后，解锁页一次性告知 -->
     <string name="unlock_unsaved_edits_discarded">上次未保存的改动已丢弃</string>
+    <!-- ISSUE-P3-438：上次进程死亡时库仍处于解锁态，解锁页一次性轻提示（文案如实中性，非错误告警） -->
+    <string name="unlock_last_session_abnormal_close">上次应用未正常关闭，密码库已自动锁定</string>
     <!-- 既有构建债顺手整改：values-en 存在此条翻译但默认 locale 缺失，lintVitalRelease 因此 fail（阻塞 assembleRelease） -->
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
@@ -966,10 +968,11 @@
     <string name="theme_hide_fab_title">滚动时隐藏创建按钮</string>
     <string name="theme_hide_fab_sub">列表滚动时自动收起「创建」悬浮按钮</string>
     <string name="theme_section_navbar">底部导航栏</string>
-    <string name="theme_show_auth_tab_title">显示验证码标签页</string>
-    <string name="theme_show_auth_tab_sub">在底部导航展示双重认证入口</string>
-    <string name="theme_show_gen_tab_title">显示生成器标签页</string>
-    <string name="theme_show_gen_tab_sub">在底部导航展示密码生成器入口</string>
+    <!-- ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化（替代原两行显隐开关） -->
+    <string name="theme_nav_tabs_desc">上下箭头调整顺序，开关控制是否显示</string>
+    <string name="theme_nav_tab_pinned_sub">固定显示，不可隐藏</string>
+    <string name="cd_move_tab_up">上移</string>
+    <string name="cd_move_tab_down">下移</string>
     <string name="theme_section_nav_search">导航与搜索</string>
     <string name="theme_group_in_search_title">搜索结果显示分组</string>
     <string name="theme_group_in_search_sub">全局搜索时标注条目所在文件夹</string>

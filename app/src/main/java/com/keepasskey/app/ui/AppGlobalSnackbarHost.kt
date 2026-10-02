@@ -41,45 +41,53 @@ internal fun AppGlobalSnackbarHost() {
     val contextState = rememberUpdatedState(LocalContext.current)
 
     LaunchedEffect(hostState) {
-        // 展示器独立成子协程：收集循环不被 showSnackbar 挂起占满——新事件到达即可**替换**
-        // 正在展示的旧条（复刻原「各屏本地宿主被下一条 showSnackbar dismiss」的语义，
-        // 否则连续复制类反馈会排成 4 秒 × N 的队列）；被替换条的 await 随取消返回，
-        // 未触发的撤销不执行——与旧形态「旧条被 dismiss 即 Dismissed」一致。
-        var showJob: Job? = null
-        AppSnackbarChannel.events.collect { event ->
-            showJob?.cancel()
-            hostState.currentSnackbarData?.dismiss()
-            showJob = launch {
-                val context = contextState.value
-                val message = event.message
-                val text = context.getString(message.resId, *message.args.toTypedArray())
-                val undoLabel = if (message.undoable && event.onUndo != null) {
-                    context.getString(R.string.btn_undo)
-                } else {
-                    null
-                }
-                // §373：无撤销动作时才尊重自定义时长；有撤销动作恒走 Material Long
-                val overrideMs = if (undoLabel == null) message.durationMillis else null
-                val dismissJob = if (overrideMs != null) {
-                    launch {
-                        delay(overrideMs)
-                        hostState.currentSnackbarData?.dismiss()
+        // ISSUE-P3-446：进入组合即向通道登记「宿主可达」，离开组合（LaunchedEffect 取消）
+        // 时复位——finally 在任何取消路径（导航销毁 / Activity 销毁）都会执行。
+        // 非组合期的生产者据此改走 Toast 兜底，消息不滞留缓冲形成迟到的陈旧提示。
+        try {
+            AppSnackbarChannel.markHostActive(true)
+            // 展示器独立成子协程：收集循环不被 showSnackbar 挂起占满——新事件到达即可**替换**
+            // 正在展示的旧条（复刻原「各屏本地宿主被下一条 showSnackbar dismiss」的语义，
+            // 否则连续复制类反馈会排成 4 秒 × N 的队列）；被替换条的 await 随取消返回，
+            // 未触发的撤销不执行——与旧形态「旧条被 dismiss 即 Dismissed」一致。
+            var showJob: Job? = null
+            AppSnackbarChannel.events.collect { event ->
+                showJob?.cancel()
+                hostState.currentSnackbarData?.dismiss()
+                showJob = launch {
+                    val context = contextState.value
+                    val message = event.message
+                    val text = context.getString(message.resId, *message.args.toTypedArray())
+                    val undoLabel = if (message.undoable && event.onUndo != null) {
+                        context.getString(R.string.btn_undo)
+                    } else {
+                        null
                     }
-                } else {
-                    null
-                }
-                val result = hostState.showSnackbar(
-                    message = text,
-                    actionLabel = undoLabel,
-                    duration = if (undoLabel != null) SnackbarDuration.Long else SnackbarDuration.Short
-                )
-                dismissJob?.cancel()
-                if (result == SnackbarResult.ActionPerformed) {
-                    // NonCancellable：撤销（恢复落库）一旦开始，不得被「下一条消息替换本条」
-                    // 的 showJob 取消打断——恢复是数据写入，中断会留下半截状态
-                    withContext(NonCancellable) { event.onUndo?.invoke() }
+                    // §373：无撤销动作时才尊重自定义时长；有撤销动作恒走 Material Long
+                    val overrideMs = if (undoLabel == null) message.durationMillis else null
+                    val dismissJob = if (overrideMs != null) {
+                        launch {
+                            delay(overrideMs)
+                            hostState.currentSnackbarData?.dismiss()
+                        }
+                    } else {
+                        null
+                    }
+                    val result = hostState.showSnackbar(
+                        message = text,
+                        actionLabel = undoLabel,
+                        duration = if (undoLabel != null) SnackbarDuration.Long else SnackbarDuration.Short
+                    )
+                    dismissJob?.cancel()
+                    if (result == SnackbarResult.ActionPerformed) {
+                        // NonCancellable：撤销（恢复落库）一旦开始，不得被「下一条消息替换本条」
+                        // 的 showJob 取消打断——恢复是数据写入，中断会留下半截状态
+                        withContext(NonCancellable) { event.onUndo?.invoke() }
+                    }
                 }
             }
+        } finally {
+            AppSnackbarChannel.markHostActive(false)
         }
     }
 

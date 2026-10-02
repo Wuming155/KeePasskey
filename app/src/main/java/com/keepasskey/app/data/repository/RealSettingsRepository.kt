@@ -110,8 +110,7 @@ class RealSettingsRepository @Inject constructor(
         hapticFeedbackEnabled = prefs[KEY_HAPTIC_FEEDBACK] ?: true,
         clipboardTimeoutSeconds = prefs[KEY_CLIPBOARD_TIMEOUT] ?: 30,
         syncOnColdStart = prefs[KEY_SYNC_ON_COLD_START] ?: true,
-        showAuthenticatorTab = prefs[KEY_SHOW_AUTHENTICATOR_TAB] ?: true,
-        showGeneratorTab = prefs[KEY_SHOW_GENERATOR_TAB] ?: true,
+        bottomNavOrder = resolveBottomNavOrder(prefs),
         // ISSUE-P3-04：上次成功解锁使用的密钥文件元数据（仅 Uri/显示名，非密钥材料）
         lastKeyFileUri = prefs[KEY_LAST_KEY_FILE_URI] ?: "",
         lastKeyFileName = prefs[KEY_LAST_KEY_FILE_NAME] ?: "",
@@ -205,11 +204,31 @@ class RealSettingsRepository @Inject constructor(
     override suspend fun setSyncOnColdStart(enabled: Boolean) =
         edit { it[KEY_SYNC_ON_COLD_START] = enabled }
 
-    override suspend fun setShowAuthenticatorTab(enabled: Boolean) =
-        edit { it[KEY_SHOW_AUTHENTICATOR_TAB] = enabled }
+    /**
+     * ISSUE-P3-443：持久化「有序可见 Tab 名单」（逗号分隔规范名）。
+     * 不回写旧显隐布尔键——新键存在后装载不再读旧键，两者语义等价。
+     */
+    override suspend fun setBottomNavOrder(order: List<String>) =
+        edit { it[KEY_BOTTOM_NAV_ORDER] = order.joinToString(",") }
 
-    override suspend fun setShowGeneratorTab(enabled: Boolean) =
-        edit { it[KEY_SHOW_GENERATOR_TAB] = enabled }
+    /**
+     * ISSUE-P3-443：底栏 Tab 顺序装载——新键缺失时从旧显隐布尔键迁移
+     * （用户既有隐藏偏好无缝延续；可隐藏集合与旧口径一致：验证码 / 生成器），
+     * 迁移结果不回写新键，用户首次在设置页调整时才落新键。
+     */
+    private fun resolveBottomNavOrder(prefs: Preferences): List<String> {
+        val stored = prefs[KEY_BOTTOM_NAV_ORDER]
+        if (stored != null) {
+            return stored.split(",").filter { it.isNotBlank() }
+        }
+        return BottomNavTabNames.DEFAULT_ORDER.filter { name ->
+            when (name) {
+                BottomNavTabNames.AUTHENTICATOR -> prefs[KEY_SHOW_AUTHENTICATOR_TAB] ?: true
+                BottomNavTabNames.GENERATOR -> prefs[KEY_SHOW_GENERATOR_TAB] ?: true
+                else -> true
+            }
+        }
+    }
 
     /** ISSUE-P3-04：仅持久化非密钥元数据（SAF Uri + 显示名），密钥字节永不落盘 */
     override suspend fun setRememberedKeyFile(uri: String, displayName: String) = edit {
@@ -269,6 +288,8 @@ class RealSettingsRepository @Inject constructor(
         private val KEY_SYNC_ON_COLD_START = booleanPreferencesKey("sync_on_cold_start")
         private val KEY_SHOW_AUTHENTICATOR_TAB = booleanPreferencesKey("show_authenticator_tab")
         private val KEY_SHOW_GENERATOR_TAB = booleanPreferencesKey("show_generator_tab")
+        // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化名单（逗号分隔规范名；缺失时从上方旧布尔键迁移）
+        private val KEY_BOTTOM_NAV_ORDER = stringPreferencesKey("bottom_nav_order")
         // ISSUE-P3-04：密钥文件「非密钥元数据」（SAF Uri 与显示名），不含任何密钥材料
         private val KEY_LAST_KEY_FILE_URI = stringPreferencesKey("last_key_file_uri")
         private val KEY_LAST_KEY_FILE_NAME = stringPreferencesKey("last_key_file_name")

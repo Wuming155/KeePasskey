@@ -303,6 +303,17 @@ fun UnlockContent(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // ISSUE-P3-438：上次会话未正常关闭（进程死亡时库仍处于解锁态）的一次性轻提示——
+                // 文案如实中性，不渲染为错误告警（onSurfaceVariant，区别于下方丢弃编辑的 error 色）
+                if (uiState.lastSessionAbnormalCloseNotice) {
+                    Text(
+                        text = stringResource(R.string.unlock_last_session_abnormal_close),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
                 // ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知（UnlockViewModel.init 消费注册表后置位）
                 if (uiState.unsavedEditsDiscardedNotice) {
                     Text(

@@ -36,3 +36,35 @@ internal fun UnlockContentPreview() {
         )
     }
 }
+
+// ISSUE-P3-438：一次性轻提示态（上次会话未正常关闭）——预览画反向态，保证该态非真机不可见
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 会话未正常关闭提示 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 会话未正常关闭提示 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockContentAbnormalCloseNoticePreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        UnlockContent(
+            uiState = UnlockUiState().copy(
+                hasDatabase = true,
+                databaseName = "Preview Vault.kdbx",
+                databaseStatus = "Ready",
+                unlockMode = UnlockMode.STANDARD,
+                isQuickUnlockAvailable = true,
+                lastSessionAbnormalCloseNotice = true
+            ),
+            currentTheme = AppThemeMode.SYSTEM,
+            onThemeToggle = {},
+            onPasswordChange = {},
+            onTogglePasswordVisibility = {},
+            onSelectKeyFile = {},
+            onClearKeyFile = {},
+            onToggleReadOnly = {},
+            onSwitchMode = {},
+            onUnlock = {},
+            onBiometricUnlock = {},
+            onDowngradeDecision = {},
+            onNavigateToDatabasePicker = {},
+            onOpenExistingVault = {}
+        )
+    }
+}
