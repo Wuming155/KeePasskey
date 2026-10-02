@@ -55,4 +55,14 @@ object DiagnosticLogModule {
     @Singleton
     fun provideDiagnosticLogGate(store: ExtendedSettingsStore): DiagnosticLogGate =
         DiagnosticLogGate { BuildConfig.DEBUG && store.isDiagnosticLogEnabled() }
+
+    /**
+     * §411 取证桥：生产 DebugLogBuffer 开启 logcat 直出（真机取证 `adb logcat -s KpLog`）。
+     * 由 @Provides 承载（构造器拒绝 Boolean 依赖——与 KeyFileVaultCopyStore 的 Hilt 教训同源）；
+     * 纯 JVM 单测的便捷构造不走此提供方法，echo 恒 false。
+     */
+    @Provides
+    @Singleton
+    fun provideDebugLogBuffer(gate: DiagnosticLogGate): DebugLogBuffer =
+        DebugLogBuffer(gate).also { it.logcatEchoEnabled = true }
 }

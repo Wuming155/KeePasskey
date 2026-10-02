@@ -1,8 +1,8 @@
 package com.keepasskey.app.data.logger
 
+import androidx.annotation.VisibleForTesting
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
@@ -14,9 +14,12 @@ import javax.inject.Singleton
  * 经 [DiagnosticLogGate] 真实约束普通诊断事件的写入——关闭时 [log] 直接丢弃，
  * 不再出现「开关可切但日志恒记录」的假开关。**导出审计**（[audit]）走独立通道，
  * 不受该开关约束：ISSUE-P2-10 验收要求导出审计留痕可核验，不得被用户偏好静默关闭。
+ *
+ * §411 取证桥：生产实例经 [DiagnosticLogModule] 提供（logcat 直出开启）；构造不再 @Inject——
+ * 同类型同作用的 @Provides 与 @Inject 构造是 Hilt 重复绑定错误，且 Boolean 开关无法走构造注入。
  */
 @Singleton
-class DebugLogBuffer @Inject constructor(
+class DebugLogBuffer(
     private val gate: DiagnosticLogGate
 ) {
 
@@ -28,6 +31,14 @@ class DebugLogBuffer @Inject constructor(
 
     private val lock = Any()
     private val lines = ArrayDeque<String>()
+
+    /**
+     * §411 取证桥：logcat 直出开关（生产 DI 恒 true；纯 JVM 单测构造恒 false——
+     * 平台 Log 类在 JVM 不存在）。输出内容与缓冲行**同源同约束**（先过诊断闸门，
+     * 同受「仅非敏感事件」铁律），使真机取证可直接 `adb logcat -s KpLog`。
+     */
+    @VisibleForTesting
+    internal var logcatEchoEnabled: Boolean = false
 
     /** 普通诊断事件入口：受 [DiagnosticLogGate] 约束（关闭时整条丢弃，不占缓冲容量）。 */
     fun log(level: String, tag: String, message: String) {
@@ -64,6 +75,12 @@ class DebugLogBuffer @Inject constructor(
                 lines.removeFirst()
             }
         }
+        if (logcatEchoEnabled) {
+            // 取证桥（§411）：内容与缓冲同源（已受「仅非敏感事件」铁律约束）；
+            // 经统一包装器 AppLog 输出（LogHygieneTest 口径——生产源码不得直引平台 Log 类；
+            // AppLog.safe 自带 JVM fail-safe）
+            com.keepasskey.core.log.AppLog.i(LOGCAT_TAG, line)
+        }
     }
 
     /**
@@ -82,6 +99,7 @@ class DebugLogBuffer @Inject constructor(
         const val AUDIT_LEVEL = "AUDIT"
         private const val MAX_LINES = 500
         private val TS_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+        private const val LOGCAT_TAG = "KpLog"
 
         // 脱敏规则：URL 须先于邮箱处理（避免 URL 内嵌邮箱被二次匹配后残留 scheme 碎片）
         private val URL_PATTERN = Regex("https?://\\S+")
