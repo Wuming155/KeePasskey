@@ -52,7 +52,24 @@
 
 > **暂无开放项（全量待办归零）**。
 
-## P3 低危问题、特性接线与体验优化（1 项）
+## P3 低危问题、特性接线与体验优化（2 项）
+
+### ISSUE-P3-433：主密码与密钥文件变更拆分为两个独立操作——「留空两个密码框 = 只改密钥文件」语义反直觉
+
+- **核实时间点**：2026-10-02；**核实方式**：用户走查反馈（只想改绑密钥文件时，须把「新密码 / 确认密码」两框整体留空再提交，视觉与操作习惯均不合适）；现状核对 `MasterKeyChangeDialog.kt`（`keepPassword` ＝ 新框与确认框同时为空，靠 `set_master_key_keep_hint` 文案告知）；参考调研结论见下（定向查证三个安卓参考项目源码）。
+- **背景（现状）**：设置页「更改主密码」单入口 → `MasterKeyChangeDialog` 一框双任务：新/确认密码 + 密钥文件三态单选（保持现状 / 绑定或更换 / 解绑，ISSUE-P3-428）；ISSUE-P3-430 引入「两框整体留空 ＝ 保持当前主密码（仅改绑密钥文件）」。提交链路本就是单一函数 `onChangeMasterPassword(CharArray, ChangeKeyFileIntent)`，密码与密钥文件意图在数据层已解耦，拆分主要是 UI 面。
+- **参考调研结论（2026-10-02）**：
+  - **KeePassDX**：合并式。Database settings → Master key → Change master key → `SetMainCredentialDialogFragment`（"Assign a master key"），Password / Keyfile / Hardware key 三卡片各带开关——「不动密码」靠**显式开关**表达，不存在「留空即保持」。
+  - **keepass2android**：合并式。Database → Change Master Key → `SetPasswordDialog`（新密码 + 确认 + keyfile 路径文本框，无文件选择器），密码与密钥文件至少其一。
+  - **Monica**：合并式，与本项目现状最接近：`KeePassMasterCredentialDialog` ＝ 密码两框 + keyfile 单选组（keep current / no key file / select different，`KeePassDatabaseCredentials.kt` 的 KEEP_CURRENT / REMOVE / REPLACE）。
+  - 即：**三家均无「改密码 / 改密钥文件拆成两个独立入口」先例**；差异只在「保持不动」如何表达（开关 vs 留空 vs 单选组）。
+- **方案裁决（用户 2026-10-02 拍板）**：**拆分**——「更改主密码」只改密码；密钥文件变更独立成项（未绑定密钥文件时为「新增 / 启用」，已绑定时为「更换 / 移除」）。属对三家参考项目的**有意偏离**，依据是操作习惯与视觉聚焦（每屏只做一件事）。
+- **验收标准**：
+  ① 设置页拆为两个入口：「更改主密码」对话框只含新/确认密码（弱口令确认闸 / `SecureDialog` / busy 保持打开等既有语义不动）；「密钥文件」独立入口（未绑定 → 选定文件即启用；已绑定 → 更换 / 移除）；
+  ② `SettingsUiState` 需暴露「当前是否绑定密钥文件」以驱动入口文案与可用态（核实方式：2026-10-02 `SettingsViewModel` 无该暴露）；两条链路最终仍走既有提交管线——密码通道传 `ChangeKeyFileIntent.Keep`，密钥文件通道传空口令，**不新开重加密路径**；
+  ③ ISSUE-P3-428 的密钥文件字节擦除链（借用语义 / 所有权移交）与 ISSUE-P3-430 的「至少一处改动」空提交防护在拆分后语义等价保留；`SecureDialogFlagPolicyTest` 等以调用点计数锚定的清单锁随迁不破坏；
+  ④ 移除 `set_master_key_keep_hint`（「留空即保持」语义不再存在），相关 strings 同步清理；改过 `*/ui/**` 后跑 `check_box_slot_children.py`；新增带字面量默认值的 `Boolean` 预览参数时跑 `check_preview_state_coverage.py`；
+  ⑤ 全量 `test` 绿 + `gate_readings.py` 全 PASS，读数块原样贴批次文档。
 
 ### ISSUE-P3-339：仿冒域能否唤醒通行密钥（本地 RP 实验室）——**浏览器半环搁置**
 
