@@ -74,8 +74,7 @@
 
 ### 3.2 门禁读数（`python tools/doc/gate_readings.py`，原样粘贴）
 
-```text
-=== 门禁读数（ISSUE-P3-305 AC④：批次文档 §3 须原样粘贴本块）===
+```text=== 门禁读数（ISSUE-P3-305 AC④：批次文档 §3 须原样粘贴本块）===
 [1/8] tools/doc/count_line_tiers.py                EXIT 0  | tier1(>500)=0  tier2(400~500)=36  budget=36
 [2/8] tools/doc/long_functions.py                  EXIT 0  | functions_ge_100=0
 [3/8] tools/doc/check_md_links.py                  EXIT 0  | BROKEN_MD_LINKS=0
@@ -93,3 +92,4 @@
 - P3-438 的设备侧场景（真机杀进程 → 冷启动提示）本轮无已连接设备未实跑，宿主侧由行为层 + 源码守卫 + 预览承托；`consumeAbnormalClose` 的一次性语义依赖 MainApplication 冷启动接线，已有源码守卫锁定。
 - P3-443 未采用拖拽手势排序（Monica 同款 `bottomNavOrder` 数据模型、上下移按钮交互）：上下移在 Compose 中无需引入拖拽选择依赖即满足 AC ①「拖拽 / 上下移」的「上下移」分支，且对无障碍更友好；如后续要拖拽可单独立项。
 - P3-443 的真机走查（宽屏 Rail 顺序联动 / 返回键熔断）待用户装机走查。
+- **2026-10-02 用户真机走查回填**：① P3-443 排序卡与显隐排序一体卡片实测正常；② P3-438 生物识别场景——解锁页先自动唤起生物识别，取消后一次性提示可见（提示与自动唤起并存不冲突），用户判定无碍；③ P3-446 Snackbar 提示成功；同时实测暴露「第三方输入法剪贴板历史仍留口令内容」＝`已知工程限界` **§3.7**（`ISSUE-P3-114` §62 同源客观限界）当批补登，非实现缺陷。
