@@ -22,12 +22,16 @@ internal sealed interface KeyFileFactorResolution {
 
     /**
      * [generated] 标记是否为「生成型」因子（决定是否需要一次性交付提示）；
-     * [borrowedKeyFileBytes] 为借用给数据层的字节副本，调用方用毕必须清零。
+     * [borrowedKeyFileBytes] 为借用给数据层的字节副本，调用方用毕必须清零；
+     * [sourceUri] / [sourceDisplayName] 为既有文件的来源元数据（ISSUE-P2-460 AC②：
+     * 建库成功即按库登记记忆用；生成型因子二者皆 null）。
      */
     class Resolved(
         val factor: CreateKeyFileFactor,
         val generated: Boolean,
-        val borrowedKeyFileBytes: ByteArray? = null
+        val borrowedKeyFileBytes: ByteArray? = null,
+        val sourceUri: String? = null,
+        val sourceDisplayName: String? = null
     ) : KeyFileFactorResolution
 
     /** 因子无法成立（既有密钥文件读取失败等）：显式失败，不得降级为其它因子 */
@@ -60,7 +64,9 @@ internal object DatabaseKeyFileFactorResolver {
                 factor = CreateKeyFileFactor.Existing(outcome.bytes),
                 generated = false,
                 // 字节所有权已移交因子；清零责任随借用契约留给 createDatabase 的调用收尾
-                borrowedKeyFileBytes = outcome.bytes
+                borrowedKeyFileBytes = outcome.bytes,
+                sourceUri = sourceUri,
+                sourceDisplayName = outcome.displayName
             )
             // 「读不到」分型（空文件 / 流异常）一律显式反馈，绝不静默忽略
             KeyFileReadResult.Empty,

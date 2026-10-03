@@ -15,6 +15,7 @@ import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
@@ -263,16 +264,47 @@ class RealSettingsRepository @Inject constructor(
         }
     }
 
-    /** ISSUE-P3-04：仅持久化非密钥元数据（SAF Uri + 显示名），密钥字节永不落盘 */
-    override suspend fun setRememberedKeyFile(uri: String, displayName: String) = edit {
-        it[KEY_LAST_KEY_FILE_URI] = uri
-        it[KEY_LAST_KEY_FILE_NAME] = displayName
+    /**
+     * ISSUE-P2-460 AC①：按库登记密钥文件记忆——[databaseId] 经 SHA-256 摘要进键名，
+     * 不同库的记录天然 namespace 隔离（结构上不可能读到另一个库的记录）。
+     */
+    override suspend fun setRememberedKeyFileFor(databaseId: String, uri: String, displayName: String) =
+        edit {
+            val digest = keyFileMemoryDigest(databaseId)
+            it[stringPreferencesKey("$KEY_FILE_MEMORY_URI_PREFIX$digest")] = uri
+            it[stringPreferencesKey("$KEY_FILE_MEMORY_NAME_PREFIX$digest")] = displayName
+        }
+
+    /** ISSUE-P2-460 AC①：读取该库的按库密钥文件记忆（未登记返回 null）。 */
+    override suspend fun rememberedKeyFileFor(databaseId: String): SettingsRepository.RememberedKeyFileMeta? {
+        if (databaseId.isBlank()) return null
+        val prefs = context.keepasskeySettingsStore.data.first()
+        val digest = keyFileMemoryDigest(databaseId)
+        val uri = prefs[stringPreferencesKey("$KEY_FILE_MEMORY_URI_PREFIX$digest")] ?: return null
+        if (uri.isBlank()) return null
+        val displayName = prefs[stringPreferencesKey("$KEY_FILE_MEMORY_NAME_PREFIX$digest")] ?: ""
+        return SettingsRepository.RememberedKeyFileMeta(uri, displayName)
     }
 
+    /** ISSUE-P2-460 AC①：清除该库的按库密钥文件记忆（幂等）。 */
+    override suspend fun clearRememberedKeyFileFor(databaseId: String) = edit {
+        if (databaseId.isBlank()) return@edit
+        val digest = keyFileMemoryDigest(databaseId)
+        it.remove(stringPreferencesKey("$KEY_FILE_MEMORY_URI_PREFIX$digest"))
+        it.remove(stringPreferencesKey("$KEY_FILE_MEMORY_NAME_PREFIX$digest"))
+    }
+
+    /** ISSUE-P2-460：清除旧版全局单槽（历史遗留键，已无写入方；仅提示来源，清了即不再提示）。 */
     override suspend fun clearRememberedKeyFile() = edit {
         it.remove(KEY_LAST_KEY_FILE_URI)
         it.remove(KEY_LAST_KEY_FILE_NAME)
     }
+
+    /** dbId → 摘要键段（与 KeyFileVaultCopyStore 的副本文件名同口径：同库恒同键） */
+    private fun keyFileMemoryDigest(databaseId: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(databaseId.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     /** ISSUE-P3-68：重试节流总开关（默认开启，安全默认不放松） */
     override suspend fun setUnlockThrottleEnabled(enabled: Boolean) = edit {
@@ -325,9 +357,12 @@ class RealSettingsRepository @Inject constructor(
         private val KEY_SHOW_GENERATOR_TAB = booleanPreferencesKey("show_generator_tab")
         // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化名单（逗号分隔规范名；缺失时从上方旧布尔键迁移）
         private val KEY_BOTTOM_NAV_ORDER = stringPreferencesKey("bottom_nav_order")
-        // ISSUE-P3-04：密钥文件「非密钥元数据」（SAF Uri 与显示名），不含任何密钥材料
+        // ISSUE-P3-04 → ISSUE-P2-460 降级：旧版全局单槽（只读提示来源，见 UserSettings 字段 KDoc）
         private val KEY_LAST_KEY_FILE_URI = stringPreferencesKey("last_key_file_uri")
         private val KEY_LAST_KEY_FILE_NAME = stringPreferencesKey("last_key_file_name")
+        // ISSUE-P2-460 AC①：按库密钥文件记忆的键名前缀（后接 dbId 的 SHA-256 摘要）
+        private const val KEY_FILE_MEMORY_URI_PREFIX = "keyfile_remember_uri_"
+        private const val KEY_FILE_MEMORY_NAME_PREFIX = "keyfile_remember_name_"
         // ISSUE-P3-68：解锁失败重试节流配置
         private val KEY_UNLOCK_THROTTLE_ENABLED = booleanPreferencesKey("unlock_throttle_enabled")
         private val KEY_UNLOCK_LOCKOUT_MAX = intPreferencesKey("unlock_lockout_max_seconds")

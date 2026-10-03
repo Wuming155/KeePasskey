@@ -476,7 +476,7 @@ class UnlockViewModelBiometricAutoPromptTest {
         val keyFileAccess = FakeKeyFileAccess().apply {
             // 预置「已记忆的密钥文件」：偏好开启 + 持久授权有效 + 可读
             putSource(FakeKeyFileAccess.KEY_FILE_URI, keyFile)
-            remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+            remember(activeDbId, FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         }
         // 新口径封印载荷：仅主密码（生产 BiometricEnrollmentCoordinator / ResealCoordinator 自本批起同此形态）
         val payload = BiometricSealedPayloadCodec.encode(secret.toCharArray(), null)
@@ -526,7 +526,7 @@ class UnlockViewModelBiometricAutoPromptTest {
     fun `记忆密钥文件不可读时回落主密码模式并清封印`() = runTest {
         val secret = "Needs#KeyFile#1"
         val keyFileAccess = FakeKeyFileAccess(failRead = true).apply {
-            remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+            remember(activeDbId, FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         }
         val payload = BiometricSealedPayloadCodec.encode(secret.toCharArray(), null)
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()

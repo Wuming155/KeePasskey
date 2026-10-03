@@ -71,12 +71,14 @@ class DatabasePickerViewModel @Inject constructor(
     /** ISSUE-P2-354 AC①：建库进行中（原 UiState.isLoading 死字段的真相源；busy 守卫读它） */
     private val isCreatingFlow = MutableStateFlow(false)
 
-    // ISSUE-P3-21：生成型密钥文件的一次性交付（状态机自本 VM 拆出，§391 行数分档闸门）
+    // ISSUE-P3-21：生成型密钥文件的一次性交付（状态机自本 VM 拆出，§391 行数分档闸门）；
+    // ISSUE-P2-460 AC③：装配副本通道——会话失效时交付回落本库私有目录副本
     private val keyFileDeliveryController = DatabasePickerKeyFileDeliveryController(
         vaultRepository = vaultRepository,
         appContext = appContext,
         scope = viewModelScope,
-        publish = { publishPickerMessage(it) }
+        publish = { publishPickerMessage(it) },
+        vaultCopyStore = keyFileVaultCopyStore
     )
     val keyFileDelivery: StateFlow<KeyFileDeliveryState>
         get() = keyFileDeliveryController.delivery
@@ -218,9 +220,15 @@ class DatabasePickerViewModel @Inject constructor(
                     val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
                     showCreateDialogFlow.value = false
                     publishPickerMessage(UiMessage(R.string.db_picker_msg_created))
+                    // ISSUE-P2-460 AC②：建库成功即收编副本 + 按库登记，不再等下次解锁
+                    // （真机取证：建库后弹窗宿主随会话锁定被拆，原「等解锁才登记」让
+                    // 生成型密钥文件永久丢失、而该库已带第二因子解不开）
+                    if (resolved.factor != CreateKeyFileFactor.None) {
+                        adoptKeyFileOnCreate(dbId = targetUri ?: fileName, vaultName = name, resolution = resolved)
+                    }
                     if (resolved.generated) {
                         // ISSUE-P3-21 验收 2：生成型密钥文件必须一次性交付（丢失即无法解锁）
-                        keyFileDeliveryController.requestSave(name)
+                        keyFileDeliveryController.requestSave(name, dbId = targetUri ?: fileName)
                     }
                     // ISSUE-P2-229：自选位置库在目录中的标识就是 uri 字符串（`importExternalDatabase` 同口径），
                     // 以文件名下行的选中事件对这类库无效
@@ -237,8 +245,43 @@ class DatabasePickerViewModel @Inject constructor(
     }
 
     /**
+     * ISSUE-P2-460 AC②：建库成功即收编密钥文件副本并按库登记（不再等下次解锁）。
+     *
+     * - 副本：经既有导出通道现取会话绑定字节（生成型与既有因子同路），失败仅留痕不阻断
+     *   （库已建成，一次性交付提示仍在；副本缺失只降级恢复体验，不得谎报建库失败）；
+     * - 登记：既有因子在「记住密钥文件位置」偏好开启且取得持久化读授权时，把来源 Uri 记到
+     *   **本库名下**（与解锁页同口径；生成型因子无 SAF 来源，副本即其登记形态）。
+     */
+    private suspend fun adoptKeyFileOnCreate(
+        dbId: String,
+        vaultName: String,
+        resolution: KeyFileFactorResolution.Resolved
+    ) {
+        val bytes = vaultRepository.exportKeyFileBytes().getOrNull()
+        if (bytes != null) {
+            val displayName = resolution.sourceDisplayName
+                ?: keyFileDeliveryController.suggestedFileName(vaultName)
+            val saved = keyFileVaultCopyStore?.save(dbId, bytes, displayName)
+            bytes.fill(0)
+            if (saved != true) {
+                debugLog?.warn("DatabasePicker", "建库密钥文件副本收编失败（库已建成，交付提示仍有效）")
+            }
+        } else {
+            debugLog?.warn("DatabasePicker", "建库后取不到密钥文件字节，副本未收编")
+        }
+        val access = keyFileAccess
+        val sourceUri = resolution.sourceUri
+        if (access != null && sourceUri != null &&
+            access.isRememberEnabled() && access.persistReadPermission(sourceUri)
+        ) {
+            access.remember(dbId, sourceUri, resolution.sourceDisplayName.orEmpty())
+        }
+    }
+
+    /**
      * 把生成型密钥文件写入用户选定的 SAF 目标（ISSUE-P3-21 验收 2）。
-     * 实现见 [DatabasePickerKeyFileDeliveryController.saveTo]（§391 拆出，行为逐字不变）。
+     * 实现见 [DatabasePickerKeyFileDeliveryController.saveTo]（§391 拆出；
+     * ISSUE-P2-460 AC③：会话取不到字节时回落本库副本，仍取不到才显式「密钥文件已丢失」）。
      */
     fun saveGeneratedKeyFileTo(targetUri: Uri) = keyFileDeliveryController.saveTo(targetUri)
 

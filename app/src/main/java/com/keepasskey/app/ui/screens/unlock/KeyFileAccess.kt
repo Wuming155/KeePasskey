@@ -58,14 +58,24 @@ interface KeyFileAccess {
     /** 该 Uri 当前是否仍持有持久化读授权（决定记忆的 Uri 能否在下次冷启动恢复） */
     suspend fun hasPersistedReadPermission(uri: String): Boolean
 
-    /** 读取已记忆的密钥文件元数据（原始记录；是否可用由 [KeyFileRememberPolicy] 裁决） */
-    suspend fun loadRemembered(): RememberedKeyFile?
+    /** 读取**该库**已记忆的密钥文件元数据（ISSUE-P2-460 AC①；未登记返回 null） */
+    suspend fun loadRemembered(databaseId: String): RememberedKeyFile?
 
-    /** 记忆密钥文件元数据（仅 Uri + 显示名，非密钥材料） */
-    suspend fun remember(uri: String, displayName: String)
+    /**
+     * 读取旧版全局单槽的密钥文件元数据（ISSUE-P2-460 AC① 降级通道，**只读**）。
+     * 仅作「本库未登记记忆」时的一句话提示来源，**不参与任何解锁裁决**——
+     * 旧版记录无法归属到具体库，自动套用即跨库串因子。
+     */
+    suspend fun loadLegacyGlobalHint(): RememberedKeyFile?
 
-    /** 清除记忆的密钥文件元数据 */
-    suspend fun forget()
+    /** 按库记忆密钥文件元数据（仅 Uri + 显示名，非密钥材料；ISSUE-P2-460 AC①） */
+    suspend fun remember(databaseId: String, uri: String, displayName: String)
+
+    /**
+     * 清除记忆（ISSUE-P2-460 AC①）：[databaseId] 非空时同时清除该库的按库记录；
+     * 旧版全局槽在任何清除裁决下都一并清掉（陈旧元数据不残留）。
+     */
+    suspend fun forget(databaseId: String?)
 }
 
 /**

@@ -160,7 +160,7 @@ class KeyFileSessionCoordinatorTest {
     fun `冷启动恢复优先消费私有目录副本（授权失效不再阻断）`() = runTest {
         val access = FakeKeyFileAccess(permissionValid = false, persistPermissionSucceeds = false)
         access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
-        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         val (subject, store, uiState) = coordinatorWithCopy(this, access)
         assertTrue(store.save("db-1", FakeKeyFileAccess.FAKE_KEY_FILE_BYTES, FakeKeyFileAccess.DISPLAY_NAME))
 
@@ -190,7 +190,7 @@ class KeyFileSessionCoordinatorTest {
         // §411 走查语义裁决：副本归「导入密钥文件」功能管——偏好关闭只停用 Uri 记忆，
         // 显式导入/改绑产生的副本仍须自动载入（导入承诺：此后解锁不再依赖授权）
         val access = FakeKeyFileAccess(rememberEnabled = false)
-        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         val (subject, store, _) = coordinatorWithCopy(this, access)
         assertTrue(store.save("db-1", FakeKeyFileAccess.FAKE_KEY_FILE_BYTES, FakeKeyFileAccess.DISPLAY_NAME))
 
@@ -202,5 +202,75 @@ class KeyFileSessionCoordinatorTest {
             subject.keyFileData!!
         )
         assertEquals("偏好关闭时 Uri 记忆仍须清除", 1, access.forgetCount)
+    }
+
+    // ===== ISSUE-P2-460：密钥文件记忆按库归属 =====
+
+    @Test
+    fun `本库未登记时其它库的按库记忆与旧全局槽都不得自动载入`() = runTest {
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        // 记忆登记在另一个库名下 + 旧版全局槽残留（历史升级态）
+        access.remember("db-other", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        access.putLegacyGlobal(FakeKeyFileAccess.KEY_FILE_URI)
+        val (subject, _, uiState) = coordinatorWithCopy(this, access)
+
+        subject.restoreRememberedKeyFile()
+
+        assertNull("其它库的记忆绝不能套用到本库（跨库串因子）", subject.keyFileData)
+        assertFalse("跨库记录不得呈现「已选择密钥文件」", uiState.value.hasKeyFile)
+        assertEquals(
+            "旧全局记录只允许一句话提示（不参与解锁裁决）",
+            com.keepasskey.app.R.string.keyfile_legacy_memory_hint,
+            uiState.value.infoMessage?.resId
+        )
+        assertEquals("提示通道不得清掉其它库的记忆", 0, access.forgetCount)
+    }
+
+    @Test
+    fun `本库按库记忆在无副本时仍走SAF通道恢复`() = runTest {
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        val (subject, store, uiState) = coordinatorWithCopy(this, access)
+        // db-1 无副本（独立临时目录，未 save 过任何副本）：回落按库 SAF 记忆通道
+        assertTrue("前置：db-1 无副本", store.baseDirOverride!!.listFiles().isNullOrEmpty())
+
+        subject.restoreRememberedKeyFile()
+
+        assertArrayEquals(
+            "本库按库记忆必须恢复第二因子",
+            FakeKeyFileAccess.FAKE_KEY_FILE_BYTES,
+            subject.keyFileData!!
+        )
+        assertEquals(
+            com.keepasskey.app.R.string.keyfile_restored_from_memory,
+            uiState.value.infoMessage?.resId
+        )
+    }
+
+    @Test
+    fun `按库记忆互相隔离——本库登记绝不覆盖其它库`() = runTest {
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember("db-other", "content://test.docs/other.pem", "other.pem")
+        val (subject, _, _) = coordinatorWithCopy(this, access)
+        subject.onKeyFileSelected(FakeKeyFileAccess.KEY_FILE_URI)
+        // 来源登记（trackKeyFileSource）经 scope.launch 异步推进
+        testScheduler.runCurrent()
+
+        subject.rememberKeyFileOnSuccess(usedKeyFile = true, displayName = FakeKeyFileAccess.DISPLAY_NAME)
+
+        assertEquals(
+            "本库登记落本库名下",
+            FakeKeyFileAccess.KEY_FILE_URI,
+            access.persistedKeyFileUri("db-1")
+        )
+        assertEquals(
+            "其它库的按库记录不受影响",
+            "content://test.docs/other.pem",
+            access.persistedKeyFileUri("db-other")
+        )
+        assertEquals("按库登记绝不写旧全局槽", "", access.legacyGlobalUri())
     }
 }

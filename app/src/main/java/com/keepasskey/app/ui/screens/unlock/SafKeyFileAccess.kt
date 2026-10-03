@@ -107,7 +107,16 @@ class SafKeyFileAccess @Inject constructor(
             }
         }
 
-    override suspend fun loadRemembered(): RememberedKeyFile? = withContext(Dispatchers.IO) {
+    /** ISSUE-P2-460 AC①：读取该库的按库记忆（dbId 摘要键名，结构上读不到其它库的记录） */
+    override suspend fun loadRemembered(databaseId: String): RememberedKeyFile? =
+        withContext(Dispatchers.IO) {
+            settingsRepository.rememberedKeyFileFor(databaseId)?.let {
+                RememberedKeyFile(it.uri, it.displayName)
+            }
+        }
+
+    /** ISSUE-P2-460 AC①：旧版全局槽只读提示通道（不参与任何解锁裁决） */
+    override suspend fun loadLegacyGlobalHint(): RememberedKeyFile? = withContext(Dispatchers.IO) {
         val settings = settingsRepository.getSettings().first()
         if (settings.lastKeyFileUri.isBlank()) {
             null
@@ -116,14 +125,19 @@ class SafKeyFileAccess @Inject constructor(
         }
     }
 
-    override suspend fun remember(uri: String, displayName: String) {
+    /** ISSUE-P2-460 AC①：按库记忆（与旧版全局槽无任何写入关联） */
+    override suspend fun remember(databaseId: String, uri: String, displayName: String) {
         withContext(Dispatchers.IO) {
-            settingsRepository.setRememberedKeyFile(uri, displayName)
+            settingsRepository.setRememberedKeyFileFor(databaseId, uri, displayName)
         }
     }
 
-    override suspend fun forget() {
+    /** ISSUE-P2-460 AC①：清除该库按库记录（dbId 非空时）+ 旧版全局槽（陈旧元数据不残留） */
+    override suspend fun forget(databaseId: String?) {
         withContext(Dispatchers.IO) {
+            if (!databaseId.isNullOrBlank()) {
+                settingsRepository.clearRememberedKeyFileFor(databaseId)
+            }
             settingsRepository.clearRememberedKeyFile()
         }
     }

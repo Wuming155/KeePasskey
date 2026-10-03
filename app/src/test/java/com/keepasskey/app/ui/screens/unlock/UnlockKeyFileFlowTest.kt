@@ -108,6 +108,8 @@ class UnlockKeyFileFlowTest {
     fun `偏好关闭时不申请持久授权也不记住密钥文件`() = runTest {
         val access = newAccess(rememberEnabled = false)
         access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        // 预置一条旧记录：偏好关闭的清除语义须有对象可清（forgetCount 只计实清）
+        access.remember(FakeKeyFileAccess.DEFAULT_DB_ID, FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         val viewModel = createViewModel(access)
 
         viewModel.onKeyFileSelected(FakeKeyFileAccess.KEY_FILE_URI)
@@ -128,7 +130,7 @@ class UnlockKeyFileFlowTest {
     fun `偏好关闭时清除历史记忆记录`() = runTest {
         val access = newAccess(rememberEnabled = false)
         access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
-        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        access.remember(FakeKeyFileAccess.DEFAULT_DB_ID, FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         val viewModel = createViewModel(access)
 
         // 偏好关闭：进入解锁页即不得恢复历史记录
@@ -148,7 +150,7 @@ class UnlockKeyFileFlowTest {
     fun `持久授权失效时恢复静默降级为未记住并清理记录`() = runTest {
         val access = newAccess(rememberEnabled = true, permissionValid = false)
         access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
-        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        access.remember(FakeKeyFileAccess.DEFAULT_DB_ID, FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         val viewModel = createViewModel(access)
 
         val state = viewModel.uiState.value
@@ -184,7 +186,7 @@ class UnlockKeyFileFlowTest {
     @Test
     fun `记忆的密钥文件已不可读时清除记录并降级为未记住`() = runTest {
         val access = newAccess(rememberEnabled = true, permissionValid = true)
-        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        access.remember(FakeKeyFileAccess.DEFAULT_DB_ID, FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         // 未注册来源字节 → 读取返回 Unreadable（模拟文件被删）
         val viewModel = createViewModel(access)
 
@@ -243,7 +245,7 @@ class UnlockKeyFileFlowTest {
     fun `记忆有效时自动恢复密钥文件并进入UiState`() = runTest {
         val access = newAccess(rememberEnabled = true, permissionValid = true)
         access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
-        access.remember(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        access.remember(FakeKeyFileAccess.DEFAULT_DB_ID, FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
         val repo = FakeVaultRepository()
         val viewModel = createViewModel(access, repo)
 

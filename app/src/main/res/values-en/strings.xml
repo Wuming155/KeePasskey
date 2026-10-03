@@ -1329,6 +1329,10 @@
     <string name="db_picker_keyfile_backup_skip">Skip for now</string>
     <string name="db_picker_keyfile_saved">Key file saved</string>
     <string name="db_picker_keyfile_save_failed">Failed to save the key file</string>
+    <!-- ISSUE-P2-460 AC③: explicit variant when neither the export channel nor the private copy yields bytes -->
+    <string name="db_picker_keyfile_lost">The key file is lost and cannot be saved: the session has ended and no backup was found. Delete this database, create it again, and keep the new key file safe</string>
+    <!-- ISSUE-P2-460 AC①: legacy global slot is surfaced as a hint only and never auto-loaded (no cross-database factor reuse) -->
+    <string name="keyfile_legacy_memory_hint">A key file remembered by an earlier version was found (%1$s). To avoid applying it to the wrong database it is no longer loaded automatically; select it manually if needed</string>
     <string name="repo_keyfile_generate_failed">Failed to generate the key file</string>
 
     <!-- ===== ISSUE-P3-19: user-readable import failure categories (non-sensitive; see ImportFailureReason) ===== -->

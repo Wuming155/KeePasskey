@@ -71,10 +71,10 @@ data class UserSettings(
     // UI 解析层 `BottomNavItem.resolveVisibleItems` fail-safe 兜底）。
     // 旧「show_authenticator_tab / show_generator_tab」布尔键由仓库层装载时迁移（RealSettingsRepository）。
     val bottomNavOrder: List<String> = BottomNavTabNames.DEFAULT_ORDER,
-    // ISSUE-P3-04：上次成功解锁使用的密钥文件「非密钥元数据」——SAF Uri 与文档显示名。
-    // 绝不承载密钥文件字节或派生密钥；是否记忆由用户偏好开关
-    // （ExtendedSettings.rememberKeyFileLocation，设置页「密钥文件策略」）控制，
-    // 偏好关闭 / 授权失效时调用方须清除本记录，不得残留过期 Uri。
+    // ISSUE-P3-04 → ISSUE-P2-460 降级：旧版「全局单槽」密钥文件记忆（历史遗留键，只读保留）。
+    // 不再有任何写入方，也**不参与任何解锁裁决**——仅作「本库未登记记忆」时的一句话提示来源
+    // （旧版记录无法归属到具体库，自动套用会跨库串因子）。
+    // 现行按库记忆走 [rememberedKeyFileFor]（dbId 摘要键名，结构上不可能读到其它库的记录）。
     val lastKeyFileUri: String = "",
     val lastKeyFileName: String = "",
     // ISSUE-P3-68：解锁失败重试节流总开关（2026-09-12 用户裁决：默认**关闭**，
@@ -134,14 +134,30 @@ interface SettingsRepository {
     suspend fun setBottomNavOrder(order: List<String>)
 
     /**
-     * ISSUE-P3-04：记住上次成功解锁使用的密钥文件（仅 SAF Uri 与文档显示名，
-     * 属非密钥元数据；密钥文件字节/派生密钥绝不经本通道持久化）。
+     * ISSUE-P2-460 AC①：按库记忆的密钥文件元数据（SAF Uri + 显示名，非密钥材料）。
+     * dbId 维度隔离：[databaseId] 经 SHA-256 摘要进键名，结构上不可能读到另一个库的记录，
+     * 无需运行期归属校验（跨库套用即「宁可显示未记住」被结构性排除）。
      */
-    suspend fun setRememberedKeyFile(uri: String, displayName: String)
+    data class RememberedKeyFileMeta(val uri: String, val displayName: String)
 
     /**
-     * ISSUE-P3-04：清除已记忆的密钥文件元数据——偏好开关关闭、持久化读授权失效
-     * 或本次解锁没有使用密钥文件时调用，杜绝过期 Uri 在下次冷启动被误恢复。
+     * ISSUE-P2-460 AC①：读取**该库**登记的密钥文件记忆（未登记返回 null）。
+     * 与旧版全局槽 [UserSettings.lastKeyFileUri] 无任何读写关联。
+     */
+    suspend fun rememberedKeyFileFor(databaseId: String): RememberedKeyFileMeta?
+
+    /**
+     * ISSUE-P2-460 AC①：按库登记密钥文件记忆（仅 SAF Uri 与显示名，非密钥材料）。
+     * 建库成功（AC②）与解锁成功使用密钥文件时调用。
+     */
+    suspend fun setRememberedKeyFileFor(databaseId: String, uri: String, displayName: String)
+
+    /** ISSUE-P2-460 AC①：清除**该库**的密钥文件记忆（幂等）。 */
+    suspend fun clearRememberedKeyFileFor(databaseId: String)
+
+    /**
+     * ISSUE-P2-460：清除旧版全局单槽的密钥文件元数据（历史遗留键，已无写入方）。
+     * 任何「记忆被裁决为不可用 / 已清除」的路径顺带调用，杜绝陈旧 Uri 残留。
      */
     suspend fun clearRememberedKeyFile()
 

@@ -252,6 +252,36 @@ Monica 的「动效降级开关」（低端机 / ROM 兼容性）是本仓没有
 
 ---
 
+### §4.4 密钥文件归属维度（2026-10-03 源码直读）
+
+> 2026-10-03 用户报两条真机现象（① 生成密钥文件后保存「一闪而退」⇒ 第二因子丢失；② 切换密码库后密钥文件不变），
+> 本轮**按源码定点直读**三家，不重新扫全树；结论同时登记为 `ISSUE-P2-460` 与
+> [`../architecture/产品裁决登记.md`](../architecture/产品裁决登记.md) PD-67。
+
+- **KeePassDX**：密钥文件 URI 落在 Room `file_database_history` 表的 **`keyfile_uri` 列**，
+  该表主键即 `database_uri`（`FileDatabaseHistoryEntity.kt`）——**归属天然在库行上，结构上不可能串库**；
+  `PreferencesUtil` 里**不存在任何 keyFile 偏好键**（无全局记忆层）；解锁时 `MainCredential.getKeyFileData`
+  走 `getUriInputStream(keyFileUri)` **现读外部文档**，应用私有目录不落副本。
+- **keepass2android**：SQLite `FileTable` 有独立 **`keyFile` 列**（`FileDbHelper.cs`，`KeyFileId` 自增主键 ⇒ 独立记录表）；
+  **三态语义**——`keyFile == null` 表示「保留（未知/不改动）」，只有显式传 `""` 才是「故意清除该库这一行」
+  （`CreateFile(ioc, keyFile, …)` 建库时传 `""`）。「生成了却没存下」有硬门：`CreateDatabaseActivity.CreateDatabase()`
+  里 `KcpKeyFile` 取不到 ⇒ `ShowMessage(error_adding_keyfile)` 后**直接 return，库根本不会创建**。
+- **Monica**：`local_keepass_databases` 四元组 `key_file_uri` + `key_file_internal_path` + `key_file_name` +
+  `key_file_fingerprint`；内部副本走 `KeePassKeyFileStore`（应用私有目录，**按 SHA-256 指纹命名**，
+  `cleanupUnreferencedInternalKeyFile` 做无引用回收）；建库/存库侧由 `KeePassKdbxService` 先落副本再登记指纹，
+  UI 侧 `AddEditPasswordScreen:1151` 硬闸门——`keyFileInternalPath` 非空**或** `generatorVerification[id]` 已
+  `Verified` 才放行，副本事后 `fingerprint(readInternal(p)) == fingerprint` 校验。
+- **本仓现状（对照结论）**：副本层 `KeyFileVaultCopyStore`（§411）**已按 `dbId` 落盘**，但**记忆层**
+  `RealSettingsRepository.setRememberedKeyFile` 只写 `last_key_file_uri` / `last_key_file_name` **两个全局键**
+  （唯一写入者 `KeyFileSessionCoordinator.rememberKeyFileOnSuccess` 仅在「解锁成功」触发），
+  建库链路既不登记也不收编、反在 `finally` 里 `fill(0)` 擦字节，恢复侧副本缺失时**裸落全局 Uri 且无归属校验**。
+- **判定**：全局「记住上次的密钥文件」这一层**在四者中是孤例**——三家全部把归属收在「库表的一列/一行」上。
+  本轮登记 `ISSUE-P2-460`，整改口径（用户裁决）＝**按库归属 + 建库即登记 + 取不到就显式告知**；
+  「副本文件名 `.kfc` 为随机名」与 Monica 的**指纹命名**不同，**若将来要做副本完整性校验，命名需改为指纹**——
+  该子项不单独立项，随 P2-460 一并评估。
+
+---
+
 ## §5 改进点清单与优先级排序
 
 > 处置栏：**已登记**＝已按 ACTIVE_ISSUES 维护规则补登；**不跟进（PD）**＝2026-10-02 用户裁决不做

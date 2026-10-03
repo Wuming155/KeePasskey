@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.KeyFileVaultCopyStore
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,41 +22,55 @@ import kotlinx.coroutines.withContext
  * 「待保存提示 → SAF 写盘 → 关闭提示」这一段状态，写盘复用既有导出通道
  * [VaultRepository.exportKeyFileBytes]，**不新造**第二条密钥文件生成 / 读取路径。
  *
+ * ISSUE-P2-460 AC②/AC③：
+ * - 建库成功即收编副本（收编在 VM 建库成功路径），故 [saveTo] 在会话已锁、导出通道取不到
+ *   字节时**回落本库私有目录副本**——交付不再因会话失效而必然失败；
+ * - 导出与副本都取不到字节时，显式提示「密钥文件已丢失」，**不得**再静默报「保存失败」
+ *   （真机取证：§408 建库窗口弹窗宿主随会话锁定被拆，导出恒空、用户只见「保存失败」一条）。
+ *
  * @param publish 反馈消息出口（VM 的 `publishPickerMessage`，保持消息通道单一）
  */
 internal class DatabasePickerKeyFileDeliveryController(
     private val vaultRepository: VaultRepository,
     private val appContext: Context?,
     private val scope: CoroutineScope,
-    private val publish: (UiMessage) -> Unit
+    private val publish: (UiMessage) -> Unit,
+    /** ISSUE-P2-460 AC③：私有目录收编副本通道（可空 = 单测未装配） */
+    private val vaultCopyStore: KeyFileVaultCopyStore? = null
 ) {
 
     /** ISSUE-P3-21：生成型密钥文件的一次性交付状态（Screen 据此弹出强制保存提示） */
     private val deliveryFlow = MutableStateFlow<KeyFileDeliveryState>(KeyFileDeliveryState.None)
     val delivery: StateFlow<KeyFileDeliveryState> = deliveryFlow.asStateFlow()
 
-    /** 建库成功后挂出「待一次性保存」提示 */
-    fun requestSave(vaultName: String) {
+    /** 本次交付对应库的 id（副本键；建库成功路径与选中事件同一取值口径） */
+    private var pendingDbId: String? = null
+
+    /** 建库成功后挂出「待一次性保存」提示（[dbId] 为新库在目录中的登记 id） */
+    fun requestSave(vaultName: String, dbId: String) {
+        pendingDbId = dbId
         deliveryFlow.value = KeyFileDeliveryState.PendingSave(suggestedFileName = suggestedFileName(vaultName))
     }
 
     /**
      * 把生成型密钥文件写入用户选定的 SAF 目标（ISSUE-P3-21 验收 2）。
      *
-     * 复用既有导出通道 [VaultRepository.exportKeyFileBytes]：只做「取字节 → 写 SAF → 擦副本」，
-     * 不新造第二条密钥文件生成/读取路径；写盘成功即关闭一次性提示。
+     * 字节来源两级：既有导出通道 [VaultRepository.exportKeyFileBytes]（会话绑定快照）→
+     * 失败时回落本库收编副本（ISSUE-P2-460 AC③）。两级都取不到即显式「密钥文件已丢失」，
+     * 绝不写空文件冒充成功、也不得只报一句「保存失败」。
      */
     fun saveTo(targetUri: Uri) {
         scope.launch {
+            val bytes = resolveDeliveryBytes()
+            if (bytes == null) {
+                // AC③：两级都取不到 ⇒ 密钥文件确已丢失，显式分型提示（不得静默「保存失败」）
+                publish(UiMessage(R.string.db_picker_keyfile_lost))
+                return@launch
+            }
             val resolver = appContext?.contentResolver
             if (resolver == null) {
                 // 禁止静默失败：没有写盘上下文时如实告知用户，提示保持驻留
-                publish(UiMessage(R.string.db_picker_keyfile_save_failed))
-                return@launch
-            }
-            // 复用既有导出通道取字节：会话未绑定密钥文件时如实失败（绝不写空文件冒充成功）
-            val bytes = vaultRepository.exportKeyFileBytes().getOrNull()
-            if (bytes == null) {
+                bytes.fill(0)
                 publish(UiMessage(R.string.db_picker_keyfile_save_failed))
                 return@launch
             }
@@ -81,6 +96,18 @@ internal class DatabasePickerKeyFileDeliveryController(
                 publish(UiMessage(R.string.db_picker_keyfile_save_failed))
             }
         }
+    }
+
+    /**
+     * AC③ 分型内核：交付字节的两级解析——既有导出通道（会话绑定快照）→ 本库私有目录副本。
+     * 返回 null = 两级都取不到 ⇒ 密钥文件确已丢失（调用方必须显式提示，不得静默）。
+     * 返回的数组所有权移交调用方（用毕 `fill(0)` 清零）。
+     * `internal` 拆出供 JVM 单测直接驱动分型（`android.net.Uri` 无 JVM 实现，无法实例化）。
+     */
+    internal suspend fun resolveDeliveryBytes(): ByteArray? {
+        val sessionBytes = vaultRepository.exportKeyFileBytes().getOrNull()
+        if (sessionBytes != null) return sessionBytes
+        return vaultCopyStore?.load(pendingDbId.orEmpty())?.bytes
     }
 
     /** 用户显式选择「暂不保存密钥文件」：关闭一次性提示（不清会话缓存，可经设置页导出补存） */

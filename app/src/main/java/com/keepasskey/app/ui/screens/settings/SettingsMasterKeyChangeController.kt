@@ -142,13 +142,14 @@ internal class SettingsMasterKeyChangeController(
     }
 
     /**
-     * 改绑 / 解绑成功后同步「记住的密钥文件位置」（ISSUE-P3-434）。
+     * 改绑 / 解绑成功后同步「记住的密钥文件位置」（ISSUE-P3-434；ISSUE-P2-460 起按库归属）。
      *
-     * 与解锁页 `rememberKeyFileOnSuccess` 同口径（ISSUE-P3-04）：
-     * - 偏好关闭 → 清除记录（不留任何密钥文件元数据）；
-     * - `Use`：偏好开启 + 来源 Uri 非空 + 对其取得**持久化读授权** → 登记新来源；
-     *   任一不满足 → 清除旧记录（旧记录指向已解绑的文件，留存必然误导下次冷启动）；
-     * - `Remove` → 清除记录（改后库无第二因子）；
+     * 与解锁页 `rememberKeyFileOnSuccess` 同口径（ISSUE-P3-04 + ISSUE-P2-460 AC①）：
+     * - 偏好关闭 → 清除记忆（本库记录 + 旧版全局槽，不留任何密钥文件元数据）；
+     * - `Use`：偏好开启 + 来源 Uri 非空 + 对其取得**持久化读授权** → 登记新来源到**本库名下**
+     *   （dbId 摘要键，绝不落全局槽）；任一不满足 → 清除旧记录（旧记录指向已解绑的文件，
+     *   留存必然误导下次冷启动）；
+     * - `Remove` → 清除记忆（改后库无第二因子）；
      * - `Keep` → 不动（密钥文件未变，记录仍有效）。
      *
      * 全程只触碰 Uri / 显示名（非密钥元数据）；任何失败都不影响已成功的改密回执。
@@ -163,17 +164,19 @@ internal class SettingsMasterKeyChangeController(
                 // 字节进私有目录（不依赖持久授权），偏好关闭只停用 Uri 记忆、不影响副本
                 if (dbId != null) vaultCopyStore?.save(dbId, intent.bytes, intent.displayName)
                 if (!rememberEnabled) {
-                    access.forget()
+                    access.forget(dbId)
                     return
                 }
-                if (intent.sourceUri.isNotBlank() && access.persistReadPermission(intent.sourceUri)) {
-                    access.remember(intent.sourceUri, intent.displayName)
+                if (intent.sourceUri.isNotBlank() && dbId != null &&
+                    access.persistReadPermission(intent.sourceUri)
+                ) {
+                    access.remember(dbId, intent.sourceUri, intent.displayName)
                 } else {
-                    access.forget()
+                    access.forget(dbId)
                 }
             }
             ChangeKeyFileIntent.Remove -> {
-                access.forget()
+                access.forget(dbId)
                 if (dbId != null) vaultCopyStore?.clear(dbId)
             }
             ChangeKeyFileIntent.Keep -> Unit
@@ -203,8 +206,8 @@ internal class SettingsMasterKeyChangeController(
             }
             return true
         }
-        // 2. 记忆 Uri 现读收编
-        val remembered = access.loadRemembered()
+        // 2. 本库记忆 Uri 现读收编（ISSUE-P2-460：记忆按库归属，读的是本库名下的记录）
+        val remembered = access.loadRemembered(dbId)
         if (remembered != null) {
             when (val outcome = access.read(remembered.uri)) {
                 is com.keepasskey.app.ui.screens.unlock.KeyFileReadResult.Success -> {
@@ -224,7 +227,7 @@ internal class SettingsMasterKeyChangeController(
                     // §411 走查（用户回执①）：授权失效 / 读取失败 → 清陈旧记录并**回落手选**
                     // （返回 false 让调用方直接弹 SAF 选择器，重选成功即经改绑流程收编副本），
                     // 不再死报「无法读取」让用户无路可走
-                    access.forget()
+                    access.forget(dbId)
                     mutableState.update {
                         it.copy(feedback = UiMessage(R.string.dbset_keyfile_import_memory_stale))
                     }

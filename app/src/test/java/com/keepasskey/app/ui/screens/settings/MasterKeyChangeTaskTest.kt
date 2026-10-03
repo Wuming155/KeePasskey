@@ -339,6 +339,7 @@ class MasterKeyChangeTaskTest {
         private val rememberEnabled: Boolean = true,
         private val persistPermission: Boolean = true
     ) : KeyFileAccess {
+        /** 单槽即可：本用例只涉一个活动库（FakeVaultRepository 的 db_personal） */
         var remembered: RememberedKeyFile? = null
         val persistRequests = mutableListOf<String>()
 
@@ -349,11 +350,12 @@ class MasterKeyChangeTaskTest {
             return persistPermission
         }
         override suspend fun hasPersistedReadPermission(uri: String): Boolean = persistPermission
-        override suspend fun loadRemembered(): RememberedKeyFile? = remembered
-        override suspend fun remember(uri: String, displayName: String) {
+        override suspend fun loadRemembered(databaseId: String): RememberedKeyFile? = remembered
+        override suspend fun loadLegacyGlobalHint(): RememberedKeyFile? = null
+        override suspend fun remember(databaseId: String, uri: String, displayName: String) {
             remembered = RememberedKeyFile(uri, displayName)
         }
-        override suspend fun forget() {
+        override suspend fun forget(databaseId: String?) {
             remembered = null
         }
     }

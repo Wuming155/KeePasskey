@@ -1451,6 +1451,10 @@
     <string name="db_picker_keyfile_backup_skip">暂不保存</string>
     <string name="db_picker_keyfile_saved">密钥文件已保存</string>
     <string name="db_picker_keyfile_save_failed">密钥文件保存失败</string>
+    <!-- ISSUE-P2-460 AC③：导出通道与私有目录副本都取不到字节时的显式分型提示（不得静默报「保存失败」） -->
+    <string name="db_picker_keyfile_lost">密钥文件已丢失，无法保存：会话已失效且未找到备份，请删除该库后重新创建并妥善保存密钥文件</string>
+    <!-- ISSUE-P2-460 AC①：本库未登记记忆时旧版全局槽只作一句话提示，绝不自动载入（防跨库串因子） -->
+    <string name="keyfile_legacy_memory_hint">检测到旧版本记住的密钥文件（%1$s）。为避免套用到其它密码库，已不再自动载入；如需使用请手动选择</string>
     <string name="repo_keyfile_generate_failed">生成密钥文件失败</string>
 
     <!-- ===== ISSUE-P3-19：导入失败的用户可读归类（非敏感，绝不含字段明文；见 ImportFailureReason） ===== -->

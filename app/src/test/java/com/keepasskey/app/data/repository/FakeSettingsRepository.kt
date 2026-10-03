@@ -120,13 +120,30 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(bottomNavOrder = order) }
     }
 
-    /** ISSUE-P3-04：密钥文件「非密钥元数据」入内存流（与生产 DataStore 语义一致） */
-    override suspend fun setRememberedKeyFile(uri: String, displayName: String) {
-        settingsFlow.update { it.copy(lastKeyFileUri = uri, lastKeyFileName = displayName) }
+    /** ISSUE-P2-460 AC①：按库密钥文件记忆（内存 map，与生产 dbId 摘要键同语义） */
+    private val perDatabaseKeyFileMemory =
+        mutableMapOf<String, SettingsRepository.RememberedKeyFileMeta>()
+
+    override suspend fun rememberedKeyFileFor(
+        databaseId: String
+    ): SettingsRepository.RememberedKeyFileMeta? = perDatabaseKeyFileMemory[databaseId]
+
+    override suspend fun setRememberedKeyFileFor(databaseId: String, uri: String, displayName: String) {
+        perDatabaseKeyFileMemory[databaseId] = SettingsRepository.RememberedKeyFileMeta(uri, displayName)
     }
 
+    override suspend fun clearRememberedKeyFileFor(databaseId: String) {
+        perDatabaseKeyFileMemory.remove(databaseId)
+    }
+
+    /** ISSUE-P2-460：清除旧版全局槽（历史遗留键） */
     override suspend fun clearRememberedKeyFile() {
         settingsFlow.update { it.copy(lastKeyFileUri = "", lastKeyFileName = "") }
+    }
+
+    /** 测试注入：直写旧版全局槽（ISSUE-P2-460 后生产已无任何写入方，仅供回归用例构造历史遗留态） */
+    suspend fun setLegacyGlobalKeyFile(uri: String, displayName: String) {
+        settingsFlow.update { it.copy(lastKeyFileUri = uri, lastKeyFileName = displayName) }
     }
 
     /** ISSUE-P3-68：重试节流开关入内存流（与生产 DataStore 语义一致） */

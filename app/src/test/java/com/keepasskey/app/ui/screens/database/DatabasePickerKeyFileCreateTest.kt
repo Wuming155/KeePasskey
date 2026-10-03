@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -88,34 +89,187 @@ class DatabasePickerKeyFileCreateTest {
 
         var lastReadUri: String? = null
 
-        override suspend fun isRememberEnabled(): Boolean = false
+        /** ISSUE-P2-460 AC②：「记住密钥文件位置」偏好（默认关 = 既有用例行为不变） */
+        var rememberEnabled: Boolean = false
+
+        /** ISSUE-P2-460 AC②：持久化读授权是否可得 */
+        var persistPermissionSucceeds: Boolean = false
+
+        /** ISSUE-P2-460 AC②：按库登记观测点 */
+        var lastRememberedDbId: String? = null
+        var lastRememberedUri: String? = null
+
+        override suspend fun isRememberEnabled(): Boolean = rememberEnabled
 
         override suspend fun read(uri: String): KeyFileReadResult {
             lastReadUri = uri
             return outcome
         }
 
-        override suspend fun persistReadPermission(uri: String): Boolean = false
+        override suspend fun persistReadPermission(uri: String): Boolean = persistPermissionSucceeds
 
         override suspend fun hasPersistedReadPermission(uri: String): Boolean = false
 
-        override suspend fun loadRemembered(): RememberedKeyFile? = null
+        override suspend fun loadRemembered(databaseId: String): RememberedKeyFile? = null
 
-        override suspend fun remember(uri: String, displayName: String) = Unit
+        override suspend fun loadLegacyGlobalHint(): RememberedKeyFile? = null
 
-        override suspend fun forget() = Unit
+        override suspend fun remember(databaseId: String, uri: String, displayName: String) {
+            lastRememberedDbId = databaseId
+            lastRememberedUri = uri
+        }
+
+        override suspend fun forget(databaseId: String?) = Unit
     }
 
     private fun TestScope.createViewModel(
         repository: VaultRepository,
-        keyFileAccess: KeyFileAccess? = null
+        keyFileAccess: KeyFileAccess? = null,
+        copyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null
     ): DatabasePickerViewModel {
-        val viewModel = DatabasePickerViewModel(repository, keyFileAccess)
+        val viewModel = DatabasePickerViewModel(
+            vaultRepository = repository,
+            keyFileAccess = keyFileAccess,
+            keyFileVaultCopyStore = copyStore
+        )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
         testScheduler.runCurrent()
         return MainDispatcherGuard.track(viewModel)
+    }
+
+    // ===== ISSUE-P2-460 AC②：建库成功即收编副本 + 按库登记（不等下次解锁） =====
+
+    /** 带假封印挂钩的临时副本库（KeyFileSessionCoordinatorTest 同范式；JVM 无 Keystore） */
+    private fun newCopyStore(): com.keepasskey.app.security.KeyFileVaultCopyStore {
+        val dir = java.io.File.createTempFile("kfc", "").parentFile
+            .resolve("kfc-${System.nanoTime()}")
+        return com.keepasskey.app.security.KeyFileVaultCopyStore(
+            context = null,
+            keystoreManager = null
+        ).also { store ->
+            store.baseDirOverride = dir
+            store.sealHook = { dek ->
+                val iv = ByteArray(12) { it.toByte() }
+                iv to dek.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
+            }
+            store.unsealHook = { iv, ciphertext ->
+                ciphertext.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
+            }
+        }
+    }
+
+    /**
+     * 轮询等待建库收编完成：`KeyFileVaultCopyStore.save` 内部 `withContext(Dispatchers.IO)`
+     * 在真实 IO 线程执行，`testScheduler.runCurrent()` 不等待其完成，须轮询至副本可读
+     * （每轮先推进 Main 队列让 VM 协程续跑，再真读一次副本）。
+     */
+    private suspend fun TestScope.awaitCopy(
+        store: com.keepasskey.app.security.KeyFileVaultCopyStore,
+        dbId: String
+    ): com.keepasskey.app.security.KeyFileVaultCopyStore.StoredCopy? {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            testScheduler.runCurrent()
+            store.load(dbId)?.let { return it }
+            kotlinx.coroutines.delay(5)
+        }
+        return null
+    }
+
+    /** 同上：轮询等待按库登记落位（登记协程同样经真实 IO 的授权校验后写入） */
+    private suspend fun TestScope.awaitRememberedDbId(access: FakeKeyFileAccess): String? {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            testScheduler.runCurrent()
+            access.lastRememberedDbId?.let { return it }
+            kotlinx.coroutines.delay(5)
+        }
+        return null
+    }
+
+    @Test
+    fun `建库成功即收编生成型密钥文件副本（不等下次解锁）`() = runTest {
+        val sessionBytes = ByteArray(32) { (it * 3 + 1).toByte() }
+        val recording = RecordingVaultRepository()
+        val repository = object : VaultRepository by recording {
+            override suspend fun exportKeyFileBytes(): KdbxResult<ByteArray> =
+                KdbxResult.Success(sessionBytes.copyOf())
+        }
+        val store = newCopyStore()
+        val viewModel = createViewModel(repository, copyStore = store)
+
+        viewModel.createDatabase(
+            "generated.kdbx", "Fake#Adopt".toCharArray(),
+            keyFile = true, preset = PRESET
+        )
+        testScheduler.runCurrent()
+
+        val copy = awaitCopy(store, "generated.kdbx")
+        assertNotNull("建库成功即收编副本，不再等下次解锁", copy)
+        assertArrayEquals("副本字节必须为会话绑定的密钥文件", sessionBytes, copy!!.bytes)
+        assertEquals("生成型副本显示名取建议名（.kdbx → .keyx）", "generated.keyx", copy.displayName)
+        copy.bytes.fill(0)
+    }
+
+    @Test
+    fun `既有密钥文件建库成功即按库登记且副本带来源显示名`() = runTest {
+        val keyFileBytes = ByteArray(32) { 9 }
+        val access = FakeKeyFileAccess(KeyFileReadResult.Success(keyFileBytes, "seed.keyx")).apply {
+            rememberEnabled = true
+            persistPermissionSucceeds = true
+        }
+        val recording = RecordingVaultRepository()
+        val repository = object : VaultRepository by recording {
+            override suspend fun exportKeyFileBytes(): KdbxResult<ByteArray> =
+                KdbxResult.Success(keyFileBytes.copyOf())
+        }
+        val store = newCopyStore()
+        val viewModel = createViewModel(repository, access, store)
+
+        viewModel.createDatabase(
+            "existing.kdbx", "Fake#AdoptExisting".toCharArray(),
+            keyFile = true, preset = PRESET, keyFileSourceUri = KEY_FILE_URI
+        )
+        testScheduler.runCurrent()
+
+        assertEquals(
+            "登记必须落本库名下（targetUri 为空 ⇒ 库 id = 登记文件名）",
+            "existing.kdbx",
+            awaitRememberedDbId(access)
+        )
+        assertEquals("登记内容为来源 Uri", KEY_FILE_URI, access.lastRememberedUri)
+        val copy = awaitCopy(store, "existing.kdbx")
+        assertNotNull("既有因子建库同样立即收编副本", copy)
+        assertEquals("副本显示名取来源文档名", "seed.keyx", copy!!.displayName)
+        copy.bytes.fill(0)
+    }
+
+    @Test
+    fun `既有密钥文件建库时偏好关闭不登记Uri但副本仍收编`() = runTest {
+        val keyFileBytes = ByteArray(32) { 5 }
+        val access = FakeKeyFileAccess(KeyFileReadResult.Success(keyFileBytes, "seed.keyx"))
+        val recording = RecordingVaultRepository()
+        val repository = object : VaultRepository by recording {
+            override suspend fun exportKeyFileBytes(): KdbxResult<ByteArray> =
+                KdbxResult.Success(keyFileBytes.copyOf())
+        }
+        val store = newCopyStore()
+        val viewModel = createViewModel(repository, access, store)
+
+        viewModel.createDatabase(
+            "pref-off.kdbx", "Fake#PrefOff".toCharArray(),
+            keyFile = true, preset = PRESET, keyFileSourceUri = KEY_FILE_URI
+        )
+        testScheduler.runCurrent()
+
+        val copy = awaitCopy(store, "pref-off.kdbx")
+        assertNotNull("副本归「导入密钥文件」功能管，不随记忆偏好缺位（§411 裁决同源）", copy)
+        copy!!.bytes.fill(0)
+        // 收编完成后登记面仍应保持未登记（偏好关闭不写 Uri 记忆）
+        testScheduler.runCurrent()
+        assertNull("偏好关闭不得登记 Uri 记忆", access.lastRememberedDbId)
     }
 
     @Test
