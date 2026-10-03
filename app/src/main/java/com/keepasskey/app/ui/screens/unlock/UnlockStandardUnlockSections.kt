@@ -131,15 +131,19 @@ private fun KeyFileSourceRow(path: String) {
 }
 
 /**
- * §434 装机回执修正：**展开态必须真的能看全**。
+ * §434 装机回执修正（两轮）：
  *
- * 原实现展开后仍是单行 + `Ellipsis`——固定行宽下超长路径（真机 118 字符）必然截尾，
- * 用户回执「完整的路径在当前空间根本看不全」正是指此。现改为：折叠态单行**中间省略**，
- * 展开态**换行铺满**（路径含 `/`，系统排版会在斜杠后断行，天然可读），不再截断。
+ * 1. **展开态必须真的能看全**：原实现展开后仍是单行 + `Ellipsis`，固定行宽下 118 字符的真实
+ *    路径必然截尾（用户回执「完整的路径在当前空间根本看不全」）；
+ * 2. **标签 / 按钮不得悬在换行块中间**：单行 `Row` + `CenterVertically` 在展开成多行后，
+ *    「来源」与眼睛会落到整块文字的**垂直中线**上，读起来像路径属于上一行的「密钥文件」
+ *    （装机截图实测）；且路径只拿到「行宽 − 标签 − 按钮」而多折行。
+ *
+ * 故改为**上下两段**：首行＝标签 + （折叠态路径 / 展开态占位）+ 眼睛按钮；展开时路径落到
+ * **下一段独占整行宽度**（少折行、彻底消除悬浮）。折叠态仍是单行中间省略。
  *
  * 状态外提为 [expanded] / [onToggle] 而非内持 `remember`，是为了让展开态**能被 @Preview 覆盖**
- * ——本态此前只能靠真机撞见，正是「新态无预览」的再现（ISSUE-P3-340 口径）；
- * 两态预览见 `UnlockScreenPreviews.kt`。
+ * ——该态曾两度只能靠真机撞见（ISSUE-P3-340 口径）；两态预览见 `UnlockScreenPreviews.kt`。
  */
 @Composable
 internal fun KeyFileSourceRowContent(
@@ -147,35 +151,49 @@ internal fun KeyFileSourceRowContent(
     expanded: Boolean,
     onToggle: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             // 左缩进对齐上行文字列（图标 20dp + 间隔 10dp + 行内水平内边距 4dp）
-            .padding(start = 34.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(start = 34.dp, end = 4.dp)
     ) {
-        Text(
-            text = stringResource(R.string.unlock_keyfile_source_label),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = if (expanded) path else abbreviatePath(path),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            // 展开：不限行数换行铺满（完整可读）；折叠：单行 + 省略号
-            maxLines = if (expanded) Int.MAX_VALUE else 1,
-            overflow = TextOverflow.Ellipsis,
-            softWrap = true,
-            modifier = Modifier.weight(1f)
-        )
-        IconButton(onClick = onToggle) {
-            Icon(
-                imageVector = if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                contentDescription = stringResource(R.string.cd_toggle_keyfile_path),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.unlock_keyfile_source_label),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            if (expanded) {
+                // 展开态：路径落到下一段独占整行，首行只留标签与按钮（占位撑开右侧）
+                Spacer(modifier = Modifier.weight(1f))
+            } else {
+                Text(
+                    text = abbreviatePath(path),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            IconButton(onClick = onToggle) {
+                Icon(
+                    imageVector = if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    contentDescription = stringResource(R.string.cd_toggle_keyfile_path),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        if (expanded) {
+            Text(
+                text = path,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 不限行数换行铺满（路径含 `/`，系统排版在斜杠后断行），完整可读、不截断
+                maxLines = Int.MAX_VALUE,
+                softWrap = true
             )
         }
     }
