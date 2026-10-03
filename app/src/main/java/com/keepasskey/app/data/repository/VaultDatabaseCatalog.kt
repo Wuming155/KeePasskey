@@ -27,6 +27,9 @@ internal class VaultDatabaseCatalog(
     private val databaseSession: DatabaseSession
 ) {
 
+    /** `ISSUE-P2-465`：活动库 ID 的持久化单点（与同步配置命名空间共用同一份记录） */
+    private val activeIdStore = ActiveDatabaseIdStore(context)
+
     /** 一条已知（含外部）密码库的持久化元数据 */
     internal data class KnownDatabaseEntry(
         val id: String,
@@ -80,28 +83,16 @@ internal class VaultDatabaseCatalog(
         }
     }
 
-    fun loadActiveDbId(): String? {
-        return try {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                ?.getString(KEY_ACTIVE_DATABASE_ID, null)
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "读取活动库 ID 失败，按未知处理", t)
-            null
-        }
-    }
+    /**
+     * 读取活动库 ID。
+     *
+     * `ISSUE-P2-465`：记录本体与键名已抽出为 [ActiveDatabaseIdStore]（同步配置的按库命名空间
+     * 需读同一份记录，键名单点定义），本方法只是转发，容错语义与抽出前逐字一致。
+     */
+    fun loadActiveDbId(): String? = activeIdStore.load()
 
-    fun saveActiveDbId(id: String?) {
-        try {
-            val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) ?: return
-            if (id == null) {
-                sp.edit().remove(KEY_ACTIVE_DATABASE_ID).apply()
-            } else {
-                sp.edit().putString(KEY_ACTIVE_DATABASE_ID, id).apply()
-            }
-        } catch (t: Throwable) {
-            AppLog.w(TAG, "写入活动库 ID 失败", t)
-        }
-    }
+    /** 登记 / 清除活动库 ID（null = 清除）；转发 [ActiveDatabaseIdStore.save]。 */
+    fun saveActiveDbId(id: String?) = activeIdStore.save(id)
 
     /**
      * `ISSUE-P3-230`：该库路径是否**缺少**持久化读授权（非 `content://` 恒 false）。
@@ -233,9 +224,10 @@ internal class VaultDatabaseCatalog(
 
     private companion object {
         const val TAG = "VaultDbCatalog"
-        const val PREFS_NAME = "keepasskey_vault_meta"
+
+        /** 与 [ActiveDatabaseIdStore.PREFS_NAME] 同一文件（活动库 ID 键由该单点持有） */
+        val PREFS_NAME = ActiveDatabaseIdStore.PREFS_NAME
         const val KEY_KNOWN_DATABASES = "known_databases_v1"
-        const val KEY_ACTIVE_DATABASE_ID = "active_database_id"
         const val RECORD_SEPARATOR = "\u0002"
         const val FIELD_SEPARATOR = "\u0001"
     }

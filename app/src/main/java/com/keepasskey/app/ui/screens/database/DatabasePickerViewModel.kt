@@ -345,6 +345,10 @@ class DatabasePickerViewModel @Inject constructor(
                 // （真机取证：DataStore 按库记忆 5 条 vs 副本 2 个）。清除后即便同 id 再次建库，
                 // 也不会把「上一个同名库」的密钥文件当成自己的记忆。
                 keyFileAccess?.forget(id)
+                // ISSUE-P2-465：同批清除该库的**云同步配置**（按库命名空间）——删库即无主配置，
+                // 留着会在同路径重建新库时被静默继承（绑定闸门仍会拦截错传，但配置页会显示
+                // 「别人的服务器与远端路径」）。绑定登记的值是根分组 UUID，删库后无从反查，故不清。
+                syncCredentialsStore?.clearFor(id)
                 publishPickerMessage(UiMessage(R.string.db_picker_msg_removed))
             } else {
                 publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))

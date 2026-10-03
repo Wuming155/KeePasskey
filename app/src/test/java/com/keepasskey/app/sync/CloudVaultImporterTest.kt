@@ -2,6 +2,7 @@ package com.keepasskey.app.sync
 
 import android.content.Context
 import android.content.ContextWrapper
+import com.keepasskey.app.data.repository.ActiveDatabaseIdStore
 import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.sync.model.RemoteFileMetadata
@@ -63,6 +64,15 @@ class CloudVaultImporterTest {
     /** 内存键值面直查别名（对齐 SyncCredentialsStoreTest 口径） */
     private val storage: MutableMap<String, Any?> get() = prefsFake.storage
 
+    /**
+     * `ISSUE-P2-465`：把「当前活动库」摆到刚导入的落盘路径上——上层 `importExternalDatabase`
+     * 正是以该路径登记该库，故这等价于「登记后重新读取」。替身把两个 prefs 名映射到同一张表，
+     * 故活动库 ID 与同步键同处一张内存表。
+     */
+    private fun activateImportedVault(localPath: String) {
+        storage[ActiveDatabaseIdStore.KEY_ACTIVE_DATABASE_ID] = localPath
+    }
+
     /** 假 Provider：download 把 [content] 写进 sink（[failDownload] 时模拟网络失败；[onDownload] 供用例注入下载期副作用） */
     private class FakeProvider(
         private val content: ByteArray = "FAKE_KDBX".toByteArray(),
@@ -116,6 +126,9 @@ class CloudVaultImporterTest {
         assertTrue(localFile.isFile)
         assertArrayEquals("FAKE_KDBX".toByteArray(), localFile.readBytes())
         assertEquals("/mailbox/keepasskey.kdbx", provider.downloadedPath)
+        // ISSUE-P2-465：导入的凭据落在「即将登记的本地库」命名空间下（显式 dbId = 落盘路径）
+        // ——上层登记该库后（活动库 ID = 同一路径），设置页与同步周期读到的正是这一份
+        activateImportedVault(localFile.absolutePath)
         assertEquals(CloudSyncProvider.WEBDAV, store.loadProvider())
         val saved = store.loadWebDavConfig()
         assertEquals("https://dav.example.com/dav/", saved?.url)
@@ -188,6 +201,8 @@ class CloudVaultImporterTest {
         val success = result as CloudVaultImportResult.Success
         assertTrue(File(success.localPath).isFile)
         assertEquals("backups/keepasskey.kdbx", provider.downloadedPath)
+        // ISSUE-P2-465：同上——按落盘路径（= 上层登记的库 ID）读回本库自己的配置
+        activateImportedVault(success.localPath)
         assertEquals(CloudSyncProvider.S3_COMPATIBLE, store.loadProvider())
         val saved = store.loadS3Config()
         assertEquals("https://acct.r2.cloudflarestorage.com", saved?.endpoint)
@@ -214,6 +229,7 @@ class CloudVaultImporterTest {
 
         val result = importer.import(request)
         assertTrue(result is CloudVaultImportResult.Success)
+        activateImportedVault((result as CloudVaultImportResult.Success).localPath)
         val saved = store.loadWebDavConfig()
         assertEquals("user@example.com", saved?.username)
         assertArrayEquals("webdav-pass".toCharArray(), saved?.password)

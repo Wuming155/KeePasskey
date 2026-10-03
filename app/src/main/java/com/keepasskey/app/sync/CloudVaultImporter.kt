@@ -141,7 +141,7 @@ class RealCloudVaultImporter @Inject constructor(
                         }
                     }
                     // 先提交凭据再改名：凭据封印失败时不留下「库已登记但同步配置缺失」的半状态
-                    if (!commitCredentials(request, passwordSnapshot, accessKeySnapshot, secretKeySnapshot)) {
+                    if (!commitCredentials(request, passwordSnapshot, accessKeySnapshot, secretKeySnapshot, target.absolutePath)) {
                         return CloudVaultImportResult.Failure(
                             UiMessage(R.string.sync_config_save_failed, isError = true)
                         )
@@ -169,28 +169,36 @@ class RealCloudVaultImporter @Inject constructor(
      * 下载成功后把凭据封印落盘并置为当前同步 Provider；store 内部负责凭据擦除。
      * 端点在此处再过一次 [HttpsEndpointPolicy] 归一化（与 Provider 构造同语义），保证
      * 落盘值与同步配置页保存口径一致（无 scheme 自动补 https://）。
+     *
+     * `ISSUE-P2-465`：[vaultPath] = 即将落盘的本地文件绝对路径，作为**显式库命名空间**
+     * 提交凭据——本链路必然发生在**解锁之前**（远端库还没下到本机，谈不上会话），
+     * 而该路径随后即由上层 `importExternalDatabase` 登记为该库的 ID、并成为解锁后的
+     * 会话路径标识 ⇒ 解锁后同步页 / 同步周期读到的正是这一份配置（不会落到别的库头上）。
      */
     private fun commitCredentials(
         request: CloudVaultImportRequest,
         passwordSnapshot: CharArray,
         accessKeySnapshot: CharArray,
-        secretKeySnapshot: CharArray
+        secretKeySnapshot: CharArray,
+        vaultPath: String
     ): Boolean = when (request) {
         is CloudVaultImportRequest.WebDav -> {
             val normalizedUrl = HttpsEndpointPolicy.normalize(request.url) ?: return false
             val saved = syncCredentialsStore.saveWebDavConfig(
-                normalizedUrl, request.username, passwordSnapshot, request.remotePath.trim()
+                normalizedUrl, request.username, passwordSnapshot, request.remotePath.trim(),
+                dbId = vaultPath
             )
-            if (saved) syncCredentialsStore.saveProvider(CloudSyncProvider.WEBDAV)
+            if (saved) syncCredentialsStore.saveProvider(CloudSyncProvider.WEBDAV, dbId = vaultPath)
             saved
         }
         is CloudVaultImportRequest.S3 -> {
             val normalizedEndpoint = HttpsEndpointPolicy.normalize(request.endpoint) ?: return false
             val saved = syncCredentialsStore.saveS3Config(
                 normalizedEndpoint, request.bucket, request.region,
-                accessKeySnapshot, secretKeySnapshot, request.objectKey, request.usePathStyle
+                accessKeySnapshot, secretKeySnapshot, request.objectKey, request.usePathStyle,
+                dbId = vaultPath
             )
-            if (saved) syncCredentialsStore.saveProvider(CloudSyncProvider.S3_COMPATIBLE)
+            if (saved) syncCredentialsStore.saveProvider(CloudSyncProvider.S3_COMPATIBLE, dbId = vaultPath)
             saved
         }
     }
