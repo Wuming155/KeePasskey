@@ -21,7 +21,15 @@ data class VaultGroup(
      * null = 该分组未绑定自定义图标，渲染侧回退 [iconName] 标准矢量图标；
      * 非 null 但不在库内图标池中时按缺图占位呈现（不谎报为标准图标）。
      */
-    val customIconId: String? = null
+    val customIconId: String? = null,
+    /**
+     * `ISSUE-P3-469`：该分组是否为库的**官方模板组**（Meta `EntryTemplatesGroup` 命中）。
+     *
+     * 与 [isRecycleBin] 同构——由仓库投影层按 `KdbxDatabase.entryTemplatesGroup` 标注，
+     * 供「从模板新建」预设供给消费（官方 KeePass / KeePassDX 的模板组不叫「模板」，
+     * 只按名扫描会漏掉它们）。
+     */
+    val isTemplate: Boolean = false
 )
 
 /**

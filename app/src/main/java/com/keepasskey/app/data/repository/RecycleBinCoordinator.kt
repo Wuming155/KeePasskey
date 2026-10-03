@@ -324,23 +324,30 @@ internal class RecycleBinCoordinator(
  * `VaultGroupCoordinator.groupsFlow`），再多写一份"供给面专用过滤"只会让两面迟早分叉
  * （用户所见再次不一致）。本函数是收敛后的**唯一**口径。
  *
- * ## 口径
+ * ## 口径（`ISSUE-P3-470` AC① 收敛：判定规则随 Meta `RecycleBinEnabled` 门控）
  *
- * * 命中条件：`id == KdbxDatabase.recycleBinUuid` **或** 组名 ∈ {`回收站`, `Recycle Bin`}；
- *   **刻意不理 `recycleBinEnabled`** —— 列表页今天就不理它，若按开关门控，
- *   「Meta 未回填但存在同名 bin」的库会让「列表页认为已删」与「供给面认为可用」再次分叉。
+ * * **`recycleBinEnabled = false` ⇒ 空表**：官方语义下关闭开关即「删除＝永久删除」，
+ *   此时**不凭任何依据**判「已删」—— 残留同名组或历史 UUID 命中组里的条目都是**活条目**，
+ *   不得被判为已删而从供给面消失（`ISSUE-P3-470` 锁定的缺陷）。
+ * * **`recycleBinEnabled = true` ⇒ 以 `RecycleBinUuid` 命中为准**；UUID **缺失**时（懒创建
+ *   未写 UUID 的第三方库）才允许组名（`回收站` / `Recycle Bin`）兜底。
  * * **含全部后代**：bin 的子组里的条目同样是已删条目（子组名一般不叫回收站，故必须展开子树）。
  * * **根组永不视为回收站**：否则一旦根组命名撞上，整库条目都会被判为"已删"、
  *   从所有供给面消失 —— 那会把 fail-closed 变成 fail-whole-vault。
  *
- * @return 回收站组及其全部后代（按 id 去重；多个同名 bin 时全部纳入）
+ * ## 与 `primaryRecycleBinRoot` 的分工
+ *
+ * 本函数回答「**哪些条目算已删**」（供给面判定，含后代展开）；`primaryRecycleBinRoot`
+ * 回答「**回收站组在哪**」（删除 / 还原 / 清空的定位）。两者的输入不同（前者看条目归属，
+ * 后者要落地移动），故口径各自独立：删除主流程对 `recycleBinEnabled = false` 已在
+ * 各个删除分支显式走物理删除（`deleteEntry` / `deleteGroup` / `batchDeleteEntries`），
+ * 不依赖本函数。
+ *
+ * @return 回收站组及其全部后代（按 id 去重；UUID 缺失且多个同名 bin 时全部纳入）
  */
 internal fun recycleBinGroupsOf(db: KdbxDatabase): List<KdbxGroup> {
-    val root = db.rootGroup
-    val binUuid = db.recycleBinUuid
-    val roots = root.allGroups().filter { group ->
-        group.id != root.id && (group.id == binUuid || isRecycleBinName(group.name))
-    }
+    val roots = recycleBinRootsOf(db)
+    if (roots.isEmpty()) return emptyList()
     val seen = mutableSetOf<KdbxUuid>()
     val out = mutableListOf<KdbxGroup>()
     for (candidate in roots) {
@@ -350,6 +357,22 @@ internal fun recycleBinGroupsOf(db: KdbxDatabase): List<KdbxGroup> {
         }
     }
     return out
+}
+
+/**
+ * 供给面「回收站根组」候选（不含后代）——`ISSUE-P3-470` AC① 的唯一收口。
+ *
+ * * `recycleBinEnabled = false` ⇒ 空表（不凭任何依据判已删）。
+ * * `= true` ⇒ 有 `RecycleBinUuid` 只认 UUID 命中；UUID 缺失才按组名兜底。
+ */
+private fun recycleBinRootsOf(db: KdbxDatabase): List<KdbxGroup> {
+    if (!db.recycleBinEnabled) return emptyList()
+    val root = db.rootGroup
+    val binUuid = db.recycleBinUuid
+    return root.allGroups().filter { group ->
+        group.id != root.id &&
+            if (binUuid != null) group.id == binUuid else isRecycleBinName(group.name)
+    }
 }
 
 /** 回收站子树的全部组 id（判定条目是否"已在回收站内"用；条目 `parentGroupId` 落在此集合内即为已删）。 */

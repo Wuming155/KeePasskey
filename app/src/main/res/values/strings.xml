@@ -286,29 +286,33 @@
     <!-- 设置相关 -->
     <string name="settings_title">设置</string>
     <string name="settings_cat_storage">密码库与存储</string>
-    <string name="settings_database">密码库与加密</string>
+    <!-- ISSUE-P3-468：条目「密码库与加密」改「数据库与加密」（组「密码库与存储」下重复「密码库」） -->
+    <string name="settings_database">数据库与加密</string>
     <string name="settings_database_sub">KDBX 4 · Argon2 / AES-KDF · 加密参数与回收站</string>
     <string name="settings_sync">云端同步</string>
     <string name="settings_sync_sub">WebDAV、兼容 S3 存储多协议自动同步</string>
     <string name="settings_change_master_key">更改主密码</string>
     <string name="settings_change_master_key_sub">重设密码库主密码与安全派生凭据</string>
-    <string name="settings_cat_security">安全与审计</string>
+    <!-- ISSUE-P3-468：组「安全与审计」改「安全」（与组内「健康度检查与审计」重复「审计」） -->
+    <string name="settings_cat_security">安全</string>
     <string name="settings_security">设备解锁与安全策略</string>
     <string name="settings_security_sub">生物识别、后台自动锁定、防截屏录屏</string>
-    <string name="settings_health">健康度检查与审计</string>
+    <!-- ISSUE-P3-468：条目「健康度检查与审计」改「密码健康检查」（与组名重复「审计」），泄露比对仍在副标题 -->
+    <string name="settings_health">密码健康检查</string>
     <string name="settings_health_sub">弱密码、密码复用、数据泄露比对</string>
-    <string name="settings_cat_preferences">自动填充</string>
+    <!-- ISSUE-P3-468：id 由 settings_cat_preferences 改名对齐（组名「自动填充」维持不变） -->
+    <string name="settings_cat_autofill">自动填充</string>
     <string name="settings_cat_display">界面与显示</string>
-    <!-- ISSUE-P3-444：界面偏好（二级页；自「界面与显示」组的第三个入口进入）+ 设置项搜索 -->
-    <string name="settings_cat_interface">界面偏好</string>
-    <string name="settings_interface_sub">密码字体、动效等界面表现</string>
+    <!-- ISSUE-P3-468：条目「界面偏好」改「字体与动效」（与组名「界面与显示」语义近重合） -->
+    <string name="settings_cat_interface">字体与动效</string>
+    <string name="settings_interface_sub">密码字段等宽字体、界面动效</string>
     <string name="interface_section_fields">字段与动效</string>
     <string name="settings_monospace_fields">密码字段等宽字体</string>
     <string name="settings_monospace_fields_sub">密码与验证码使用等宽字体展示，便于逐字符核对</string>
     <string name="settings_reduce_animations">动效降级</string>
     <string name="settings_reduce_animations_sub">关闭页面转场与列表动画（低端机型或系统卡顿时开启）</string>
-    <!-- ISSUE-P3-432：自动填充与通行密钥拆为两个设置项 -->
-    <string name="settings_autofill">自动填充</string>
+    <!-- ISSUE-P3-432：自动填充与通行密钥拆为两个设置项；ISSUE-P3-468：条目改名「系统自动填充」与组名区分 -->
+    <string name="settings_autofill">系统自动填充</string>
     <string name="settings_autofill_sub">系统自动填充服务、黑名单、TOTP 联动、剪贴板保护</string>
     <string name="settings_passkey">通行密钥 (Passkey)</string>
     <string name="settings_passkey_sub">凭据管理器、特权浏览器、注册归属校验</string>

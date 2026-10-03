@@ -36,6 +36,8 @@ internal class VaultGroupCoordinator(
                 // 连带修正：分组选择器（移动 / 新建目标）会一并排除 bin 子树，
                 // 不再允许把活条目移进回收站的子组里。
                 val binGroupIds = recycleBinGroupIdsOf(db)
+                // ISSUE-P3-469：官方模板组（Meta EntryTemplatesGroup 命中）标注 —— 供「从模板新建」消费
+                val templateGroupId = db.entryTemplatesGroup
                 val allKdbxGroups = db.rootGroup.allGroups()
                 allKdbxGroups.map { kdbxGroup ->
                     val isRecycle = kdbxGroup.id in binGroupIds
@@ -50,7 +52,8 @@ internal class VaultGroupCoordinator(
                         iconName = if (isRecycle || kdbxGroup.iconId == RealVaultRepository.ICON_TRASH_BIN) "delete" else "folder",
                         updatedAt = entryMapper.formatInstant(kdbxGroup.times.lastModificationTime),
                         createdAt = entryMapper.formatInstant(kdbxGroup.times.creationTime),
-                        isRecycleBin = isRecycle
+                        isRecycleBin = isRecycle,
+                        isTemplate = templateGroupId != null && kdbxGroup.id == templateGroupId
                     )
                 }
             }

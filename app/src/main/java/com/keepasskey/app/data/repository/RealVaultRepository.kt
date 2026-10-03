@@ -102,7 +102,7 @@ class RealVaultRepository @Inject constructor(
         totpPreferences = { totpPreferencesSource.read() }
     )
     private val groups = VaultGroupCoordinator(databaseSession, entryMapper) { persistSession() }
-    private val exporter = VaultExportCoordinator(context, strings, databaseSession) { persistSession() }
+    private val exporter = VaultExportCoordinator(strings, databaseSession) { persistSession() }
     // ISSUE-P3-305：条目只读查询面与 HOTP 推进面（各自成器，见类 KDoc）
     private val queries = VaultEntryQueryCoordinator(databaseSession, entryMapper, projectionDispatcher)
     private val hotp = HotpAdvanceCoordinator(secretReader, entryWriter, strings)

@@ -146,15 +146,34 @@ class RecycleBinSubtreeExclusionTest {
     }
 
     @Test
-    fun `Meta 未回填但组名叫回收站时同样排除（与列表页判定同源）`() = runBlocking {
+    fun `Meta 未回填但组名叫回收站且启用回收站时同样排除（与列表页判定同源）`() = runBlocking {
         val session = DatabaseSession()
-        // recycleBinUuid = null 且 enabled = false：外部 KeePass 库的常见形态
-        session.setDatabaseForTesting(databaseWithBin(binUuid = null, enabled = false))
+        // ISSUE-P3-470 AC①：recycleBinEnabled = true 且 recycleBinUuid = null（懒创建未写 UUID
+        // 的第三方库），此时才允许按组名兜底 → 仍须排除。
+        session.setDatabaseForTesting(databaseWithBin(binUuid = null, enabled = true))
         val coordinator = query(session)
 
         val usable = coordinator.usableEntries()
         assertEquals("按名命中的 bin 及其子组同样须被排除", 2, usable.size)
         assertTrue(usable.all { it.parentGroupId == liveGroupId })
+    }
+
+    @Test
+    fun `Meta 关闭回收站时残留同名组不判已删（ISSUE-P3-470）`() = runBlocking {
+        val session = DatabaseSession()
+        // ISSUE-P3-470 AC①：recycleBinEnabled = false ⇒ 不凭任何依据判已删 ——
+        // 官方语义下关闭开关即「删除＝永久删除」，残留同名组（此处 UUID 仍命中）里的条目是活条目。
+        session.setDatabaseForTesting(databaseWithBin(binUuid = binId, enabled = false))
+        val coordinator = query(session)
+
+        val all = coordinator.allEntries()
+        val usable = coordinator.usableEntries()
+        assertEquals("关闭回收站时全部 5 条均为可用（无任何条目被判已删）", 5, usable.size)
+        assertEquals("可用侧等于整树侧", all.map { it.id }.toSet(), usable.map { it.id }.toSet())
+
+        // 正向对照：同口径的 UI 投影也不得标 isRecycled（否则列表页仍把它们呈现为已删）
+        val projections = coordinator.entriesFlow().first()
+        assertEquals("关闭回收站时投影不得标 isRecycled", 0, projections.count { it.isRecycled })
     }
 
     @Test

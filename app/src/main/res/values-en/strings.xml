@@ -282,23 +282,26 @@
     <string name="settings_sync_sub">WebDAV &amp; S3 compatible multi-protocol sync</string>
     <string name="settings_change_master_key">Change Master Password</string>
     <string name="settings_change_master_key_sub">Reset master password and key derivation settings</string>
-    <string name="settings_cat_security">Security &amp; Audit</string>
+    <!-- ISSUE-P3-468: group "Security & Audit" -> "Security" (dedupe with "Health Check & Audit") -->
+    <string name="settings_cat_security">Security</string>
     <string name="settings_security">Device Unlock &amp; Security</string>
     <string name="settings_security_sub">Biometrics, background auto-lock, screenshot protection</string>
-    <string name="settings_health">Health Check &amp; Audit</string>
+    <!-- ISSUE-P3-468: entry "Health Check & Audit" -> "Password Health Check", breach check stays in subtitle -->
+    <string name="settings_health">Password Health Check</string>
     <string name="settings_health_sub">Weak passwords, reuse detection, breach checking</string>
-    <string name="settings_cat_preferences">Autofill</string>
+    <!-- ISSUE-P3-468: id renamed from settings_cat_preferences (group label "Autofill" unchanged) -->
+    <string name="settings_cat_autofill">Autofill</string>
     <string name="settings_cat_display">Interface &amp; Display</string>
-    <!-- ISSUE-P3-444: interface preferences (second-level page, third entry of "Interface & Display") + settings search -->
-    <string name="settings_cat_interface">Interface preferences</string>
-    <string name="settings_interface_sub">Password font, motion and other display behaviour</string>
+    <!-- ISSUE-P3-468: entry "Interface preferences" -> "Font and Motion" -->
+    <string name="settings_cat_interface">Font &amp; Motion</string>
+    <string name="settings_interface_sub">Monospace password font, interface motion</string>
     <string name="interface_section_fields">Fields &amp; motion</string>
     <string name="settings_monospace_fields">Monospace password font</string>
     <string name="settings_monospace_fields_sub">Show passwords and codes in a monospace font for character-by-character checking</string>
     <string name="settings_reduce_animations">Reduce motion</string>
     <string name="settings_reduce_animations_sub">Turn off screen transitions and list animations (for low-end devices or stuttering systems)</string>
-    <!-- ISSUE-P3-432：autofill and passkey split into two settings entries -->
-    <string name="settings_autofill">Autofill</string>
+    <!-- ISSUE-P3-432：autofill and passkey split into two settings entries; ISSUE-P3-468: entry renamed to "System Autofill" -->
+    <string name="settings_autofill">System Autofill</string>
     <string name="settings_autofill_sub">System autofill service, blocklists, TOTP integration, clipboard protection</string>
     <string name="settings_passkey">Passkeys</string>
     <string name="settings_passkey_sub">Credential Manager, privileged browsers, registration ownership checks</string>

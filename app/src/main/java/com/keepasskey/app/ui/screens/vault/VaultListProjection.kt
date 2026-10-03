@@ -337,15 +337,23 @@ private fun selectGroups(
 
 /**
  * 7. ISSUE-P3-51：库内「模板」分组内的条目（供「从模板新建」选择器）。
- * 未安装模板库（无同名分组）时为空表，创建对话框据此隐藏该入口。
+ * 未安装模板库（无模板组）时为空表，创建对话框据此隐藏该入口。
+ *
+ * `ISSUE-P3-469` 读侧：优先取**官方模板组**（Meta `EntryTemplatesGroup` 命中，投影为
+ * [VaultGroup.isTemplate]）——第三方库的模板组通常不叫「模板」，只按组名扫描会漏掉它；
+ * 读不到（历史库未登记 Meta）时**回落**按固定组名扫描，既有路径逐字保留。
  */
 private fun buildTemplateEntries(
     allGroups: List<VaultGroup>,
     allEntries: List<UiVaultEntry>
 ): List<UiVaultEntry> {
     val templateGroupIds = allGroups
-        .filter { it.name == VaultTemplateFactory.TEMPLATE_GROUP_NAME }
+        .filter { it.isTemplate }
         .mapTo(mutableSetOf()) { it.id }
+        .ifEmpty {
+            allGroups.filter { it.name == VaultTemplateFactory.TEMPLATE_GROUP_NAME }
+                .mapTo(mutableSetOf()) { it.id }
+        }
     return if (templateGroupIds.isEmpty()) {
         emptyList()
     } else {

@@ -44,51 +44,7 @@
 > **暂无开放项**。（最近一条 `ISSUE-P2-465` 云同步配置按库隔离已于 §422 整条闭环，
 > 见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §422）
 
-## P3 低危问题、特性接线与体验优化（4 项）
-
-### ISSUE-P3-468：设置主页分组命名与归属梳理——消除组名与条目名嵌套重复（用户走查反馈，方案已拍板）
-
-- **核实时间点**：2026-10-03；**核实方式**：用户提供设置主页真机截图（com.keepasskey，v1.0.0-Preview 2026 Edition）并原话反馈「这个界面的排列命名感觉不太科学」；代码面核对 `app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsGroups.kt`（L75-267）与 `app/src/main/res/values/strings.xml`（L280-313、L736-741）。
-- **背景**：现行五分组为「密码库与存储 / 安全与审计 / 自动填充 / 界面与显示 / 系统」，共 14 个二级入口（§402/§420/§426/§427 多轮演进的结果，分组顺序与「混域判据」本身无争议）。用户对**命名与归属**提出质疑。逐条核对发现五处不科学点：  
-  ① **组「自动填充」与组内首条「自动填充」同名嵌套**——组标题下第一行重复同一词，视觉上像重复标题（Material settings 模式指南明确 section title 应具体、避免歧义；资源 id 残留为 `settings_cat_preferences`，与文案完全脱节）；  
-  ② **组「密码库与存储」与条目「密码库与加密」重复「密码库」**，且该条目实际内容是 KDBX 版本 / KDF 参数 / 回收站（即数据库设置），KeePassXC 语义为「数据库设置」；  
-  ③ **「更改主密码」挂在「安全与审计」**——其副标题自述「重设密码库主密码与安全派生凭据」，本质是库加密凭据轮换，与「密码库与加密」（KDF / 加密参数）同域；官方 KeePass 与 KeePassXC 均把改主密钥放在数据库设置内；  
-  ④ **组「安全与审计」与条目「健康度检查与审计」重复「审计」**；  
-  ⑤ **条目「界面偏好」与组「界面与显示」语义近重合**，内容仅「密码字段等宽字体 + 动效降级」两项，名称让用户无从猜测（PD-72 已锁定其「主页三并列第三入口」的归位，本条只改命名、不动结构）。另有一处顺带事实：release 构建下「开发者调试」隐藏（`BuildConfig.DEBUG`），「系统」组仅剩「关于」单条目，Material 指南不建议单条目分组。
-- **约束**：PD-72（界面偏好归位为主页第三入口）、PD-73（设置页不搜索）、PD-68（云同步单页）均不得被本条推翻；分组顺序（高频优先）与「按域分组」框架维持不变。
-- **裁决（2026-10-03，用户逐项拍板）**：  
-  A. **采纳**：条目「自动填充」改「系统自动填充」（组名维持「自动填充」不变）；id `settings_cat_preferences` 改名 `settings_cat_autofill` 对齐；  
-  B. **采纳**：条目「密码库与加密」改「数据库与加密」；  
-  C. **否决**：「更改主密码」维持挂在「安全与审计」组不动（用户原话「无必要」）；  
-  D. **采纳**：组「安全与审计」改「安全」，条目「健康度检查与审计」改「密码健康检查」（泄露比对入副标题）；  
-  E. **采纳**：条目「界面偏好」改「字体与动效」（副标题「密码字段等宽字体、界面动效」；用户原话「字体与动向」，按全站「动效」术语对齐理解为「动效」，如需改回再议）；  
-  F. **采纳**：release 构建下「开发者调试」隐藏时不渲染「系统」组标题，「关于」独立成卡（或等价形态，实施时以单卡为默认）。
-- **验收标准**：  
-  ① 按上表裁决实施；C 项否决理由随批次文档留痕；  
-  ② 命名改动的字符串资源双语（zh 默认 + values-en）同步，`SettingsGroups.kt` 装配逻辑除 F 项的条件渲染外无变化；  
-  ③ 不触碰任何二级页内容与路由（纯主页文案 / 归属层级调整；F 项仅影响 release 可见性）；  
-  ④ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；真机走查留痕。
-
-### ISSUE-P3-469：模板组未接入官方 `EntryTemplatesGroup` 机制——与官方 KeePass / KeePassDX 的模板组互不识别（对拍调研）
-
-- **核实时间点**：2026-10-03；**核实方式**：官方文档对拍（keepass.info/help/v2/dbsettings.html——官方模板组在「数据库设置 → Advanced」指定，官方要求「Templates must be kept in a single group」「不得在模板组放真实数据条目」；KDBX XML schema 语义 `Meta/EntryTemplatesGroup`＝承载模板条目的组 UUID）+ 代码定位（`app/src/main/java/com/keepasskey/app/data/repository/VaultTemplateFactory.kt` L15-21；`database/src/main/java/com/keepasskey/database/xml/KdbxXmlMetaReader.kt` L36、`KdbxXmlSerializer.kt` L35——该 meta 字段仅「读入/回写」，app 侧从不设置）+ 参考项目对拍（`references/KeePassDX-架构分析.md` §5.2：KeePassDX 走官方模板组体系）。
-- **背景**：本仓 `VaultTemplateFactory` 创建的是硬编码中文「模板」分组 + 5 个固定模板条目（网页登录/信用卡/WiFi 等），组 UUID 随机、从不写 `entryTemplatesGroup`。后果是**双向不互通**：① 本仓写的库，官方 KeePass / KeePassDX / KeePassXC 均不识别其模板组（三家按 `EntryTemplatesGroup` 指向识别）；② 第三方库的官方模板组，本仓当普通组展示、不参与「新建条目」模板供给。
-- **整改面（用户 2026-10-03 拍板采纳，分两步）**：  
-  ① **写侧（小）**：`VaultTemplateFactory` 创建模板组时把组 UUID 写入 `KdbxMetaData.entryTemplatesGroup`（读写管线已存在，仅缺 app 侧设置动作）；  
-  ② **读侧（中，可拆分独立实施）**：加载后解析该 meta，命中组在浏览树加「模板」标注，或「新建条目」模板预设优先从该组条目读取、读不到回落现有硬编码。
-- **验收标准**：  
-  ① 写侧：新建库/含模板组库保存后，`entryTemplatesGroup` 与模板组 UUID 一致，经 `keepassxc-cli` / `pykeepass` 读回对拍留痕（互操作证据纪律见 `AGENTS.md` 规则 8）；  
-  ② 读侧：不破坏既有模板预设回落路径；模板组标注/「从模板新建」交互不回归既有用例；  
-  ③ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；批次文档留痕。
-
-### ISSUE-P3-470：回收站供给面判定不理 `RecycleBinEnabled`——Meta 关闭回收站的库中同名组条目被全域误判「已删」
-
-- **核实时间点**：2026-10-03；**核实方式**：官方语义对拍（KDBX Meta `RecycleBinEnabled` + `RecycleBinUUID` 共同决定删除行为，官方关闭开关时删除＝永久删除、回收站组按 UUID 识别——keepass.info 格式语义 + keepassxc-specs kdbx-xml rfc 对拍）+ 代码定位（`app/src/main/java/com/keepasskey/app/data/repository/RecycleBinCoordinator.kt` L330-334、L338-353：供给面**刻意不理 `recycleBinEnabled`**，UUID 命中或组名「回收站/Recycle Bin」即判已删）。
-- **背景**：删除/还原/清空主流程已对齐官方 KeePass `MainForm_Functions` 口径（软删/硬删分流正确），缺陷仅在**供给面判定**（「哪些条目算已删」）：Meta 显式 `recycleBinEnabled=false` 但残留同名组（或历史 UUID 命中组）的库，其组内条目被全域判为已删——官方语义下这些是活条目。本仓新建库默认启用回收站，故影响面集中在「第三方工具产生的、关闭了回收站的库」。
-- **验收标准**：  
-  ① 判定规则收敛：`recycleBinEnabled=true` ⇒ 以 `RecycleBinUuid` 命中为准（UUID 缺失时才允许组名兜底，覆盖懒创建未写 UUID 的第三方库）；`=false` ⇒ 不凭任何依据判已删；  
-  ② 新增「Meta 关闭回收站 + 残留同名组」单测；既有软删/还原/清空回归全绿；  
-  ③ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；批次文档留痕。
+## P3 低危问题、特性接线与体验优化（1 项）
 
 ### ISSUE-P3-471：锁库清零路径漏 `CustomIcon` 字节——敏感清理纪律不对称
 

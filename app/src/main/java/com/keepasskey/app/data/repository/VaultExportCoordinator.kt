@@ -1,8 +1,8 @@
 package com.keepasskey.app.data.repository
 
-import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.csv.KdbxCsvExporter
 import com.keepasskey.database.session.DatabaseSession
@@ -10,6 +10,7 @@ import com.keepasskey.database.xml.KeePassXmlExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import java.time.Instant
 
 /**
  * 导出与模板协调器（ISSUE-P3-31 批次 B 自 `RealVaultRepository` 拆出，纯结构性改动）。
@@ -18,10 +19,12 @@ import kotlinx.coroutines.withContext
  * （TASK-13 设置页导出/模板真实化）。
  *
  * XML 导出为 CPU 密集的序列化，保留 `Dispatchers.Default` 调度；
- * 模板安装为幂等操作（同名模板分组已存在即失败返回）。
+ * 模板安装为幂等操作（同名模板分组已存在且已登记 Meta 即失败返回）。
+ *
+ * `ISSUE-P3-469`：本类**不依赖 Android `Context`**——唯一曾用之处的失败文案已改走
+ * [StringsProvider] 通道，故可在宿主 JVM 用例中直接驱动 [installEntryTemplates] 落盘对拍。
  */
 internal class VaultExportCoordinator(
-    private val context: Context,
     private val strings: StringsProvider,
     private val databaseSession: DatabaseSession,
     private val persistSession: suspend () -> KdbxResult<Unit>
@@ -75,24 +78,56 @@ internal class VaultExportCoordinator(
         return KdbxResult.Success(bytes)
     }
 
+    /**
+     * 安装条目模板库（真实创建「模板」分组与 5 个模板条目）。
+     *
+     * `ISSUE-P3-469` 写侧：模板组的 UUID 必须同步写入 Meta `EntryTemplatesGroup` ——
+     * 该字段是官方 KeePass / KeePassDX / KeePassXC 识别「模板组」的**唯一依据**
+     * （官方语义要求模板集中在单一组内、且不承载真实数据条目），此前本仓只建组、
+     * 从不写该 Meta，导致本仓写的库三家均不识别其模板组。
+     *
+     * 幂等分两种形态：模板组已在（Meta 命中或同名分组）且 Meta 已登记 ⇒ 直接失败不重复安装；
+     * 模板组已在但 Meta 未登记（存量库 / 第三方库）⇒ **回填** Meta 后视为安装完成。
+     */
     suspend fun installEntryTemplates(): KdbxResult<Unit> {
-        // 幂等保护：已存在同名模板分组时不再重复安装
         val currentDb = databaseSession.databaseFlow.first()
             ?: return KdbxResult.Failure(
                 IllegalStateException("活动数据库为空"),
                 strings.get(R.string.repo_no_active_db_for_export)
             )
-        if (currentDb.rootGroup.subgroups.any { it.name == VaultTemplateFactory.TEMPLATE_GROUP_NAME }) {
-            return KdbxResult.Failure(
-                IllegalStateException("模板分组已存在"),
-                context.getString(
-                    R.string.repo_templates_already_installed,
-                    VaultTemplateFactory.TEMPLATE_GROUP_NAME
+        val metaTemplateGroup = currentDb.entryTemplatesGroup
+            ?.let { id -> currentDb.rootGroup.allGroups().firstOrNull { it.id == id } }
+        val namedTemplateGroup = currentDb.rootGroup.subgroups
+            .firstOrNull { it.name == VaultTemplateFactory.TEMPLATE_GROUP_NAME }
+        val existingTemplateGroup = metaTemplateGroup ?: namedTemplateGroup
+        if (existingTemplateGroup != null) {
+            if (currentDb.entryTemplatesGroup == existingTemplateGroup.id) {
+                return KdbxResult.Failure(
+                    IllegalStateException("模板分组已存在"),
+                    strings.get(
+                        R.string.repo_templates_already_installed,
+                        VaultTemplateFactory.TEMPLATE_GROUP_NAME
+                    )
                 )
-            )
+            }
+            // 模板组已在、Meta 未登记 ⇒ 回填 EntryTemplatesGroup 使其对第三方工具可识别
+            markTemplatesGroup(existingTemplateGroup.id)
+            return persistSession()
         }
         // saveGroup 仅更新内存树（置 DIRTY），由 persistSession 统一序列化落盘并上传播结果
-        databaseSession.saveGroup(VaultTemplateFactory.buildTemplateGroup())
+        val templateGroup = VaultTemplateFactory.buildTemplateGroup()
+        databaseSession.saveGroup(templateGroup)
+        markTemplatesGroup(templateGroup.id)
         return persistSession()
+    }
+
+    /** 将模板组 UUID 写入 Meta（`EntryTemplatesGroup` + 变更时间戳，官方 KDBX 4 语义）。 */
+    private suspend fun markTemplatesGroup(groupId: KdbxUuid) {
+        databaseSession.updateDatabaseMeta { db ->
+            db.copy(
+                entryTemplatesGroup = groupId,
+                entryTemplatesGroupChanged = Instant.now()
+            )
+        }
     }
 }

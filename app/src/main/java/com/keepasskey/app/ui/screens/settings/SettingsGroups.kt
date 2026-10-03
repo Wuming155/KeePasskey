@@ -52,17 +52,24 @@ internal class SettingsActions(
 /** 分组内一行：只承载渲染体（行自身的文案在组合期由各 `ModernSettingsRow` 解析）。 */
 internal class SettingsGroupRow(val content: @Composable () -> Unit)
 
-/** 一个设置分组：分组标题资源 + 行列表。 */
+/**
+ * 一个设置分组：分组标题资源（**可空**，`null` 表示不渲染分组标题）+ 行列表。
+ *
+ * `ISSUE-P3-468` F 项：release 构建下「开发者调试」隐藏、「系统」组仅剩「关于」单条目时，
+ * 不渲染分组标题，让「关于」独立成卡（Material 指南不建议单条目分组）。
+ */
 internal class SettingsGroupSpec(
-    @StringRes val headerRes: Int,
+    @StringRes val headerRes: Int?,
     val rows: List<SettingsGroupRow>
 )
 
-/** 渲染一个分组卡片；零行时不渲染（不产生只有标题的空卡）。 */
+/** 渲染一个分组卡片；零行时不渲染（不产生只有标题的空卡）；标题资源为 `null` 时不渲染标题。 */
 @Composable
-internal fun SettingsGroup(@StringRes headerRes: Int, rows: List<SettingsGroupRow>) {
+internal fun SettingsGroup(@StringRes headerRes: Int?, rows: List<SettingsGroupRow>) {
     if (rows.isEmpty()) return
-    ModernSectionHeader(title = stringResource(headerRes))
+    if (headerRes != null) {
+        ModernSectionHeader(title = stringResource(headerRes))
+    }
     SettingsGroupCard {
         rows.forEachIndexed { index, row ->
             if (index > 0) SettingsItemDivider()
@@ -71,7 +78,10 @@ internal fun SettingsGroup(@StringRes headerRes: Int, rows: List<SettingsGroupRo
     }
 }
 
-/** 全部分组（顺序＝渲染顺序）；`BuildConfig.DEBUG` 只决定系统组是否含「调试」行。 */
+/**
+ * 全部分组（顺序＝渲染顺序）；`BuildConfig.DEBUG` 只决定系统组是否含「调试」行、
+ * 以及是否渲染「系统」组标题（`ISSUE-P3-468` F 项：release 下仅「关于」时标题省略、独立成卡）。
+ */
 @Composable
 internal fun settingsGroups(uiState: SettingsUiState, actions: SettingsActions): List<SettingsGroupSpec> =
     listOf(
@@ -169,7 +179,8 @@ private fun autofillGroup(actions: SettingsActions): SettingsGroupSpec {
     val securityColors = LocalSecurityColors.current
     return SettingsGroupSpec(
         // ISSUE-P3-432：自动填充与通行密钥拆为两个设置项
-        headerRes = R.string.settings_cat_preferences,
+        // ISSUE-P3-468：id 自 settings_cat_preferences 改名对齐（组名「自动填充」不变）
+        headerRes = R.string.settings_cat_autofill,
         rows = listOf(
             SettingsGroupRow {
                 ModernSettingsRow(
@@ -219,6 +230,7 @@ private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = Settings
         },
         // ISSUE-P3-444 修订：界面偏好（等宽字段字体 / 动效降级）收进本组第三个入口，
         // 不再以独立分组平铺在主页——两项都属「界面与显示」的细分表现，与上两行同族
+        // ISSUE-P3-468：条目名「界面偏好」改「字体与动效」（与组名「界面与显示」语义近重合）
         SettingsGroupRow {
             ModernSettingsRow(
                 icon = Icons.Default.Tune,
@@ -235,7 +247,9 @@ private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = Settings
 private fun systemGroup(uiState: SettingsUiState, actions: SettingsActions): SettingsGroupSpec {
     val securityColors = LocalSecurityColors.current
     return SettingsGroupSpec(
-        headerRes = R.string.set_section_system,
+        // ISSUE-P3-468 F：release 构建「调试」行隐藏后本组仅剩「关于」单条目 —— 不渲染组标题，
+        // 「关于」独立成卡（Material 不建议单条目分组）；debug 构建维持「系统」标题 + 两行
+        headerRes = if (BuildConfig.DEBUG) R.string.set_section_system else null,
         rows = buildList {
             // ISSUE-P3-413：诊断日志入口仅 debug 构建露出（release 日志缓冲恒空、导出恒禁用）
             if (BuildConfig.DEBUG) {
