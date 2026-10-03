@@ -74,16 +74,7 @@ internal fun DisplayPrefRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                // ISSUE-P3-444 AC③：设置项搜索命中段高亮（查询词经 LocalSettingsHighlightQuery
-                // 由设置分组下传；二级设置页未注入该局部值 ⇒ 空串 ⇒ 原样渲染，行为不变）
-                text = com.keepasskey.app.ui.screens.settings.SettingsSearch.highlighted(
-                    text = title,
-                    query = com.keepasskey.app.ui.screens.settings.LocalSettingsHighlightQuery.current,
-                    style = androidx.compose.ui.text.SpanStyle(
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                ),
+                text = title,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                 color = MaterialTheme.colorScheme.onSurface
             )

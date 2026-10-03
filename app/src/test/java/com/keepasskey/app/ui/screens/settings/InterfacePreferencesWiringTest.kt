@@ -158,7 +158,7 @@ class InterfacePreferencesWiringTest {
 
         /** 设置主页的分组装配（入口行必须在此，且不得再内联渲染两开关） */
         const val HOME_GROUPS_PATH =
-            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSearchSection.kt"
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsGroups.kt"
 
         const val FACADE_PATH = "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt"
 

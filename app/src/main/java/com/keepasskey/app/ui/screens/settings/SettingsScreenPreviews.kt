@@ -68,59 +68,6 @@ internal fun SettingsContentWithBackPreview() {
 }
 
 /**
- * `ISSUE-P3-444` AC③：设置项搜索**命中**态——只有含关键词的分组与行被渲染，
- * 命中段以主题主色加粗高亮（关键词取 `TOTP`，中英文资源名里都存在，双语预览同图可比）。
- */
-@Preview(name = "浅色模式-搜索命中", showBackground = true)
-@Preview(name = "深色模式-搜索命中", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun SettingsContentSearchHitPreview() {
-    KeePasskeyTheme {
-        SettingsContent(
-            uiState = SettingsUiState(),
-            onNavigateToDatabase = {},
-            onNavigateToImportExport = {},
-            onNavigateToSync = {},
-            onNavigateToAutofill = {},
-            onNavigateToPasskey = {},
-            onNavigateToSecurity = {},
-            onNavigateToTheme = {},
-            onNavigateToListNav = {},
-            onNavigateToHealth = {},
-            onNavigateToTotp = {},
-            onNavigateToDebug = {},
-            onNavigateToAbout = {},
-            initialSearchQuery = "TOTP"
-        )
-    }
-}
-
-/** `ISSUE-P3-444` AC③：设置项搜索**零命中**态（不呈现空白页，如实给空态与建议）。 */
-@Preview(name = "浅色模式-搜索零命中", showBackground = true)
-@Preview(name = "深色模式-搜索零命中", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun SettingsContentSearchEmptyPreview() {
-    KeePasskeyTheme {
-        SettingsContent(
-            uiState = SettingsUiState(),
-            onNavigateToDatabase = {},
-            onNavigateToImportExport = {},
-            onNavigateToSync = {},
-            onNavigateToAutofill = {},
-            onNavigateToPasskey = {},
-            onNavigateToSecurity = {},
-            onNavigateToTheme = {},
-            onNavigateToListNav = {},
-            onNavigateToHealth = {},
-            onNavigateToTotp = {},
-            onNavigateToDebug = {},
-            onNavigateToAbout = {},
-            initialSearchQuery = "zzzz-no-such-setting"
-        )
-    }
-}
-
-/**
  * `ISSUE-P3-444` AC④：**系统字体缩放 200%** 下的设置主页——用于核对「界面偏好」入口与整页
  * 分组在最大档字号下不破版（结论与残余声明见 `PD-70`：本仓不建独立缩放偏好，如实适配系统缩放）。
  */

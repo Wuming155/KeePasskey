@@ -104,9 +104,8 @@ fun SettingsScreen(
 /**
  * 现代高保真设置内容展示组件
  *
- * `ISSUE-P3-444` AC③：新增设置项搜索（按关键词过滤分组卡片 + 命中高亮 + 零命中空态）。
- * 分组装配已下沉到 [settingsGroups]（`SettingsSearchSection.kt`）——搜索要求在渲染前就知道
- * 全部行的可搜索文本，故分组改为数据形态；本组件只保留页面壳、搜索态与对话框宿主。
+ * 分组装配下沉到 [settingsGroups]（`SettingsGroups.kt`），本组件只保留页面壳与对话框宿主。
+ * `ISSUE-P3-444` AC③ 的「设置项搜索」已于 §427 **作废移除**（用户走查裁决：设置页不需要搜索框）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,21 +139,11 @@ fun SettingsContent(
     onWeakPasswordConfirmed: () -> Unit = {},
     /** ISSUE-P2-354 AC③：换密反馈经 Snackbar 展示后的一次性清除 */
     onMasterKeyChangeFeedbackShown: () -> Unit = {},
-    /**
-     * ISSUE-P3-444 AC③：设置项搜索词的**初值**（仅预览 / 截图用）。
-     *
-     * 生产路径恒取缺省空串（未过滤）；带字面量默认值的是 `String` 而非 `Boolean`，
-     * 不属「可见性开关参数」口径，但两条搜索态预览（命中 / 零命中）仍同批补齐。
-     */
-    initialSearchQuery: String = "",
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var showMasterKeyDialog by remember { mutableStateOf(false) }
-    // ISSUE-P3-444 AC③：设置项搜索词（页面会话态——设置页是低频页，刻意不持久化，
-    // 每次进入以未过滤的完整分组呈现）
-    var searchQuery by remember { mutableStateOf(initialSearchQuery) }
 
     // ISSUE-P2-354 AC③ + ISSUE-P3-359 AC④：换密结果反馈（成功/失败）转发全局通道——
     // 反馈存于 uiState，发出即交外壳唯一宿主呈现（切 Tab 离开也不丢），回执后一次性清位
@@ -182,11 +171,6 @@ fun SettingsContent(
         onNavigateToInterface = onNavigateToInterface
     )
     val groups = settingsGroups(uiState, actions)
-    val query = searchQuery
-    // AC③ 零命中空态：任一分组的任一行命中即不呈现空态（判定与分组渲染同源同函数）
-    val hasMatch = groups.any { group ->
-        group.rows.any { SettingsSearch.matchesQuery(query, it.searchTexts) }
-    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -228,18 +212,8 @@ fun SettingsContent(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SettingsSearchField(query = searchQuery, onQueryChange = { searchQuery = it })
-
-            if (query.isNotBlank() && !hasMatch) {
-                SettingsSearchEmptyState()
-            } else {
-                groups.forEach { group ->
-                    SettingsSearchGroup(
-                        headerRes = group.headerRes,
-                        query = query,
-                        rows = group.rows
-                    )
-                }
+            groups.forEach { group ->
+                SettingsGroup(headerRes = group.headerRes, rows = group.rows)
             }
 
             Spacer(modifier = Modifier.height(16.dp))

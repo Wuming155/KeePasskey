@@ -1,12 +1,10 @@
 package com.keepasskey.app.ui.screens.settings
 
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Assignment
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.HealthAndSafety
@@ -15,31 +13,22 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Password
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VpnKey
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
- * 设置主页的分组装配 + 设置项搜索栏（`ISSUE-P3-444` AC③）。
+ * 设置主页的分组装配（`ISSUE-P3-444` AC③ 增设搜索时自 `SettingsScreen.kt` 下沉，**AC③ 作废后保留**）。
  *
- * 拆出本文件的原因有二：① 搜索要求「先知道全部分组的可搜索文本」才能在零命中时给空态，
- * 分组因此必须**数据化**（原先硬编码在 `SettingsContent` 的组合树上，无从统计）；
- * ② `SettingsScreen.kt` 已逼近单文件规模闸门，分组装配下沉后主文件只留页面壳与对话框宿主。
- *
- * 分组顺序、行顺序、图标与文案资源与搜索结果改造前**逐项一致**（纯结构搬运 + 过滤维度）。
+ * 现状（§427 修订）：**不做设置项搜索**——分组装配与 `SettingsScreen.kt` 分离这一结构照旧保留
+ * （`SettingsScreen.kt` 需要这份余量以避免贴近单文件规模闸门），但仅作为「声明式分组列表 + 统一渲染」，
+ * 不再承载任何过滤 / 高亮维度。分组顺序、行顺序、图标与文案资源与引入搜索前**逐项一致**。
  */
 internal class SettingsActions(
     val onNavigateToDatabase: () -> Unit,
@@ -60,6 +49,28 @@ internal class SettingsActions(
     val onNavigateToInterface: () -> Unit
 )
 
+/** 分组内一行：只承载渲染体（行自身的文案在组合期由各 `ModernSettingsRow` 解析）。 */
+internal class SettingsGroupRow(val content: @Composable () -> Unit)
+
+/** 一个设置分组：分组标题资源 + 行列表。 */
+internal class SettingsGroupSpec(
+    @StringRes val headerRes: Int,
+    val rows: List<SettingsGroupRow>
+)
+
+/** 渲染一个分组卡片；零行时不渲染（不产生只有标题的空卡）。 */
+@Composable
+internal fun SettingsGroup(@StringRes headerRes: Int, rows: List<SettingsGroupRow>) {
+    if (rows.isEmpty()) return
+    ModernSectionHeader(title = stringResource(headerRes))
+    SettingsGroupCard {
+        rows.forEachIndexed { index, row ->
+            if (index > 0) SettingsItemDivider()
+            row.content()
+        }
+    }
+}
+
 /** 全部分组（顺序＝渲染顺序）；`BuildConfig.DEBUG` 只决定系统组是否含「调试」行。 */
 @Composable
 internal fun settingsGroups(uiState: SettingsUiState, actions: SettingsActions): List<SettingsGroupSpec> =
@@ -75,7 +86,7 @@ internal fun settingsGroups(uiState: SettingsUiState, actions: SettingsActions):
 private fun storageGroup(actions: SettingsActions): SettingsGroupSpec = SettingsGroupSpec(
     headerRes = R.string.settings_cat_storage,
     rows = listOf(
-        settingsRow(R.string.settings_database, R.string.settings_database_sub) {
+        SettingsGroupRow {
             ModernSettingsRow(
                 icon = Icons.Default.Storage,
                 iconTint = MaterialTheme.colorScheme.primary,
@@ -85,7 +96,7 @@ private fun storageGroup(actions: SettingsActions): SettingsGroupSpec = Settings
             )
         },
         // ISSUE-P3-467：数据导入与导出（动作流，自数据库属性页拆出）
-        settingsRow(R.string.settings_import_export, R.string.settings_import_export_sub) {
+        SettingsGroupRow {
             ModernSettingsRow(
                 icon = Icons.Default.ImportExport,
                 iconTint = MaterialTheme.colorScheme.primary,
@@ -94,7 +105,7 @@ private fun storageGroup(actions: SettingsActions): SettingsGroupSpec = Settings
                 onClick = actions.onNavigateToImportExport
             )
         },
-        settingsRow(R.string.settings_sync, R.string.settings_sync_sub) {
+        SettingsGroupRow {
             ModernSettingsRow(
                 icon = Icons.Default.CloudSync,
                 iconTint = MaterialTheme.colorScheme.tertiary,
@@ -112,7 +123,7 @@ private fun securityGroup(actions: SettingsActions): SettingsGroupSpec {
     return SettingsGroupSpec(
         headerRes = R.string.settings_cat_security,
         rows = listOf(
-            settingsRow(R.string.settings_security, R.string.settings_security_sub) {
+            SettingsGroupRow {
                 ModernSettingsRow(
                     icon = Icons.Default.Fingerprint,
                     iconTint = securityColors.passkey,
@@ -121,7 +132,7 @@ private fun securityGroup(actions: SettingsActions): SettingsGroupSpec {
                     onClick = actions.onNavigateToSecurity
                 )
             },
-            settingsRow(R.string.set_totp_entry_title, R.string.set_totp_entry_sub) {
+            SettingsGroupRow {
                 ModernSettingsRow(
                     icon = Icons.Default.Password,
                     iconTint = MaterialTheme.colorScheme.primary,
@@ -130,7 +141,7 @@ private fun securityGroup(actions: SettingsActions): SettingsGroupSpec {
                     onClick = actions.onNavigateToTotp
                 )
             },
-            settingsRow(R.string.settings_health, R.string.settings_health_sub) {
+            SettingsGroupRow {
                 ModernSettingsRow(
                     icon = Icons.Default.HealthAndSafety,
                     iconTint = securityColors.success,
@@ -140,7 +151,7 @@ private fun securityGroup(actions: SettingsActions): SettingsGroupSpec {
                 )
             },
             // ISSUE-P3-413：凭据操作归安全域——六路调研无一家把改密与存储/同步并列
-            settingsRow(R.string.settings_change_master_key, R.string.settings_change_master_key_sub) {
+            SettingsGroupRow {
                 ModernSettingsRow(
                     icon = Icons.Default.VpnKey,
                     iconTint = securityColors.warning,
@@ -160,7 +171,7 @@ private fun autofillGroup(actions: SettingsActions): SettingsGroupSpec {
         // ISSUE-P3-432：自动填充与通行密钥拆为两个设置项
         headerRes = R.string.settings_cat_preferences,
         rows = listOf(
-            settingsRow(R.string.settings_autofill, R.string.settings_autofill_sub) {
+            SettingsGroupRow {
                 ModernSettingsRow(
                     icon = Icons.AutoMirrored.Filled.Assignment,
                     iconTint = MaterialTheme.colorScheme.secondary,
@@ -169,7 +180,7 @@ private fun autofillGroup(actions: SettingsActions): SettingsGroupSpec {
                     onClick = actions.onNavigateToAutofill
                 )
             },
-            settingsRow(R.string.settings_passkey, R.string.settings_passkey_sub) {
+            SettingsGroupRow {
                 ModernSettingsRow(
                     icon = Icons.Default.Key,
                     iconTint = securityColors.passkey,
@@ -187,7 +198,7 @@ private fun autofillGroup(actions: SettingsActions): SettingsGroupSpec {
 private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = SettingsGroupSpec(
     headerRes = R.string.settings_cat_display,
     rows = listOf(
-        settingsRow(R.string.settings_theme, R.string.settings_theme_sub) {
+        SettingsGroupRow {
             ModernSettingsRow(
                 icon = Icons.Default.Palette,
                 iconTint = MaterialTheme.colorScheme.tertiary,
@@ -197,7 +208,7 @@ private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = Settings
             )
         },
         // ISSUE-P3-467：列表与导航偏好（自主题页拆出）
-        settingsRow(R.string.settings_list_nav, R.string.settings_list_nav_sub) {
+        SettingsGroupRow {
             ModernSettingsRow(
                 icon = Icons.AutoMirrored.Filled.List,
                 iconTint = MaterialTheme.colorScheme.tertiary,
@@ -208,7 +219,7 @@ private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = Settings
         },
         // ISSUE-P3-444 修订：界面偏好（等宽字段字体 / 动效降级）收进本组第三个入口，
         // 不再以独立分组平铺在主页——两项都属「界面与显示」的细分表现，与上两行同族
-        settingsRow(R.string.settings_cat_interface, R.string.settings_interface_sub) {
+        SettingsGroupRow {
             ModernSettingsRow(
                 icon = Icons.Default.Tune,
                 iconTint = MaterialTheme.colorScheme.tertiary,
@@ -228,66 +239,29 @@ private fun systemGroup(uiState: SettingsUiState, actions: SettingsActions): Set
         rows = buildList {
             // ISSUE-P3-413：诊断日志入口仅 debug 构建露出（release 日志缓冲恒空、导出恒禁用）
             if (BuildConfig.DEBUG) {
-                add(settingsRow(R.string.debug_title, R.string.set_debug_entry_sub) {
-                    ModernSettingsRow(
-                        icon = Icons.Default.BugReport,
-                        iconTint = securityColors.warning,
-                        title = stringResource(R.string.debug_title),
-                        subtitle = stringResource(R.string.set_debug_entry_sub),
-                        onClick = actions.onNavigateToDebug
-                    )
-                })
-            }
-            add(settingsRow(R.string.settings_about, R.string.set_about_entry_sub) {
-                ModernSettingsRow(
-                    icon = Icons.Default.Info,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = stringResource(R.string.settings_about),
-                    subtitle = stringResource(R.string.set_about_entry_sub, uiState.appVersion),
-                    onClick = actions.onNavigateToAbout
+                add(
+                    SettingsGroupRow {
+                        ModernSettingsRow(
+                            icon = Icons.Default.BugReport,
+                            iconTint = securityColors.warning,
+                            title = stringResource(R.string.debug_title),
+                            subtitle = stringResource(R.string.set_debug_entry_sub),
+                            onClick = actions.onNavigateToDebug
+                        )
+                    }
                 )
-            })
-        }
-    )
-}
-
-/**
- * 设置项搜索框（`ISSUE-P3-444` AC③）：顶栏之下的独立输入行，非空时右侧给清除入口。
- */
-@Composable
-internal fun SettingsSearchField(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
-        modifier = modifier.fillMaxWidth(),
-        singleLine = true,
-        placeholder = {
-            Text(
-                text = stringResource(R.string.settings_search_hint),
-                style = MaterialTheme.typography.bodyMedium
-            )
-        },
-        leadingIcon = {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        },
-        trailingIcon = {
-            if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = stringResource(R.string.settings_search_clear)
+            }
+            add(
+                SettingsGroupRow {
+                    ModernSettingsRow(
+                        icon = Icons.Default.Info,
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        title = stringResource(R.string.settings_about),
+                        subtitle = stringResource(R.string.set_about_entry_sub, uiState.appVersion),
+                        onClick = actions.onNavigateToAbout
                     )
                 }
-            }
-        },
-        shape = RoundedCornerShape(14.dp)
+            )
+        }
     )
 }

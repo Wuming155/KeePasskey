@@ -295,10 +295,6 @@
     <string name="settings_cat_interface">界面偏好</string>
     <string name="settings_interface_sub">密码字体、动效等界面表现</string>
     <string name="interface_section_fields">字段与动效</string>
-    <string name="settings_search_hint">搜索设置项</string>
-    <string name="settings_search_clear">清除搜索</string>
-    <string name="settings_search_empty">没有匹配的设置项</string>
-    <string name="settings_search_empty_hint">换个关键词试试</string>
     <string name="settings_monospace_fields">密码字段等宽字体</string>
     <string name="settings_monospace_fields_sub">密码与验证码使用等宽字体展示，便于逐字符核对</string>
     <string name="settings_reduce_animations">动效降级</string>
