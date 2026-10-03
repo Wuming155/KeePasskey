@@ -25,8 +25,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AppLanguage
-import com.keepasskey.app.ui.screens.settings.ListDensity
-import com.keepasskey.app.ui.screens.settings.SearchMatchMode
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.AppThemePalette
@@ -52,23 +50,9 @@ fun ThemeSettingsScreen(
     onLanguageSelected: (AppLanguage) -> Unit = {},
     onOledOptimizationToggle: (Boolean) -> Unit,
     onDynamicColorToggle: (Boolean) -> Unit = {},
-    onShowUsernameInList: (Boolean) -> Unit = {},
-    onShowOtpInList: (Boolean) -> Unit = {},
-    onShowPasskeyBadge: (Boolean) -> Unit = {},
-    onShowUrlInList: (Boolean) -> Unit = {},
-    onHideFabOnScrollToggle: (Boolean) -> Unit = {},
-    onHapticFeedbackToggle: (Boolean) -> Unit = {},
-    // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化回调（有序可见 Tab 名单）
-    onBottomNavOrderChange: (List<String>) -> Unit = {},
     // KP2A 扩展显示操作
     onMaskPasswordsDefaultToggle: (Boolean) -> Unit = {},
     onMaskTotpDefaultToggle: (Boolean) -> Unit = {},
-    onShowUnlockedNotificationToggle: (Boolean) -> Unit = {},
-    onShowGroupInSearchResultToggle: (Boolean) -> Unit = {},
-    onShowGroupInEntryToggle: (Boolean) -> Unit = {},
-    onListDensitySelected: (ListDensity) -> Unit = {},
-    onAutoActivateSearchOnOpenToggle: (Boolean) -> Unit = {},
-    onSearchMatchModeSelected: (SearchMatchMode) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     SettingsSubscreenScaffold(
@@ -104,26 +88,8 @@ fun ThemeSettingsScreen(
                 onMaskTotpDefaultToggle = onMaskTotpDefaultToggle
             )
 
-            themeListSection(
-                uiState = uiState,
-                onListDensitySelected = onListDensitySelected,
-                onShowUsernameInList = onShowUsernameInList,
-                onShowOtpInList = onShowOtpInList,
-                onShowPasskeyBadge = onShowPasskeyBadge,
-                onShowUrlInList = onShowUrlInList,
-                onHideFabOnScrollToggle = onHideFabOnScrollToggle,
-                onHapticFeedbackToggle = onHapticFeedbackToggle,
-                onBottomNavOrderChange = onBottomNavOrderChange
-            )
-
-            themeNavSearchSection(
-                uiState = uiState,
-                onShowUnlockedNotificationToggle = onShowUnlockedNotificationToggle,
-                onAutoActivateSearchOnOpenToggle = onAutoActivateSearchOnOpenToggle,
-                onShowGroupInSearchResultToggle = onShowGroupInSearchResultToggle,
-                onShowGroupInEntryToggle = onShowGroupInEntryToggle,
-                onSearchMatchModeSelected = onSearchMatchModeSelected
-            )
+            // ISSUE-P3-467：「列表显示偏好」与「导航与搜索」两节已拆至 ListDisplaySettingsScreen
+            // （路由 settings/list_display），本页保留纯「应用外观」域。
 
             themeLanguageSection(
                 uiState = uiState,

@@ -15,8 +15,8 @@ import java.io.File
  * 断言分两层：
  * 1. **产生处**（`SettingsExportController`）：每个失败反馈构造必须显式带 `isError = true`，
  *    成功反馈不得带（否则样式判定失去鉴别力）；
- * 2. **消费处**（`DatabaseSettingsScreen`）：必须读 `feedback.isError`，
- *    旧的 `contains("失败")` 文案嗅探不得回归。
+ * 2. **消费处**（`ImportExportSettingsScreen`；ISSUE-P3-467 自 `DatabaseSettingsScreen` 纯迁位拆出，
+ *    消费点随段落走）：必须读 `feedback.isError`，旧的 `contains("失败")` 文案嗅探不得回归。
  */
 class ExportFeedbackErrorStyleTest {
 
@@ -95,8 +95,9 @@ class ExportFeedbackErrorStyleTest {
     }
 
     private companion object {
+        // ISSUE-P3-467：导出反馈消费点已随段落自 DatabaseSettingsScreen 迁至 ImportExportSettingsScreen
         const val SCREEN =
-            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseSettingsScreen.kt"
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/ImportExportSettingsScreen.kt"
         const val CONTROLLER =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExportController.kt"
         const val ROOT_SEARCH_DEPTH = 6

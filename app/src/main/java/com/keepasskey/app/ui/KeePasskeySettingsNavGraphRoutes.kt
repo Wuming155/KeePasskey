@@ -16,6 +16,8 @@ import com.keepasskey.app.ui.screens.settings.subscreens.AutofillSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.DatabaseSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.DebugSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.HealthCheckScreen
+import com.keepasskey.app.ui.screens.settings.subscreens.ImportExportSettingsScreen
+import com.keepasskey.app.ui.screens.settings.subscreens.ListDisplaySettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.PasskeySettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.PrivilegedBrowserSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.SecuritySettingsScreen
@@ -30,24 +32,14 @@ import com.keepasskey.app.ui.screens.settings.subscreens.WebDavSyncScreen
  * 逐条原样迁移。页面均为自包含的 `hiltViewModel<SettingsViewModel>()` 宿主。
  */
 
-/** 7. 二级设置页面：密码库与加密 */
+/** 7. 二级设置页面：密码库与加密（ISSUE-P3-467：导入/导出链路已拆至 settingsImportExportRoute） */
 internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostController) {
     composable(Screen.SettingsDatabase.route) {
         val settingsViewModel: SettingsViewModel = hiltViewModel()
         val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
         val kdfBenchmarkState by settingsViewModel.kdfBenchmark.collectAsStateWithLifecycle()
-        // TASK-13 整改：导出/模板动作反馈流
-        val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
-        // ISSUE-P3-437 AC②：导出长操作进行中（过程反馈段）
-        val isExportInProgress by settingsViewModel.isExportInProgress.collectAsStateWithLifecycle()
-        // ISSUE-P3-19：明文导入状态流（Idle / Parsing / Done / Failed）
-        val importState by settingsViewModel.importState.collectAsStateWithLifecycle()
-        // ISSUE-P3-384：`.kdbx` 并入状态流
-        val mergeState by settingsViewModel.mergeState.collectAsStateWithLifecycle()
         // ISSUE-P3-20：子库挂载状态流（真实挂载记录 + 运行时状态 + 操作反馈）
         val childDatabaseState by settingsViewModel.childDatabaseState.collectAsStateWithLifecycle()
-        // ISSUE-P3-436：导入密钥文件的重封印弹窗宿主（与 SettingsScreen 同一经 LocalActivity 直取的口径）
-        val hostActivity = LocalActivity.current as? FragmentActivity
         DatabaseSettingsScreen(
             uiState = settingsState,
             onBackClick = { navController.popBackStack() },
@@ -60,7 +52,35 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             // M6 整改：真实 KDF 基准接线
             kdfBenchmarkState = kdfBenchmarkState,
             onRunKdfBenchmark = settingsViewModel::runKdfBenchmark,
-            // TASK-13 整改：导出/模板真实动作接线
+            onInstallTemplates = settingsViewModel::installEntryTemplates,
+            // ISSUE-P3-20：子库挂载链路（真实挂载 / 凭据重录解锁 / 卸载）
+            childDatabaseState = childDatabaseState,
+            onMountChildDatabase = settingsViewModel::mountChildDatabase,
+            onUnlockChildDatabase = settingsViewModel::unlockChildDatabase,
+            onUnmountChildDatabase = settingsViewModel::unmountChildDatabase,
+            onChildDatabaseFeedbackDismiss = settingsViewModel::dismissChildDatabaseFeedback
+        )
+    }
+}
+
+/** 7a. 二级设置页面：数据导入与导出 (ISSUE-P3-467 自数据库属性页纯迁位拆出——动作流与配置域分离) */
+internal fun NavGraphBuilder.settingsImportExportRoute(navController: NavHostController) {
+    composable(Screen.SettingsImportExport.route) {
+        val settingsViewModel: SettingsViewModel = hiltViewModel()
+        val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+        // TASK-13 整改：导出/模板动作反馈流
+        val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
+        // ISSUE-P3-437 AC②：导出长操作进行中（过程反馈段）
+        val isExportInProgress by settingsViewModel.isExportInProgress.collectAsStateWithLifecycle()
+        // ISSUE-P3-19：明文导入状态流（Idle / Parsing / Done / Failed）
+        val importState by settingsViewModel.importState.collectAsStateWithLifecycle()
+        // ISSUE-P3-384：`.kdbx` 并入状态流
+        val mergeState by settingsViewModel.mergeState.collectAsStateWithLifecycle()
+        // ISSUE-P3-436：导入密钥文件的重封印弹窗宿主（与 SettingsScreen 同一经 LocalActivity 直取的口径）
+        val hostActivity = LocalActivity.current as? FragmentActivity
+        ImportExportSettingsScreen(
+            uiState = settingsState,
+            onBackClick = { navController.popBackStack() },
             exportFeedback = exportFeedback,
             isExportInProgress = isExportInProgress,
             onClearExportFeedback = settingsViewModel::clearExportFeedback,
@@ -82,7 +102,6 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             },
             keyFileImportFeedback = settingsState.masterKeyChangeFeedback,
             onClearKeyFileImportFeedback = settingsViewModel::clearMasterKeyChangeFeedback,
-            onInstallTemplates = settingsViewModel::installEntryTemplates,
             // ISSUE-P3-19：导入链路（选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）
             importState = importState,
             mergeState = mergeState,
@@ -93,13 +112,7 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             // ISSUE-P3-384：`.kdbx` 并入（第二库凭据提交 + 取消 + 报告关闭）
             onMergeSubmit = settingsViewModel::submitMergeCredentials,
             onCancelMerge = settingsViewModel::cancelMerge,
-            onMergeReportDismiss = settingsViewModel::dismissMergeReport,
-            // ISSUE-P3-20：子库挂载链路（真实挂载 / 凭据重录解锁 / 卸载）
-            childDatabaseState = childDatabaseState,
-            onMountChildDatabase = settingsViewModel::mountChildDatabase,
-            onUnlockChildDatabase = settingsViewModel::unlockChildDatabase,
-            onUnmountChildDatabase = settingsViewModel::unmountChildDatabase,
-            onChildDatabaseFeedbackDismiss = settingsViewModel::dismissChildDatabaseFeedback
+            onMergeReportDismiss = settingsViewModel::dismissMergeReport
         )
     }
 }
@@ -255,7 +268,7 @@ internal fun NavGraphBuilder.settingsSecurityRoute(navController: NavHostControl
     }
 }
 
-/** 11. 二级设置页面：外观与主题 (显示密度与敏感信息遮掩) */
+/** 11. 二级设置页面：外观与主题 (显示密度与敏感信息遮掩；ISSUE-P3-467 列表/导航偏好已拆至 settingsListDisplayRoute) */
 internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController) {
     composable(Screen.SettingsTheme.route) {
         val settingsViewModel: SettingsViewModel = hiltViewModel()
@@ -273,21 +286,34 @@ internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController
             onLanguageSelected = settingsViewModel::setAppLanguage,
             onOledOptimizationToggle = settingsViewModel::setOledBlackOptimization,
             onDynamicColorToggle = settingsViewModel::setDynamicColorEnabled,
+            onMaskPasswordsDefaultToggle = settingsViewModel::setMaskPasswordsDefault,
+            onMaskTotpDefaultToggle = settingsViewModel::setMaskTotpDefault
+        )
+    }
+}
+
+/** 11a. 二级设置页面：列表与导航 (ISSUE-P3-467 自主题页纯迁位拆出——列表显示与搜索行为归位) */
+internal fun NavGraphBuilder.settingsListDisplayRoute(navController: NavHostController) {
+    composable(Screen.SettingsListDisplay.route) {
+        val settingsViewModel: SettingsViewModel = hiltViewModel()
+        val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+        ListDisplaySettingsScreen(
+            uiState = settingsState,
+            onBackClick = { navController.popBackStack() },
             onShowUsernameInList = settingsViewModel::setShowUsernameInList,
             onShowOtpInList = settingsViewModel::setShowOtpInList,
             onShowPasskeyBadge = settingsViewModel::setShowPasskeyBadge,
             onShowUrlInList = settingsViewModel::setShowUrlInList,
             onHideFabOnScrollToggle = settingsViewModel::setHideFabOnScroll,
             onHapticFeedbackToggle = settingsViewModel::setHapticFeedbackEnabled,
-            onMaskPasswordsDefaultToggle = settingsViewModel::setMaskPasswordsDefault,
-            onMaskTotpDefaultToggle = settingsViewModel::setMaskTotpDefault,
+            // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化
+            onBottomNavOrderChange = settingsViewModel::setBottomNavOrder,
             onShowUnlockedNotificationToggle = settingsViewModel::setShowUnlockedNotification,
             onShowGroupInSearchResultToggle = settingsViewModel::setShowGroupInSearchResult,
             onShowGroupInEntryToggle = settingsViewModel::setShowGroupInEntry,
             onListDensitySelected = settingsViewModel::setListDensity,
             onAutoActivateSearchOnOpenToggle = settingsViewModel::setAutoActivateSearchOnOpen,
-            onSearchMatchModeSelected = settingsViewModel::setSearchMatchMode,
-            onBottomNavOrderChange = settingsViewModel::setBottomNavOrder
+            onSearchMatchModeSelected = settingsViewModel::setSearchMatchMode
         )
     }
 }

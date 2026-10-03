@@ -16,12 +16,14 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
     navController: NavHostController
 ) {
     settingsDatabaseRoute(navController)
+    settingsImportExportRoute(navController)
     settingsSyncRoute(navController)
     settingsAutofillRoute(navController)
     settingsPasskeyRoute(navController)
     settingsPrivilegedBrowsersRoute(navController)
     settingsSecurityRoute(navController)
     settingsThemeRoute(navController)
+    settingsListDisplayRoute(navController)
     settingsTotpRoute(navController)
     settingsHealthRoute(navController)
     settingsDebugRoute(navController)

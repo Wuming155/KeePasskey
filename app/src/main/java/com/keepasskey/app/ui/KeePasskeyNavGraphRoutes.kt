@@ -256,11 +256,15 @@ internal fun NavGraphBuilder.settingsHomeRoute(
         SettingsScreen(
             // ISSUE-P3-359 AC③：二级设置页下钻全部补 launchSingleTop（双击设置项不叠页）
             onNavigateToDatabase = { navController.navigate(Screen.SettingsDatabase.route) { launchSingleTop = true } },
+            // ISSUE-P3-467：数据导入与导出（自数据库属性页拆出的独立二级入口）
+            onNavigateToImportExport = { navController.navigate(Screen.SettingsImportExport.route) { launchSingleTop = true } },
             onNavigateToSync = { navController.navigate(Screen.SettingsSync.route) { launchSingleTop = true } },
             onNavigateToAutofill = { navController.navigate(Screen.SettingsAutofill.route) { launchSingleTop = true } },
             onNavigateToPasskey = { navController.navigate(Screen.SettingsPasskey.route) { launchSingleTop = true } },
             onNavigateToSecurity = { navController.navigate(Screen.SettingsSecurity.route) { launchSingleTop = true } },
             onNavigateToTheme = { navController.navigate(Screen.SettingsTheme.route) { launchSingleTop = true } },
+            // ISSUE-P3-467：列表与导航（自主题页拆出的独立二级入口）
+            onNavigateToListNav = { navController.navigate(Screen.SettingsListDisplay.route) { launchSingleTop = true } },
             onNavigateToHealth = { navController.navigate(Screen.SettingsHealth.route) { launchSingleTop = true } },
             onNavigateToTotp = { navController.navigate(Screen.SettingsTotp.route) { launchSingleTop = true } },
             onNavigateToDebug = { navController.navigate(Screen.SettingsDebug.route) { launchSingleTop = true } },

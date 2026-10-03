@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.settings
 
-import android.content.res.Configuration
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,10 +13,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.HealthAndSafety
+import androidx.compose.material.icons.filled.ImportExport
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
@@ -42,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -53,7 +53,6 @@ import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
-import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
@@ -63,12 +62,16 @@ import com.keepasskey.app.ui.theme.LocalSecurityColors
 @Composable
 fun SettingsScreen(
     onNavigateToDatabase: () -> Unit,
+    // ISSUE-P3-467：数据导入与导出自数据库属性页拆为独立二级入口（动作流与配置域分离）
+    onNavigateToImportExport: () -> Unit,
     onNavigateToSync: () -> Unit,
     onNavigateToAutofill: () -> Unit,
     // ISSUE-P3-432：通行密钥 (Passkey) 独立设置项（CM 凭据管理器通道自自动填充入口拆出）
     onNavigateToPasskey: () -> Unit,
     onNavigateToSecurity: () -> Unit,
     onNavigateToTheme: () -> Unit,
+    // ISSUE-P3-467：列表与导航偏好自主题页拆为独立二级入口
+    onNavigateToListNav: () -> Unit,
     onNavigateToHealth: () -> Unit,
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
@@ -87,11 +90,13 @@ fun SettingsScreen(
     SettingsContent(
         uiState = uiState,
         onNavigateToDatabase = onNavigateToDatabase,
+        onNavigateToImportExport = onNavigateToImportExport,
         onNavigateToSync = onNavigateToSync,
         onNavigateToAutofill = onNavigateToAutofill,
         onNavigateToPasskey = onNavigateToPasskey,
         onNavigateToSecurity = onNavigateToSecurity,
         onNavigateToTheme = onNavigateToTheme,
+        onNavigateToListNav = onNavigateToListNav,
         onNavigateToHealth = onNavigateToHealth,
         onNavigateToTotp = onNavigateToTotp,
         onNavigateToDebug = onNavigateToDebug,
@@ -116,12 +121,16 @@ fun SettingsScreen(
 fun SettingsContent(
     uiState: SettingsUiState,
     onNavigateToDatabase: () -> Unit,
+    // ISSUE-P3-467：数据导入与导出独立二级入口
+    onNavigateToImportExport: () -> Unit,
     onNavigateToSync: () -> Unit,
     onNavigateToAutofill: () -> Unit,
     // ISSUE-P3-432：通行密钥 (Passkey) 独立设置项
     onNavigateToPasskey: () -> Unit,
     onNavigateToSecurity: () -> Unit,
     onNavigateToTheme: () -> Unit,
+    // ISSUE-P3-467：列表与导航独立二级入口
+    onNavigateToListNav: () -> Unit,
     onNavigateToHealth: () -> Unit,
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
@@ -204,6 +213,15 @@ fun SettingsContent(
                     onClick = onNavigateToDatabase
                 )
                 SettingsItemDivider()
+                // ISSUE-P3-467：数据导入与导出（动作流，自数据库属性页拆出）
+                ModernSettingsRow(
+                    icon = Icons.Default.ImportExport,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = stringResource(R.string.settings_import_export),
+                    subtitle = stringResource(R.string.settings_import_export_sub),
+                    onClick = onNavigateToImportExport
+                )
+                SettingsItemDivider()
                 ModernSettingsRow(
                     icon = Icons.Default.CloudSync,
                     iconTint = MaterialTheme.colorScheme.tertiary,
@@ -280,6 +298,15 @@ fun SettingsContent(
                     subtitle = stringResource(R.string.settings_theme_sub),
                     onClick = onNavigateToTheme
                 )
+                SettingsItemDivider()
+                // ISSUE-P3-467：列表与导航偏好（自主题页拆出）
+                ModernSettingsRow(
+                    icon = Icons.AutoMirrored.Filled.List,
+                    iconTint = MaterialTheme.colorScheme.tertiary,
+                    title = stringResource(R.string.settings_list_nav),
+                    subtitle = stringResource(R.string.settings_list_nav_sub),
+                    onClick = onNavigateToListNav
+                )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -320,55 +347,6 @@ fun SettingsContent(
             onReadKeyFile = onReadKeyFile,
             onDismiss = { showMasterKeyDialog = false },
             onWeakPasswordConfirmed = onWeakPasswordConfirmed
-        )
-    }
-}
-
-// P3-23：以下 Preview name 为 IDE 预览标注（仅开发期可见，非运行时 UI），保留原样
-@Preview(name = "浅色模式", showBackground = true)
-@Preview(name = "深色模式", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun SettingsContentPreview() {
-    KeePasskeyTheme {
-        SettingsContent(
-            uiState = SettingsUiState(),
-            onNavigateToDatabase = {},
-            onNavigateToSync = {},
-            onNavigateToAutofill = {},
-            onNavigateToPasskey = {},
-            onNavigateToSecurity = {},
-            onNavigateToTheme = {},
-            onNavigateToHealth = {},
-            onNavigateToTotp = {},
-            onNavigateToDebug = {},
-            onNavigateToAbout = {}
-        )
-    }
-}
-
-/**
- * `ISSUE-P3-340`：`showBackButton = true` 那一态此前从未被预览画过（默认 `false` 态才是）。
- * 单独开一个预览函数而不是在同一张图里叠两个整屏：整屏组件叠在一起会把各自的高度都压没，
- * 导出的 PNG 也就无从比对。
- */
-@Preview(name = "浅色模式-带返回键", showBackground = true)
-@Preview(name = "深色模式-带返回键", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun SettingsContentWithBackPreview() {
-    KeePasskeyTheme {
-        SettingsContent(
-            uiState = SettingsUiState(),
-            onNavigateToDatabase = {},
-            onNavigateToSync = {},
-            onNavigateToAutofill = {},
-            onNavigateToPasskey = {},
-            onNavigateToSecurity = {},
-            onNavigateToTheme = {},
-            onNavigateToHealth = {},
-            onNavigateToTotp = {},
-            onNavigateToDebug = {},
-            onNavigateToAbout = {},
-            showBackButton = true
         )
     }
 }

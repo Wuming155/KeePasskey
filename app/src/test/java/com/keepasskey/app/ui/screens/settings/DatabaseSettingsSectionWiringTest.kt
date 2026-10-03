@@ -47,21 +47,24 @@ class DatabaseSettingsSectionWiringTest {
 
     @Test
     fun `整页必须无条件组合两个段落且不得残留旧直调形态`() {
-        val screen = stripCommentsOnly(readSource(PARENT))
-        val childCall = indexOfTopLevelCall(screen, "ChildDatabaseSection(")
-        val importCall = indexOfTopLevelCall(screen, "VaultImportSection(")
+        // ISSUE-P3-467：导入段（VaultImportSection）已自数据库页纯迁位至 ImportExportSettingsScreen，
+        // 两段落各自的无条件组合与旧直调形态禁令分别在各自宿主页面上断言，强度不变。
+        val databaseScreen = stripCommentsOnly(readSource(DATABASE_PARENT))
+        val importExportScreen = stripCommentsOnly(readSource(IMPORT_EXPORT_PARENT))
+        val childCall = indexOfTopLevelCall(databaseScreen, "ChildDatabaseSection(")
+        val importCall = indexOfTopLevelCall(importExportScreen, "VaultImportSection(")
 
-        assertTrue("整页必须调用 ChildDatabaseSection（段落被删即失去入口）", childCall >= 0)
-        assertTrue("整页必须调用 VaultImportSection（段落被删即失去入口）", importCall >= 0)
+        assertTrue("数据库页必须调用 ChildDatabaseSection（段落被删即失去入口）", childCall >= 0)
+        assertTrue("导入导出页必须调用 VaultImportSection（段落被删即失去入口）", importCall >= 0)
         assertFalse(
             "不得残留「if (showChildDbDialog) { ChildDatabaseDialog(…) }」旧形态（条件包裹段落即丢状态）",
-            Regex("if \\(showChildDbDialog\\)").containsMatchIn(screen) ||
-                Regex("ChildDatabaseDialog\\(").containsMatchIn(screen)
+            Regex("if \\(showChildDbDialog\\)").containsMatchIn(databaseScreen) ||
+                Regex("ChildDatabaseDialog\\(").containsMatchIn(databaseScreen)
         )
         assertFalse(
             "不得残留「if (showImportDialog) { ImportSourceDialog(…) }」旧形态",
-            Regex("if \\(showImportDialog\\)").containsMatchIn(screen) ||
-                Regex("ImportSourceDialog\\(").containsMatchIn(screen)
+            Regex("if \\(showImportDialog\\)").containsMatchIn(importExportScreen) ||
+                Regex("ImportSourceDialog\\(").containsMatchIn(importExportScreen)
         )
     }
 
@@ -147,7 +150,9 @@ class DatabaseSettingsSectionWiringTest {
     private companion object {
         const val DIR = "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens"
         const val SECTIONS = "$DIR/DatabaseSettingsSections.kt"
-        const val PARENT = "$DIR/DatabaseSettingsScreen.kt"
+        // ISSUE-P3-467：子库段落宿主＝数据库属性页；导入段落宿主＝导入导出页（纯迁位拆分）
+        const val DATABASE_PARENT = "$DIR/DatabaseSettingsScreen.kt"
+        const val IMPORT_EXPORT_PARENT = "$DIR/ImportExportSettingsScreen.kt"
 
         val repositoryRoot: File by lazy {
             var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile

@@ -203,8 +203,10 @@ class ExportTicketSinkGuardTest {
     private companion object {
         const val CONTROLLER_SOURCE =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExportController.kt"
+        // ISSUE-P3-467：导出链路（含密钥文件 SAF 回调与三处确认调用点）已随段落
+        // 自 DatabaseSettingsScreen 纯迁位至 ImportExportSettingsScreen，守卫目标随之更新
         const val SCREEN_SOURCE =
-            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseSettingsScreen.kt"
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/ImportExportSettingsScreen.kt"
         const val CONFIRM_DIALOG_SOURCE =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/DatabaseSettingsExportConfirmDialog.kt"
         const val SUBSCREENS_DIR =

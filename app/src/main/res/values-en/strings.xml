@@ -277,7 +277,12 @@
     <string name="settings_passkey">Passkeys</string>
     <string name="settings_passkey_sub">Credential Manager, privileged browsers, registration ownership checks</string>
     <string name="settings_theme">Appearance &amp; Theme</string>
-    <string name="settings_theme_sub">Theme mode, language preference, list display options</string>
+    <!-- ISSUE-P3-467: list/navigation preferences split from theme page into their own subpage -->
+    <string name="settings_theme_sub">Theme mode, dynamic color, language preference</string>
+    <string name="settings_import_export">Import &amp; Export</string>
+    <string name="settings_import_export_sub">Migrate from other password managers, export KDBX / XML / CSV &amp; key files</string>
+    <string name="settings_list_nav">List &amp; Navigation</string>
+    <string name="settings_list_nav_sub">List fields, density, bottom nav order &amp; search behavior</string>
     <string name="settings_about">About KeePasskey</string>
     <string name="settings_language">Language</string>
     <string name="settings_lang_system">Follow System</string>

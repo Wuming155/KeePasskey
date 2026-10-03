@@ -287,7 +287,12 @@
     <string name="settings_passkey">通行密钥 (Passkey)</string>
     <string name="settings_passkey_sub">凭据管理器、特权浏览器、注册归属校验</string>
     <string name="settings_theme">外观与主题</string>
-    <string name="settings_theme_sub">深浅色主题、语言偏好、列表视图设置</string>
+    <!-- ISSUE-P3-467：列表/导航偏好自主题页拆为独立二级页 -->
+    <string name="settings_theme_sub">深浅色主题、动态取色、语言偏好</string>
+    <string name="settings_import_export">数据导入与导出</string>
+    <string name="settings_import_export_sub">从其他密码管理器迁入，导出 KDBX / XML / CSV 与密钥文件</string>
+    <string name="settings_list_nav">列表与导航</string>
+    <string name="settings_list_nav_sub">列表字段显隐、密度、底部导航排序与搜索行为</string>
     <string name="settings_about">关于 KeePasskey</string>
     <string name="settings_language">界面语言</string>
     <string name="settings_lang_system">跟随系统</string>

@@ -27,6 +27,9 @@ sealed class Screen(val route: String) {
     }
     data object Settings : Screen("settings")
     data object SettingsDatabase : Screen("settings/database")
+
+    /** 数据导入与导出（ISSUE-P3-467：动作流自数据库属性页拆出） */
+    data object SettingsImportExport : Screen("settings/import_export")
     data object SettingsSync : Screen("settings/sync")
     data object SettingsAutofill : Screen("settings/autofill")
 
@@ -37,6 +40,9 @@ sealed class Screen(val route: String) {
     data object SettingsPrivilegedBrowsers : Screen("settings/privileged_browsers")
     data object SettingsSecurity : Screen("settings/security")
     data object SettingsTheme : Screen("settings/theme")
+
+    /** 列表与导航偏好（ISSUE-P3-467：列表显示与搜索行为自主题页拆出） */
+    data object SettingsListDisplay : Screen("settings/list_display")
     data object SettingsHealth : Screen("settings/health")
     data object SettingsTotp : Screen("settings/totp")
     data object SettingsDebug : Screen("settings/debug")
