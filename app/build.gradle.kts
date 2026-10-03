@@ -258,6 +258,11 @@ dependencies {
     // TASK-07 整改：compileSdk 37 就位后 core-ktx 升至 1.19.0（1.19.0 起要求 API 37）
     implementation(libs.androidx.core.ktx)
 
+    // §430：常驻通知展开态用 `androidx.media.app.NotificationCompat.MediaStyle`
+    // （`androidx.core` 不含该类；官方文档指明 MediaStyle 是唯一能把动作按钮带进「收起视图」的样式，
+    //  并与 KeePassDX 同源——本机 HyperOS 实测 media 样式通知折叠态即带展开箭头）
+    implementation(libs.androidx.media)
+
     // Compose 物料清单：统一管理所有 androidx.compose.* 版本，与 Kotlin 2.4.10 的 Compose 编译器对齐。
     // TASK-07 整改：2026.08.00（Compose 1.12.x + Material 3 Expressive）要求 compileSdk 37
     implementation(platform(libs.compose.bom))

@@ -103,18 +103,21 @@ class UnlockedNotificationWiringTest {
     }
 
     /**
-     * §429：**展开可供性**守卫——动作按钮在折叠态由 OEM 决定是否渲染，但「点一下展开」这条路
+     * §429 / §430：**展开可供性**守卫——动作按钮在折叠态由 OEM 决定是否渲染，但「点一下展开」这条路
      * 必须有：无展开态样式时，系统只给「长按」路径（§426/§427/§428 三轮走查的同一处卡点）。
+     *
+     * 样式必须是 `MediaStyle`：官方文档指明它是**唯一**能把动作按钮带进收起视图的样式；
+     * 且本机（HyperOS）实测证明 `BigTextStyle` **不产生**展开箭头（§429 因此被替换）。
      */
     @Test
-    fun `常驻通知必须给出展开态以便一键展开动作`() {
+    fun `常驻通知必须以MediaStyle提供展开态`() {
         assertTrue(
-            "必须设展开态样式（NotificationCompat.BigTextStyle）——折叠态才出现展开箭头（§429）",
-            code.contains("NotificationCompat.BigTextStyle()")
+            "必须用 MediaStyle 提供展开态（§430；`BigTextStyle` 在本机 HyperOS 实测无展开箭头）",
+            code.contains("MediaStyle()")
         )
-        assertTrue(
-            "展开态文案必须复用同一 contentText（不得为展开态另立第二份用户数据面）",
-            code.contains(".setStyle(NotificationCompat.BigTextStyle().bigText(contentText))")
+        assertFalse(
+            "不得回退到 BigTextStyle —— 本机实测其不产生展开箭头，等于退回「只能长按」",
+            code.contains("BigTextStyle")
         )
     }
 

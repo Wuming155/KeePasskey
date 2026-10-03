@@ -26,6 +26,9 @@ ksp = "2.3.12"
 hilt = "2.60.1"
 hiltExt = "1.4.0"
 coreKtx = "1.19.0"
+# §430：常驻通知展开态用 `androidx.media.app.NotificationCompat.MediaStyle`
+# （`androidx.core` 不含该类；官方文档指明 MediaStyle 是唯一能把动作按钮带进「收起视图」的样式）
+androidxMedia = "1.7.0"
 composeBom = "2026.09.00"
 # TASK-07：M3 Expressive 公开 API（MaterialExpressiveTheme/MotionScheme）在 1.5.0 才毕业公开，
 # 1.4.0 stable 中仍为 internal。
@@ -74,6 +77,7 @@ composeScreenshot = "0.0.1-alpha16"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-media = { group = "androidx.media", name = "media", version.ref = "androidxMedia" }
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidxAnnotation" }
 
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }

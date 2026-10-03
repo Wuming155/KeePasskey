@@ -3,6 +3,7 @@ package com.keepasskey.app.notification
 import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.media.app.NotificationCompat.MediaStyle
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.core.log.AppLog
@@ -193,15 +194,15 @@ class UnlockedNotificationController @Inject constructor(
             context.getString(R.string.notification_unlocked_text_idle)
         }
 
-        // §429：给通知补一个**展开态**（`BigTextStyle`）——折叠通知的标题右侧因此出现「展开箭头」，
-        // 用户**点一下箭头**即可展开并看到动作按钮。此前完全没有展开态，系统只提供「长按」一条路径，
-        // 正是 §426 / §427 / §428 三轮走查连续卡住的地方（§428 修好了静默分类，但展开可供性仍缺）。
-        // 参考实现同口径：Monica `SmartCopyNotificationHelper.kt:118`（BigTextStyle + 动作）；
-        // KeePassDX `DatabaseTaskNotificationService.kt:598-604`（MediaStyle 取得同样的展开态；
-        // 其 `setShowActionsInCompactView` 在源码里自注「Won't work with Xiaomi」——故不采用该法）。
-        // 收起态与展开态文案一致，展开只多出动作行 ⇒ 不引入任何新的用户数据面。
+        // §430：展开态改用 **MediaStyle**。Android 官方文档明确「MediaStyle 是**唯一**能把操作按钮
+        // 带进**收起视图**的样式」；本机（Xiaomi HyperOS OS4.0 / Android 17）实测进一步证实：
+        // 系统自身发出的 **media 样式**通知在折叠态**即带展开箭头**，而同样式的 `bigtext` 通知没有
+        // ⇒ §429 的 `BigTextStyle` 在本机不产生箭头，本批替换为 MediaStyle。
+        // 参考实现同口径：KeePassDX `services/DatabaseTaskNotificationService.kt:598-604`（MediaStyle）。
+        // 刻意**不用** `setShowActionsInCompactView`：KeePassDX 源码自注「Won't work with Xiaomi」，
+        // 且它要求动作另配图标；本仓箭头展开后的动作行仍由系统渲染为文字按钮（与 §425 起现状一致）。
         builder.setContentText(contentText)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+            .setStyle(MediaStyle())
 
         val notification = builder.build()
         try {
