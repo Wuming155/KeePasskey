@@ -24,9 +24,14 @@ class HelpTipWiringTest {
             "自动填充设置页须挂 AUTOFILL_CHANNEL 提示位",
             readSource(AUTOFILL_SCREEN).contains("HelpTip.AUTOFILL_CHANNEL")
         )
+        // §436 走查回执续：解锁页折叠卡拆分降档（UnlockContentSections.kt 越 tier1，
+        // 「高级认证凭证」卡迁至 UnlockAdvancedAuthCard.kt，DismissibleHelpTip 随迁）——
+        // 守卫按「原文件 + 段落文件」**并集**扫描（§186 同款范式：只放宽定位范围、不降低断言强度）
+        val unlockSections = listOf(UNLOCK_SECTIONS, UNLOCK_ADVANCED_CARD)
+            .joinToString(separator = "\n") { readSource(it) }
         assertTrue(
             "解锁页须挂 UNLOCK_KEYFILE 提示位",
-            readSource(UNLOCK_SECTIONS).contains("HelpTip.UNLOCK_KEYFILE")
+            unlockSections.contains("HelpTip.UNLOCK_KEYFILE")
         )
     }
 
@@ -81,6 +86,8 @@ class HelpTipWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/AutofillSettingsScreen.kt"
         const val UNLOCK_SECTIONS =
             "app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockContentSections.kt"
+        const val UNLOCK_ADVANCED_CARD =
+            "app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockAdvancedAuthCard.kt"
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
         val repositoryRoot: File by lazy {

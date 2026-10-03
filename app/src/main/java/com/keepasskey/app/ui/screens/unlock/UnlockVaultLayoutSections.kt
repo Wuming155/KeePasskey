@@ -248,6 +248,8 @@ internal fun UnlockStandardUnlockContent(
                 ) {
                     // 完整主密码输入框（SecurePasswordField：显示 String 仅存活于组件内部，
                     // CharArray 直达 ViewModel；embeddedFlat = 无边框行形态）
+                    // §436 走查回执①：默认 56dp 主体在分组卡内偏高，压到 48dp 紧凑档
+                    // （MD3 dense 档；leading icon 24dp 在上下 8dp 内容边距内不裁剪）
                     SecurePasswordField(
                         label = null,
                         placeholder = stringResource(R.string.unlock_master_password_hint),
@@ -261,7 +263,9 @@ internal fun UnlockStandardUnlockContent(
                         wipeToken = uiState.clearPasswordFieldToken,
                         leadingIcon = Icons.Default.Lock,
                         embeddedFlat = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     )
                 }
             }

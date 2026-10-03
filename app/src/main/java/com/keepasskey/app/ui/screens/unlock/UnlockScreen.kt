@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -222,30 +223,34 @@ fun UnlockContent(
                 // 使滚动容器先被 IME 压缩高度再滚动；置于其后会导致容器不参与避让、输入框被键盘遮挡。
                 .imePadding()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 24.dp, vertical = 32.dp),
+                .padding(horizontal = 24.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            // §436 走查回执③：内容整体上移——由垂直居中改为顶部对齐
+            verticalArrangement = Arrangement.Top
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
-
-            UnlockVaultLogo(uiState = uiState)
-
-            Spacer(modifier = Modifier.height(16.dp))
-
             if (!uiState.hasDatabase) {
+                UnlockVaultLogo(uiState = uiState)
+
+                Spacer(modifier = Modifier.height(14.dp))
+
                 UnlockEmptyVaultContent(
                     uiState = uiState,
                     onOpenExistingVault = onOpenExistingVault,
                     onCreateNewVault = onCreateNewVault
                 )
             } else {
-                Text(
-                    text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_title) else stringResource(R.string.unlock_title),
-                    style = HeroTitleStyle,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+                // §436 走查回执②：锁块缩小并与标题同行（标题左侧）
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    UnlockVaultLogo(uiState = uiState)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_title) else stringResource(R.string.unlock_title),
+                        style = HeroTitleStyle,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // §436：副标题改绘为「状态胶囊」（点 + 文案），文案仍按实测安全等级条件渲染——
                 // ISSUE-P2-285 AC①：软件级降级态（quickUnlockDowngraded）下如实呈现「无硬件隔离」，

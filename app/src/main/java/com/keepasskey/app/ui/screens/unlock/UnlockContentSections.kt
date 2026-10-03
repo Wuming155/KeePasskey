@@ -7,10 +7,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,13 +25,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -52,8 +47,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
-import com.keepasskey.app.ui.components.DismissibleHelpTip
-import com.keepasskey.app.ui.components.HelpTip
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
@@ -62,35 +55,37 @@ import com.keepasskey.app.ui.theme.LocalReduceAnimations
 /**
  * 密码库锁 Logo 与呼吸光晕底座。
  *
- * §436 重绘为原型的「方形锁块」形态：64dp 圆角方块（surfaceContainerLow 底 +
+ * §436 重绘为原型的「方形锁块」形态：圆角方块（surfaceContainerLow 底 +
  * outlineVariant 描边）内嵌 primary 锁形图标，右下角叠加一颗 primary 呼吸点
  * （原圆形 + 径向渐变光晕形态退役）。呼吸动画受 [LocalReduceAnimations] 降级偏好裁决。
+ *
+ * §436 走查回执①：锁块与标题同行（标题左侧）并缩小——由「居中大 Logo」改为「行内小锁块」。
  */
 @Composable
 internal fun UnlockVaultLogo(uiState: UnlockUiState) {
     Box(
-        modifier = Modifier.size(72.dp),
+        modifier = Modifier.size(38.dp),
         contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
-                .size(64.dp)
-                .clip(MaterialTheme.shapes.large)
+                .size(34.dp)
+                .clip(MaterialTheme.shapes.small)
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large),
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.small),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (!uiState.hasDatabase) Icons.Default.Lock else if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) Icons.Default.FlashOn else Icons.Default.Lock,
                 contentDescription = stringResource(R.string.cd_vault_locked),
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(17.dp)
             )
             // §436：右下角呼吸点——「库已锁定」的状态化视觉锚
             UnlockPingDot(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .offset(x = 6.dp, y = 6.dp)
+                    .offset(x = 3.dp, y = 3.dp)
             )
         }
     }
@@ -101,7 +96,7 @@ internal fun UnlockVaultLogo(uiState: UnlockUiState) {
 private fun UnlockPingDot(modifier: Modifier = Modifier) {
     val dotColor = MaterialTheme.colorScheme.primary
     val reduceAnimations = LocalReduceAnimations.current
-    Box(modifier = modifier.size(14.dp), contentAlignment = Alignment.Center) {
+    Box(modifier = modifier.size(10.dp), contentAlignment = Alignment.Center) {
         if (!reduceAnimations) {
             val transition = rememberInfiniteTransition(label = "UnlockPing")
             // §436：循环周期收敛到 AppNavigationMotion.UNLOCK_PING_CYCLE_MS 具名 token
@@ -144,7 +139,7 @@ private fun UnlockPingDot(modifier: Modifier = Modifier) {
         }
         Box(
             modifier = Modifier
-                .size(8.dp)
+                .size(5.dp)
                 .clip(CircleShape)
                 .background(dotColor)
         )
@@ -299,114 +294,6 @@ internal fun UnlockQuickUnlockCard(
     }
 }
 
-/**
- * 「高级认证凭证」折叠卡（§436 原型形态）：头部栏〔图标 + 标题 + 密钥就绪徽章 + 展开箭头〕，
- * 展开抽屉内承载密钥文件提示条 / 密钥文件行 / 只读开关行——功能入口与改版前一致，仅布局收拢。
- *
- * [expanded] / [onToggleExpand] 状态外提（ISSUE-P3-340 口径：折叠态必须可被 @Preview 覆盖，
- * 两态预览见 `UnlockScreenPreviews.kt`）。
- */
-@Composable
-internal fun UnlockAdvancedAuthCard(
-    hasKeyFile: Boolean,
-    keyFileName: String,
-    keyFileSourcePath: String?,
-    onSelectKeyFile: () -> Unit,
-    onClearKeyFile: () -> Unit,
-    openReadOnly: Boolean,
-    onToggleReadOnly: () -> Unit,
-    expanded: Boolean,
-    onToggleExpand: () -> Unit
-) {
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.large)
-                    .clickable(onClick = onToggleExpand)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = stringResource(R.string.unlock_advanced_credentials_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                if (hasKeyFile) {
-                    UnlockKeyFileReadyBadge()
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = stringResource(R.string.cd_toggle_advanced_credentials),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            if (expanded) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .padding(14.dp)
-                ) {
-                    // ISSUE-P3-445 AC①：密钥文件高困惑点一次性可关闭提示（关闭态持久化，非模态）
-                    DismissibleHelpTip(tip = HelpTip.UNLOCK_KEYFILE)
-                    Spacer(modifier = Modifier.height(10.dp))
-                    // 密钥文件行（§186 拆至同包 UnlockStandardUnlockSections.kt；判定与绘制逐字保留）
-                    UnlockKeyFileRow(
-                        hasKeyFile = hasKeyFile,
-                        keyFileName = keyFileName,
-                        // §433（ISSUE-P3-448 走查续）：加载来源真实路径（默认中间省略 + 按钮展开完整）
-                        keyFileSourcePath = keyFileSourcePath,
-                        onSelectKeyFile = onSelectKeyFile,
-                        onClearKeyFile = onClearKeyFile
-                    )
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 12.dp),
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
-                    // H4-只读整改：只读打开开关（§186 拆出）
-                    UnlockReadOnlyRow(
-                        openReadOnly = openReadOnly,
-                        onToggleReadOnly = onToggleReadOnly
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** 「密钥已就绪」徽章：仅在已加载密钥文件时呈现（原型头部右侧的状态胶囊） */
-@Composable
-private fun UnlockKeyFileReadyBadge() {
-    Surface(
-        shape = CapsuleShape,
-        color = MaterialTheme.colorScheme.secondaryContainer
-    ) {
-        Text(
-            text = stringResource(R.string.unlock_keyfile_ready_badge),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-        )
-    }
-}
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 @androidx.compose.ui.tooling.preview.Preview(name = "快速解锁卡片 - 浅色", showBackground = true)
