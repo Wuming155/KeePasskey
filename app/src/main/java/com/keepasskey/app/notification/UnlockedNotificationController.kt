@@ -147,7 +147,10 @@ class UnlockedNotificationController @Inject constructor(
             // 锁屏仅显示「内容已隐藏」：库处于解锁态本身即敏感状态，不应在锁屏暴露
             .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .setOngoing(true)
-            .setSilent(true)
+            // §428：静音改由**通道**表达（`NotificationChannels.ensureCreated` 的
+            // `setSound(null, null)` + `enableVibration(false)`）。刻意**不再**用 `setSilent(true)`：
+            // 该标志会把通知推向 OEM 的「静默」分类，而 MIUI/HyperOS 对静默通知在折叠态
+            // 不渲染动作按钮（须长按）——正是 §426 走查反馈的现象。
             .setOnlyAlertOnce(true)
             // ISSUE-P3-386：常驻通知「立即锁定」快捷动作——与自动锁同收口，
             // 触发后会话锁定 → 本控制器观察 state 变化自动 cancel 撤销通知

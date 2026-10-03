@@ -56,10 +56,22 @@ class NotificationChannelSpecTest {
     }
 
     @Test
-    fun `解锁状态通道为低重要度静默通道`() {
+    fun `解锁状态通道为默认重要度（动作按钮可直接点按，§428）`() {
+        // §428 走查修订：原 IMPORTANCE_LOW 在 MIUI/HyperOS 上被归入「静默通知」，
+        // 动作按钮在折叠态不渲染、须长按才出现。参考实现（KeePassDX / Monica）均以
+        // DEFAULT 及以上承载带动作的通知；本通道不需要 heads-up，故取 DEFAULT（静音下沉到通道层）。
         assertEquals(
-            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_DEFAULT,
             NotificationChannelSpec.UNLOCKED_STATUS.importance
+        )
+    }
+
+    @Test
+    fun `解锁状态通道使用迁移后的新 id`() {
+        // 重要度不可程序化修改 ⇒ 必须换新 id；旧 id 由 ensureCreated 显式删除（见 NotificationChannels）
+        assertEquals(
+            "keepasskey_unlocked_status_v2",
+            NotificationChannelSpec.UNLOCKED_STATUS.channelId
         )
     }
 

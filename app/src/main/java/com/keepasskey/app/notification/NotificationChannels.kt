@@ -28,12 +28,29 @@ enum class NotificationChannelSpec(
     /** 通道重要度：决定是否响铃/横幅/是否出现在状态栏 */
     val importance: Int
 ) {
-    /** 已解锁常驻状态通知：低重要度（静默、无横幅），仅作为「库仍处于解锁态」的可见凭据 */
+    /**
+     * 已解锁常驻状态通知（`ISSUE-P3-440` 走查修订，§428）：**默认重要度 + 通道级静音**。
+     *
+     * 原为 `IMPORTANCE_LOW`，但 **MIUI / HyperOS 把低重要度通知归入「静默通知」**——该分类下
+     * 通知在折叠态**不渲染动作按钮**，用户须**长按**才看得到「立即锁定 / 复制用户名 / 复制验证码」
+     * （2026-10-03 装机走查反馈「只有长按才会出现…选项」）。§426 曾按 `PD-71` 判其为平台行为；
+     * 本批定位到「**通道重要度**」这一自家可控的成因（参考实现同口径），故按缺陷修正。
+     *
+     * 参考实现（`docs/references/` 定向源码检索，只读）：KeePassDX 全部通知通道用
+     * `IMPORTANCE_DEFAULT`（`services/NotificationService.kt:67-72`）且动作按钮可直接点按；
+     * Monica 的 Smart Copy 通知用 `IMPORTANCE_HIGH`（`utils/SmartCopyNotificationHelper.kt:154-165`）。
+     * 本通道**不需要 heads-up**，取 `DEFAULT` 并在通道级声明无声无震动
+     * （见 [NotificationChannels.ensureCreated] 的 `setSound(null, null)` + `enableVibration(false)`），
+     * 于是「正常通知栏可见 + 动作可直接点」与「不发声、不横幅」两者兼得。
+     *
+     * **重要度不可程序化修改**（Android 既定约束）：故本批换新 id（`_v2`），
+     * 并在 [NotificationChannels.ensureCreated] 内删除旧 id 的遗留通道，避免系统设置里残留同名空通道。
+     */
     UNLOCKED_STATUS(
-        channelId = "keepasskey_unlocked_status",
+        channelId = "keepasskey_unlocked_status_v2",
         nameRes = R.string.notification_channel_unlocked_name,
         descriptionRes = R.string.notification_channel_unlocked_desc,
-        importance = NotificationManager.IMPORTANCE_LOW
+        importance = NotificationManager.IMPORTANCE_DEFAULT
     ),
 
     /** 自动填充后的一次性验证码通知：默认重要度（在通知栏可见），发送时静默不响铃 */
@@ -103,9 +120,23 @@ object NotificationChannels {
     const val SMALL_ICON_RES = android.R.drawable.ic_lock_lock
 
     /**
+     * 旧「已解锁」通道 id（§428 之前的 `IMPORTANCE_LOW` 形态）。
+     *
+     * 重要度不可程序化修改 ⇒ 换新 id 后必须**显式删除**旧通道，否则系统通知设置里会残留
+     * 一个同名（但永不投递）的空通道，用户无从分辨。
+     */
+    private const val LEGACY_ID_UNLOCKED_STATUS = "keepasskey_unlocked_status"
+
+    /**
      * 幂等建立全部通道（重复调用无害；已在系统侧存在的通道仅更新名称/描述）。
      *
      * 用户若曾手动调整过通道重要度，系统会保留用户设置（本方法不回收该决定）。
+     *
+     * §428：**静音下沉到通道层**——原先只靠发送侧 `Notification.setSilent(true)`。该标志会把通知
+     * 推向 OEM 的「静默」分类，而 MIUI/HyperOS 对静默通知在折叠态**不渲染动作按钮**（须长按）；
+     * 「不发声/不震动」本就该由**通道**表达，与决定动作渲染的**重要度**解耦。
+     * 参考：KeePassDX `services/NotificationService.kt:67-72` 建立通道即 `setSound(null, null)` +
+     * `enableVibration(false)`。
      */
     fun ensureCreated(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -118,9 +149,14 @@ object NotificationChannels {
                 description = context.getString(spec.descriptionRes)
                 // 密码管理器通知不参与角标计数（避免以数字暗示敏感事件频次）
                 setShowBadge(false)
+                // §428：通道级静音（无声、无震动）——重要度只决定「能否可见 + 能否渲染动作」
+                setSound(null, null)
+                enableVibration(false)
             }
             manager.createNotificationChannel(channel)
         }
+        // §428 迁移：旧「已解锁」通道无法就地升级重要度，显式删除以免残留同名空通道（不存在时为幂等空操作）
+        manager.deleteNotificationChannel(LEGACY_ID_UNLOCKED_STATUS)
     }
 }
 
