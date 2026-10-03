@@ -44,7 +44,9 @@
 > **暂无开放项**。（最近一条 `ISSUE-P2-461` 交付弹窗导航时序已于 §417 整条闭环，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §417；
 > 其前一条 `ISSUE-P2-460` 密钥文件按库归属于 §416 闭环。两条的真机走查判据见 §416 批次正文 §5 + §417 批次正文 §6）
 
-## P3 低危问题、特性接线与体验优化（7 项）
+## P3 低危问题、特性接线与体验优化（9 项）
+
+### ISSUE-P3-463：`SyncCacheEvictorTest` Windows 文件锁偶发红——锁瞬间的在途缓存写未收敛即断言
 
 > **归档留痕**：`ISSUE-P3-453`（用户可见硬编码中文清扫）已于 [§413 批次](resolved/batches/413-用户可见硬编码中文清扫批次.md) 结案后又暴露**通道侧回归**——
 > §413 把 30+ 消费点改走的 `StringsProvider` 用 `@ApplicationContext` 取串（Application resources 按系统 locale 定形，恒中文），

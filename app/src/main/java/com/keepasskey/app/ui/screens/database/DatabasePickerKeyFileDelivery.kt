@@ -6,6 +6,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.KeyFileVaultCopyStore
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.screens.unlock.querySafDisplayName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,7 +84,7 @@ internal class DatabasePickerKeyFileDeliveryController(
                 return@launch
             }
             val written = withContext(Dispatchers.IO) {
-                try {
+                val ok = try {
                     resolver.openOutputStream(targetUri)?.use { output ->
                         output.write(bytes)
                         output.flush()
@@ -93,10 +94,21 @@ internal class DatabasePickerKeyFileDeliveryController(
                     // 异常不外泄内容（可能是提供方拒绝/磁盘满），统一由下方语义化提示承接
                     debugLog?.warn(TAG, "交付状态机: SAF 写盘抛异常（细节不外泄）")
                     false
-                } finally {
-                    // 密钥文件字节副本用毕即擦（会话内仍持有自己的副本供后续导出）
-                    bytes.fill(0)
                 }
+                if (ok) {
+                    // ISSUE-P3-462：用户在 SAF 选择器里可改名——写盘成功后、密钥字节擦除前，
+                    // 按目标文档的**实际显示名**回写本库副本（同字节重封存）。建库收编时取的
+                    // 是建议名（生成型因子彼时尚无真实文档名），此后解锁页提示应以用户保存的命名为准。
+                    // 查询失败保持现名，不阻断保存回执（AC②）。
+                    val actualName = appContext?.let { querySafDisplayName(it, targetUri) }.orEmpty()
+                    if (!pendingDbId.isNullOrBlank() && vaultCopyStore != null && actualName.isNotBlank()) {
+                        vaultCopyStore.save(pendingDbId!!, bytes, actualName)
+                        debugLog?.info(TAG, "交付状态机: 副本显示名已按用户保存命名回写")
+                    }
+                }
+                // 密钥文件字节副本用毕即擦（成败路径都清零；会话内仍持有自己的副本供后续导出）
+                bytes.fill(0)
+                ok
             }
             if (written) {
                 debugLog?.info(TAG, "交付状态机: 写盘成功 → PendingSave→None（提示关闭）")
