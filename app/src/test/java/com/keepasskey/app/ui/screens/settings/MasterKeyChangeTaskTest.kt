@@ -10,7 +10,6 @@ import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
-import com.keepasskey.app.security.KeyFileVaultCopyStore
 import com.keepasskey.app.sync.PeriodicSyncScheduler
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
@@ -39,10 +38,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
-import java.io.File
 
 /**
  * `ISSUE-P2-354 AC③`：更换主密钥任务移出 UI scope 后的忙态守卫与回执。
@@ -60,9 +56,6 @@ import java.io.File
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MasterKeyChangeTaskTest {
-
-    @get:Rule
-    val tmp = TemporaryFolder()
 
     private val testDispatcher = StandardTestDispatcher()
 
@@ -342,67 +335,6 @@ class MasterKeyChangeTaskTest {
         assertNull("来源 Uri 缺失必须清旧记录", blankUri.remembered)
     }
 
-    // ── §411 走查续（ISSUE-P3-448）：私有目录副本摘要（设置页常驻状态段依据） ────────
-
-    /**
-     * 用户走查反馈「有没有导入私有目录我看不出来」——本用例锁定摘要的三条路径：
-     * 无副本探测归 null、导入成功回写显示名、解绑后归零。摘要即设置页常驻状态段的渲染依据。
-     */
-    @Test
-    fun `私有目录副本摘要：无副本归null、导入成功回写、解绑归零`() = runTest {
-        val store = newCopyStore()
-        val access = FakeKeyFileAccess().apply {
-            remembered = RememberedKeyFile("content://keyfile", "my.keyx")
-            readResult = KeyFileReadResult.Success(byteArrayOf(1, 2, 3), "my.keyx")
-        }
-        val controller = SettingsMasterKeyChangeController(
-            FakeVaultRepository(), this, keyFileAccess = access, vaultCopyStore = store
-        )
-
-        controller.refreshKeyFileCopyName()
-        assertNull(
-            "无副本必须归 null（UI 据此不渲染状态段，绝不显示不存在的副本）",
-            controller.state.value.keyFileCopyDisplayName
-        )
-
-        assertTrue("有记忆应走收编语义（返回 true）", controller.importRememberedCopy())
-        assertEquals(
-            "导入成功后摘要必须回写为副本原始显示名",
-            "my.keyx",
-            controller.state.value.keyFileCopyDisplayName
-        )
-
-        // 重新探测：必须从真实落盘的副本读回（而非仅内存回显）
-        controller.refreshKeyFileCopyName()
-        assertEquals(
-            "重新探测必须读回已落盘副本的显示名",
-            "my.keyx",
-            controller.state.value.keyFileCopyDisplayName
-        )
-
-        controller.submit(CharArray(0), ChangeKeyFileIntent.Remove)
-        advanceUntilIdle()
-        assertNull(
-            "解绑后摘要必须归零（副本已清除，不遗留陈旧的「已存入」显示）",
-            controller.state.value.keyFileCopyDisplayName
-        )
-    }
-
-    /** §411（P3-448）：JVM 无 Keystore——注入可逆假 DEK 封印钩子（同 KeyFileVaultCopyStoreTest 范式） */
-    private fun newCopyStore(): KeyFileVaultCopyStore {
-        val dir: File = tmp.newFolder()
-        return KeyFileVaultCopyStore(context = null, keystoreManager = null).also { store ->
-            store.sealHook = { dek ->
-                val iv = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
-                iv to dek.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
-            }
-            store.unsealHook = { _, ciphertext ->
-                ciphertext.mapIndexed { i, b -> (b.toInt() xor (i and 0xFF)).toByte() }.toByteArray()
-            }
-            store.baseDirOverride = dir
-        }
-    }
-
     private class FakeKeyFileAccess(
         private val rememberEnabled: Boolean = true,
         private val persistPermission: Boolean = true
@@ -411,11 +343,8 @@ class MasterKeyChangeTaskTest {
         var remembered: RememberedKeyFile? = null
         val persistRequests = mutableListOf<String>()
 
-        /** §411（P3-448）：现读结果可注入（默认不可读＝既有用例口径不变） */
-        var readResult: KeyFileReadResult = KeyFileReadResult.Unreadable
-
         override suspend fun isRememberEnabled(): Boolean = rememberEnabled
-        override suspend fun read(uri: String): KeyFileReadResult = readResult
+        override suspend fun read(uri: String): KeyFileReadResult = KeyFileReadResult.Unreadable
         override suspend fun persistReadPermission(uri: String): Boolean {
             persistRequests.add(uri)
             return persistPermission

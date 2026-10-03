@@ -266,15 +266,7 @@ data class SettingsUiState(
      */
     val isChangingMasterKey: Boolean = false,
     /** 更换主密钥结果反馈（成功/失败各一条），SettingsContent 经既有 Snackbar 路径展示后清除 */
-    val masterKeyChangeFeedback: UiMessage? = null,
-    /**
-     * §411 走查续（ISSUE-P3-448）：当前活动库在应用私有目录内的密钥文件副本**原始显示名**。
-     *
-     * null = 无副本 / 尚未探测（数据导入与导出页不渲染副本状态段）。非 null 时页面在
-     * 「导入密钥文件」行下方常驻呈现「已存入应用私有目录」+ 可显隐路径，让用户一眼确认
-     * 收编是否真的发生（此前只有一次性 Snackbar，走查无法判断）。
-     */
-    val keyFileCopyDisplayName: String? = null
+    val masterKeyChangeFeedback: UiMessage? = null
 )
 
 /**

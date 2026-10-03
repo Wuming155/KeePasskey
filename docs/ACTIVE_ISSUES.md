@@ -44,7 +44,7 @@
 > **暂无开放项**。（最近一条 `ISSUE-P2-465` 云同步配置按库隔离已于 §422 整条闭环，
 > 见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §422）
 
-## P3 低危问题、特性接线与体验优化（2 项）
+## P3 低危问题、特性接线与体验优化（5 项）
 
 ### ISSUE-P3-448：「导入密钥文件」语义改「把解锁所选密钥文件导入应用私有目录」（用户裁决）
 
@@ -82,3 +82,33 @@
   ② 命名改动的字符串资源双语（zh 默认 + values-en）同步，`SettingsGroups.kt` 装配逻辑除 F 项的条件渲染外无变化；  
   ③ 不触碰任何二级页内容与路由（纯主页文案 / 归属层级调整；F 项仅影响 release 可见性）；  
   ④ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；真机走查留痕。
+
+### ISSUE-P3-469：模板组未接入官方 `EntryTemplatesGroup` 机制——与官方 KeePass / KeePassDX 的模板组互不识别（对拍调研）
+
+- **核实时间点**：2026-10-03；**核实方式**：官方文档对拍（keepass.info/help/v2/dbsettings.html——官方模板组在「数据库设置 → Advanced」指定，官方要求「Templates must be kept in a single group」「不得在模板组放真实数据条目」；KDBX XML schema 语义 `Meta/EntryTemplatesGroup`＝承载模板条目的组 UUID）+ 代码定位（`app/src/main/java/com/keepasskey/app/data/repository/VaultTemplateFactory.kt` L15-21；`database/src/main/java/com/keepasskey/database/xml/KdbxXmlMetaReader.kt` L36、`KdbxXmlSerializer.kt` L35——该 meta 字段仅「读入/回写」，app 侧从不设置）+ 参考项目对拍（`references/KeePassDX-架构分析.md` §5.2：KeePassDX 走官方模板组体系）。
+- **背景**：本仓 `VaultTemplateFactory` 创建的是硬编码中文「模板」分组 + 5 个固定模板条目（网页登录/信用卡/WiFi 等），组 UUID 随机、从不写 `entryTemplatesGroup`。后果是**双向不互通**：① 本仓写的库，官方 KeePass / KeePassDX / KeePassXC 均不识别其模板组（三家按 `EntryTemplatesGroup` 指向识别）；② 第三方库的官方模板组，本仓当普通组展示、不参与「新建条目」模板供给。
+- **整改面（用户 2026-10-03 拍板采纳，分两步）**：  
+  ① **写侧（小）**：`VaultTemplateFactory` 创建模板组时把组 UUID 写入 `KdbxMetaData.entryTemplatesGroup`（读写管线已存在，仅缺 app 侧设置动作）；  
+  ② **读侧（中，可拆分独立实施）**：加载后解析该 meta，命中组在浏览树加「模板」标注，或「新建条目」模板预设优先从该组条目读取、读不到回落现有硬编码。
+- **验收标准**：  
+  ① 写侧：新建库/含模板组库保存后，`entryTemplatesGroup` 与模板组 UUID 一致，经 `keepassxc-cli` / `pykeepass` 读回对拍留痕（互操作证据纪律见 `AGENTS.md` 规则 8）；  
+  ② 读侧：不破坏既有模板预设回落路径；模板组标注/「从模板新建」交互不回归既有用例；  
+  ③ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；批次文档留痕。
+
+### ISSUE-P3-470：回收站供给面判定不理 `RecycleBinEnabled`——Meta 关闭回收站的库中同名组条目被全域误判「已删」
+
+- **核实时间点**：2026-10-03；**核实方式**：官方语义对拍（KDBX Meta `RecycleBinEnabled` + `RecycleBinUUID` 共同决定删除行为，官方关闭开关时删除＝永久删除、回收站组按 UUID 识别——keepass.info 格式语义 + keepassxc-specs kdbx-xml rfc 对拍）+ 代码定位（`app/src/main/java/com/keepasskey/app/data/repository/RecycleBinCoordinator.kt` L330-334、L338-353：供给面**刻意不理 `recycleBinEnabled`**，UUID 命中或组名「回收站/Recycle Bin」即判已删）。
+- **背景**：删除/还原/清空主流程已对齐官方 KeePass `MainForm_Functions` 口径（软删/硬删分流正确），缺陷仅在**供给面判定**（「哪些条目算已删」）：Meta 显式 `recycleBinEnabled=false` 但残留同名组（或历史 UUID 命中组）的库，其组内条目被全域判为已删——官方语义下这些是活条目。本仓新建库默认启用回收站，故影响面集中在「第三方工具产生的、关闭了回收站的库」。
+- **验收标准**：  
+  ① 判定规则收敛：`recycleBinEnabled=true` ⇒ 以 `RecycleBinUuid` 命中为准（UUID 缺失时才允许组名兜底，覆盖懒创建未写 UUID 的第三方库）；`=false` ⇒ 不凭任何依据判已删；  
+  ② 新增「Meta 关闭回收站 + 残留同名组」单测；既有软删/还原/清空回归全绿；  
+  ③ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；批次文档留痕。
+
+### ISSUE-P3-471：锁库清零路径漏 `CustomIcon` 字节——敏感清理纪律不对称
+
+- **核实时间点**：2026-10-03；**核实方式**：代码定位（`database/src/main/java/com/keepasskey/database/KdbxDatabase.kt` L84-88：`clearSensitiveData` 只清 rootGroup / kdfParameters / 二进制池；`core/src/main/java/com/keepasskey/core/model/CustomIcon.kt` L15：`data: ByteArray` 不在任何清零路径内；`CustomIconCoordinator` 亦非 `SessionLockObserver`）+ 参考项目对拍（`references/KeePassDX-架构分析.md` §5.6 / §8.3-11：KeePassDX `clearAndClose` 清图标/附件缓存）。
+- **背景**：本仓敏感清理纪律为锁库全路径对称（密钥、凭据缓存、二进制池、附件缓存均有清理路径与 SessionLockObserver 观察者），唯 Meta 级 `customIcons` 的 PNG 字节数组遗漏——锁库后图标字节驻留堆至 GC。单看风险小（图标非凭据材料），属清理纪律一致性缺口，用户 2026-10-03 拍板补齐。
+- **验收标准**：  
+  ① `clearSensitiveData` 对每个 `CustomIcon.data` 显式清零（与 rootGroup 同点清理）；锁库后无 UI/渲染缓存仍持有图标字节（有则一并清，口径为「清零至 GC 可及」，与仓内其它 ByteArray 清零纪律一致）；  
+  ② 新增单测断言清零行为；既有锁库/换库回归全绿；  
+  ③ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；批次文档留痕。

@@ -39,8 +39,6 @@
     <string name="cd_hide_password">Hide password</string>
     <string name="cd_show_password">Show password</string>
     <string name="cd_toggle_password_visibility">Toggle password visibility</string>
-    <!-- §411 follow-up (ISSUE-P3-448): toggle for the private-storage key file copy path -->
-    <string name="cd_toggle_keyfile_path">Toggle key file copy path visibility</string>
     <string name="cd_copy_username">Copy username</string>
     <string name="cd_copy_password">Copy password</string>
     <string name="cd_vault_locked">Vault locked</string>
@@ -701,10 +699,6 @@
     <string name="dbset_keyfile_import_warn_title">Confirm key file import</string>
     <string name="dbset_keyfile_import_warn_message">The selected file will become this vault\u2019s key file (the second unlock factor):\n- The vault will be re-derived and saved with "master password + this key file";\n- The previously bound key file will no longer unlock this vault;\n- After the import, verify the new credentials unlock the vault before disposing of the old key file.</string>
     <string name="dbset_keyfile_import_confirm">Confirm import</string>
-    <!-- §411 follow-up (ISSUE-P3-448): persistent private-storage copy status (below import row) -->
-    <string name="dbset_keyfile_copy_title">Stored in app-private storage</string>
-    <string name="dbset_keyfile_copy_path">App-private storage/keyfiles/%1$s</string>
-    <string name="dbset_keyfile_copy_hint">The copy is stored under a hashed vault-id name in app-private storage; readable only by this app</string>
     <string name="dbset_import_dialog_title">Choose import source</string>
     <string name="dbset_import_preparing">Parsing %1$s data...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>

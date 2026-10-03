@@ -4,21 +4,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Upload
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,7 +23,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -60,9 +53,6 @@ import kotlinx.coroutines.launch
  *    （不进任何 String / UiState），确认＝所有权随意图移交控制器，取消 / 换选＝就地清零；
  * 5. 改绑任务进行中（[keyFileImportBusy]）导入行禁用——Argon2 重派生是临界写，
  *    忙守卫在控制器内也兜底（并发提交被拒并擦除入参）。
- * 6. **§411 走查续（P3-448）**：[keyFileCopyDisplayName] 非空时在导入行下方常驻一行
- *    「已存入应用私有目录」+ 可显隐路径（默认圆点遮蔽，眼睛按钮展开）——用户走查反馈
- *    「有没有导入私有目录我看不出来」，仅靠一次性导入回执不足以确认落位。
  */
 @Composable
 internal fun DatabaseImportExportCard(
@@ -77,9 +67,7 @@ internal fun DatabaseImportExportCard(
     // 返回 true = 已处理（回执走反馈位），false = 无记忆 → 回落下方 SAF 手选改绑流程
     onImportRememberedKeyFile: suspend () -> Boolean = { false },
     keyFileImportFeedback: UiMessage? = null,
-    onClearKeyFileImportFeedback: () -> Unit = {},
-    // §411 走查续（ISSUE-P3-448）：私有目录副本常驻状态（原始显示名；null = 无副本不渲染）
-    keyFileCopyDisplayName: String? = null
+    onClearKeyFileImportFeedback: () -> Unit = {}
 ) {
     var pendingKeyFileImport by remember { mutableStateOf<PendingKeyFileImport?>(null) }
     var showKeyFileReadFailed by remember { mutableStateOf(false) }
@@ -152,10 +140,6 @@ internal fun DatabaseImportExportCard(
                 },
                 enabled = !keyFileImportBusy
             )
-
-            // §411 走查续（P3-448）：副本常驻状态段——置于导入行正下方（用户拍板位置），
-            // 仅在确有副本时渲染，让「是否真的导入了私有目录」一眼可见
-            keyFileCopyDisplayName?.let { KeyFileCopyStatusSection(displayName = it) }
 
             keyFileImportFeedback?.let { feedback ->
                 DatabaseFeedbackItem(
@@ -256,62 +240,3 @@ private fun KeyFileImportConfirmDialog(
         }
     )
 }
-
-/**
- * §411 走查续（ISSUE-P3-448）：私有目录副本**常驻状态段**。
- *
- * 用户走查反馈「有没有导入私有目录我看不出来」——原实现只有一次性导入回执，回答不了
- * 「此刻到底有没有副本」。本段在导入行下方常驻呈现三行：
- *
- * 1. 状态标题「已存入应用私有目录」（常显，一眼可见）；
- * 2. 路径「应用私有目录/keyfiles/<原文件名>」——**默认以圆点遮蔽**，眼睛按钮展开 / 收起
- *    （与口令字段同款显隐交互，副本显示名可能含库名等可识别信息）；
- * 3. 脚注：副本在私有目录内实际按**库标识哈希**命名（此处显示的是原始文件名）。
- */
-@Composable
-private fun KeyFileCopyStatusSection(displayName: String) {
-    var pathVisible by remember { mutableStateOf(false) }
-    val fullPath = stringResource(R.string.dbset_keyfile_copy_path, displayName)
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            text = stringResource(R.string.dbset_keyfile_copy_title),
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = if (pathVisible) fullPath else maskKeyFilePath(fullPath),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 4.dp)
-            )
-            IconButton(onClick = { pathVisible = !pathVisible }) {
-                Icon(
-                    imageVector = if (pathVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                    contentDescription = stringResource(R.string.cd_toggle_keyfile_path),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        Text(
-            text = stringResource(R.string.dbset_keyfile_copy_hint),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(start = 4.dp)
-        )
-    }
-}
-
-/**
- * §411 走查续（ISSUE-P3-448）：路径遮蔽呈现——与口令字段同款的**等长圆点**。
- *
- * 纯函数，供 JVM 单测直断言；字符取 `●`（与 `SecurePasswordField` 的
- * `PasswordVisualTransformation('●')` 同一字符，全站显隐口径一致）。
- */
-internal fun maskKeyFilePath(path: String): String = "●".repeat(path.length)
