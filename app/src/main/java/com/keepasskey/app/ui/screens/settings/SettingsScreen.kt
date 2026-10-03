@@ -57,6 +57,8 @@ fun SettingsScreen(
     onNavigateToTheme: () -> Unit,
     // ISSUE-P3-467：列表与导航偏好自主题页拆为独立二级入口
     onNavigateToListNav: () -> Unit,
+    // ISSUE-P3-444 修订：界面偏好二级入口（自「界面与显示」组第三行进入）
+    onNavigateToInterface: () -> Unit,
     onNavigateToHealth: () -> Unit,
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
@@ -82,6 +84,7 @@ fun SettingsScreen(
         onNavigateToSecurity = onNavigateToSecurity,
         onNavigateToTheme = onNavigateToTheme,
         onNavigateToListNav = onNavigateToListNav,
+        onNavigateToInterface = onNavigateToInterface,
         onNavigateToHealth = onNavigateToHealth,
         onNavigateToTotp = onNavigateToTotp,
         onNavigateToDebug = onNavigateToDebug,
@@ -92,10 +95,6 @@ fun SettingsScreen(
         onReadKeyFile = viewModel.keyFileReader,
         onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
         onMasterKeyChangeFeedbackShown = viewModel::clearMasterKeyChangeFeedback,
-        // ISSUE-P3-444：界面偏好组两开关上行（直取进阶偏好通道，避免在 ViewModel 再包一层
-        // setter 把已贴近单文件闸门的它继续推大；同文件 masterKeyChangeController 的既有口径）
-        onMonospaceFieldsChange = { viewModel.extendedPreferences.setMonospaceFieldsEnabled(it) },
-        onReduceAnimationsChange = { viewModel.extendedPreferences.setReduceAnimations(it) },
         onBackClick = onBackClick,
         showBackButton = showBackButton,
         modifier = modifier
@@ -124,6 +123,8 @@ fun SettingsContent(
     onNavigateToTheme: () -> Unit,
     // ISSUE-P3-467：列表与导航独立二级入口
     onNavigateToListNav: () -> Unit,
+    // ISSUE-P3-444 修订：界面偏好二级入口（两个开关已收进该页，主页不再内联）
+    onNavigateToInterface: () -> Unit = {},
     onNavigateToHealth: () -> Unit,
     onNavigateToTotp: () -> Unit = {},
     onNavigateToDebug: () -> Unit = {},
@@ -139,9 +140,6 @@ fun SettingsContent(
     onWeakPasswordConfirmed: () -> Unit = {},
     /** ISSUE-P2-354 AC③：换密反馈经 Snackbar 展示后的一次性清除 */
     onMasterKeyChangeFeedbackShown: () -> Unit = {},
-    // ISSUE-P3-444：界面偏好组两开关上行（默认空实现便于既有预览 / 截图调用点不受影响）
-    onMonospaceFieldsChange: (Boolean) -> Unit = {},
-    onReduceAnimationsChange: (Boolean) -> Unit = {},
     /**
      * ISSUE-P3-444 AC③：设置项搜索词的**初值**（仅预览 / 截图用）。
      *
@@ -181,8 +179,7 @@ fun SettingsContent(
         onNavigateToDebug = onNavigateToDebug,
         onNavigateToAbout = onNavigateToAbout,
         onOpenMasterKeyDialog = { showMasterKeyDialog = true },
-        onMonospaceFieldsChange = onMonospaceFieldsChange,
-        onReduceAnimationsChange = onReduceAnimationsChange
+        onNavigateToInterface = onNavigateToInterface
     )
     val groups = settingsGroups(uiState, actions)
     val query = searchQuery

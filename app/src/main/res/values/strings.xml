@@ -291,8 +291,10 @@
     <string name="settings_health_sub">弱密码、密码复用、数据泄露比对</string>
     <string name="settings_cat_preferences">自动填充</string>
     <string name="settings_cat_display">界面与显示</string>
-    <!-- ISSUE-P3-444：界面偏好组（等宽字段字体 / 动效降级）+ 设置项搜索 -->
+    <!-- ISSUE-P3-444：界面偏好（二级页；自「界面与显示」组的第三个入口进入）+ 设置项搜索 -->
     <string name="settings_cat_interface">界面偏好</string>
+    <string name="settings_interface_sub">密码字体、动效等界面表现</string>
+    <string name="interface_section_fields">字段与动效</string>
     <string name="settings_search_hint">搜索设置项</string>
     <string name="settings_search_clear">清除搜索</string>
     <string name="settings_search_empty">没有匹配的设置项</string>

@@ -265,6 +265,8 @@ internal fun NavGraphBuilder.settingsHomeRoute(
             onNavigateToTheme = { navController.navigate(Screen.SettingsTheme.route) { launchSingleTop = true } },
             // ISSUE-P3-467：列表与导航（自主题页拆出的独立二级入口）
             onNavigateToListNav = { navController.navigate(Screen.SettingsListDisplay.route) { launchSingleTop = true } },
+            // ISSUE-P3-444 修订：界面偏好（自「界面与显示」组第三个入口进入）
+            onNavigateToInterface = { navController.navigate(Screen.SettingsInterface.route) { launchSingleTop = true } },
             onNavigateToHealth = { navController.navigate(Screen.SettingsHealth.route) { launchSingleTop = true } },
             onNavigateToTotp = { navController.navigate(Screen.SettingsTotp.route) { launchSingleTop = true } },
             onNavigateToDebug = { navController.navigate(Screen.SettingsDebug.route) { launchSingleTop = true } },

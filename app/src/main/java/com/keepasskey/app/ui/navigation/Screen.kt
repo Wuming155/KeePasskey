@@ -43,6 +43,9 @@ sealed class Screen(val route: String) {
 
     /** 列表与导航偏好（ISSUE-P3-467：列表显示与搜索行为自主题页拆出） */
     data object SettingsListDisplay : Screen("settings/list_display")
+
+    /** 界面偏好（ISSUE-P3-444 修订：等宽字段字体 / 动效降级自设置主页分组收进「界面与显示」第三个二级入口） */
+    data object SettingsInterface : Screen("settings/interface")
     data object SettingsHealth : Screen("settings/health")
     data object SettingsTotp : Screen("settings/totp")
     data object SettingsDebug : Screen("settings/debug")

@@ -51,12 +51,51 @@ class InterfacePreferencesWiringTest {
 
         val section = stripCommentsOnly(readSource(SECTION_PATH))
         assertTrue(
-            "「界面偏好」组必须渲染等宽字段开关",
+            "「界面偏好」页必须渲染等宽字段开关",
             section.contains("checked = uiState.monospaceFieldsEnabled")
         )
         assertTrue(
-            "「界面偏好」组必须渲染动效降级开关",
+            "「界面偏好」页必须渲染动效降级开关",
             section.contains("checked = uiState.reduceAnimations")
+        )
+
+        // ISSUE-P3-444 修订：两个开关收进二级页后，设置主页必须**保留可达入口**
+        // （自「界面与显示」组第三行进入）——入口缺失等于开关被打入冷宫
+        val home = stripCommentsOnly(readSource(HOME_GROUPS_PATH))
+        assertTrue(
+            "设置主页「界面与显示」组必须有指向界面偏好页的入口行",
+            home.contains("onClick = actions.onNavigateToInterface")
+        )
+        assertTrue(
+            "设置主页不得再内联渲染这两个开关（否则开关出现两份）",
+            !home.contains("checked = uiState.monospaceFieldsEnabled")
+        )
+    }
+
+    /**
+     * `ISSUE-P3-444` 修订：两个开关收进二级页后，「入口可达」本身成为不变量——
+     * 门面必须装配路由体、路由体必须指向新 `Screen` 且宿主为新页面。
+     */
+    @Test
+    fun `界面偏好二级页必须已注册且指向新路由`() {
+        val facade = stripCommentsOnly(readSource(FACADE_PATH))
+        assertTrue(
+            "二级路由门面必须装配 settingsInterfaceRoute(navController)",
+            facade.contains("settingsInterfaceRoute(navController)")
+        )
+        // ISSUE-P3-444 修订：外观域路由体已拆至 Display Routes 文件（tier2 棘轮），仍须逐项在册
+        val routes = stripCommentsOnly(readSource(ROUTE_PATH))
+        assertTrue(
+            "路由体必须在路由文件中定义",
+            routes.contains("fun NavGraphBuilder.settingsInterfaceRoute")
+        )
+        assertTrue(
+            "路由体必须落在新建的 Screen.SettingsInterface 上",
+            routes.contains("Screen.SettingsInterface.route")
+        )
+        assertTrue(
+            "路由体必须渲染新页面 InterfaceSettingsScreen",
+            routes.contains("InterfaceSettingsScreen(")
         )
     }
 
@@ -113,8 +152,19 @@ class InterfacePreferencesWiringTest {
             "app/src/main/java/com/keepasskey/app/data/repository/ExtendedSettingsStore.kt"
         const val PROJECTION_PATH =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiStateProjection.kt"
+        /** ISSUE-P3-444 修订：两个开关现落在「界面偏好」二级页 */
         const val SECTION_PATH =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/InterfaceSettingsScreen.kt"
+
+        /** 设置主页的分组装配（入口行必须在此，且不得再内联渲染两开关） */
+        const val HOME_GROUPS_PATH =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSearchSection.kt"
+
+        const val FACADE_PATH = "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt"
+
+        /** ISSUE-P3-444 修订：外观域（主题 / 列表与导航 / 界面偏好）路由体所在文件 */
+        const val ROUTE_PATH =
+            "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsDisplayNavGraphRoutes.kt"
         const val APP_PATH = "app/src/main/java/com/keepasskey/app/ui/KeePasskeyApp.kt"
         const val LIST_CONTENT_PATH =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListContent.kt"

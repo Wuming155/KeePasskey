@@ -24,6 +24,7 @@ internal fun NavGraphBuilder.keepasskeySettingsNavGraph(
     settingsSecurityRoute(navController)
     settingsThemeRoute(navController)
     settingsListDisplayRoute(navController)
+    settingsInterfaceRoute(navController)
     settingsTotpRoute(navController)
     settingsHealthRoute(navController)
     settingsDebugRoute(navController)

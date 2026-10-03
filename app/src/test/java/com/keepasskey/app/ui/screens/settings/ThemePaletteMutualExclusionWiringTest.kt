@@ -114,7 +114,10 @@ class ThemePaletteMutualExclusionWiringTest {
             screen.contains("onSwitchToBrandPalette = onSwitchToBrandPalette")
         )
         // §280：路由体下沉 Routes 文件，按门面 + 注册体并集扫描
-        val navGraph = readSource(NAV_GRAPH) + readSource(NAV_GRAPH_ROUTES)
+        // ISSUE-P3-444 修订：外观域路由（主题 / 列表与导航 / 界面偏好）再拆至 Display Routes 文件，纳入并集
+        val navGraph = readSource(NAV_GRAPH) +
+            readSource(NAV_GRAPH_ROUTES) +
+            readSource(NAV_GRAPH_DISPLAY_ROUTES)
         assertTrue(
             "NavGraph 必须把一步切回接线到关闭动态取色（偏好值已落盘，无须另行选择）",
             navGraph.contains("onSwitchToBrandPalette = { settingsViewModel.setDynamicColorEnabled(false) }")
@@ -167,6 +170,10 @@ class ThemePaletteMutualExclusionWiringTest {
         const val NAV_GRAPH = "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt"
         const val NAV_GRAPH_ROUTES =
             "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraphRoutes.kt"
+
+        /** ISSUE-P3-444 修订：外观域二级页路由（主题 / 列表与导航 / 界面偏好）的注册体所在文件 */
+        const val NAV_GRAPH_DISPLAY_ROUTES =
+            "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsDisplayNavGraphRoutes.kt"
         const val THEME = "app/src/main/java/com/keepasskey/app/ui/theme/Theme.kt"
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

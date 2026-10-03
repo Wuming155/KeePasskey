@@ -1,8 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Assignment
@@ -19,6 +17,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,7 +30,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
-import com.keepasskey.app.ui.screens.settings.subscreens.DisplayPrefRow
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
@@ -58,9 +56,8 @@ internal class SettingsActions(
     val onNavigateToAbout: () -> Unit,
     /** 打开「更换主密钥」对话框（状态由 `SettingsContent` 持有） */
     val onOpenMasterKeyDialog: () -> Unit,
-    // ===== ISSUE-P3-444：界面偏好组 =====
-    val onMonospaceFieldsChange: (Boolean) -> Unit,
-    val onReduceAnimationsChange: (Boolean) -> Unit
+    // ===== ISSUE-P3-444 修订：界面偏好二级页入口（原为分组内联两开关） =====
+    val onNavigateToInterface: () -> Unit
 )
 
 /** 全部分组（顺序＝渲染顺序）；`BuildConfig.DEBUG` 只决定系统组是否含「调试」行。 */
@@ -70,7 +67,6 @@ internal fun settingsGroups(uiState: SettingsUiState, actions: SettingsActions):
         storageGroup(actions),
         securityGroup(actions),
         autofillGroup(actions),
-        interfaceGroup(uiState, actions),
         displayGroup(actions),
         systemGroup(uiState, actions)
     )
@@ -186,35 +182,6 @@ private fun autofillGroup(actions: SettingsActions): SettingsGroupSpec {
     )
 }
 
-/** `ISSUE-P3-444` AC⑤：界面偏好分组（等宽字段字体 / 动效降级）。 */
-@Composable
-private fun interfaceGroup(uiState: SettingsUiState, actions: SettingsActions): SettingsGroupSpec =
-    SettingsGroupSpec(
-        headerRes = R.string.settings_cat_interface,
-        rows = listOf(
-            settingsRow(R.string.settings_monospace_fields, R.string.settings_monospace_fields_sub) {
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
-                    DisplayPrefRow(
-                        title = stringResource(R.string.settings_monospace_fields),
-                        subtitle = stringResource(R.string.settings_monospace_fields_sub),
-                        checked = uiState.monospaceFieldsEnabled,
-                        onCheckedChange = actions.onMonospaceFieldsChange
-                    )
-                }
-            },
-            settingsRow(R.string.settings_reduce_animations, R.string.settings_reduce_animations_sub) {
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
-                    DisplayPrefRow(
-                        title = stringResource(R.string.settings_reduce_animations),
-                        subtitle = stringResource(R.string.settings_reduce_animations_sub),
-                        checked = uiState.reduceAnimations,
-                        onCheckedChange = actions.onReduceAnimationsChange
-                    )
-                }
-            }
-        )
-    )
-
 /** ISSUE-P3-413：外观独立成组，不与自动填充混排。 */
 @Composable
 private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = SettingsGroupSpec(
@@ -237,6 +204,17 @@ private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = Settings
                 title = stringResource(R.string.settings_list_nav),
                 subtitle = stringResource(R.string.settings_list_nav_sub),
                 onClick = actions.onNavigateToListNav
+            )
+        },
+        // ISSUE-P3-444 修订：界面偏好（等宽字段字体 / 动效降级）收进本组第三个入口，
+        // 不再以独立分组平铺在主页——两项都属「界面与显示」的细分表现，与上两行同族
+        settingsRow(R.string.settings_cat_interface, R.string.settings_interface_sub) {
+            ModernSettingsRow(
+                icon = Icons.Default.Tune,
+                iconTint = MaterialTheme.colorScheme.tertiary,
+                title = stringResource(R.string.settings_cat_interface),
+                subtitle = stringResource(R.string.settings_interface_sub),
+                onClick = actions.onNavigateToInterface
             )
         }
     )

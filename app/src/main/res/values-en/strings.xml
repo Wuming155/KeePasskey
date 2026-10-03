@@ -281,8 +281,10 @@
     <string name="settings_health_sub">Weak passwords, reuse detection, breach checking</string>
     <string name="settings_cat_preferences">Autofill</string>
     <string name="settings_cat_display">Interface &amp; Display</string>
-    <!-- ISSUE-P3-444: interface preference group (monospace fields / reduced motion) + settings search -->
+    <!-- ISSUE-P3-444: interface preferences (second-level page, third entry of "Interface & Display") + settings search -->
     <string name="settings_cat_interface">Interface preferences</string>
+    <string name="settings_interface_sub">Password font, motion and other display behaviour</string>
+    <string name="interface_section_fields">Fields &amp; motion</string>
     <string name="settings_search_hint">Search settings</string>
     <string name="settings_search_clear">Clear search</string>
     <string name="settings_search_empty">No matching settings</string>
