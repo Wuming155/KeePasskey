@@ -205,6 +205,64 @@ class KeyFileSessionCoordinatorTest {
         assertEquals("偏好关闭时 Uri 记忆仍须清除", 1, access.forgetCount)
     }
 
+    // ===== §433（ISSUE-P3-448 走查续）：解锁页「加载来源」路径 =====
+
+    @Test
+    fun `副本恢复的来源为副本真实绝对路径并随清除归零`() = runTest {
+        // 用户走查原话「有没有导入私有目录我看不出来」——解锁页须显示**真实路径**（非逻辑标签）
+        val access = FakeKeyFileAccess(permissionValid = false, persistPermissionSucceeds = false)
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        val (subject, store, uiState) = coordinatorWithCopy(this, access)
+        assertTrue(store.save("db-1", FakeKeyFileAccess.FAKE_KEY_FILE_BYTES, FakeKeyFileAccess.DISPLAY_NAME))
+
+        subject.restoreRememberedKeyFile()
+
+        val shown = uiState.value.keyFileSourcePath
+        assertEquals(
+            "走私有目录副本恢复时来源必须是副本的绝对路径",
+            store.copyPathFor("db-1"),
+            shown
+        )
+        assertTrue("来源必须指向私有目录下的 kfc 副本文件", shown!!.endsWith(".kfc"))
+
+        subject.clearKeyFile()
+        assertNull("取消选择后来源路径必须归零（不残留陈旧指向）", uiState.value.keyFileSourcePath)
+    }
+
+    @Test
+    fun `无副本回落到SAF记忆时来源如实为Uri而非副本路径`() = runTest {
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        val (subject, store, uiState) = coordinatorWithCopy(this, access)
+        assertNull("前置：本库确实无副本", store.copyPathFor("db-1"))
+
+        subject.restoreRememberedKeyFile()
+
+        assertEquals(
+            "无副本时走 SAF 记忆恢复，来源须如实为该 Uri（不得张冠李戴成私有目录路径）",
+            FakeKeyFileAccess.KEY_FILE_URI,
+            uiState.value.keyFileSourcePath
+        )
+    }
+
+    @Test
+    fun `手选密钥文件的来源为所选Uri`() = runTest {
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        val (subject, _, uiState) = coordinatorWithCopy(this, access)
+
+        subject.onKeyFileSelected(FakeKeyFileAccess.KEY_FILE_URI)
+        testScheduler.runCurrent()
+
+        assertEquals(
+            "手选来源应为所选 SAF Uri",
+            FakeKeyFileAccess.KEY_FILE_URI,
+            uiState.value.keyFileSourcePath
+        )
+    }
+
     // ===== ISSUE-P2-460：密钥文件记忆按库归属 =====
 
     @Test

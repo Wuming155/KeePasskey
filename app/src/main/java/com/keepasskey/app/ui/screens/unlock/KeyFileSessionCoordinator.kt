@@ -79,8 +79,8 @@ internal class KeyFileSessionCoordinator(
 
     override fun currentDatabaseId(): String? = activeDbId()
 
-    override fun adoptRestoredKeyFile(bytes: ByteArray, displayName: String) =
-        adoptKeyFile(bytes, displayName)
+    override fun adoptRestoredKeyFile(bytes: ByteArray, displayName: String, sourcePath: String?) =
+        adoptKeyFile(bytes, displayName, sourcePath)
 
     override fun setKeyFileSourceUri(uri: String?) {
         keyFileSourceUri = uri
@@ -105,7 +105,8 @@ internal class KeyFileSessionCoordinator(
                 when (val outcome = access.read(uri)) {
                     is KeyFileReadResult.Success -> {
                         try {
-                            adoptKeyFile(outcome.bytes, outcome.displayName)
+                            // §433（P3-448 走查续）：手选来源＝该 SAF Uri
+                            adoptKeyFile(outcome.bytes, outcome.displayName, uri)
                         } finally {
                             // 移交后立即擦除读取结果（VM 内部持独立副本）
                             outcome.bytes.fill(0)
@@ -129,16 +130,26 @@ internal class KeyFileSessionCoordinator(
      * 本入口不携带来源 Uri（ISSUE-P3-04 记忆登记需经 [onKeyFileSelected] 的 Uri 通道）。
      */
     fun onKeyFileSelected(data: ByteArray, fileName: String) {
-        adoptKeyFile(data, fileName)
+        adoptKeyFile(data, fileName, null)
         userTouched = true
     }
 
-    /** 采纳密钥文件字节：覆盖驻留副本（旧副本显式清零）并同步「已选择 + 显示名」语义 */
-    private fun adoptKeyFile(data: ByteArray, fileName: String) {
+    /**
+     * 采纳密钥文件字节：覆盖驻留副本（旧副本显式清零）并同步「已选择 + 显示名 + 来源路径」语义。
+     *
+     * [sourcePath]（§433，ISSUE-P3-448 走查续）＝本文件从哪载入（私有目录副本绝对路径 / SAF Uri），
+     * 仅用于解锁页呈现来源，绝不参与密钥派生。
+     */
+    private fun adoptKeyFile(data: ByteArray, fileName: String, sourcePath: String?) {
         keyFileData?.fill(0)
         keyFileData = data.copyOf()
         uiState.update {
-            it.copy(hasKeyFile = true, keyFileName = fileName, errorMessage = null)
+            it.copy(
+                hasKeyFile = true,
+                keyFileName = fileName,
+                keyFileSourcePath = sourcePath,
+                errorMessage = null
+            )
         }
     }
 
@@ -153,7 +164,7 @@ internal class KeyFileSessionCoordinator(
         keyFileData = null
         keyFileSourceUri = null
         userTouched = true
-        uiState.update { it.copy(hasKeyFile = false, keyFileName = "") }
+        uiState.update { it.copy(hasKeyFile = false, keyFileName = "", keyFileSourcePath = null) }
     }
 
     /**
@@ -166,7 +177,12 @@ internal class KeyFileSessionCoordinator(
         keyFileSourceUri = null
         userTouched = true
         uiState.update {
-            it.copy(hasKeyFile = false, keyFileName = "", errorMessage = UiMessage(R.string.unlock_keyfile_read_failed))
+            it.copy(
+                hasKeyFile = false,
+                keyFileName = "",
+                keyFileSourcePath = null,
+                errorMessage = UiMessage(R.string.unlock_keyfile_read_failed)
+            )
         }
     }
 
@@ -292,7 +308,13 @@ internal class KeyFileSessionCoordinator(
         keyFileSourceUri = null
         userTouched = false
         uiState.update {
-            it.copy(hasKeyFile = false, keyFileName = "", infoMessage = null, errorMessage = null)
+            it.copy(
+                hasKeyFile = false,
+                keyFileName = "",
+                keyFileSourcePath = null,
+                infoMessage = null,
+                errorMessage = null
+            )
         }
         debugLog.info(TAG, "活动库切换：密钥文件表单态已复位（驻留字节清零）")
     }

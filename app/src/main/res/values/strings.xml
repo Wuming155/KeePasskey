@@ -66,6 +66,9 @@
     <string name="unlock_master_password_hint">输入主密码以解锁</string>
     <string name="unlock_keyfile">密钥文件</string>
     <string name="unlock_keyfile_selected">已加载密钥文件: %1$s</string>
+    <!-- §433（ISSUE-P3-448 走查续）：密钥文件加载来源（真实路径；默认中间省略，按钮展开完整） -->
+    <string name="unlock_keyfile_source_label">来源</string>
+    <string name="cd_toggle_keyfile_path">展开或收起完整路径</string>
     <string name="unlock_keyfile_none">未关联密钥文件 (可选)</string>
     <string name="unlock_keyfile_read_failed">无法读取所选密钥文件，请重试</string>
     <!-- ISSUE-P3-437 AC①：解锁链阶段型过程文案（零敏感载荷，仅过程描述） -->

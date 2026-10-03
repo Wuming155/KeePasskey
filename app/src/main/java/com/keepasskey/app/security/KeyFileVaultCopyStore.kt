@@ -154,6 +154,19 @@ class KeyFileVaultCopyStore @Inject constructor(
         }
     }
 
+    /**
+     * §433（ISSUE-P3-448 走查续）：副本文件的**绝对路径**（文件不存在 / 通道缺失 ⇒ null）。
+     *
+     * 供解锁页呈现「本次加载来源」：路径本身不含密钥材料（文件名是库 id 的 SHA-256 摘要），
+     * 但属应用内部布局信息，UI 侧默认以**中间省略**呈现、由用户显式展开看全。
+     */
+    fun copyPathFor(databaseId: String): String? {
+        if (databaseId.isBlank()) return null
+        val dir = baseDir ?: return null
+        val target = fileFor(dir, databaseId)
+        return if (target.exists()) target.absolutePath else null
+    }
+
     /** 清除全部收编副本（凭据全清 / 数据迁移等场景）。 */
     fun clearAll() {
         val dir = baseDir ?: return

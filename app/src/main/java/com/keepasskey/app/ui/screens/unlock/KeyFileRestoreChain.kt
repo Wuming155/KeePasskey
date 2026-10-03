@@ -21,8 +21,13 @@ internal interface KeyFileRestoreHost {
     /** 活动库 id（按库记忆的命名空间；null = 无库维度，不恢复） */
     fun currentDatabaseId(): String?
 
-    /** 采纳恢复出的密钥文件字节（写驻留副本 + 「已选择 + 显示名」语义） */
-    fun adoptRestoredKeyFile(bytes: ByteArray, displayName: String)
+    /**
+     * 采纳恢复出的密钥文件字节（写驻留副本 + 「已选择 + 显示名」语义）。
+     *
+     * [sourcePath]（§433，ISSUE-P3-448 走查续）＝本次恢复的**来源路径**（副本绝对路径 / SAF Uri），
+     * 仅用于解锁页呈现「从哪载入」，非密钥材料。
+     */
+    fun adoptRestoredKeyFile(bytes: ByteArray, displayName: String, sourcePath: String?)
 
     /** 登记恢复来源 Uri（非密钥元数据） */
     fun setKeyFileSourceUri(uri: String?)
@@ -140,7 +145,8 @@ internal class KeyFileRestoreChain(
             return true
         }
         try {
-            host.adoptRestoredKeyFile(copy.bytes, copy.displayName)
+            // §433（P3-448 走查续）：来源＝私有目录副本**真实绝对路径**（供解锁页呈现「从哪载入」）
+            host.adoptRestoredKeyFile(copy.bytes, copy.displayName, vaultCopyStore?.copyPathFor(dbId))
         } finally {
             copy.bytes.fill(0)
         }
@@ -210,7 +216,8 @@ internal class KeyFileRestoreChain(
                     }
                     val displayName = outcome.displayName.ifBlank { remembered.displayName }
                     try {
-                        host.adoptRestoredKeyFile(outcome.bytes, displayName)
+                        // §433（P3-448 走查续）：来源＝本库按库记忆的 SAF Uri（授权来源，非密钥材料）
+                        host.adoptRestoredKeyFile(outcome.bytes, displayName, remembered.uri)
                     } finally {
                         outcome.bytes.fill(0)
                     }

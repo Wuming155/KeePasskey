@@ -66,6 +66,9 @@
     <string name="unlock_master_password_hint">Enter master password to unlock</string>
     <string name="unlock_keyfile">Key File</string>
     <string name="unlock_keyfile_selected">Key file loaded: %1$s</string>
+    <!-- §433 (ISSUE-P3-448 follow-up): key file load source (real path; abbreviated by default) -->
+    <string name="unlock_keyfile_source_label">Source</string>
+    <string name="cd_toggle_keyfile_path">Show or hide the full path</string>
     <string name="unlock_keyfile_none">No key file selected (Optional)</string>
     <string name="unlock_keyfile_read_failed">Failed to read the selected key file, please retry</string>
     <!-- ISSUE-P3-437 AC①: stage feedback lines for the unlock flow (no sensitive payload) -->

@@ -24,6 +24,10 @@ data class UnlockUiState(
     val hasKeyFile: Boolean = false,
     // 修复虚假开关整改：仅在选择真实密钥文件后由 ViewModel 填充真实文件名，不再写死假名
     val keyFileName: String = "",
+    // §433（ISSUE-P3-448 走查续）：本次加载密钥文件的**来源路径**——私有目录收编副本的绝对路径，
+    // 或 SAF 记忆 / 手选的 Uri；null = 无可呈现来源（未选 / 字节由调用方直接提供 / 无库维度）。
+    // 非密钥材料（不参与派生）；属应用内部布局与授权来源信息，UI 侧默认**中间省略** + 按钮展开。
+    val keyFileSourcePath: String? = null,
     val isLoading: Boolean = false,
     // ISSUE-P3-368 AC②：打开链进度（0..1 确定段；null = KDF 等分段不确定段）。
     // 仅在 isLoading 期间由解锁页渲染进度条；isLoading 语义与按钮内嵌圈不回归。

@@ -331,6 +331,8 @@ internal fun UnlockStandardUnlockContent(
     UnlockKeyFileRow(
         hasKeyFile = uiState.hasKeyFile,
         keyFileName = uiState.keyFileName,
+        // §433（ISSUE-P3-448 走查续）：加载来源真实路径（默认中间省略 + 按钮展开完整）
+        keyFileSourcePath = uiState.keyFileSourcePath,
         onSelectKeyFile = onSelectKeyFile,
         onClearKeyFile = onClearKeyFile
     )

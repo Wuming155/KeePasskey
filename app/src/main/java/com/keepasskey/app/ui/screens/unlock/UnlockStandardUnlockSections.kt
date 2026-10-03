@@ -15,18 +15,26 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
@@ -44,59 +52,128 @@ import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
  * 附加密钥文件：文件选择行为（非布尔开关）——点击唤起 SAF；已选时展示文件名并提供清除。
+ *
+ * §433（ISSUE-P3-448 走查续）：已选且已知**加载来源**（[keyFileSourcePath]，私有目录副本绝对路径
+ * 或 SAF Uri）时，在行下方另起一行呈现来源路径——默认**中间省略**、点右侧眼睛展开完整路径。
+ * 该行刻意落在**可点击行之外**：整行点击是「清除密钥文件」，若把来源行纳入同一手势，
+ * 用户想看清路径就会把密钥文件清掉。
  */
 @Composable
 internal fun UnlockKeyFileRow(
     hasKeyFile: Boolean,
     keyFileName: String,
+    keyFileSourcePath: String?,
     onSelectKeyFile: () -> Unit,
     onClearKeyFile: () -> Unit
 ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .clickable {
+                    if (hasKeyFile) onClearKeyFile() else onSelectKeyFile()
+                }
+                .padding(vertical = 10.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.AttachFile,
+                contentDescription = stringResource(R.string.unlock_keyfile),
+                tint = if (hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.unlock_keyfile),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (hasKeyFile && keyFileName.isNotBlank()) {
+                    Text(
+                        text = stringResource(R.string.unlock_keyfile_selected, keyFileName),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.unlock_keyfile_none),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Icon(
+                imageVector = if (hasKeyFile) Icons.Default.CheckCircle else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = if (hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        if (hasKeyFile && !keyFileSourcePath.isNullOrBlank()) {
+            KeyFileSourceRow(path = keyFileSourcePath)
+        }
+    }
+}
+
+/**
+ * §433（ISSUE-P3-448 走查续）：密钥文件**加载来源**行。
+ *
+ * 回答用户走查原话「有没有导入私有目录我看不出来」——显示本次加载的**真实路径**
+ * （私有目录收编副本为绝对路径，SAF 来源为 Uri）：默认**中间省略**（不整段铺开），
+ * 点右侧按钮展开完整路径，再次点击收起。
+ */
+@Composable
+private fun KeyFileSourceRow(path: String) {
+    var expanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .clickable {
-                if (hasKeyFile) onClearKeyFile() else onSelectKeyFile()
-            }
-            .padding(vertical = 10.dp, horizontal = 4.dp),
+            // 左缩进对齐上行文字列（图标 20dp + 间隔 10dp + 行内水平内边距 4dp）
+            .padding(start = 34.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = Icons.Default.AttachFile,
-            contentDescription = stringResource(R.string.unlock_keyfile),
-            tint = if (hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp)
+        Text(
+            text = stringResource(R.string.unlock_keyfile_source_label),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.unlock_keyfile),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = if (expanded) path else abbreviatePath(path),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        IconButton(onClick = { expanded = !expanded }) {
+            Icon(
+                imageVector = if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                contentDescription = stringResource(R.string.cd_toggle_keyfile_path),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
             )
-            if (hasKeyFile && keyFileName.isNotBlank()) {
-                Text(
-                    text = stringResource(R.string.unlock_keyfile_selected, keyFileName),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            } else {
-                Text(
-                    text = stringResource(R.string.unlock_keyfile_none),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
-        Icon(
-            imageVector = if (hasKeyFile) Icons.Default.CheckCircle else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = if (hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp)
-        )
     }
 }
+
+/**
+ * §433（ISSUE-P3-448 走查续）：路径**中间省略**（默认折叠态）——首尾保留、中段以 `…` 代。
+ *
+ * 纯函数，供 JVM 单测直断言（不依赖 Compose 排版）；超长路径（如 64 位哈希文件名）由此收敛，
+ * 用户需要看全时经 [KeyFileSourceRow] 的展开按钮切换。
+ */
+internal fun abbreviatePath(path: String, max: Int = PATH_ABBREV_MAX_CHARS): String {
+    if (path.length <= max) return path
+    val head = (max - 1) / 2
+    val tail = max - 1 - head
+    return path.take(head) + "…" + path.takeLast(tail)
+}
+
+/** 折叠态路径长度上限（首尾对称保留，中段省略） */
+private const val PATH_ABBREV_MAX_CHARS = 40
 
 /** H4-只读整改：只读打开开关（KeePassDX/KP2A 同款能力） */
 @Composable

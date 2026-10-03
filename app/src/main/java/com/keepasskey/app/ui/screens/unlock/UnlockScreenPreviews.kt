@@ -90,6 +90,10 @@ internal fun UnlockContentErrorWithKeyFileInfoPreview() {
                 isQuickUnlockAvailable = true,
                 hasKeyFile = true,
                 keyFileName = "usr.dat",
+                // §433（ISSUE-P3-448 走查续）：新「来源」行只在确有来源时渲染——
+                // 默认参数（null）的预览看不到它，故在此画真机同形的副本绝对路径（折叠态）
+                keyFileSourcePath = "/data/user/0/com.keepasskey.debug/files/keyfiles/" +
+                    "08f8c3ef4ce4b5ea548d5bc5c445cc8a28501e93342268c96a00105ee84fd7c9.kfc",
                 errorMessage = UiMessage(R.string.sec_biometric_auth_failed),
                 infoMessage = UiMessage(R.string.keyfile_restored_from_memory, listOf("usr.dat"))
             ),
