@@ -237,6 +237,15 @@ class AppNavigationMotion private constructor(
          */
         const val PARALLAX_DIVISOR: Int = 4
 
+        /**
+         * §436：解锁页锁块呼吸点的循环周期（§436 原型 1.8s）。
+         *
+         * 与转场时间轴无关的**常驻氛围动效**：循环呼吸必须由确定时长 + 线性缓动表达
+         * （spring 无法构成「淡出-归零-重启」的循环），motionScheme 三档 spec 是转场短时长，
+         * 语义不匹配；故作为具名 token 收敛到本类统一取值，供 `UnlockContentSections` 引用。
+         */
+        const val UNLOCK_PING_CYCLE_MS: Int = 1800
+
     /**
      * 同级顶层入口的起始缩放。
      *

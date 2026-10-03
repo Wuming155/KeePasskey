@@ -287,18 +287,46 @@ internal fun UnlockSubmitButton(
     }
 }
 
-/** 「切回快速解锁」入口：仅在存在可用快速解锁凭据时呈现 */
+/**
+ * 「切回快速解锁」入口：仅在存在可用快速解锁凭据时呈现。
+ *
+ * §436 重绘为原型的次级胶囊按钮形态（⚡ 图标 + 全宽 capsule + outlineVariant 描边），
+ * 替换原先居中的 TextButton；触控目标仍保持 ≥ 48dp。
+ */
 @Composable
 internal fun UnlockSwitchToQuickEntry(
     onSwitchToQuickUnlock: () -> Unit
 ) {
-    Spacer(modifier = Modifier.height(8.dp))
-    TextButton(
-        onClick = onSwitchToQuickUnlock,
-        modifier = Modifier.heightIn(min = 48.dp)
+    Spacer(modifier = Modifier.height(10.dp))
+    androidx.compose.material3.Surface(
+        shape = CapsuleShape,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CapsuleShape)
+            .clickable(onClick = onSwitchToQuickUnlock)
     ) {
-        Icon(Icons.Default.FlashOn, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(stringResource(R.string.unlock_switch_back_quick), style = MaterialTheme.typography.labelSmall)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.FlashOn,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = stringResource(R.string.unlock_switch_back_quick),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
     }
 }

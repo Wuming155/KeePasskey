@@ -401,7 +401,12 @@ class AppNavigationMotionTest {
          * 新增豁免须在批次文档登记理由（不得为让守卫变绿而加名单）。
          */
         private val TWEEN_EXEMPT_FILES = setOf(
-            "app/src/main/java/com/keepasskey/app/ui/navigation/AppNavigationMotion.kt"
+            "app/src/main/java/com/keepasskey/app/ui/navigation/AppNavigationMotion.kt",
+            // §436 登记理由：解锁页锁块呼吸点是**常驻氛围动效**（1.8s 循环，时长取
+            // `AppNavigationMotion.UNLOCK_PING_CYCLE_MS` 具名 token）——循环「淡出-归零-重启」
+            // 必须由确定时长 + 线性缓动表达，spring 无法构成该循环，motionScheme 三档 spec
+            // 是转场短时长、语义不匹配；与导航转场时间轴无关，故文件级豁免。
+            "app/src/main/java/com/keepasskey/app/ui/screens/unlock/UnlockContentSections.kt"
         )
 
         private val repositoryRoot: File by lazy {

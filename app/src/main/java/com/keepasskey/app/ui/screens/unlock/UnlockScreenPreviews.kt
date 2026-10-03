@@ -1,7 +1,13 @@
 package com.keepasskey.app.ui.screens.unlock
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.theme.AppThemeMode
@@ -137,3 +143,77 @@ internal fun KeyFileSourceRowExpandedPreview() {
 private const val PREVIEW_KEY_FILE_COPY_PATH =
     "/data/user/0/com.keepasskey.debug/files/keyfiles/" +
         "08f8c3ef4ce4b5ea548d5bc5c445cc8a28501e93342268c96a00105ee84fd7c9.kfc"
+
+// ===== §436 分组卡改版预览 =====
+
+// ISSUE-P3-340 规则条文：折叠卡的 expanded 开关两态都要画——收起态下密钥文件 / 只读开关
+// 全部不可见，若只画展开态，收起态的间距与头部徽章只有真机能撞见
+@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（展开）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（展开）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（收起）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（收起）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockAdvancedAuthCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
+            UnlockAdvancedAuthCard(
+                hasKeyFile = true,
+                keyFileName = "hellisllords.keyx",
+                keyFileSourcePath = PREVIEW_KEY_FILE_COPY_PATH,
+                onSelectKeyFile = {},
+                onClearKeyFile = {},
+                openReadOnly = false,
+                onToggleReadOnly = {},
+                expanded = true,
+                onToggleExpand = {}
+            )
+            // 收起态 + 无密钥文件（徽章不呈现的反向态）
+            UnlockAdvancedAuthCard(
+                hasKeyFile = false,
+                keyFileName = "",
+                keyFileSourcePath = null,
+                onSelectKeyFile = {},
+                onClearKeyFile = {},
+                openReadOnly = true,
+                onToggleReadOnly = {},
+                expanded = false,
+                onToggleExpand = {}
+            )
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(name = "分组卡（数据库行 + 主密码行）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "分组卡（数据库行 + 主密码行）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockVaultGroupCardPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        UnlockVaultGroupCard(
+            databaseRow = {
+                UnlockDatabaseRow(
+                    name = "phellords.kdbx",
+                    status = "本地存储 · 42 个凭据",
+                    onOpen = {},
+                    onSwitchTap = {}
+                )
+            },
+            passwordRow = {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    com.keepasskey.app.ui.components.SecurePasswordField(
+                        label = null,
+                        placeholder = "输入主密码",
+                        onPasswordChanged = {},
+                        isPasswordVisible = false,
+                        onToggleVisibility = {},
+                        leadingIcon = Icons.Default.Lock,
+                        embeddedFlat = true
+                    )
+                }
+            }
+        )
+    }
+}

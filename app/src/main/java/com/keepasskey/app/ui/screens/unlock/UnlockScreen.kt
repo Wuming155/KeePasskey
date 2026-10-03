@@ -3,8 +3,8 @@ package com.keepasskey.app.ui.screens.unlock
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,34 +17,33 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
-import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.screens.database.DatabasePickerViewModel
 import com.keepasskey.app.ui.theme.AppThemeMode
+import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.HeroTitleStyle
 import com.keepasskey.app.ui.unwrapToFragmentActivity
 
@@ -246,71 +245,19 @@ fun UnlockContent(
                     color = MaterialTheme.colorScheme.onBackground
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                Text(
-                    // ISSUE-P2-285 AC①：硬件声明按实测安全等级条件渲染——软件级降级态
-                    // （quickUnlockDowngraded，P1-22 实测回填）下如实呈现「无硬件隔离」，
-                    // 禁硬件 / 软件一律渲染硬件文案
-                    text = when {
-                        uiState.unlockMode != UnlockMode.QUICK_UNLOCK -> stringResource(R.string.unlock_subtitle)
-                        uiState.quickUnlockDowngraded -> stringResource(R.string.unlock_quick_subtitle_software)
-                        else -> stringResource(R.string.unlock_quick_subtitle)
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                // §436：副标题改绘为「状态胶囊」（点 + 文案），文案仍按实测安全等级条件渲染——
+                // ISSUE-P2-285 AC①：软件级降级态（quickUnlockDowngraded）下如实呈现「无硬件隔离」，
+                // 禁硬件 / 软件一律渲染硬件文案
+                val subtitleText = when {
+                    uiState.unlockMode != UnlockMode.QUICK_UNLOCK -> stringResource(R.string.unlock_subtitle)
+                    uiState.quickUnlockDowngraded -> stringResource(R.string.unlock_quick_subtitle_software)
+                    else -> stringResource(R.string.unlock_quick_subtitle)
+                }
+                UnlockStatusPill(subtitle = subtitleText)
 
                 Spacer(modifier = Modifier.height(20.dp))
-
-                // 当前数据库概要条目
-                BentoCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
-                        .clickable { onNavigateToDatabasePicker() },
-                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = MaterialTheme.shapes.medium
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = stringResource(R.string.cd_active_database),
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = uiState.databaseName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = uiState.databaseStatus,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        TextButton(onClick = onNavigateToDatabasePicker) {
-                            Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.unlock_switch_vault), fontSize = 12.sp)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
 
                 // ISSUE-P3-438：上次会话未正常关闭（进程死亡时库仍处于解锁态）的一次性轻提示——
                 // 文案如实中性，不渲染为错误告警（onSurfaceVariant，区别于下方丢弃编辑的 error 色）
@@ -345,15 +292,28 @@ fun UnlockContent(
                     // ISSUE-P3-215 曾在此承载无障碍提示、后迁设置页；ISSUE-P3-324 该提示与
                     // 整条信号链路一并移除（含系统预装服务的口径对未开无障碍用户构成假提示），
                     // 解锁页同样不得回潮渲染任何无障碍状态卡。
+                    // §436：数据库行 + 主密码行整合进同一张分组卡（原型布局）；
+                    // 「切换库」两处入口（整行点击 / 尾部「切换」胶囊）都走 onNavigateToDatabasePicker。
+                    var advancedExpanded by remember { mutableStateOf(true) }
                     UnlockStandardUnlockContent(
                         uiState = uiState,
+                        databaseRow = {
+                            UnlockDatabaseRow(
+                                name = uiState.databaseName,
+                                status = uiState.databaseStatus,
+                                onOpen = { onNavigateToDatabasePicker() },
+                                onSwitchTap = { onNavigateToDatabasePicker() }
+                            )
+                        },
                         onPasswordChange = onPasswordChange,
                         onTogglePasswordVisibility = onTogglePasswordVisibility,
                         onSelectKeyFile = onSelectKeyFile,
                         onClearKeyFile = onClearKeyFile,
                         onToggleReadOnly = onToggleReadOnly,
                         onUnlock = onUnlock,
-                        onSwitchMode = onSwitchMode
+                        onSwitchMode = onSwitchMode,
+                        advancedExpanded = advancedExpanded,
+                        onToggleAdvancedExpanded = { advancedExpanded = !advancedExpanded }
                     )
                 }
             }
@@ -366,6 +326,37 @@ fun UnlockContent(
             onConfirm = { onDowngradeDecision(true) },
             onDecline = { onDowngradeDecision(false) }
         )
+    }
+}
+
+/**
+ * §436：品牌区状态胶囊（原型形态）——primary 圆点 + 副标题文案，
+ * surfaceContainer 底 + outlineVariant 描边的胶囊容器。
+ */
+@Composable
+private fun UnlockStatusPill(subtitle: String) {
+    Surface(
+        shape = CapsuleShape,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

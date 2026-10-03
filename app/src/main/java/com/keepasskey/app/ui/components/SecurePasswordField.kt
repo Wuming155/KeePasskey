@@ -51,10 +51,16 @@ import com.keepasskey.app.ui.theme.passwordFieldStyle
  * 之内（`TextFieldImpl.kt`）——**Box 的同层兄弟互相叠放**，故该槽只接受**单个**节点；
  * 需要多行辅助 / 错误 / 提示文案时，调用方须自行包一层 `Column`（真机事故：解锁页四行文案
  * 平铺直出，两行同时成立即压成一行乱码）。机检见 `tools/doc/check_box_slot_children.py`。
+ *
+ * 2026-10-03 解锁页分组卡改版（§436）新增两个**向后兼容**的呈现开关：
+ * - [label] 放宽为可空（`null` = 不渲染浮动标签，语义交由 [placeholder] / 无障碍语义承载）；
+ * - [embeddedFlat] = `true` 时四态描边与容器全部透明——字段作为「无边框行」嵌入分组卡
+ *   （原型为「数据库行 + 主密码行同卡」的扁平形态），错误态仍由 [supportingText] 承载。
+ *   默认 `false`＝既有外观，既有调用点（条目编辑 / 改密对话框等）零变化。
  */
 @Composable
 fun SecurePasswordField(
-    label: String,
+    label: String?,
     onPasswordChanged: (CharArray) -> Unit,
     modifier: Modifier = Modifier,
     placeholder: String? = null,
@@ -70,6 +76,8 @@ fun SecurePasswordField(
     // ISSUE-P1-04：外部擦除令牌——值变化时立即清空本组件显示态与桥接 CharArray，
     // 用于解锁失败/锁定后与 ViewModel 内主密码清零保持同步（用户须重新输入后重试）
     wipeToken: Any? = null,
+    // §436：无边框扁平形态（嵌入分组卡内的主密码行）；默认 false＝既有外观
+    embeddedFlat: Boolean = false,
     onDone: () -> Unit = {}
 ) {
     var displayText by remember { mutableStateOf("") }
@@ -120,7 +128,7 @@ fun SecurePasswordField(
             // 桥接数组仅供本次回调消费；收件方长期持有须自行复制
             onPasswordChanged(charBridge)
         },
-        label = { Text(label) },
+        label = label?.let { { Text(it) } },
         placeholder = placeholder?.let { { Text(it) } },
         isError = isError,
         supportingText = supportingText,
@@ -160,16 +168,31 @@ fun SecurePasswordField(
             color = MaterialTheme.colorScheme.onSurface
         ),
         shape = MaterialTheme.shapes.medium,
-        // ISSUE-P3-133：未聚焦边框取 `outline` 而非 `outlineVariant`——后者在本仓按
-        // `Color.kt` 的既有裁决（ISSUE-P3-132）仅承载「分隔线」角色（对浅色底实测 1.24:1），
-        // 用作输入框描边即近乎隐形；容器回归 MD3 outlined 默认（透明），避免在对话框
-        // （surfaceContainerHigh）上落成一块不透明白底，与同表单紧邻的 OutlinedTextField 割裂。
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            focusedContainerColor = Color.Transparent,
-            unfocusedContainerColor = Color.Transparent
-        ),
+        colors = if (embeddedFlat) {
+            // §436：扁平内嵌态——四态描边与容器全透明，字段以「无边框行」融进分组卡；
+            // 错误反馈仍由 supportingText（error 色）承载，不依赖描边
+            OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                disabledBorderColor = Color.Transparent,
+                errorBorderColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+                disabledContainerColor = Color.Transparent,
+                errorContainerColor = Color.Transparent
+            )
+        } else {
+            // ISSUE-P3-133：未聚焦边框取 `outline` 而非 `outlineVariant`——后者在本仓按
+            // `Color.kt` 的既有裁决（ISSUE-P3-132）仅承载「分隔线」角色（对浅色底实测 1.24:1），
+            // 用作输入框描边即近乎隐形；容器回归 MD3 outlined 默认（透明），避免在对话框
+            // （surfaceContainerHigh）上落成一块不透明白底，与同表单紧邻的 OutlinedTextField 割裂。
+            OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent
+            )
+        },
         enabled = enabled,
         // ISSUE-P2-44：显式声明「本节点是口令字段」，不再让该语义**只**由框架从
         // `PasswordVisualTransformation` 推导（消除「切换显隐后语义随之消失」的隐式耦合）。

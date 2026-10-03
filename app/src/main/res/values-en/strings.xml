@@ -105,6 +105,11 @@
     <string name="unlock_btn_unlock">U N L O C K   V A U L T</string>
     <string name="unlock_switch_vault">Switch Vault</string>
     <string name="unlock_biometric_primary_btn">Unlock with Biometrics</string>
+    <!-- §436 unlock grouped-card redesign: db row tail / advanced credentials collapse card -->
+    <string name="unlock_switch_short">Switch</string>
+    <string name="unlock_advanced_credentials_title">Advanced credentials</string>
+    <string name="unlock_keyfile_ready_badge">Key file ready</string>
+    <string name="cd_toggle_advanced_credentials">Expand or collapse advanced credentials</string>
 
     <!-- Database Picker & Manager -->
     <string name="db_picker_title">Vault Manager</string>

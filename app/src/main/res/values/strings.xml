@@ -104,6 +104,11 @@
     <string name="unlock_btn_unlock">解 锁 密 码 库</string>
     <string name="unlock_switch_vault">切换密码库</string>
     <string name="unlock_biometric_primary_btn">使用生物识别解锁</string>
+    <!-- §436 解锁页分组卡改版：数据库行尾标 / 高级认证凭证折叠卡 -->
+    <string name="unlock_switch_short">切换</string>
+    <string name="unlock_advanced_credentials_title">高级认证凭证</string>
+    <string name="unlock_keyfile_ready_badge">密钥已就绪</string>
+    <string name="cd_toggle_advanced_credentials">展开或收起高级认证凭证</string>
     <string name="unlock_empty_vault_title">欢迎使用 KeePasskey</string>
     <string name="unlock_empty_vault_subtitle">尚未选择或创建密码库，请从下方选择开始方式：</string>
     <string name="unlock_empty_create_btn">新建密码库</string>

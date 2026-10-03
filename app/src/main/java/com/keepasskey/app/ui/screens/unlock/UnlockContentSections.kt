@@ -1,14 +1,24 @@
 package com.keepasskey.app.ui.screens.unlock
 
 import android.content.res.Configuration
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,10 +27,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -28,55 +41,113 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
-import com.keepasskey.app.ui.components.SecurePasswordField
+import com.keepasskey.app.ui.components.DismissibleHelpTip
+import com.keepasskey.app.ui.components.HelpTip
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.HeroTitleStyle
+import com.keepasskey.app.ui.theme.LocalReduceAnimations
 
 /**
- * 密码库锁 Logo 与呼吸光晕底座
+ * 密码库锁 Logo 与呼吸光晕底座。
+ *
+ * §436 重绘为原型的「方形锁块」形态：64dp 圆角方块（surfaceContainerLow 底 +
+ * outlineVariant 描边）内嵌 primary 锁形图标，右下角叠加一颗 primary 呼吸点
+ * （原圆形 + 径向渐变光晕形态退役）。呼吸动画受 [LocalReduceAnimations] 降级偏好裁决。
  */
 @Composable
 internal fun UnlockVaultLogo(uiState: UnlockUiState) {
     Box(
-        modifier = Modifier
-            .size(92.dp)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                        Color.Transparent
-                    )
-                )
-            ),
+        modifier = Modifier.size(72.dp),
         contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
                 .size(64.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), CircleShape),
+                .clip(MaterialTheme.shapes.large)
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (!uiState.hasDatabase) Icons.Default.Lock else if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) Icons.Default.FlashOn else Icons.Default.Lock,
                 contentDescription = stringResource(R.string.cd_vault_locked),
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(28.dp)
+            )
+            // §436：右下角呼吸点——「库已锁定」的状态化视觉锚
+            UnlockPingDot(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 6.dp, y = 6.dp)
             )
         }
+    }
+}
+
+/** 呼吸点：外圈 primary 光斑做 alpha / scale 循环，实心点常驻（动效降级时只保留实心点） */
+@Composable
+private fun UnlockPingDot(modifier: Modifier = Modifier) {
+    val dotColor = MaterialTheme.colorScheme.primary
+    val reduceAnimations = LocalReduceAnimations.current
+    Box(modifier = modifier.size(14.dp), contentAlignment = Alignment.Center) {
+        if (!reduceAnimations) {
+            val transition = rememberInfiniteTransition(label = "UnlockPing")
+            // §436：循环周期收敛到 AppNavigationMotion.UNLOCK_PING_CYCLE_MS 具名 token
+            // （常驻氛围动效，文件级 tween 豁免已登记理由，见 AppNavigationMotionTest）
+            val pingAlpha by transition.animateFloat(
+                initialValue = 0.6f,
+                targetValue = 0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(
+                        durationMillis = com.keepasskey.app.ui.navigation.AppNavigationMotion.UNLOCK_PING_CYCLE_MS,
+                        easing = LinearEasing
+                    ),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "UnlockPingAlpha"
+            )
+            val pingScale by transition.animateFloat(
+                initialValue = 1f,
+                targetValue = 2.2f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(
+                        durationMillis = com.keepasskey.app.ui.navigation.AppNavigationMotion.UNLOCK_PING_CYCLE_MS,
+                        easing = LinearEasing
+                    ),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "UnlockPingScale"
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = pingAlpha
+                        scaleX = pingScale
+                        scaleY = pingScale
+                    }
+                    .clip(CircleShape)
+                    .background(dotColor)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(dotColor)
+        )
     }
 }
 
@@ -229,136 +300,111 @@ internal fun UnlockQuickUnlockCard(
 }
 
 /**
- * 主密码输入框的 supporting 槽位（§280 规模门禁同批自 [UnlockStandardUnlockContent] 逐字迁出，
- * 结构性拆分：渲染语义零变化）。
+ * 「高级认证凭证」折叠卡（§436 原型形态）：头部栏〔图标 + 标题 + 密钥就绪徽章 + 展开箭头〕，
+ * 展开抽屉内承载密钥文件提示条 / 密钥文件行 / 只读开关行——功能入口与改版前一致，仅布局收拢。
  *
- * ISSUE-P2-355 AC②：锁定期倒计时由 throttleLockoutRemainingMs 状态直驱、每秒刷新——
- * 一次性快照会随用户输入（onPasswordChangeSecure 清提示）消失，直驱行冲不掉；
- * 下方 errorMessage 的锁定快照与此行同源，锁定期内不重复渲染。
- *
- * ISSUE-P3-457（**单节点契约**）：本函数是 `OutlinedTextField.supportingText` 槽的内容，而该槽在
- * Material3 侧落在 `Box(Modifier.layoutId(SupportingId))` 内部（`TextFieldImpl.kt` 的
- * `TextFieldLayout` / `CutoutTextFieldLayout` 两处同形）——**Box 的同层兄弟互相叠放**，
- * 而非上下流动；且外层只 `heightIn(min = MinSupportingTextLineHeight).wrapContentHeight()`，
- * 量到的是**最高子节点**而非子节点之和。⇒ 本槽只能发射**一个**节点：此前四行 Text 平铺直出，
- * 任意两行同时成立即压在同一行上（真机实证：生物识别失败文案「生物识别验证未通过或已取消」
- * 与「已自动载入记住的密钥文件: usr.dat」叠成一行乱码；「主密码错误…」+「剩余 N 次尝试」
- * 同样命中——后者是开启了失败节流时**每次输错都会出现**的常态组合）。
- * 此槽的叠放风险由 `tools/doc/check_box_slot_children.py` 机检（含框架槽与「多发射助手函数」）。
+ * [expanded] / [onToggleExpand] 状态外提（ISSUE-P3-340 口径：折叠态必须可被 @Preview 覆盖，
+ * 两态预览见 `UnlockScreenPreviews.kt`）。
  */
 @Composable
-private fun UnlockPasswordSupportingText(uiState: UnlockUiState) {
-    // ISSUE-P3-457：Column 是**契约**而非排版偏好——它把四行文案从「Box 同层兄弟」变成
-    // 「Column 顺序子节点」，逐行上下分离；单行成立时渲染结果与平铺直出逐像素等价。
-    Column {
-        val lockoutMs = uiState.throttleLockoutRemainingMs
-        val countdownShown = lockoutMs > 0L
-        if (countdownShown) {
-            Text(
-                text = lockoutUiMessage(lockoutMs).resolveText(),
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        uiState.errorMessage?.let { message ->
-            if (!(countdownShown && message.isLockoutCountdown())) {
+internal fun UnlockAdvancedAuthCard(
+    hasKeyFile: Boolean,
+    keyFileName: String,
+    keyFileSourcePath: String?,
+    onSelectKeyFile: () -> Unit,
+    onClearKeyFile: () -> Unit,
+    openReadOnly: Boolean,
+    onToggleReadOnly: () -> Unit,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.large)
+                    .clickable(onClick = onToggleExpand)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = message.resolveText(),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
+                    text = stringResource(R.string.unlock_advanced_credentials_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                if (hasKeyFile) {
+                    UnlockKeyFileReadyBadge()
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = stringResource(R.string.cd_toggle_advanced_credentials),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
                 )
             }
-        }
-        // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（节流关闭 / 锁定态 / 已输入时为 null 不呈现）
-        if (uiState.errorMessage != null) {
-            uiState.throttleAttemptsRemaining?.let { remaining ->
-                Text(
-                    text = stringResource(R.string.unlock_attempts_remaining, remaining),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
+            if (expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .padding(14.dp)
+                ) {
+                    // ISSUE-P3-445 AC①：密钥文件高困惑点一次性可关闭提示（关闭态持久化，非模态）
+                    DismissibleHelpTip(tip = HelpTip.UNLOCK_KEYFILE)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    // 密钥文件行（§186 拆至同包 UnlockStandardUnlockSections.kt；判定与绘制逐字保留）
+                    UnlockKeyFileRow(
+                        hasKeyFile = hasKeyFile,
+                        keyFileName = keyFileName,
+                        // §433（ISSUE-P3-448 走查续）：加载来源真实路径（默认中间省略 + 按钮展开完整）
+                        keyFileSourcePath = keyFileSourcePath,
+                        onSelectKeyFile = onSelectKeyFile,
+                        onClearKeyFile = onClearKeyFile
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    )
+                    // H4-只读整改：只读打开开关（§186 拆出）
+                    UnlockReadOnlyRow(
+                        openReadOnly = openReadOnly,
+                        onToggleReadOnly = onToggleReadOnly
+                    )
+                }
             }
-        }
-        uiState.infoMessage?.let { message ->
-            Text(
-                text = message.resolveText(),
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.bodySmall
-            )
         }
     }
 }
 
-/**
- * 完整主密码解锁区（含密钥文件、只读开关与解锁主操作）
- */
+/** 「密钥已就绪」徽章：仅在已加载密钥文件时呈现（原型头部右侧的状态胶囊） */
 @Composable
-internal fun UnlockStandardUnlockContent(
-    uiState: UnlockUiState,
-    onPasswordChange: (CharArray) -> Unit,
-    onTogglePasswordVisibility: () -> Unit,
-    onSelectKeyFile: () -> Unit,
-    onClearKeyFile: () -> Unit,
-    onToggleReadOnly: () -> Unit,
-    onUnlock: () -> Unit,
-    onSwitchMode: (UnlockMode) -> Unit
-) {
-    // 完整主密码输入框（SecurePasswordField：显示 String 仅存活于组件内部，CharArray 直达 ViewModel）
-    SecurePasswordField(
-        label = stringResource(R.string.unlock_master_password),
-        placeholder = stringResource(R.string.unlock_master_password_hint),
-        onPasswordChanged = onPasswordChange,
-        isError = uiState.errorMessage != null,
-        supportingText = { UnlockPasswordSupportingText(uiState) },
-        isPasswordVisible = uiState.isPasswordVisible,
-        onToggleVisibility = onTogglePasswordVisibility,
-        onDone = onUnlock,
-        // ISSUE-P1-04：失败/锁定后令牌递增，驱动输入框擦除显示态，与 VM 主密码清零同步
-        wipeToken = uiState.clearPasswordFieldToken,
-        modifier = Modifier.fillMaxWidth()
-    )
-
-    Spacer(modifier = Modifier.height(12.dp))
-
-    // ISSUE-P3-445 AC①：密钥文件高困惑点一次性可关闭提示（关闭态持久化，非模态）
-    com.keepasskey.app.ui.components.DismissibleHelpTip(
-        tip = com.keepasskey.app.ui.components.HelpTip.UNLOCK_KEYFILE
-    )
-
-    Spacer(modifier = Modifier.height(12.dp))
-
-    // 密钥文件行（§186 拆至同包 UnlockStandardUnlockSections.kt；判定与绘制逐字保留）
-    UnlockKeyFileRow(
-        hasKeyFile = uiState.hasKeyFile,
-        keyFileName = uiState.keyFileName,
-        // §433（ISSUE-P3-448 走查续）：加载来源真实路径（默认中间省略 + 按钮展开完整）
-        keyFileSourcePath = uiState.keyFileSourcePath,
-        onSelectKeyFile = onSelectKeyFile,
-        onClearKeyFile = onClearKeyFile
-    )
-
-    Spacer(modifier = Modifier.height(12.dp))
-
-    // H4-只读整改：只读打开开关（§186 拆出）
-    UnlockReadOnlyRow(
-        openReadOnly = uiState.openReadOnly,
-        onToggleReadOnly = onToggleReadOnly
-    )
-
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // 解锁主操作按钮：无密码且无密钥文件时禁用（密钥文件单独解锁时允许空密码）
-    UnlockSubmitButton(
-        enabled = !uiState.isLoading && (uiState.hasPassword || uiState.hasKeyFile),
-        isLoading = uiState.isLoading,
-        onUnlock = onUnlock
-    )
-
-    // ISSUE-P3-368 AC②：主密码路径的打开进度（确定段 0..1 / 不确定段跑马灯）
-    UnlockLoadProgressSection(uiState)
-
-    if (uiState.isQuickUnlockAvailable) {
-        UnlockSwitchToQuickEntry(onSwitchToQuickUnlock = { onSwitchMode(UnlockMode.QUICK_UNLOCK) })
+private fun UnlockKeyFileReadyBadge() {
+    Surface(
+        shape = CapsuleShape,
+        color = MaterialTheme.colorScheme.secondaryContainer
+    ) {
+        Text(
+            text = stringResource(R.string.unlock_keyfile_ready_badge),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+        )
     }
 }
 
