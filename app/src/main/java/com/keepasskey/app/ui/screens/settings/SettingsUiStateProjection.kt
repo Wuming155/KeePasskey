@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.UserSettings
+import com.keepasskey.app.ui.AppLaunchLanguageSeed
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.crypto.kdf.KdfParameters
@@ -82,7 +83,10 @@ internal fun settingsUiStateFlow(
 }.stateIn(
     scope = scope,
     started = SharingStarted.WhileSubscribed(timeoutMillis),
-    initialValue = SettingsUiState()
+    // 首帧语言取**启动种子**（零 IO，Application.onCreate 已灌种）：否则首帧 appLanguage 恒 SYSTEM ⇒
+    // 按系统 locale 渲染一帧，用户上次选 English 的冷启动会先闪一帧中文再翻成英文（ISSUE-P3-459 续）。
+    // 种子只作首帧兜底，真实值由 userSettings 首值到达后覆盖。
+    initialValue = SettingsUiState(appLanguage = AppLaunchLanguageSeed.read())
 )
 
 internal fun buildSettingsUiState(

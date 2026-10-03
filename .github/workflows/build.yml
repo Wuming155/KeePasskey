@@ -67,9 +67,14 @@ jobs:
   # 现将 `count_line_tiers` / `long_functions` 等自研机检挂进流水线，
   # 阈值越过即红（禁止 `|| true` / continue-on-error 吞掉）。
   # 判据与棘轮口径见各脚本文档串；本 job 不依赖 JDK / NDK，秒级完成。
+  # 第九条（ISSUE-P3-459 续）`check_launch_language_seed.py`：语言偏好真源是 DataStore，
+  # 首值异步冷读，冷启动首帧拿不到值就按系统 locale 渲染一帧 ⇒「先闪一帧中文」。
+  # 该形态 2026-09 已实测过一次：机检全绿（只盯字面量有没有中文）、真机却整屏中文（§414 事故），
+  # 故此处按**接线点**钉死四条（Application 灌种 / Compose 首帧 initialValue / 取串通道 /
+  # 语言写入点镜像），缺一即红。
   # ---------------------------------------------------------------------------
   hygiene-gate:
-    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children)
+    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -94,6 +99,7 @@ jobs:
           python3 tools/audit/check_recheck_consistency.py
           python3 tools/doc/check_bounded_type_names.py
           python3 tools/doc/check_box_slot_children.py
+          python3 tools/audit/check_launch_language_seed.py
 
   # ---------------------------------------------------------------------------
   # 门禁 1：快速门禁（不构建原生）

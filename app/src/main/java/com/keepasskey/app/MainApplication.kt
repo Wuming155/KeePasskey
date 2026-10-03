@@ -3,6 +3,7 @@ package com.keepasskey.app
 import android.app.Application
 import androidx.work.Configuration
 import com.keepasskey.app.data.binary.FileBinaryStore
+import com.keepasskey.app.ui.AppLaunchLanguageSeed
 import com.keepasskey.app.notification.NotificationChannels
 import com.keepasskey.app.notification.UnlockedNotificationController
 import com.keepasskey.app.security.AutoLockManager
@@ -116,6 +117,10 @@ class MainApplication : Application(), Configuration.Provider {
         // ISSUE-P1-10 (ZT-10)：统一日志包装器调试开关——debug 构建开放 v/d 与完整异常堆栈，
         // release 保持关闭（AppLog.e/w 自动脱敏，R8 另行剥离 v/d 调用点）
         AppLog.debugEnabled = BuildConfig.DEBUG
+        // ISSUE-P3-459 续：灌应用内语言**启动种子**——SharedPreferences 冷读 1~5ms、早于任何首帧渲染，
+        // 后续所有语言读取（Compose 首帧 / StringsProvider / 非 UI 装配点）都退化为一次 volatile 读，
+        // 冷启动不再先闪一帧系统语言。此处**刻意不**等 DataStore 冷读（主线程阻塞 → 启动期 ANR 风险）。
+        AppLaunchLanguageSeed.install(this)
         // F-13（P1）：附件落盘目录（cacheDir/attachments）存放的是**附件解密后的明文**，
         // 仅靠 SessionLockObserver.onSessionLocked() 清理存在已确认缺口：进程被 kill /
         // force-stop / OOM 回收时该回调不执行，明文会跨进程存活到下一次锁定，

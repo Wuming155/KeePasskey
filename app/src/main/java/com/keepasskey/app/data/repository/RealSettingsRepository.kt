@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import android.content.Context
+import com.keepasskey.app.ui.AppLaunchLanguageSeed
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
@@ -178,8 +179,12 @@ class RealSettingsRepository @Inject constructor(
     override suspend fun setDynamicColorEnabled(enabled: Boolean) =
         edit { it[KEY_DYNAMIC_COLOR] = enabled }
 
-    override suspend fun setAppLanguage(language: AppLanguage) =
+    override suspend fun setAppLanguage(language: AppLanguage) {
         edit { it[KEY_APP_LANGUAGE] = language.name }
+        // 镜像到启动种子（唯一写入点）：否则冷启动读到的是旧值，表现为「切了语言重启又变回去」。
+        // store 内部已吞异常，不会阻断上方 edit 的持久化。
+        AppLaunchLanguageSeed.store(context, language)
+    }
 
     override suspend fun setBiometricEnabled(enabled: Boolean) =
         edit { it[KEY_BIOMETRIC_ENABLED] = enabled }
