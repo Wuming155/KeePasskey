@@ -199,8 +199,16 @@ internal class VaultDatabaseCatalog(
         if (combined.isEmpty()) {
             return emptyList()
         }
+        // 活动库唯一判定：优先按 id 精确命中。仅当 id 未命中时，才回退 path / name
+        // （兼容历史遗留的 storedActiveId 可能落为路径 / 文件名的旧记录）。
+        // 不能用 id/path/name 的「或」逻辑：两个库文件名相同时（例如本地 vault.kdbx 与
+        // content://…/vault.kdbx 同名）会被同时标为活动库，冷启动 firstOrNull{isActive} 取列表首个，
+        // 从而回显错库的密钥文件 —— 这正是「杀后台冷启动才暴露」的现象（热重启内存态正确）。
+        // ISSUE-P2-465 后续修复。
+        val resolvedActive = combined.firstOrNull { it.id == effectiveActiveId }
+            ?: combined.firstOrNull { it.path == effectiveActiveId || it.name == effectiveActiveId }
         val list = combined.map { db ->
-            val isActive = (db.id == effectiveActiveId || db.path == effectiveActiveId || db.name == effectiveActiveId)
+            val isActive = db.id == resolvedActive?.id
             db.copy(
                 isActive = isActive,
                 lastOpenedAt = if (isActive && databaseSession.state.value == DatabaseSession.SessionState.OPENED) {
