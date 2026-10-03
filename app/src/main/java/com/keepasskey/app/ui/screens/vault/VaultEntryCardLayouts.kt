@@ -36,7 +36,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.EntryIconContent
 import com.keepasskey.app.ui.model.BitmapEntryIcon
 import com.keepasskey.app.ui.model.UiVaultEntry
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 /**
  * 条目卡片的专用版式（ISSUE-P3-02 从 VaultEntryRows 拆出，保持单文件行数阈值内）。
@@ -121,7 +121,7 @@ internal fun CreditCardLayout(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = entry.cardNumberMasked ?: "**** **** **** ****",
-                style = MonospacePasswordStyle.copy(
+                style = passwordFieldStyle().copy(
                     fontSize = densitySpec.secondaryFontSizeSp.sp,
                     fontWeight = FontWeight.SemiBold
                 ),

@@ -65,7 +65,9 @@ class EntryDetailViewModel @Inject constructor(
     // ISSUE-P2-65：会话锁定观察者注册点（null 仅用于纯 JVM 单测）。
     // 本 ViewModel 持有按需解密明文（密码 / 修订密码 / 受保护字段）与实时 TOTP 码，
     // 锁定 / 关闭时必须立即擦除，不得仅依赖导航离开（`onScreenDisposed`）。
-    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null,
+    /** ISSUE-P3-440：常驻通知复制动作的作用对象登记处（null 仅用于纯 JVM 单测） */
+    private val recentEntryTracker: com.keepasskey.app.notification.UnlockedNotificationEntryTracker? = null
 ) : ViewModel() {
 
     // P3-23：文案解析通道（优先 stringsProvider，其次经 appContext 转发，均缺省时回退空串实现）
@@ -250,6 +252,7 @@ class EntryDetailViewModel @Inject constructor(
         extendedSettingsSource?.let { source -> extendedSettingsFlow.value = source.load() }
         // 覆盖「离开详情页已清零明文 → 再次进入」的路径（此时条目 id 未变化，setEntryId 提前返回）
         revealController.revealPasswordIfVisibleByDefault()
+        recentEntryTracker?.set(entryIdFlow.value) // ISSUE-P3-440：登记「最近查看条目」供常驻通知挂复制动作
     }
 
     /**

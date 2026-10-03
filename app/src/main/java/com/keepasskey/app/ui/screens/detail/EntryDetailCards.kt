@@ -45,8 +45,7 @@ import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.theme.LocalSecurityColors
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
-import com.keepasskey.app.ui.theme.MonospaceTotpStyle
+import com.keepasskey.app.ui.theme.totpFieldStyle
 
 /**
  * 基础凭据卡片（用户名 / 密码行与强度条）
@@ -135,7 +134,7 @@ internal fun TotpCard(
                         TOTP_MASK
                     },
                     // 与验证码大卡 / 列表同一色语义（success），避免跨页蓝/绿混用
-                    style = MonospaceTotpStyle.copy(color = LocalSecurityColors.current.success)
+                    style = totpFieldStyle().copy(color = LocalSecurityColors.current.success)
                 )
                 // ISSUE-P2-289 AC③：解析期回落诊断如实呈现（禁静默改写）
                 if (entry.totpWarnings.isNotEmpty()) {

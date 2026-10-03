@@ -12,19 +12,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Assignment
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.Fingerprint
-import androidx.compose.material.icons.filled.HealthAndSafety
-import androidx.compose.material.icons.filled.ImportExport
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Password
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,20 +27,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.fragment.app.FragmentActivity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
-import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
  * 2026 现代化高阶设置主页（Route）
@@ -107,6 +92,10 @@ fun SettingsScreen(
         onReadKeyFile = viewModel.keyFileReader,
         onWeakPasswordConfirmed = { viewModel.noteWeakMasterPasswordConfirmed() },
         onMasterKeyChangeFeedbackShown = viewModel::clearMasterKeyChangeFeedback,
+        // ISSUE-P3-444：界面偏好组两开关上行（直取进阶偏好通道，避免在 ViewModel 再包一层
+        // setter 把已贴近单文件闸门的它继续推大；同文件 masterKeyChangeController 的既有口径）
+        onMonospaceFieldsChange = { viewModel.extendedPreferences.setMonospaceFieldsEnabled(it) },
+        onReduceAnimationsChange = { viewModel.extendedPreferences.setReduceAnimations(it) },
         onBackClick = onBackClick,
         showBackButton = showBackButton,
         modifier = modifier
@@ -115,6 +104,10 @@ fun SettingsScreen(
 
 /**
  * 现代高保真设置内容展示组件
+ *
+ * `ISSUE-P3-444` AC③：新增设置项搜索（按关键词过滤分组卡片 + 命中高亮 + 零命中空态）。
+ * 分组装配已下沉到 [settingsGroups]（`SettingsSearchSection.kt`）——搜索要求在渲染前就知道
+ * 全部行的可搜索文本，故分组改为数据形态；本组件只保留页面壳、搜索态与对话框宿主。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,12 +139,24 @@ fun SettingsContent(
     onWeakPasswordConfirmed: () -> Unit = {},
     /** ISSUE-P2-354 AC③：换密反馈经 Snackbar 展示后的一次性清除 */
     onMasterKeyChangeFeedbackShown: () -> Unit = {},
+    // ISSUE-P3-444：界面偏好组两开关上行（默认空实现便于既有预览 / 截图调用点不受影响）
+    onMonospaceFieldsChange: (Boolean) -> Unit = {},
+    onReduceAnimationsChange: (Boolean) -> Unit = {},
+    /**
+     * ISSUE-P3-444 AC③：设置项搜索词的**初值**（仅预览 / 截图用）。
+     *
+     * 生产路径恒取缺省空串（未过滤）；带字面量默认值的是 `String` 而非 `Boolean`，
+     * 不属「可见性开关参数」口径，但两条搜索态预览（命中 / 零命中）仍同批补齐。
+     */
+    initialSearchQuery: String = "",
     onBackClick: () -> Unit = {},
     showBackButton: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val securityColors = LocalSecurityColors.current
     var showMasterKeyDialog by remember { mutableStateOf(false) }
+    // ISSUE-P3-444 AC③：设置项搜索词（页面会话态——设置页是低频页，刻意不持久化，
+    // 每次进入以未过滤的完整分组呈现）
+    var searchQuery by remember { mutableStateOf(initialSearchQuery) }
 
     // ISSUE-P2-354 AC③ + ISSUE-P3-359 AC④：换密结果反馈（成功/失败）转发全局通道——
     // 反馈存于 uiState，发出即交外壳唯一宿主呈现（切 Tab 离开也不丢），回执后一次性清位
@@ -160,6 +165,30 @@ fun SettingsContent(
             AppSnackbarChannel.trySend(AppSnackbarEvent(feedback))
             onMasterKeyChangeFeedbackShown()
         }
+    }
+
+    val actions = SettingsActions(
+        onNavigateToDatabase = onNavigateToDatabase,
+        onNavigateToImportExport = onNavigateToImportExport,
+        onNavigateToSync = onNavigateToSync,
+        onNavigateToAutofill = onNavigateToAutofill,
+        onNavigateToPasskey = onNavigateToPasskey,
+        onNavigateToSecurity = onNavigateToSecurity,
+        onNavigateToTheme = onNavigateToTheme,
+        onNavigateToListNav = onNavigateToListNav,
+        onNavigateToHealth = onNavigateToHealth,
+        onNavigateToTotp = onNavigateToTotp,
+        onNavigateToDebug = onNavigateToDebug,
+        onNavigateToAbout = onNavigateToAbout,
+        onOpenMasterKeyDialog = { showMasterKeyDialog = true },
+        onMonospaceFieldsChange = onMonospaceFieldsChange,
+        onReduceAnimationsChange = onReduceAnimationsChange
+    )
+    val groups = settingsGroups(uiState, actions)
+    val query = searchQuery
+    // AC③ 零命中空态：任一分组的任一行命中即不呈现空态（判定与分组渲染同源同函数）
+    val hasMatch = groups.any { group ->
+        group.rows.any { SettingsSearch.matchesQuery(query, it.searchTexts) }
     }
 
     Scaffold(
@@ -202,136 +231,18 @@ fun SettingsContent(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 分类 1: 密码库与存储 (Vault & Storage)
-            ModernSectionHeader(title = stringResource(R.string.settings_cat_storage))
-            SettingsGroupCard {
-                ModernSettingsRow(
-                    icon = Icons.Default.Storage,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = stringResource(R.string.settings_database),
-                    subtitle = stringResource(R.string.settings_database_sub),
-                    onClick = onNavigateToDatabase
-                )
-                SettingsItemDivider()
-                // ISSUE-P3-467：数据导入与导出（动作流，自数据库属性页拆出）
-                ModernSettingsRow(
-                    icon = Icons.Default.ImportExport,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = stringResource(R.string.settings_import_export),
-                    subtitle = stringResource(R.string.settings_import_export_sub),
-                    onClick = onNavigateToImportExport
-                )
-                SettingsItemDivider()
-                ModernSettingsRow(
-                    icon = Icons.Default.CloudSync,
-                    iconTint = MaterialTheme.colorScheme.tertiary,
-                    title = stringResource(R.string.settings_sync),
-                    subtitle = stringResource(R.string.settings_sync_sub),
-                    onClick = onNavigateToSync
-                )
-            }
+            SettingsSearchField(query = searchQuery, onQueryChange = { searchQuery = it })
 
-            // 分类 2: 设备安全与两步验证 (Security & Authentication)
-            ModernSectionHeader(title = stringResource(R.string.settings_cat_security))
-            SettingsGroupCard {
-                ModernSettingsRow(
-                    icon = Icons.Default.Fingerprint,
-                    iconTint = securityColors.passkey,
-                    title = stringResource(R.string.settings_security),
-                    subtitle = stringResource(R.string.settings_security_sub),
-                    onClick = onNavigateToSecurity
-                )
-                SettingsItemDivider()
-                ModernSettingsRow(
-                    icon = Icons.Default.Password,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = stringResource(R.string.set_totp_entry_title),
-                    subtitle = stringResource(R.string.set_totp_entry_sub),
-                    onClick = onNavigateToTotp
-                )
-                SettingsItemDivider()
-                ModernSettingsRow(
-                    icon = Icons.Default.HealthAndSafety,
-                    iconTint = securityColors.success,
-                    title = stringResource(R.string.settings_health),
-                    subtitle = stringResource(R.string.settings_health_sub),
-                    onClick = onNavigateToHealth
-                )
-                SettingsItemDivider()
-                // ISSUE-P3-413：凭据操作归安全域——六路调研无一家把改密与存储/同步并列（keepass2android 归 Database security、Bitwarden 归 Account security）
-                ModernSettingsRow(
-                    icon = Icons.Default.VpnKey,
-                    iconTint = securityColors.warning,
-                    title = stringResource(R.string.settings_change_master_key),
-                    subtitle = stringResource(R.string.settings_change_master_key_sub),
-                    onClick = { showMasterKeyDialog = true }
-                )
-            }
-
-            // 分类 3: 自动填充 (Autofill)——ISSUE-P3-432：自动填充与通行密钥拆为两个设置项
-            ModernSectionHeader(title = stringResource(R.string.settings_cat_preferences))
-            SettingsGroupCard {
-                ModernSettingsRow(
-                    icon = Icons.AutoMirrored.Filled.Assignment,
-                    iconTint = MaterialTheme.colorScheme.secondary,
-                    title = stringResource(R.string.settings_autofill),
-                    subtitle = stringResource(R.string.settings_autofill_sub),
-                    onClick = onNavigateToAutofill
-                )
-                SettingsItemDivider()
-                ModernSettingsRow(
-                    icon = Icons.Default.Key,
-                    iconTint = securityColors.passkey,
-                    title = stringResource(R.string.settings_passkey),
-                    subtitle = stringResource(R.string.settings_passkey_sub),
-                    onClick = onNavigateToPasskey
-                )
-            }
-
-            // 分类 3b: 界面与显示 (Interface & Display)——ISSUE-P3-413：外观独立成组，不与自动填充混排
-            ModernSectionHeader(title = stringResource(R.string.settings_cat_display))
-            SettingsGroupCard {
-                ModernSettingsRow(
-                    icon = Icons.Default.Palette,
-                    iconTint = MaterialTheme.colorScheme.tertiary,
-                    title = stringResource(R.string.settings_theme),
-                    subtitle = stringResource(R.string.settings_theme_sub),
-                    onClick = onNavigateToTheme
-                )
-                SettingsItemDivider()
-                // ISSUE-P3-467：列表与导航偏好（自主题页拆出）
-                ModernSettingsRow(
-                    icon = Icons.AutoMirrored.Filled.List,
-                    iconTint = MaterialTheme.colorScheme.tertiary,
-                    title = stringResource(R.string.settings_list_nav),
-                    subtitle = stringResource(R.string.settings_list_nav_sub),
-                    onClick = onNavigateToListNav
-                )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // 分类 4: 系统维护与关于 (System, Maintenance & About)
-            ModernSectionHeader(title = stringResource(R.string.set_section_system))
-            SettingsGroupCard {
-                // ISSUE-P3-413：诊断日志闸门（DiagnosticLogGate）含 BuildConfig.DEBUG，release 日志缓冲恒空、导出恒禁用，入口仅 debug 构建露出
-                if (BuildConfig.DEBUG) {
-                    ModernSettingsRow(
-                        icon = Icons.Default.BugReport,
-                        iconTint = securityColors.warning,
-                        title = stringResource(R.string.debug_title),
-                        subtitle = stringResource(R.string.set_debug_entry_sub),
-                        onClick = onNavigateToDebug
+            if (query.isNotBlank() && !hasMatch) {
+                SettingsSearchEmptyState()
+            } else {
+                groups.forEach { group ->
+                    SettingsSearchGroup(
+                        headerRes = group.headerRes,
+                        query = query,
+                        rows = group.rows
                     )
-                    SettingsItemDivider()
                 }
-                ModernSettingsRow(
-                    icon = Icons.Default.Info,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    title = stringResource(R.string.settings_about),
-                    subtitle = stringResource(R.string.set_about_entry_sub, uiState.appVersion),
-                    onClick = onNavigateToAbout
-                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

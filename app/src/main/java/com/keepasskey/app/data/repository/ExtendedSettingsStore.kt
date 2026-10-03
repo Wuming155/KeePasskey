@@ -150,7 +150,9 @@ class ExtendedSettingsStore @Inject constructor(
 
             // 调试日志
             debugLogEnabled = p.getBoolean(K_DEBUG_LOG_ENABLED, defaults.debugLogEnabled),
-            verboseSyncLog = p.getBoolean(K_VERBOSE_SYNC_LOG, defaults.verboseSyncLog)
+            verboseSyncLog = p.getBoolean(K_VERBOSE_SYNC_LOG, defaults.verboseSyncLog),
+            monospaceFieldsEnabled = p.getBoolean(K_MONOSPACE_FIELDS, defaults.monospaceFieldsEnabled), // ISSUE-P3-444：界面偏好组（键缺失 ⇒ 回落数据类默认值）
+            reduceAnimations = p.getBoolean(K_REDUCE_ANIMATIONS, defaults.reduceAnimations)
         )
     }
 
@@ -207,6 +209,9 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_BREACH_CHECK_ENABLED, settings.breachCheckEnabled)
             .putBoolean(K_DEBUG_LOG_ENABLED, settings.debugLogEnabled)
             .putBoolean(K_VERBOSE_SYNC_LOG, settings.verboseSyncLog)
+            // ISSUE-P3-444：界面偏好组
+            .putBoolean(K_MONOSPACE_FIELDS, settings.monospaceFieldsEnabled)
+            .putBoolean(K_REDUCE_ANIMATIONS, settings.reduceAnimations)
             .apply()
     }
 
@@ -437,5 +442,9 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_DEBUG_LOG_ENABLED = "debug_log_enabled"
         const val K_VERBOSE_SYNC_LOG = "verbose_sync_log"
         const val K_WIFI_ONLY_SYNC = "wifi_only_sync"
+
+        /** ISSUE-P3-444：界面偏好组（等宽字段字体 / 动效降级） */
+        const val K_MONOSPACE_FIELDS = "monospace_fields_enabled"
+        const val K_REDUCE_ANIMATIONS = "reduce_animations"
     }
 }

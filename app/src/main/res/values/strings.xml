@@ -153,6 +153,16 @@
     <string name="vault_empty_desc">当前目录下没有凭据或文件夹，点击下方新建</string>
     <!-- ISSUE-P3-352 AC①：搜索空态双出口之一（另一出口复用 vault_new_entry） -->
     <string name="vault_search_clear">清除搜索</string>
+    <!-- ISSUE-P3-442：搜索词写回条目 URL 的自愈询问（仅在「搜索态点开条目且 URL 与搜索词域不匹配」时出现） -->
+    <string name="search_write_back_title">写入搜索词？</string>
+    <string name="search_write_back_message">把搜索词写入该条目的 URL：%1$s</string>
+    <string name="search_write_back_current">当前 URL：%1$s</string>
+    <string name="search_write_back_current_none">该条目当前没有 URL</string>
+    <string name="search_write_back_no_ask">本次会话不再询问</string>
+    <string name="search_write_back_confirm">写入</string>
+    <string name="search_write_back_cancel">取消</string>
+    <string name="search_write_back_done">已写入 URL：%1$s</string>
+    <string name="search_write_back_failed">写入失败</string>
     <string name="vault_new_entry">新建凭据条目</string>
     <string name="vault_new_folder">新建文件夹</string>
     <string name="vault_folder_name">文件夹名称</string>
@@ -281,6 +291,16 @@
     <string name="settings_health_sub">弱密码、密码复用、数据泄露比对</string>
     <string name="settings_cat_preferences">自动填充</string>
     <string name="settings_cat_display">界面与显示</string>
+    <!-- ISSUE-P3-444：界面偏好组（等宽字段字体 / 动效降级）+ 设置项搜索 -->
+    <string name="settings_cat_interface">界面偏好</string>
+    <string name="settings_search_hint">搜索设置项</string>
+    <string name="settings_search_clear">清除搜索</string>
+    <string name="settings_search_empty">没有匹配的设置项</string>
+    <string name="settings_search_empty_hint">换个关键词试试</string>
+    <string name="settings_monospace_fields">密码字段等宽字体</string>
+    <string name="settings_monospace_fields_sub">密码与验证码使用等宽字体展示，便于逐字符核对</string>
+    <string name="settings_reduce_animations">动效降级</string>
+    <string name="settings_reduce_animations_sub">关闭页面转场与列表动画（低端机型或系统卡顿时开启）</string>
     <!-- ISSUE-P3-432：自动填充与通行密钥拆为两个设置项 -->
     <string name="settings_autofill">自动填充</string>
     <string name="settings_autofill_sub">系统自动填充服务、黑名单、TOTP 联动、剪贴板保护</string>
@@ -1432,6 +1452,12 @@
     <string name="notification_unlocked_text">自动锁定倒计时进行中，点击返回应用</string>
     <string name="notification_unlocked_text_idle">密码库已解锁，点击返回应用</string>
     <string name="notification_unlocked_lock_now">立即锁定</string>
+    <!-- ISSUE-P3-440：常驻通知复制快捷动作（PD-69 字段子集＝用户名 / TOTP；不含任何条目数据） -->
+    <string name="notification_unlocked_copy_username">复制用户名</string>
+    <string name="notification_unlocked_copy_totp">复制验证码</string>
+    <string name="notification_copy_username_done">用户名已复制到剪贴板</string>
+    <string name="notification_copy_totp_done">验证码已复制到剪贴板</string>
+    <string name="notification_copy_clip_label">KeePasskey 复制</string>
     <string name="notification_channel_totp_name">动态验证码</string>
     <string name="notification_channel_totp_desc">自动填充后显示该条目的动态验证码，随有效期自动消失</string>
     <string name="notification_totp_title">动态验证码</string>

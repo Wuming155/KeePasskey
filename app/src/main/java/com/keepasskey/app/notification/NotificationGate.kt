@@ -52,6 +52,17 @@ object NotificationGate {
     ): Boolean = permissionGranted && prefEnabled && isUnlockedState(sessionState)
 
     /**
+     * `ISSUE-P3-440`：常驻通知是否附带**复制快捷动作**（用户名 / TOTP）。
+     *
+     * 动作必须有明确的作用对象，而常驻通知本身是全局的（不含条目）：只有在「最近查看过某个条目」
+     * 时才挂动作；否则呈现一组点了没反应（或复制别处）的按钮，属假入口。
+     *
+     * 字段子集由安全复核定案 `PD-69` 收窄为「用户名 + TOTP」，密码与受保护字段永不上通知面。
+     */
+    fun shouldShowUnlockedCopyActions(recentEntryId: String?): Boolean =
+        !recentEntryId.isNullOrBlank()
+
+    /**
      * 是否发送自动填充验证码通知。
      *
      * @param prefEnabled 用户偏好 `autofillShowTotpNotification`

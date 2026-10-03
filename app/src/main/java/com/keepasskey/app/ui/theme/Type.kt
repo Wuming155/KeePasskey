@@ -121,3 +121,38 @@ val MonospaceTotpStyle = TextStyle(
     fontSize = 26.sp,
     letterSpacing = 3.sp
 )
+
+/**
+ * `ISSUE-P3-444` AC①：等宽开关**关闭**时的回落样式。
+ *
+ * 只把 `fontFamily` 换回默认族并把等宽的额外字距收回常规值——字号 / 字重 / 行高与等宽档
+ * **逐项对齐**，故开关只改变字形宽度观感，不会引起排版层级变化（也不会让密码行的行高跳动）。
+ */
+private val DefaultFontPasswordStyle = MonospacePasswordStyle.copy(
+    fontFamily = FontFamily.Default,
+    letterSpacing = 0.25.sp,
+    // 断行策略必须与 `Typography` 各槽位同源（ISSUE-P3-138）：凡显式落到 FontFamily.Default
+    // 的槽位都要带 CjkLineBreak，否则该字号的文案退回逐字断行（`UiCjkLineBreakWiringTest` 机检）
+    lineBreak = CjkLineBreak
+)
+
+private val DefaultFontTotpStyle = MonospaceTotpStyle.copy(
+    fontFamily = FontFamily.Default,
+    letterSpacing = 0.5.sp,
+    lineBreak = CjkLineBreak
+)
+
+/**
+ * 密码 / 安全私钥字段样式（`ISSUE-P3-444`）：受 [LocalMonospaceFields] 偏好裁决。
+ *
+ * 全站等宽样式一律经本访问器取值；直接引用 [MonospacePasswordStyle] 常量会让该处
+ * 绕过「界面偏好」开关。默认（未注入偏好）恒返回等宽档＝改动前画面。
+ */
+@androidx.compose.runtime.Composable
+fun passwordFieldStyle(): TextStyle =
+    if (LocalMonospaceFields.current) MonospacePasswordStyle else DefaultFontPasswordStyle
+
+/** TOTP 验证码样式（`ISSUE-P3-444`）：受 [LocalMonospaceFields] 偏好裁决，同 [passwordFieldStyle]。 */
+@androidx.compose.runtime.Composable
+fun totpFieldStyle(): TextStyle =
+    if (LocalMonospaceFields.current) MonospaceTotpStyle else DefaultFontTotpStyle

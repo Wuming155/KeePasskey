@@ -1,8 +1,11 @@
 package com.keepasskey.app.ui.screens.settings
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
 
 /**
@@ -61,5 +64,122 @@ internal fun SettingsContentWithBackPreview() {
             onNavigateToAbout = {},
             showBackButton = true
         )
+    }
+}
+
+/**
+ * `ISSUE-P3-444` AC③：设置项搜索**命中**态——只有含关键词的分组与行被渲染，
+ * 命中段以主题主色加粗高亮（关键词取 `TOTP`，中英文资源名里都存在，双语预览同图可比）。
+ */
+@Preview(name = "浅色模式-搜索命中", showBackground = true)
+@Preview(name = "深色模式-搜索命中", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun SettingsContentSearchHitPreview() {
+    KeePasskeyTheme {
+        SettingsContent(
+            uiState = SettingsUiState(),
+            onNavigateToDatabase = {},
+            onNavigateToImportExport = {},
+            onNavigateToSync = {},
+            onNavigateToAutofill = {},
+            onNavigateToPasskey = {},
+            onNavigateToSecurity = {},
+            onNavigateToTheme = {},
+            onNavigateToListNav = {},
+            onNavigateToHealth = {},
+            onNavigateToTotp = {},
+            onNavigateToDebug = {},
+            onNavigateToAbout = {},
+            initialSearchQuery = "TOTP"
+        )
+    }
+}
+
+/** `ISSUE-P3-444` AC③：设置项搜索**零命中**态（不呈现空白页，如实给空态与建议）。 */
+@Preview(name = "浅色模式-搜索零命中", showBackground = true)
+@Preview(name = "深色模式-搜索零命中", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun SettingsContentSearchEmptyPreview() {
+    KeePasskeyTheme {
+        SettingsContent(
+            uiState = SettingsUiState(),
+            onNavigateToDatabase = {},
+            onNavigateToImportExport = {},
+            onNavigateToSync = {},
+            onNavigateToAutofill = {},
+            onNavigateToPasskey = {},
+            onNavigateToSecurity = {},
+            onNavigateToTheme = {},
+            onNavigateToListNav = {},
+            onNavigateToHealth = {},
+            onNavigateToTotp = {},
+            onNavigateToDebug = {},
+            onNavigateToAbout = {},
+            initialSearchQuery = "zzzz-no-such-setting"
+        )
+    }
+}
+
+/**
+ * `ISSUE-P3-444` AC④：**系统字体缩放 200%** 下的设置主页——用于核对「界面偏好」入口与整页
+ * 分组在最大档字号下不破版（结论与残余声明见 `PD-70`：本仓不建独立缩放偏好，如实适配系统缩放）。
+ */
+@Preview(name = "浅色模式-系统字号 200%", showBackground = true, fontScale = 2.0f)
+@Preview(
+    name = "深色模式-系统字号 200%",
+    showBackground = true,
+    uiMode = Configuration.UI_MODE_NIGHT_YES,
+    fontScale = 2.0f
+)
+@Composable
+internal fun SettingsContentLargeFontScalePreview() {
+    KeePasskeyTheme {
+        SettingsContent(
+            uiState = SettingsUiState(),
+            onNavigateToDatabase = {},
+            onNavigateToImportExport = {},
+            onNavigateToSync = {},
+            onNavigateToAutofill = {},
+            onNavigateToPasskey = {},
+            onNavigateToSecurity = {},
+            onNavigateToTheme = {},
+            onNavigateToListNav = {},
+            onNavigateToHealth = {},
+            onNavigateToTotp = {},
+            onNavigateToDebug = {},
+            onNavigateToAbout = {}
+        )
+    }
+}
+
+/**
+ * `ISSUE-P3-444` AC①：等宽字体开关**关闭**态——密码 / 验证码回落默认字族。
+ *
+ * 该态在「设置页自身」看不出差别（开关是两态里的一态），必须单独画一行样例字段；
+ * 与开关开启态（默认 `@Preview`，由全站既有预览承载）构成正反两态。
+ */
+@Preview(name = "等宽字体关闭-密码与验证码", showBackground = true)
+@Preview(name = "等宽字体关闭-深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun SettingsMonospaceFieldsDisabledPreview() {
+    KeePasskeyTheme {
+        androidx.compose.runtime.CompositionLocalProvider(
+            com.keepasskey.app.ui.theme.LocalMonospaceFields provides false
+        ) {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                androidx.compose.material3.Text(
+                    text = "Correct-Horse-Battery-9",
+                    style = com.keepasskey.app.ui.theme.passwordFieldStyle(),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+                )
+                androidx.compose.material3.Text(
+                    text = "123 456",
+                    style = com.keepasskey.app.ui.theme.totpFieldStyle(),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                )
+            }
+        }
     }
 }

@@ -39,6 +39,8 @@ import com.keepasskey.app.ui.screens.settings.SettingsViewModel
 import com.keepasskey.app.ui.screens.vault.AppTerminationPolicy
 import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.KeePasskeyTheme
+import com.keepasskey.app.ui.theme.LocalMonospaceFields
+import com.keepasskey.app.ui.theme.LocalReduceAnimations
 import kotlinx.coroutines.launch
 
 /**
@@ -91,7 +93,10 @@ fun KeePasskeyApp() {
 
     CompositionLocalProvider(
         LocalContext provides localizedContext,
-        LocalConfiguration provides localizedConfiguration, HapticsEnabled provides appSettings.hapticFeedbackEnabled // ISSUE-P3-358 AC①
+        LocalConfiguration provides localizedConfiguration, HapticsEnabled provides appSettings.hapticFeedbackEnabled, // ISSUE-P3-358 AC①
+        // ISSUE-P3-444：界面偏好组——等宽字段字体与动效降级两开关在全站可见性最高的一层注入
+        LocalMonospaceFields provides appSettings.monospaceFieldsEnabled,
+        LocalReduceAnimations provides appSettings.reduceAnimations
     ) {
         KeePasskeyTheme(
             themeMode = appSettings.themeMode,
@@ -315,7 +320,13 @@ private fun AppShellScaffold(
     // `remember(motionScheme)` 保证实例身份稳定，`NavHost` 的
     // `remember(route, startDestination, builder)` 才不会因每次重组都拿到新实例而整图重建（§183）。
     val motionScheme = MaterialTheme.motionScheme
-    val motion = remember(motionScheme) { AppNavigationMotion.from(motionScheme) }
+    // ISSUE-P3-444 AC②：动效降级只派生「直切实例」，不改 AppNavigationMotion 的定标常量；
+    // `AppNavigationMotion.from(motionScheme)` 这一调用刻意保持逐字存在（源码守卫口径）。
+    val reduceAnimations = LocalReduceAnimations.current
+    val motion = remember(motionScheme, reduceAnimations) {
+        val base = AppNavigationMotion.from(motionScheme)
+        if (reduceAnimations) base.withReducedMotion() else base
+    }
     Scaffold(
         modifier = Modifier.imePadding(),
         bottomBar = {

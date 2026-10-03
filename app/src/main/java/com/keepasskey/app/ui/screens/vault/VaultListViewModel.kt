@@ -152,6 +152,20 @@ class VaultListViewModel @Inject constructor(
         )
     )
 
+    // ISSUE-P3-442：搜索词自愈回灌（「把搜索词写进该条目 URL？」）——询问去重与字段级写回
+    // 编排在同包 VaultSearchWriteBackCoordinator（门面在同包 VaultListViewModelActions.kt）。
+    // 「已询问」集合与「本次会话不再询问」标记都活在本协调器上 ⇒ 作用域＝本 ViewModel 存活期。
+    internal val searchWriteBack = VaultSearchWriteBackCoordinator(
+        repository = vaultRepository,
+        scope = viewModelScope,
+        // 取即时回显值（未防抖）：与输入框同拍，避免用户刚改词就被防抖旧值判定
+        currentQuery = { searchQueryFlow.value },
+        currentEntry = { id -> uiState.value.entries.firstOrNull { it.id == id } },
+        isReadOnly = { isReadOnlyFlow.value },
+        isInsideRecycleBin = { uiState.value.isInsideRecycleBin },
+        onMessage = { publishVaultMessage(it) }
+    )
+
     // ISSUE-P3-29：同步指示与下拉刷新编排（门面在同包 VaultListViewModelActions.kt）
     internal val syncController = VaultListSyncController(
         syncCoordinator = syncCoordinator,

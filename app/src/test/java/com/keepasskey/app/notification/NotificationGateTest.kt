@@ -90,6 +90,20 @@ class NotificationGateTest {
         assertFalse(NotificationGate.isUnlockedState(DatabaseSession.SessionState.CLOSED))
     }
 
+    // ===== 常驻通知复制快捷动作（ISSUE-P3-440；字段子集裁决见 PD-69）=====
+
+    @Test
+    fun `有最近查看条目时挂出复制动作`() {
+        assertTrue(NotificationGate.shouldShowUnlockedCopyActions("0123456789abcdef"))
+    }
+
+    @Test
+    fun `无最近查看条目时不挂复制动作`() {
+        assertFalse(NotificationGate.shouldShowUnlockedCopyActions(null))
+        assertFalse(NotificationGate.shouldShowUnlockedCopyActions(""))
+        assertFalse(NotificationGate.shouldShowUnlockedCopyActions("   "))
+    }
+
     // ===== 自动填充验证码通知（autofillShowTotpNotification）=====
 
     @Test

@@ -282,6 +282,9 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
         favorite: Boolean
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
+    /** `ISSUE-P3-442` 搜索词自愈：仅改写条目 `URL` 字段并落盘，不产生历史修订（语义与字段面保证见 `VaultEntryUrlWriter`） */
+    suspend fun updateEntryUrl(entryId: String, url: String): com.keepasskey.core.result.KdbxResult<Unit>
+
     /**
      * 还原处于回收站中的凭据条目
      */

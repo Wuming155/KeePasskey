@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 /**
  * 冲突页段落组件（§192 自 `ConflictResolutionScreen.kt` 下沉，窄参数、不读 UiState、不自持状态）。
@@ -201,7 +201,7 @@ internal fun ConflictFieldChoiceRow(
             )
             Text(
                 text = value,
-                style = if (isSensitive) MonospacePasswordStyle else MaterialTheme.typography.bodySmall,
+                style = if (isSensitive) passwordFieldStyle() else MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
         }

@@ -32,6 +32,13 @@ import javax.inject.Singleton
  * 通知内容（验收标准 4）：标题与正文均为固定通用文案，不含条目名、用户名、密码、库文件名等
  * 任何用户数据；`VISIBILITY_SECRET` 保证锁屏不展示内容。
  *
+ * 快捷动作（ISSUE-P3-440，安全裁决见 `docs/architecture/产品裁决登记.md` `PD-69`）：
+ * - 「立即锁定」（ISSUE-P3-386）恒有；
+ * - 「复制用户名 / 复制验证码」**仅在存在「最近查看条目」时**挂出（[UnlockedNotificationEntryTracker]）——
+ *   动作必须有作用对象，且动作文案为固定通用文案（不含条目名与字段值）；
+ *   密码与受保护字段**永不**上通知面；
+ * - 锁库 / 关闭库 / 偏好关闭即随 [cancel] 整体撤销，并清除「最近查看条目」登记。
+ *
  * 协程：自持受控 Application 级 [scope]（SupervisorJob + Default），禁止裸 GlobalScope。
  */
 @Singleton
@@ -40,7 +47,9 @@ class UnlockedNotificationController @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val settingsStore: ExtendedSettingsStore,
     private val permissionPrompter: NotificationPermissionPrompter,
-    private val autoLockManager: com.keepasskey.app.security.AutoLockManager
+    private val autoLockManager: com.keepasskey.app.security.AutoLockManager,
+    // ISSUE-P3-440：复制快捷动作的「最近查看条目」来源（无作用对象时不挂动作）
+    private val entryTracker: UnlockedNotificationEntryTracker
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -52,6 +61,9 @@ class UnlockedNotificationController @Inject constructor(
 
     /** 上一次已发布通知关联的倒计时截止点 */
     private var lastDeadline: Long? = null
+
+    /** 上一次已发布通知关联的「最近查看条目」（ISSUE-P3-440：动作集的唯一变量） */
+    private var lastRecentEntryId: String? = null
 
     /** 上一次求得的「目标状态」，仅在变化时记录诊断日志（避免轮询刷屏） */
     private var lastDesired: Boolean? = null
@@ -69,7 +81,9 @@ class UnlockedNotificationController @Inject constructor(
             merge(
                 databaseSession.state.map { },
                 preferenceChanges(),
-                autoLockManager.lockDeadline.map { }
+                autoLockManager.lockDeadline.map { },
+                // ISSUE-P3-440：最近查看条目变化 ⇒ 复制动作集变化 ⇒ 需要重发通知
+                entryTracker.entryId.map { }
             ).collect { refresh() }
         }
     }
@@ -108,17 +122,20 @@ class UnlockedNotificationController @Inject constructor(
         }
         val currentDeadline = autoLockManager.lockDeadline.value
         val deadlineChanged = posted && lastDeadline != currentDeadline
+        // ISSUE-P3-440：动作集由「最近查看条目」决定——它一变就必须重发（否则动作与作用对象脱节）
+        val currentRecentEntryId = entryTracker.entryId.value
+        val recentChanged = posted && lastRecentEntryId != currentRecentEntryId
         when {
-            desired && (!posted || deadlineChanged) -> {
+            desired && (!posted || deadlineChanged || recentChanged) -> {
                 lastDeadline = currentDeadline
-                post(currentDeadline)
+                post(currentDeadline, currentRecentEntryId)
             }
             !desired && posted -> cancel()
             else -> Unit
         }
     }
 
-    private fun post(deadline: Long?) {
+    private fun post(deadline: Long?, recentEntryId: String?) {
         val builder = NotificationCompat.Builder(
             context,
             NotificationChannelSpec.UNLOCKED_STATUS.channelId
@@ -142,6 +159,25 @@ class UnlockedNotificationController @Inject constructor(
                 ).build()
             )
 
+        // ISSUE-P3-440：复制快捷动作（`PD-69` 裁决的字段子集：用户名 / TOTP；密码与受保护字段不上通知面）。
+        // 仅在「最近查看过某个条目」时挂出（`NotificationGate.shouldShowUnlockedCopyActions`）——
+        // 动作必须有作用对象，否则就是点了没反应的假入口。动作文案为固定通用文案，不含条目名 / 值。
+        if (NotificationGate.shouldShowUnlockedCopyActions(recentEntryId)) {
+            builder.addAction(
+                NotificationCompat.Action.Builder(
+                    null,
+                    context.getString(R.string.notification_unlocked_copy_username),
+                    NotificationIntents.copyUsernameFromNotification(context)
+                ).build()
+            ).addAction(
+                NotificationCompat.Action.Builder(
+                    null,
+                    context.getString(R.string.notification_unlocked_copy_totp),
+                    NotificationIntents.copyTotpFromNotification(context)
+                ).build()
+            )
+        }
+
         val now = System.currentTimeMillis()
         if (deadline != null && deadline > now) {
             builder.setContentText(context.getString(R.string.notification_unlocked_text))
@@ -160,6 +196,7 @@ class UnlockedNotificationController @Inject constructor(
             NotificationManagerCompat.from(context)
                 .notify(NotificationChannels.ID_UNLOCKED_STATUS, notification)
             posted = true
+            lastRecentEntryId = recentEntryId
         } catch (t: SecurityException) {
             // 权限在运行期被回收（用户在系统设置中关闭通知）：静默降级，绝不崩溃
             AppLog.w(TAG, "已解锁常驻通知发送被系统拒绝，静默降级", t)
@@ -170,6 +207,10 @@ class UnlockedNotificationController @Inject constructor(
     private fun cancel() {
         posted = false
         lastDeadline = null
+        // ISSUE-P3-440 AC②：锁库 / 关闭库 / 偏好关闭即撤销动作——连带清除「最近查看条目」，
+        // 使下次解锁不会挂出上一个会话的条目动作（`PD-69` ② 存活口径）。
+        lastRecentEntryId = null
+        entryTracker.clear()
         try {
             NotificationManagerCompat.from(context).cancel(NotificationChannels.ID_UNLOCKED_STATUS)
         } catch (t: SecurityException) {

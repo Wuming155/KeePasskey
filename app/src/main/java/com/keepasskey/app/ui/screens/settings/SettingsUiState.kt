@@ -199,6 +199,9 @@ data class SettingsUiState(
     // ISSUE-P3-443：底栏 Tab「显隐 + 排序」一体化配置——有序可见 Tab 名单
     // （元素为 BottomNavTabNames 规范名；解析与排序语义见 BottomNavItem.resolveVisibleItems）
     val bottomNavOrder: List<String> = com.keepasskey.app.data.repository.BottomNavTabNames.DEFAULT_ORDER,
+    // ISSUE-P3-444：界面偏好组（等宽字体开关 / 动效降级开关；默认值＝既有可观察行为）
+    val monospaceFieldsEnabled: Boolean = true,
+    val reduceAnimations: Boolean = false,
 
     // 6. 两步验证与 TOTP 高级规范映射 (Tray TOTP / Custom Fields)
     val totpSeedFieldName: String = "TOTP Seed", // KP2A: 密钥种子字段名

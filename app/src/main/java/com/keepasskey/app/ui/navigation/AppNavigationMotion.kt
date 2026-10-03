@@ -63,12 +63,20 @@ class AppNavigationMotion private constructor(
     /** 整屏滑动的空间动画（位移大 → `slowSpatialSpec`，页面级从容档，`ISSUE-P3-323`） */
     private val fullSlideSpec: FiniteAnimationSpec<IntOffset>,
     /** 视差位移的空间动画（位移小 → `defaultSpatialSpec`，去 fast 档欠阻尼过冲，`ISSUE-P3-323`） */
-    private val parallaxSpec: FiniteAnimationSpec<IntOffset>
+    private val parallaxSpec: FiniteAnimationSpec<IntOffset>,
+    /**
+     * `ISSUE-P3-444` AC②：动效降级标记。true 时**全部**转场槽位返回 `None`（直切）。
+     *
+     * 刻意做成**实例级**标记而不是改动上列定标常量：常量仍由 `AppNavigationMotionTest`
+     * 逐条锁定，本开关只决定运行期是否播放（低端机 / HyperOS 2 / Android 15 卡顿机型）。
+     */
+    internal val reduceMotion: Boolean = false
 ) {
 
     /** 全局默认：下钻前进进入（自右整屏滑入 + 延迟淡入） */
     val defaultEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        slideIntoContainer(
+        if (reduceMotion) EnterTransition.None
+        else slideIntoContainer(
             towards = AnimatedContentTransitionScope.SlideDirection.Start,
             animationSpec = fullSlideSpec
         ) + fadeIn(animationSpec = fadeInSpec())
@@ -76,7 +84,8 @@ class AppNavigationMotion private constructor(
 
     /** 全局默认：下钻前进离开（向左视差位移 + 快淡出，与返回方向镜像） */
     val defaultExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        slideOutOfContainer(
+        if (reduceMotion) ExitTransition.None
+        else slideOutOfContainer(
             towards = AnimatedContentTransitionScope.SlideDirection.Start,
             targetOffset = { fullWidth -> -fullWidth / PARALLAX_DIVISOR },
             animationSpec = parallaxSpec
@@ -85,7 +94,8 @@ class AppNavigationMotion private constructor(
 
     /** 全局默认：返回上一级时上一页恢复（自左视差还原 + 延迟淡入） */
     val defaultPopEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        slideIntoContainer(
+        if (reduceMotion) EnterTransition.None
+        else slideIntoContainer(
             towards = AnimatedContentTransitionScope.SlideDirection.End,
             initialOffset = { fullWidth -> -fullWidth / PARALLAX_DIVISOR },
             animationSpec = fullSlideSpec
@@ -94,7 +104,8 @@ class AppNavigationMotion private constructor(
 
     /** 全局默认：返回上一级时当前页退出（向右视差位移 + 快淡出；与前进方向镜像） */
     val defaultPopExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        slideOutOfContainer(
+        if (reduceMotion) ExitTransition.None
+        else slideOutOfContainer(
             towards = AnimatedContentTransitionScope.SlideDirection.End,
             targetOffset = { fullWidth -> fullWidth / PARALLAX_DIVISOR },
             animationSpec = parallaxSpec
@@ -109,7 +120,8 @@ class AppNavigationMotion private constructor(
      */
     val predictivePopEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.(swipeEdge: Int) -> EnterTransition =
         { _ ->
-            scaleIn(
+            if (reduceMotion) EnterTransition.None
+            else scaleIn(
                 initialScale = PREDICTIVE_ENTER_SCALE,
                 transformOrigin = TransformOrigin.Center,
                 animationSpec = predictiveSpec()
@@ -119,7 +131,8 @@ class AppNavigationMotion private constructor(
     /** 预测性返回：退出页按**全屏表面**规格缩至 [PREDICTIVE_EXIT_SCALE] + 阈值前淡出 */
     val predictivePopExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.(swipeEdge: Int) -> ExitTransition =
         { _ ->
-            scaleOut(
+            if (reduceMotion) ExitTransition.None
+            else scaleOut(
                 targetScale = PREDICTIVE_EXIT_SCALE,
                 transformOrigin = TransformOrigin.Center,
                 animationSpec = predictiveSpec()
@@ -135,7 +148,8 @@ class AppNavigationMotion private constructor(
      * 保留 `0.92f` 涨入以维持「同级不改变空间层级」的语义。
      */
     val topLevelEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        fadeIn(animationSpec = topLevelFadeInSpec()) +
+        if (reduceMotion) EnterTransition.None
+        else fadeIn(animationSpec = topLevelFadeInSpec()) +
             scaleIn(
                 initialScale = FADE_THROUGH_START_SCALE,
                 transformOrigin = TransformOrigin.Center,
@@ -145,7 +159,8 @@ class AppNavigationMotion private constructor(
 
     /** 顶层 Tab / 解锁页：交叉淡化退出（仅淡化，不产生位移与缩放；与进入**同时**进行） */
     val topLevelExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        fadeOut(animationSpec = topLevelFadeOutSpec())
+        if (reduceMotion) ExitTransition.None
+        else fadeOut(animationSpec = topLevelFadeOutSpec())
     }
 
     private fun fadeInSpec(easing: Easing = FADE_IN_EASING): FiniteAnimationSpec<Float> =
@@ -163,6 +178,17 @@ class AppNavigationMotion private constructor(
 
     private fun predictiveSpec(): FiniteAnimationSpec<Float> =
         tween(durationMillis = SHARED_AXIS_SLIDE_MS, easing = SYSTEM_UI_EASING)
+
+    /**
+     * `ISSUE-P3-444` AC②：由已构造实例派生出**动效降级**实例——全部转场槽位退化为直切。
+     *
+     * 刻意做成「派生」而非给 [from] 加参数：`KeePasskeyApp` 的源码守卫要求
+     * `AppNavigationMotion.from(motionScheme)` 这一调用**逐字**存在（防绕过主题自造第二套语言），
+     * 降级因而在拿到实例之后再裁决，两件事互不干扰。
+     */
+    fun withReducedMotion(): AppNavigationMotion =
+        if (reduceMotion) this
+        else AppNavigationMotion(fullSlideSpec, parallaxSpec, reduceMotion = true)
 
     companion object {
         /**

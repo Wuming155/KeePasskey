@@ -224,4 +224,15 @@ internal class SettingsExtendedPreferencesController(
     fun setDebugLogEnabled(enabled: Boolean) = updateExtended { it.copy(debugLogEnabled = enabled) }
 
     fun setVerboseSyncLog(enabled: Boolean) = updateExtended { it.copy(verboseSyncLog = enabled) }
+
+    // ========== ISSUE-P3-444：界面偏好组 ==========
+    /** 密码 / TOTP 字段等宽展示开关（默认开＝既有硬编码行为；消费方见 `LocalMonospaceFields`） */
+    fun setMonospaceFieldsEnabled(enabled: Boolean) =
+        updateExtended { it.copy(monospaceFieldsEnabled = enabled) }
+
+    /**
+     * 动效降级开关（默认关）。只影响**运行期**是否播放转场 / 列表动画，
+     * **不改** `AppNavigationMotion` 的定标常量（守卫测试口径不受影响）。
+     */
+    fun setReduceAnimations(enabled: Boolean) = updateExtended { it.copy(reduceAnimations = enabled) }
 }

@@ -144,6 +144,12 @@ internal object NotificationIntents {
     /** 已解锁常驻通知「立即锁定」动作请求码（ISSUE-P3-386） */
     private const val REQUEST_CODE_UNLOCKED_LOCK = 3004
 
+    /** 已解锁常驻通知「复制用户名」动作请求码（ISSUE-P3-440） */
+    private const val REQUEST_CODE_UNLOCKED_COPY_USERNAME = 3005
+
+    /** 已解锁常驻通知「复制验证码」动作请求码（ISSUE-P3-440） */
+    private const val REQUEST_CODE_UNLOCKED_COPY_TOTP = 3006
+
     fun openAppForUnlockedStatus(context: Context): PendingIntent =
         openApp(context, REQUEST_CODE_UNLOCKED_STATUS)
 
@@ -164,6 +170,44 @@ internal object NotificationIntents {
         return PendingIntent.getBroadcast(
             context,
             REQUEST_CODE_UNLOCKED_LOCK,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    /**
+     * `ISSUE-P3-440`：常驻通知「复制用户名」动作（`PD-69` 字段子集之一）。
+     *
+     * 与「立即锁定」同形态走广播接收器：点击后**不展开任何明文 UI**，
+     * 由 [UnlockedNotificationCopyReceiver] 在后台完成读取与剪贴板写入。
+     */
+    fun copyUsernameFromNotification(context: Context): PendingIntent =
+        copyFromNotification(context, REQUEST_CODE_UNLOCKED_COPY_USERNAME, UnlockedNotificationCopyField.USERNAME)
+
+    /**
+     * `ISSUE-P3-440`：常驻通知「复制验证码」动作（`PD-69` 字段子集之一）。
+     *
+     * 验证码属 30 秒级一次性动态值：走敏感剪贴板通道（`EXTRA_IS_SENSITIVE` + 定时擦除），
+     * 与详情页 / 列表徽标复制同一链路。
+     */
+    fun copyTotpFromNotification(context: Context): PendingIntent =
+        copyFromNotification(context, REQUEST_CODE_UNLOCKED_COPY_TOTP, UnlockedNotificationCopyField.TOTP)
+
+    /**
+     * 复制类动作的统一构造：**载荷只有字段名**（[UnlockedNotificationCopyField.extraValue]）——
+     * 不含条目 id、不含任何条目内容，动作的作用对象在点击时从
+     * [UnlockedNotificationEntryTracker] 现取。
+     */
+    private fun copyFromNotification(
+        context: Context,
+        requestCode: Int,
+        field: UnlockedNotificationCopyField
+    ): PendingIntent {
+        val intent = Intent(context, UnlockedNotificationCopyReceiver::class.java)
+            .putExtra(UnlockedNotificationCopyReceiver.EXTRA_COPY_FIELD, field.extraValue)
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )

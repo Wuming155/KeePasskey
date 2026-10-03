@@ -170,6 +170,11 @@
             android:name=".notification.VaultLockActionReceiver"
             android:exported="false" />
 
+        <!-- ISSUE-P3-440：常驻通知「复制用户名 / 验证码」广播动作（同上，exported=false） -->
+        <receiver
+            android:name=".notification.UnlockedNotificationCopyReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".passkey.PasskeyAssertionActivity"
             android:exported="false"

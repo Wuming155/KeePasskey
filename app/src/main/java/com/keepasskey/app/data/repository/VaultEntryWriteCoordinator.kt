@@ -225,22 +225,14 @@ internal class VaultEntryWriteCoordinator(
         favorite: Boolean
     ): KdbxResult<Unit> {
         // TASK-34 整改：收藏状态持久化至 KDBX 条目 customData（随库文件同步），
-        // 直接改内存树并落盘——不经 HistoryManager，收藏切换不产生历史修订
-        val uuid = parseKdbxUuidOrNull(entryId)
-            ?: return KdbxResult.Failure(
-                IllegalArgumentException(strings.get(R.string.repo_invalid_entry_id)),
-                strings.get(R.string.repo_entry_not_found)
-            )
-        val db = databaseSession.databaseFlow.first()
-            ?: return KdbxResult.Failure(
-                IllegalStateException(strings.get(R.string.repo_db_locked)),
-                strings.get(R.string.repo_db_locked)
-            )
-        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid }
-            ?: return KdbxResult.Failure(
-                IllegalArgumentException(strings.get(R.string.repo_entry_not_found)),
-                strings.get(R.string.repo_entry_not_found)
-            )
+        // 直接改内存树并落盘——不经 HistoryManager，收藏切换不产生历史修订。
+        // ISSUE-P3-442：三级解析收敛到 resolveExistingEntryForFieldWrite（与 OTP / URL 写入口同源）
+        val entry = when (
+            val resolved = resolveExistingEntryForFieldWrite(databaseSession, strings, entryId)
+        ) {
+            is KdbxResult.Success -> resolved.data
+            is KdbxResult.Failure -> return resolved
+        }
 
         val updated = entry.copy(
             customData = if (favorite) {
@@ -265,21 +257,12 @@ internal class VaultEntryWriteCoordinator(
      * 本方法用毕不清零，调用方负责。
      */
     suspend fun updateEntryOtpConfig(entryId: String, otpChars: CharArray): KdbxResult<Unit> {
-        val uuid = parseKdbxUuidOrNull(entryId)
-            ?: return KdbxResult.Failure(
-                IllegalArgumentException(strings.get(R.string.repo_invalid_entry_id)),
-                strings.get(R.string.repo_entry_not_found)
-            )
-        val db = databaseSession.databaseFlow.first()
-            ?: return KdbxResult.Failure(
-                IllegalStateException(strings.get(R.string.repo_db_locked)),
-                strings.get(R.string.repo_db_locked)
-            )
-        val entry = db.rootGroup.allEntries().firstOrNull { it.id == uuid }
-            ?: return KdbxResult.Failure(
-                IllegalArgumentException(strings.get(R.string.repo_entry_not_found)),
-                strings.get(R.string.repo_entry_not_found)
-            )
+        val entry = when (
+            val resolved = resolveExistingEntryForFieldWrite(databaseSession, strings, entryId)
+        ) {
+            is KdbxResult.Success -> resolved.data
+            is KdbxResult.Failure -> return resolved
+        }
         val updated = entry.copy(
             fields = entry.fields + (KdbxConstants.Fields.OTP to ProtectedString(otpChars, isProtected = true)),
             times = entry.times.copy(lastModificationTime = Instant.now())

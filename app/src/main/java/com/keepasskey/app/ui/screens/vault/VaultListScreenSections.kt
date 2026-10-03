@@ -47,8 +47,9 @@ internal fun LazyListScope.vaultFilterChipRowSection(
 internal fun LazyListScope.childDatabaseSection(
     uiState: VaultListUiState,
     densitySpec: ListDensitySpec,
-    itemFadeSpec: FiniteAnimationSpec<Float>,
-    itemPlacementSpec: FiniteAnimationSpec<IntOffset>
+    // ISSUE-P3-444 AC②：动效降级态传 null（`animateItem` 的 spec 参数可空 ⇒ 直切）
+    itemFadeSpec: FiniteAnimationSpec<Float>?,
+    itemPlacementSpec: FiniteAnimationSpec<IntOffset>?
 ) {
     if (uiState.childEntrySectionVisible) {
         uiState.childEntryGroups.forEach { childGroup ->

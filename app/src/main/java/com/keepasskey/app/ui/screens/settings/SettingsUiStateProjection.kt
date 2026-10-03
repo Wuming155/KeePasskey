@@ -230,6 +230,9 @@ internal fun buildSettingsUiState(
     autoActivateSearchOnOpen = extState.autoActivateSearchOnOpen,
     searchMatchMode = extState.searchMatchMode,
     bottomNavOrder = userSettings.bottomNavOrder,
+    // ISSUE-P3-444：界面偏好组（等宽字段字体 / 动效降级）
+    monospaceFieldsEnabled = extState.monospaceFieldsEnabled,
+    reduceAnimations = extState.reduceAnimations,
 
     // 6. TOTP 规范字段映射
     totpSeedFieldName = extState.totpSeedFieldName,

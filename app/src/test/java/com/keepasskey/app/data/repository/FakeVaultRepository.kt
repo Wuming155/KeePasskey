@@ -308,6 +308,24 @@ class FakeVaultRepository(
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
 
+    // ISSUE-P3-442 Fake 语义：字段级写 URL（与 RealVaultRepository 同语义——只动 url 一个字段，
+    // 其余投影字段（含 overrideUrl / 自定义字段）原样保留）
+    override suspend fun updateEntryUrl(
+        entryId: String,
+        url: String
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
+        val current = entriesFlow.value.toMutableList()
+        val index = current.indexOfFirst { it.id == entryId }
+        if (index < 0) {
+            return com.keepasskey.core.result.KdbxResult.Failure(
+                IllegalArgumentException("条目不存在"), "条目不存在"
+            )
+        }
+        current[index] = current[index].copy(url = url)
+        entriesFlow.value = current
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+    }
+
     // TASK-16 Fake 语义：克隆 = 同字段复制 + 新 id + 清历史修订
     override suspend fun duplicateEntry(id: String): com.keepasskey.core.result.KdbxResult<String> {
         val source = entriesFlow.value.firstOrNull { it.id == id }

@@ -189,7 +189,7 @@ class SettingsViewModel @Inject constructor(
         syncController.clearS3AccessKeyPrefill()
     }
 
-    private val extendedPreferences = SettingsExtendedPreferencesController(
+    internal val extendedPreferences = SettingsExtendedPreferencesController( // ISSUE-P3-444：放宽为 internal 供设置页直取（同 masterKeyChangeController 口径）
         extendedSettingsStore = extendedSettingsStore,
         syncCoordinator = syncCoordinator,
         periodicSyncScheduler = periodicSyncScheduler,

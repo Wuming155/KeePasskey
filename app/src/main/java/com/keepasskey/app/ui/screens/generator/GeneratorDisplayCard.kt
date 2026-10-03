@@ -41,7 +41,7 @@ import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.components.PasswordStrengthBar
 import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 @Composable
 internal fun GeneratorDisplayCard(
@@ -76,7 +76,7 @@ internal fun GeneratorDisplayCard(
             ) {
                 Text(
                     text = password,
-                    style = MonospacePasswordStyle.copy(
+                    style = passwordFieldStyle().copy(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = 1.sp,

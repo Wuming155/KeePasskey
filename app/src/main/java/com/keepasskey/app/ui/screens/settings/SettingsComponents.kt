@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -116,7 +117,16 @@ internal fun ModernSettingsRow(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                // ISSUE-P3-444 AC③：设置项搜索命中段高亮（查询词经 LocalSettingsHighlightQuery
+                // 由分组下传；缺省空串时 highlighted() 原样返回，不产生任何 span）
+                text = SettingsSearch.highlighted(
+                    text = title,
+                    query = LocalSettingsHighlightQuery.current,
+                    style = SpanStyle(
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                ),
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp

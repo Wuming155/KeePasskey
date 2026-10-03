@@ -141,6 +141,16 @@
     <string name="vault_root_dir">Root</string>
     <string name="vault_empty_title">No search results</string>
     <string name="vault_search_clear">Clear search</string>
+    <!-- ISSUE-P3-442: self-healing prompt to write the search term into the entry URL -->
+    <string name="search_write_back_title">Save search term?</string>
+    <string name="search_write_back_message">Write the search term into this entry\'s URL: %1$s</string>
+    <string name="search_write_back_current">Current URL: %1$s</string>
+    <string name="search_write_back_current_none">This entry has no URL yet</string>
+    <string name="search_write_back_no_ask">Don\'t ask again this session</string>
+    <string name="search_write_back_confirm">Write</string>
+    <string name="search_write_back_cancel">Cancel</string>
+    <string name="search_write_back_done">URL updated: %1$s</string>
+    <string name="search_write_back_failed">Failed to update URL</string>
     <string name="vault_empty_desc">No entries or folders found here. Tap the plus button below to add one</string>
     <string name="vault_new_entry">New Entry</string>
     <string name="vault_new_folder">New Folder</string>
@@ -271,6 +281,16 @@
     <string name="settings_health_sub">Weak passwords, reuse detection, breach checking</string>
     <string name="settings_cat_preferences">Autofill</string>
     <string name="settings_cat_display">Interface &amp; Display</string>
+    <!-- ISSUE-P3-444: interface preference group (monospace fields / reduced motion) + settings search -->
+    <string name="settings_cat_interface">Interface preferences</string>
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_search_clear">Clear search</string>
+    <string name="settings_search_empty">No matching settings</string>
+    <string name="settings_search_empty_hint">Try a different keyword</string>
+    <string name="settings_monospace_fields">Monospace password font</string>
+    <string name="settings_monospace_fields_sub">Show passwords and codes in a monospace font for character-by-character checking</string>
+    <string name="settings_reduce_animations">Reduce motion</string>
+    <string name="settings_reduce_animations_sub">Turn off screen transitions and list animations (for low-end devices or stuttering systems)</string>
     <!-- ISSUE-P3-432：autofill and passkey split into two settings entries -->
     <string name="settings_autofill">Autofill</string>
     <string name="settings_autofill_sub">System autofill service, blocklists, TOTP integration, clipboard protection</string>
@@ -1310,6 +1330,12 @@
     <string name="notification_unlocked_text">Auto-lock countdown in progress; tap to return to the app</string>
     <string name="notification_unlocked_text_idle">KeePasskey vault is unlocked; tap to return to the app</string>
     <string name="notification_unlocked_lock_now">Lock now</string>
+    <!-- ISSUE-P3-440: copy shortcut actions (PD-69 field subset = username / TOTP; no entry data) -->
+    <string name="notification_unlocked_copy_username">Copy username</string>
+    <string name="notification_unlocked_copy_totp">Copy code</string>
+    <string name="notification_copy_username_done">Username copied to clipboard</string>
+    <string name="notification_copy_totp_done">Code copied to clipboard</string>
+    <string name="notification_copy_clip_label">KeePasskey copy</string>
     <string name="notification_channel_totp_name">Dynamic codes</string>
     <string name="notification_channel_totp_desc">Shows the dynamic code of the autofilled entry; it disappears once the code expires</string>
     <string name="notification_totp_title">Dynamic code</string>

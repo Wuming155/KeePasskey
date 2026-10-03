@@ -102,7 +102,8 @@ fun VaultListScreen(
         onEntryClick = { entryId ->
             if (uiState.isBatchMode) {
                 viewModel.toggleEntrySelection(entryId)
-            } else {
+            } else if (!viewModel.prepareSearchWriteBack(entryId)) {
+                // ISSUE-P3-442：命中自愈条件时先询问（不导航），处置后再由下方对话框回调导航
                 onEntryClick(entryId)
             }
         },
@@ -173,6 +174,23 @@ fun VaultListScreen(
         VaultBindingTakeoverDialog(
             onConfirm = viewModel::confirmBindingTakeover,
             onDismiss = viewModel::dismissBindingTakeover
+        )
+    }
+
+    // ISSUE-P3-442：搜索词自愈询问宿主——两种处置（写入 / 取消）都以「打开该条目」收尾，
+    // 用户点开条目的意图不因是否回灌 URL 而被改变。
+    val writeBackPrompt by viewModel.searchWriteBackPrompt.collectAsStateWithLifecycle()
+    writeBackPrompt?.let { prompt ->
+        VaultSearchWriteBackDialog(
+            prompt = prompt,
+            onConfirm = { rememberChoice ->
+                viewModel.confirmSearchWriteBack(rememberChoice)
+                onEntryClick(prompt.entryId)
+            },
+            onDismiss = { rememberChoice ->
+                viewModel.dismissSearchWriteBack(rememberChoice)
+                onEntryClick(prompt.entryId)
+            }
         )
     }
 }

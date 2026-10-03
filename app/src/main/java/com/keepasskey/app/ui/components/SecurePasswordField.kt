@@ -32,7 +32,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 /**
  * 安全密码输入组件（String 边界最小化封装）。
@@ -155,7 +155,7 @@ fun SecurePasswordField(
                 Icon(imageVector = icon, contentDescription = null)
             }
         },
-        textStyle = MonospacePasswordStyle.copy(
+        textStyle = passwordFieldStyle().copy(
             fontSize = 17.sp,
             color = MaterialTheme.colorScheme.onSurface
         ),

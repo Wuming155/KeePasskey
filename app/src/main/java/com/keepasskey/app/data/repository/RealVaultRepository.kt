@@ -94,6 +94,8 @@ class RealVaultRepository @Inject constructor(
         baselineHolder = baselineHolder
     )
     private val entryWriter = VaultEntryWriteCoordinator(strings, databaseSession, entryMapper) { persistSession() }
+    // ISSUE-P3-442：URL 字段级写入口（搜索词自愈回灌；独立成器，见 VaultEntryUrlWriter KDoc）
+    private val entryUrlWriter = VaultEntryUrlWriter(strings, databaseSession) { persistSession() }
     private val secretReader = VaultEntrySecretReader(
         databaseSession,
         entryMapper,
@@ -253,6 +255,9 @@ class RealVaultRepository @Inject constructor(
 
     override suspend fun setEntryFavorite(entryId: String, favorite: Boolean): KdbxResult<Unit> =
         entryWriter.setEntryFavorite(entryId, favorite)
+    /** ISSUE-P3-442：搜索词自愈回灌（字段级写 URL，不产生历史修订） */
+    override suspend fun updateEntryUrl(entryId: String, url: String): KdbxResult<Unit> =
+        entryUrlWriter.updateUrl(entryId, url)
 
     override suspend fun deleteEntry(id: String): KdbxResult<Unit> = recycleBin.deleteEntry(id)
 

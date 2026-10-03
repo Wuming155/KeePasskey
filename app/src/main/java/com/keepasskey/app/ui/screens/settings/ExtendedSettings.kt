@@ -109,5 +109,12 @@ data class ExtendedSettings(
 
     // 调试日志
     val debugLogEnabled: Boolean = false,
-    val verboseSyncLog: Boolean = false
+    val verboseSyncLog: Boolean = false,
+
+    // ISSUE-P3-444：界面偏好组（自竞品对照 G14 登记）。两个字段刻意追加在**末尾**——
+    // 本数据类字段众多，追加在中间会让任何位置化构造调用点静默错位。
+    /** 密码 / TOTP 字段用等宽字体展示（默认 true＝既有硬编码行为，收口 [com.keepasskey.app.ui.theme.passwordFieldStyle]）； */
+    val monospaceFieldsEnabled: Boolean = true,
+    /** 动效降级（默认 false）：关闭转场 / 列表动画，退化为直切（为 HyperOS 2 / Android 15 卡顿机型设）； */
+    val reduceAnimations: Boolean = false
 )

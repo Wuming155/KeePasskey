@@ -50,7 +50,7 @@ import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 /**
  * 历史版本差异对比对话框 (Visual Diff Dialog)
@@ -192,7 +192,7 @@ private fun DiffFieldCard(
                 Text(text = stringResource(R.string.diff_old_label), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 Text(
                     text = if (isSensitive) historicalValue else historicalValue,
-                    style = if (isSensitive) MonospacePasswordStyle.copy(fontSize = 13.sp) else MaterialTheme.typography.bodySmall,
+                    style = if (isSensitive) passwordFieldStyle().copy(fontSize = 13.sp) else MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
@@ -209,7 +209,7 @@ private fun DiffFieldCard(
                 Text(text = stringResource(R.string.diff_new_label), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 Text(
                     text = if (isSensitive) currentValue else currentValue,
-                    style = if (isSensitive) MonospacePasswordStyle.copy(fontSize = 13.sp) else MaterialTheme.typography.bodySmall,
+                    style = if (isSensitive) passwordFieldStyle().copy(fontSize = 13.sp) else MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }

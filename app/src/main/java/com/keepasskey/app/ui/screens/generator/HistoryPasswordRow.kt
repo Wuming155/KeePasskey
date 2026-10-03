@@ -24,7 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 @Composable
 internal fun HistoryPasswordRow(
@@ -47,7 +47,7 @@ internal fun HistoryPasswordRow(
         ) {
             Text(
                 text = password,
-                style = MonospacePasswordStyle.copy(fontSize = 14.sp),
+                style = passwordFieldStyle().copy(fontSize = 14.sp),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

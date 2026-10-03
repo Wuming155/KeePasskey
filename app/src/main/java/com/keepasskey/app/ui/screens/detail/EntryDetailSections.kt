@@ -44,7 +44,7 @@ import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 /**
  * 自定义字段卡片区（受保护字段按需解密展示）
@@ -85,7 +85,7 @@ internal fun CustomFieldsCard(
                         } else field.value
                         Text(
                             text = displayValue,
-                            style = if (field.isProtected && !isVisible) MonospacePasswordStyle else MaterialTheme.typography.bodyMedium,
+                            style = if (field.isProtected && !isVisible) passwordFieldStyle() else MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }

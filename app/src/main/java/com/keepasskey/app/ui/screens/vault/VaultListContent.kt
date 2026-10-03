@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.vault
 
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.ui.components.vaultLoadingSkeletonItems
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.app.ui.theme.LocalReduceAnimations
 
 /**
  * 密码库列表页的**内容装配层**（§280 规模门禁同批自 `VaultListScreen.kt` 逐字迁出，
@@ -115,8 +117,13 @@ fun VaultListContent(
     // fast→default（800/0.6→380/0.8，重排不再欠阻尼过冲）；仍在**本层**取值后传入 `animateItem`
     // （`items` 的 content lambda 是 `@Composable`，但把 `MaterialTheme` 读取下沉到每个条目
     // 会让 N 个 item 各注册一次组合局部读取）。
-    val itemFadeSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
-    val itemPlacementSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+    // ISSUE-P3-444 AC②：动效降级态传 null spec —— `animateItem` 的 spec 参数可空，传 null
+    // 即不播放增删 / 重排动画（调用形态保持不变，仍由源码守卫钉住「列表项必须启用 animateItem」）。
+    val reduceAnimations = LocalReduceAnimations.current
+    val itemFadeSpec: FiniteAnimationSpec<Float>? =
+        if (reduceAnimations) null else MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val itemPlacementSpec: FiniteAnimationSpec<IntOffset>? =
+        if (reduceAnimations) null else MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

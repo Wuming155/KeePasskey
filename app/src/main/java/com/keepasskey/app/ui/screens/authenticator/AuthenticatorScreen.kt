@@ -67,7 +67,7 @@ import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.theme.CapsuleShape
-import com.keepasskey.app.ui.theme.MonospaceTotpStyle
+import com.keepasskey.app.ui.theme.totpFieldStyle
 import com.keepasskey.core.otp.OtpEngine
 
 /**
@@ -405,7 +405,7 @@ private fun TotpLargeCard(
                     text = formatTotpCode(code),
                     // ISSUE-P3-358 AC⑥：验证码占满剩余宽度，大字号下裁剪而非换行/顶走复制键
                     modifier = Modifier.weight(1f),
-                    style = MonospaceTotpStyle.copy(
+                    style = totpFieldStyle().copy(
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 3.sp,

@@ -23,6 +23,27 @@ fun VaultListViewModel.clearUserMessage() {
     userMessageFlow.value = null
 }
 
+// ===== ISSUE-P3-442：搜索词「写回条目 URL」自愈链（判定内核见 SearchWriteBackPolicy） =====
+
+/** 待确认的写回提示（null = 无）；页面据此渲染询问对话框。 */
+val VaultListViewModel.searchWriteBackPrompt: StateFlow<SearchWriteBackPrompt?>
+    get() = searchWriteBack.prompt
+
+/**
+ * 搜索态下用户点开列表结果：命中自愈条件时置起询问并返回 true
+ * （调用方**不得**直接导航，须等用户处置后再调 `onEntryClick`）；false＝照常导航。
+ */
+fun VaultListViewModel.prepareSearchWriteBack(entryId: String): Boolean =
+    searchWriteBack.prepareEntryOpen(entryId)
+
+/** 用户确认写入（[rememberChoice]＝勾选了「本次会话不再询问」）。 */
+fun VaultListViewModel.confirmSearchWriteBack(rememberChoice: Boolean) =
+    searchWriteBack.confirm(rememberChoice)
+
+/** 用户取消写入（[rememberChoice] 同上）。 */
+fun VaultListViewModel.dismissSearchWriteBack(rememberChoice: Boolean) =
+    searchWriteBack.dismiss(rememberChoice)
+
 // 批量管理操作
 
 fun VaultListViewModel.startBatchMode(initialEntryId: String) = actions.startBatchMode(initialEntryId)

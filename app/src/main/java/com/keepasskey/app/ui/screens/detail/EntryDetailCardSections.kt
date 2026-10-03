@@ -34,7 +34,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.PasswordStrengthBar
 import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.UiVaultEntry
-import com.keepasskey.app.ui.theme.MonospacePasswordStyle
+import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 /**
  * `BasicCredentialsCard` 的段落组件（`ISSUE-P3-188` §206：宿主文件 397 行距 400 余量仅 3 行，
@@ -115,7 +115,7 @@ internal fun BasicCredentialsPasswordArea(
                 ) { isVisible ->
                     Text(
                         text = if (isVisible) uiState.revealedPassword.orEmpty() else entry.passwordMasked,
-                        style = MonospacePasswordStyle.copy(
+                        style = passwordFieldStyle().copy(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 17.sp
                         ),

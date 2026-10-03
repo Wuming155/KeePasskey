@@ -5,6 +5,7 @@ import com.keepasskey.app.testutil.stripCommentsOnly
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -132,6 +133,36 @@ class AppNavigationMotionTest {
         assertNotNull(motion.predictivePopExitTransition)
         assertNotNull(motion.topLevelEnterTransition)
         assertNotNull(motion.topLevelExitTransition)
+    }
+
+    @Test
+    fun `动效降级实例必须全槽位直切且不改定标常量`() {
+        val scheme = androidx.compose.material3.MotionScheme.expressive()
+        val normal = AppNavigationMotion.from(scheme)
+        assertFalse("默认实例不得是降级态", normal.reduceMotion)
+
+        val reduced = normal.withReducedMotion()
+        assertTrue("withReducedMotion() 必须派生出降级态实例", reduced.reduceMotion)
+        assertSame("重复降级必须幂等（不反复构造新实例）", reduced, reduced.withReducedMotion())
+
+        // 降级**不得**改动任何定标常量（AC②：守卫口径不受影响）
+        assertEquals(300, AppNavigationMotion.SHARED_AXIS_SLIDE_MS)
+        assertEquals(90, AppNavigationMotion.FADE_OUT_MS)
+        assertEquals(210, AppNavigationMotion.FADE_IN_MS)
+        assertEquals(300, AppNavigationMotion.TOP_LEVEL_FADE_MS)
+
+        // 源码级：八个转场槽位（四向 + 预测性两向 + 顶层两向）都必须有直切分支
+        val motion = stripCommentsOnly(readSource(MOTION_SOURCE))
+        assertEquals(
+            "[$MOTION_SOURCE] 四个 EnterTransition 槽位都必须有 if (reduceMotion) EnterTransition.None 直切分支",
+            4,
+            Regex("if \\(reduceMotion\\) EnterTransition\\.None").findAll(motion).count()
+        )
+        assertEquals(
+            "[$MOTION_SOURCE] 四个 ExitTransition 槽位都必须有 if (reduceMotion) ExitTransition.None 直切分支",
+            4,
+            Regex("if \\(reduceMotion\\) ExitTransition\\.None").findAll(motion).count()
+        )
     }
 
     @Test
