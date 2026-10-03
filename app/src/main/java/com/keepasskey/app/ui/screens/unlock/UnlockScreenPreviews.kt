@@ -92,8 +92,7 @@ internal fun UnlockContentErrorWithKeyFileInfoPreview() {
                 keyFileName = "usr.dat",
                 // §433（ISSUE-P3-448 走查续）：新「来源」行只在确有来源时渲染——
                 // 默认参数（null）的预览看不到它，故在此画真机同形的副本绝对路径（折叠态）
-                keyFileSourcePath = "/data/user/0/com.keepasskey.debug/files/keyfiles/" +
-                    "08f8c3ef4ce4b5ea548d5bc5c445cc8a28501e93342268c96a00105ee84fd7c9.kfc",
+                keyFileSourcePath = PREVIEW_KEY_FILE_COPY_PATH,
                 errorMessage = UiMessage(R.string.sec_biometric_auth_failed),
                 infoMessage = UiMessage(R.string.keyfile_restored_from_memory, listOf("usr.dat"))
             ),
@@ -113,3 +112,28 @@ internal fun UnlockContentErrorWithKeyFileInfoPreview() {
         )
     }
 }
+
+// §434 装机回执：密钥文件「来源」行的**展开态**此前没有任何预览——单行 + Ellipsis 在固定行宽下
+// 永远截尾，「展开了仍看不全」于是只能靠真机撞见。补折叠 / 展开两态预览，使「换行铺满」在导出图上可直接查。
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 密钥文件来源（折叠） - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 密钥文件来源（折叠） - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun KeyFileSourceRowCollapsedPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        KeyFileSourceRowContent(path = PREVIEW_KEY_FILE_COPY_PATH, expanded = false, onToggle = {})
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 密钥文件来源（展开·换行铺满） - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 密钥文件来源（展开·换行铺满） - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun KeyFileSourceRowExpandedPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        KeyFileSourceRowContent(path = PREVIEW_KEY_FILE_COPY_PATH, expanded = true, onToggle = {})
+    }
+}
+
+/** 真机同形的副本绝对路径（库 id 的 SHA-256 文件名，118 字符——单行必然截尾） */
+private const val PREVIEW_KEY_FILE_COPY_PATH =
+    "/data/user/0/com.keepasskey.debug/files/keyfiles/" +
+        "08f8c3ef4ce4b5ea548d5bc5c445cc8a28501e93342268c96a00105ee84fd7c9.kfc"

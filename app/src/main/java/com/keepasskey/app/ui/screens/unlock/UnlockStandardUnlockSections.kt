@@ -127,6 +127,26 @@ internal fun UnlockKeyFileRow(
 @Composable
 private fun KeyFileSourceRow(path: String) {
     var expanded by remember { mutableStateOf(false) }
+    KeyFileSourceRowContent(path = path, expanded = expanded, onToggle = { expanded = !expanded })
+}
+
+/**
+ * §434 装机回执修正：**展开态必须真的能看全**。
+ *
+ * 原实现展开后仍是单行 + `Ellipsis`——固定行宽下超长路径（真机 118 字符）必然截尾，
+ * 用户回执「完整的路径在当前空间根本看不全」正是指此。现改为：折叠态单行**中间省略**，
+ * 展开态**换行铺满**（路径含 `/`，系统排版会在斜杠后断行，天然可读），不再截断。
+ *
+ * 状态外提为 [expanded] / [onToggle] 而非内持 `remember`，是为了让展开态**能被 @Preview 覆盖**
+ * ——本态此前只能靠真机撞见，正是「新态无预览」的再现（ISSUE-P3-340 口径）；
+ * 两态预览见 `UnlockScreenPreviews.kt`。
+ */
+@Composable
+internal fun KeyFileSourceRowContent(
+    path: String,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -144,11 +164,13 @@ private fun KeyFileSourceRow(path: String) {
             text = if (expanded) path else abbreviatePath(path),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+            // 展开：不限行数换行铺满（完整可读）；折叠：单行 + 省略号
+            maxLines = if (expanded) Int.MAX_VALUE else 1,
             overflow = TextOverflow.Ellipsis,
+            softWrap = true,
             modifier = Modifier.weight(1f)
         )
-        IconButton(onClick = { expanded = !expanded }) {
+        IconButton(onClick = onToggle) {
             Icon(
                 imageVector = if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                 contentDescription = stringResource(R.string.cd_toggle_keyfile_path),
