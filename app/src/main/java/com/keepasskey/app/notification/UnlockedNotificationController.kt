@@ -182,17 +182,26 @@ class UnlockedNotificationController @Inject constructor(
         }
 
         val now = System.currentTimeMillis()
-        if (deadline != null && deadline > now) {
-            builder.setContentText(context.getString(R.string.notification_unlocked_text))
-                .setWhen(deadline)
+        val contentText = if (deadline != null && deadline > now) {
+            builder.setWhen(deadline)
                 .setShowWhen(true)
                 .setUsesChronometer(true)
                 .setChronometerCountDown(true)
+            context.getString(R.string.notification_unlocked_text)
         } else {
-            builder.setContentText(context.getString(R.string.notification_unlocked_text_idle))
-                .setShowWhen(false)
-                .setUsesChronometer(false)
+            builder.setShowWhen(false).setUsesChronometer(false)
+            context.getString(R.string.notification_unlocked_text_idle)
         }
+
+        // §429：给通知补一个**展开态**（`BigTextStyle`）——折叠通知的标题右侧因此出现「展开箭头」，
+        // 用户**点一下箭头**即可展开并看到动作按钮。此前完全没有展开态，系统只提供「长按」一条路径，
+        // 正是 §426 / §427 / §428 三轮走查连续卡住的地方（§428 修好了静默分类，但展开可供性仍缺）。
+        // 参考实现同口径：Monica `SmartCopyNotificationHelper.kt:118`（BigTextStyle + 动作）；
+        // KeePassDX `DatabaseTaskNotificationService.kt:598-604`（MediaStyle 取得同样的展开态；
+        // 其 `setShowActionsInCompactView` 在源码里自注「Won't work with Xiaomi」——故不采用该法）。
+        // 收起态与展开态文案一致，展开只多出动作行 ⇒ 不引入任何新的用户数据面。
+        builder.setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
 
         val notification = builder.build()
         try {
