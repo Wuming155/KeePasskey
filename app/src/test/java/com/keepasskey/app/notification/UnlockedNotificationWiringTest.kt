@@ -110,7 +110,7 @@ class UnlockedNotificationWiringTest {
      * 且本机（HyperOS）实测证明 `BigTextStyle` **不产生**展开箭头（§429 因此被替换）。
      */
     @Test
-    fun `常驻通知必须以MediaStyle提供展开态`() {
+    fun `常驻通知必须以MediaStyle提供收起行动作位`() {
         assertTrue(
             "必须用 MediaStyle 提供展开态（§430；`BigTextStyle` 在本机 HyperOS 实测无展开箭头）",
             code.contains("MediaStyle()")
@@ -118,6 +118,16 @@ class UnlockedNotificationWiringTest {
         assertFalse(
             "不得回退到 BigTextStyle —— 本机实测其不产生展开箭头，等于退回「只能长按」",
             code.contains("BigTextStyle")
+        )
+        // §431：MediaStyle 的**展开视图是媒体版式、不渲染普通动作行**（§430 装机回执：
+        // 「点一下箭头，没有看到立即锁定 / 复制用户名 / 复制验证码」）⇒ 动作必须显式放进收起行按钮位。
+        assertTrue(
+            "动作必须经 setShowActionsInCompactView 放进**收起行**按钮位（否则点开箭头也看不到动作）",
+            code.contains("setShowActionsInCompactView(")
+        )
+        assertTrue(
+            "收起行按钮位需要图标，否则按钮位空白",
+            code.contains("IconCompat.createWithResource(")
         )
     }
 

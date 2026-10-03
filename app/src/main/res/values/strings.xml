@@ -1446,9 +1446,9 @@
          密码、库文件名等任何用户数据；验证码为短期动态值，仅出现在 TOTP 通知正文。 -->
     <string name="notification_channel_unlocked_name">已解锁状态</string>
     <string name="notification_channel_unlocked_desc">密码库处于解锁状态时的常驻提醒，点击可返回应用</string>
-    <string name="notification_unlocked_title">KeePasskey 密码库已解锁</string>
-    <string name="notification_unlocked_text">自动锁定倒计时进行中，点击返回应用</string>
-    <string name="notification_unlocked_text_idle">密码库已解锁，点击返回应用</string>
+    <string name="notification_unlocked_title">密码库已解锁</string>
+    <string name="notification_unlocked_text">自动锁定倒计时进行中</string>
+    <string name="notification_unlocked_text_idle">点击返回应用</string>
     <string name="notification_unlocked_lock_now">立即锁定</string>
     <!-- ISSUE-P3-440：常驻通知复制快捷动作（PD-69 字段子集＝用户名 / TOTP；不含任何条目数据） -->
     <string name="notification_unlocked_copy_username">复制用户名</string>

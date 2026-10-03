@@ -3,6 +3,7 @@ package com.keepasskey.app.notification
 import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
@@ -137,6 +138,16 @@ class UnlockedNotificationController @Inject constructor(
     }
 
     private fun post(deadline: Long?, recentEntryId: String?) {
+        // §431：动作必须经 `setShowActionsInCompactView()` 落到**收起行的按钮位**——MediaStyle 的展开视图
+        // 是媒体版式、**不渲染普通动作行**，故上一版出现「点开箭头却看不到动作」（§430 装机回执）。
+        // 这些按钮位需要图标，本批补三个单色动作图标（顺序与下方 addAction 一一对应）。
+        val actionIcons = intArrayOf(
+            R.drawable.ic_notif_lock,
+            R.drawable.ic_notif_account,
+            R.drawable.ic_notif_totp
+        )
+        // 动作数：立即锁定恒在；复制两项仅在「最近查看过条目」时追加
+        var actionCount = 1
         val builder = NotificationCompat.Builder(
             context,
             NotificationChannelSpec.UNLOCKED_STATUS.channelId
@@ -157,7 +168,7 @@ class UnlockedNotificationController @Inject constructor(
             // 触发后会话锁定 → 本控制器观察 state 变化自动 cancel 撤销通知
             .addAction(
                 NotificationCompat.Action.Builder(
-                    null,
+                    IconCompat.createWithResource(context, actionIcons[0]),
                     context.getString(R.string.notification_unlocked_lock_now),
                     NotificationIntents.lockVaultNow(context)
                 ).build()
@@ -167,15 +178,16 @@ class UnlockedNotificationController @Inject constructor(
         // 仅在「最近查看过某个条目」时挂出（`NotificationGate.shouldShowUnlockedCopyActions`）——
         // 动作必须有作用对象，否则就是点了没反应的假入口。动作文案为固定通用文案，不含条目名 / 值。
         if (NotificationGate.shouldShowUnlockedCopyActions(recentEntryId)) {
+            actionCount = 3
             builder.addAction(
                 NotificationCompat.Action.Builder(
-                    null,
+                    IconCompat.createWithResource(context, actionIcons[1]),
                     context.getString(R.string.notification_unlocked_copy_username),
                     NotificationIntents.copyUsernameFromNotification(context)
                 ).build()
             ).addAction(
                 NotificationCompat.Action.Builder(
-                    null,
+                    IconCompat.createWithResource(context, actionIcons[2]),
                     context.getString(R.string.notification_unlocked_copy_totp),
                     NotificationIntents.copyTotpFromNotification(context)
                 ).build()
@@ -194,15 +206,14 @@ class UnlockedNotificationController @Inject constructor(
             context.getString(R.string.notification_unlocked_text_idle)
         }
 
-        // §430：展开态改用 **MediaStyle**。Android 官方文档明确「MediaStyle 是**唯一**能把操作按钮
-        // 带进**收起视图**的样式」；本机（Xiaomi HyperOS OS4.0 / Android 17）实测进一步证实：
-        // 系统自身发出的 **media 样式**通知在折叠态**即带展开箭头**，而同样式的 `bigtext` 通知没有
-        // ⇒ §429 的 `BigTextStyle` 在本机不产生箭头，本批替换为 MediaStyle。
-        // 参考实现同口径：KeePassDX `services/DatabaseTaskNotificationService.kt:598-604`（MediaStyle）。
-        // 刻意**不用** `setShowActionsInCompactView`：KeePassDX 源码自注「Won't work with Xiaomi」，
-        // 且它要求动作另配图标；本仓箭头展开后的动作行仍由系统渲染为文字按钮（与 §425 起现状一致）。
+        // §430：展开态用 **MediaStyle**（Android 官方文档：它是**唯一**能把操作按钮带进**收起视图**的样式；
+        // 本机实测也证实 media 样式通知折叠态即带展开箭头，而 `bigtext` 不产生箭头）。
+        // §431：动作**必须**经 `setShowActionsInCompactView()` 落进收起行的按钮位——MediaStyle 的展开视图
+        // 是媒体版式、不渲染普通动作行。这样无需展开/长按即可直接点按三个动作，展开箭头仍保留。
+        // 如实声明：KeePassDX 源码自注该方法「Won't work with Xiaomi」（§430 曾因此回避它），
+        // 本批改以**装机回执**为准判定；若本机不生效，按 `PD-71` 重开条件处置。
         builder.setContentText(contentText)
-            .setStyle(MediaStyle())
+            .setStyle(MediaStyle().setShowActionsInCompactView(*IntArray(actionCount) { it }))
 
         val notification = builder.build()
         try {

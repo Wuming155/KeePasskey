@@ -1324,9 +1324,9 @@
          A TOTP code is a short-lived dynamic value and appears only in the TOTP body. -->
     <string name="notification_channel_unlocked_name">Unlocked status</string>
     <string name="notification_channel_unlocked_desc">Persistent reminder while the vault is unlocked; tap to return to the app</string>
-    <string name="notification_unlocked_title">KeePasskey vault is unlocked</string>
-    <string name="notification_unlocked_text">Auto-lock countdown in progress; tap to return to the app</string>
-    <string name="notification_unlocked_text_idle">KeePasskey vault is unlocked; tap to return to the app</string>
+    <string name="notification_unlocked_title">Vault unlocked</string>
+    <string name="notification_unlocked_text">Auto-lock countdown running</string>
+    <string name="notification_unlocked_text_idle">Tap to return to the app</string>
     <string name="notification_unlocked_lock_now">Lock now</string>
     <!-- ISSUE-P3-440: copy shortcut actions (PD-69 field subset = username / TOTP; no entry data) -->
     <string name="notification_unlocked_copy_username">Copy username</string>
