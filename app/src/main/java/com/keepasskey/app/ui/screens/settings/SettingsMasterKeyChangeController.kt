@@ -26,7 +26,15 @@ import com.keepasskey.app.ui.model.StringsProvider
  */
 internal data class MasterKeyChangeTaskState(
     val isChanging: Boolean = false,
-    val feedback: UiMessage? = null
+    val feedback: UiMessage? = null,
+    /**
+     * §411 走查续（ISSUE-P3-448）：当前活动库在应用私有目录内的密钥文件副本**原始显示名**
+     * （null = 无副本 / 尚未探测）。
+     *
+     * 本值由同一控制器在「导入密钥文件 / 改绑 / 解绑」成功后就地回写，并随本状态流一并
+     * 投递（本控制器即「改密 / 改绑 / 导入」三位一体的状态宿主），设置页据此渲染常驻状态段。
+     */
+    val keyFileCopyDisplayName: String? = null
 )
 
 /**
@@ -55,6 +63,10 @@ internal data class MasterKeyChangeTaskState(
  * 单测未装配）——`Use` 成功即收编新文件字节（不再依赖持久授权），`Remove` / 偏好关闭清除副本；
  * 另承载设置页「导入密钥文件」行的新语义入口 [importRememberedCopy]：把解锁时所选（记忆）
  * 的密钥文件收编进私有目录，不再要求用户重复手选。
+ *
+ * §411 走查续（ISSUE-P3-448）：副本**摘要**（[MasterKeyChangeTaskState.keyFileCopyDisplayName]）
+ * 随导入 / 改绑 / 解绑结果就地回写，并由 [refreshKeyFileCopyName] 在设置页打开时重新探测——
+ * 用户此前无法从界面判断副本是否真的落到私有目录（只有一次性 Snackbar）。
  */
 internal class SettingsMasterKeyChangeController(
     private val repository: VaultRepository,
@@ -162,7 +174,12 @@ internal class SettingsMasterKeyChangeController(
             is ChangeKeyFileIntent.Use -> {
                 // §411 走查（用户回执①）：副本收编与记忆偏好解耦——改绑成功即收编新文件
                 // 字节进私有目录（不依赖持久授权），偏好关闭只停用 Uri 记忆、不影响副本
-                if (dbId != null) vaultCopyStore?.save(dbId, intent.bytes, intent.displayName)
+                val store = vaultCopyStore
+                if (dbId != null && store != null) {
+                    // §411 走查续（P3-448）：副本摘要随收编结果回写（成功才显示「已存入」）
+                    val saved = store.save(dbId, intent.bytes, intent.displayName)
+                    updateCopyDisplayName(if (saved) intent.displayName else null)
+                }
                 if (!rememberEnabled) {
                     access.forget(dbId)
                     return
@@ -178,6 +195,8 @@ internal class SettingsMasterKeyChangeController(
             ChangeKeyFileIntent.Remove -> {
                 access.forget(dbId)
                 if (dbId != null) vaultCopyStore?.clear(dbId)
+                // 副本已随解绑清除：摘要同步归零（不遗留「已存入」的陈旧显示）
+                updateCopyDisplayName(null)
             }
             ChangeKeyFileIntent.Keep -> Unit
         }
@@ -202,7 +221,11 @@ internal class SettingsMasterKeyChangeController(
         if (existing != null) {
             existing.bytes.fill(0)
             mutableState.update {
-                it.copy(feedback = UiMessage(R.string.dbset_keyfile_import_memory_done))
+                it.copy(
+                    feedback = UiMessage(R.string.dbset_keyfile_import_memory_done),
+                    // 幂等命中即已收编：摘要同步回写（设置页常驻状态段据此呈现）
+                    keyFileCopyDisplayName = existing.displayName
+                )
             }
             return true
         }
@@ -219,6 +242,12 @@ internal class SettingsMasterKeyChangeController(
                                 UiMessage(R.string.dbset_keyfile_import_memory_done)
                             } else {
                                 UiMessage(R.string.unlock_keyfile_read_failed)
+                            },
+                            // 收编成功才回写摘要；失败保留旧值（本次覆盖未生效，旧副本可能仍在）
+                            keyFileCopyDisplayName = if (saved == true) {
+                                outcome.displayName
+                            } else {
+                                it.keyFileCopyDisplayName
                             }
                         )
                     }
@@ -238,6 +267,33 @@ internal class SettingsMasterKeyChangeController(
         }
         // 3. 无记忆：回落手选改绑流程
         return false
+    }
+
+    /**
+     * §411 走查续（ISSUE-P3-448）：探测当前活动库的私有目录副本摘要。
+     *
+     * 设置页（数据导入与导出页）打开时调用一次：副本摘要不随组合存活，切库或外部改动后
+     * 须重新探测。无活动库 / 通道未装配 / 无副本一律归 null——UI 据此不渲染状态段，
+     * **绝不显示一个并不存在的副本**。
+     */
+    suspend fun refreshKeyFileCopyName() {
+        val store = vaultCopyStore ?: return
+        val dbId = activeDbId()
+        val name = if (dbId == null) {
+            null
+        } else {
+            store.load(dbId)?.let { copy ->
+                // 只为取显示名：解出的字节就地清零，不向任何调用方外泄
+                copy.bytes.fill(0)
+                copy.displayName
+            }
+        }
+        updateCopyDisplayName(name)
+    }
+
+    /** 副本摘要回写（单一入口，避免各处 `copy` 时漏字段）。 */
+    private fun updateCopyDisplayName(name: String?) {
+        mutableState.update { it.copy(keyFileCopyDisplayName = name) }
     }
 
     /** 回执经 Snackbar 展示后清除（一次性消息语义）。 */

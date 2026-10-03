@@ -267,7 +267,9 @@ internal fun buildSettingsUiState(
 
     // 10. 更换主密钥任务（ISSUE-P2-354 AC③）
     isChangingMasterKey = masterKeyTask.isChanging,
-    masterKeyChangeFeedback = masterKeyTask.feedback
+    masterKeyChangeFeedback = masterKeyTask.feedback,
+    // §411 走查续（ISSUE-P3-448）：密钥文件私有目录副本摘要（随同一任务态流投递）
+    keyFileCopyDisplayName = masterKeyTask.keyFileCopyDisplayName
 )
 
 /**

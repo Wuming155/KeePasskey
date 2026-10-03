@@ -66,6 +66,9 @@ internal fun NavGraphBuilder.settingsImportExportRoute(navController: NavHostCon
     composable(Screen.SettingsImportExport.route) {
         val settingsViewModel: SettingsViewModel = hiltViewModel()
         val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+        // §411 走查续（ISSUE-P3-448）：密钥文件私有目录副本摘要探测——副本状态不随组合存活，
+        // 每次进入本页重新探测一次（无活动库 / 无副本一律归空，UI 不渲染状态段）
+        LaunchedEffect(Unit) { settingsViewModel.masterKeyChangeController.refreshKeyFileCopyName() }
         // TASK-13 整改：导出/模板动作反馈流
         val exportFeedback by settingsViewModel.exportFeedback.collectAsStateWithLifecycle()
         // ISSUE-P3-437 AC②：导出长操作进行中（过程反馈段）
@@ -100,6 +103,8 @@ internal fun NavGraphBuilder.settingsImportExportRoute(navController: NavHostCon
             },
             keyFileImportFeedback = settingsState.masterKeyChangeFeedback,
             onClearKeyFileImportFeedback = settingsViewModel::clearMasterKeyChangeFeedback,
+            // §411 走查续（P3-448）：私有目录副本常驻状态（null = 无副本，卡片不渲染该段）
+            keyFileCopyDisplayName = settingsState.keyFileCopyDisplayName,
             // ISSUE-P3-19：导入链路（选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框）
             importState = importState,
             mergeState = mergeState,

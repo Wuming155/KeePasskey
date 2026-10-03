@@ -60,6 +60,8 @@ fun ImportExportSettingsScreen(
     onImportRememberedKeyFile: suspend () -> Boolean = { false },
     keyFileImportFeedback: UiMessage? = null,
     onClearKeyFileImportFeedback: () -> Unit = {},
+    // §411 走查续（P3-448）：私有目录副本常驻状态（null = 无副本，卡片不渲染该段）
+    keyFileCopyDisplayName: String? = null,
     // ISSUE-P3-19：导入链路（对话框选源 → SAF 选文件 → 控制器解析/落库 → 报告对话框；状态上抬，本屏只透传）。
     // ISSUE-P3-384：`.kdbx` 并入状态（AwaitingMergeCredentials 等）
     importState: ImportUiState = ImportUiState.Idle,
@@ -160,7 +162,9 @@ fun ImportExportSettingsScreen(
                     keyFileImportBusy = keyFileImportBusy,
                     onImportRememberedKeyFile = onImportRememberedKeyFile,
                     keyFileImportFeedback = keyFileImportFeedback,
-                    onClearKeyFileImportFeedback = onClearKeyFileImportFeedback
+                    onClearKeyFileImportFeedback = onClearKeyFileImportFeedback,
+                    // §411 走查续（P3-448）：副本常驻状态段（有副本时在导入行下方呈现）
+                    keyFileCopyDisplayName = keyFileCopyDisplayName
                 )
             }
 
@@ -253,7 +257,10 @@ internal fun ImportExportSettingsScreenPreview() {
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 databaseName = "预览示例密码库"
             ),
-            onBackClick = {}
+            onBackClick = {},
+            // §411 走查续（P3-448）：预览「已存入应用私有目录」态（遮蔽 + 眼睛按钮）——
+            // 该段仅在确有副本时渲染，默认参数（null）的预览看不到它
+            keyFileCopyDisplayName = "预览密钥.keyx"
         )
     }
 }

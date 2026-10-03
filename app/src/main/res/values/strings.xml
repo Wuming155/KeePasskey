@@ -39,6 +39,8 @@
     <string name="cd_hide_password">隐藏密码</string>
     <string name="cd_show_password">显示密码</string>
     <string name="cd_toggle_password_visibility">密码显示与隐藏</string>
+    <!-- §411 走查续（ISSUE-P3-448）：私有目录副本路径的显隐切换按钮 -->
+    <string name="cd_toggle_keyfile_path">密钥文件副本路径的显示与隐藏</string>
     <string name="cd_copy_username">复制用户名</string>
     <string name="cd_copy_password">复制密码</string>
     <string name="cd_vault_locked">密码库已锁定</string>
@@ -710,6 +712,10 @@
     <string name="dbset_keyfile_import_warn_title">确认导入密钥文件</string>
     <string name="dbset_keyfile_import_warn_message">即将把所选文件设为本库的密钥文件（第二重凭据）：\n· 本库将以「主密码 + 该密钥文件」重新派生并保存；\n· 此前绑定的密钥文件此后不再能解锁本库；\n· 导入完成后请先确认新凭据可正常解锁，再处置旧密钥文件。</string>
     <string name="dbset_keyfile_import_confirm">确认导入</string>
+    <!-- §411 走查续（ISSUE-P3-448）：私有目录副本常驻状态（导入行下方；路径默认遮蔽可显隐） -->
+    <string name="dbset_keyfile_copy_title">已存入应用私有目录</string>
+    <string name="dbset_keyfile_copy_path">应用私有目录/keyfiles/%1$s</string>
+    <string name="dbset_keyfile_copy_hint">副本在应用私有目录内以库标识哈希命名存放，仅本应用可读</string>
     <string name="dbset_import_dialog_title">选择导入来源</string>
     <string name="dbset_import_preparing">正在解析 %1$s 数据...</string>
     <string name="dbset_src_1pux">1Password (1PUX)</string>
