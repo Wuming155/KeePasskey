@@ -250,6 +250,42 @@ class KeyFileSessionCoordinatorTest {
     }
 
     @Test
+    fun `活动库切换复位表单态并按新库恢复（提示名与加载名同源）`() = runTest {
+        // ISSUE-P3-464 ②：切库不得残留上一库的驻留因子与「已自动载入」提示；
+        // 复位后按新库记录恢复，提示名与密钥文件行同名（KeePassDX 单一真相源口径）
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember("db-old", "content://test.docs/old.pem", "old.keyx")
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        val (subject, _, uiState) = coordinatorWithCopy(this, access)
+        // 模拟上一库的表单态：已驻留密钥文件 + 用户显式选择标记
+        subject.onKeyFileSelected(FakeKeyFileAccess.KEY_FILE_URI)
+        testScheduler.runCurrent()
+        assertNotNull(subject.keyFileData)
+        assertTrue(uiState.value.hasKeyFile)
+
+        subject.onActiveVaultChanged()
+
+        assertNull("切库必须清空驻留字节", subject.keyFileData)
+        assertFalse("切库必须清空已选择语义", uiState.value.hasKeyFile)
+        assertNull("切库必须清空陈旧提示", uiState.value.infoMessage)
+
+        // 复位后按新库（db-1）恢复：userTouched 已复位，记忆恢复不被挡
+        subject.restoreRememberedKeyFile()
+
+        assertTrue(uiState.value.hasKeyFile)
+        assertEquals(
+            "恢复提示名与密钥文件行必须同名（同一次恢复产出）",
+            uiState.value.keyFileName,
+            FakeKeyFileAccess.DISPLAY_NAME
+        )
+        assertEquals(
+            com.keepasskey.app.R.string.keyfile_restored_from_memory,
+            uiState.value.infoMessage?.resId
+        )
+    }
+
+    @Test
     fun `按库记忆互相隔离——本库登记绝不覆盖其它库`() = runTest {
         val access = FakeKeyFileAccess()
         access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)

@@ -91,6 +91,9 @@ class UnlockViewModel @Inject constructor(
 
     private var activeDatabaseId: String? = null
 
+    /** ISSUE-P3-464 ②：活动库切换触发的密钥文件复位/恢复任务（新切换取消在途任务，防并发恢复互踩） */
+    private var keyFileRestoreJob: kotlinx.coroutines.Job? = null
+
     /** 密钥文件因子会话协调器（ISSUE-P3-25）：承载 `keyFileData` 全部借用/克隆/清零路径 */
     private val keyFileSession = KeyFileSessionCoordinator(
         scope = viewModelScope,
@@ -158,6 +161,8 @@ class UnlockViewModel @Inject constructor(
 
         viewModelScope.launch {
             var lastHasDatabase: Boolean? = null
+            // ISSUE-P3-464 ②：活动库 id 变化检测（见 collect 内复位/恢复分支）
+            var lastSeenDbId: String? = null
             vaultRepository.getDatabases().collect { databases ->
                 val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
                 if (active != null) {
@@ -201,6 +206,17 @@ class UnlockViewModel @Inject constructor(
                         )
                     }
                 }
+                // ISSUE-P3-464 ②：活动库 id 变化 → 密钥文件表单态复位并按新库记录重新恢复
+                // （恢复提示名与实际加载名恒同源；切库不残留上一库的驻留因子）
+                if (activeDatabaseId != lastSeenDbId && activeDatabaseId != null) {
+                    lastSeenDbId = activeDatabaseId
+                    debugLog.info("UnlockVM", "活动库切换 → 密钥文件表单复位并按新库恢复")
+                    keyFileRestoreJob?.cancel()
+                    keyFileRestoreJob = launch {
+                        keyFileSession.onActiveVaultChanged()
+                        keyFileSession.restoreRememberedKeyFile()
+                    }
+                }
                 // ISSUE-P3-01：数据库/封印凭据状态变化后统一重算（与设置流抵达顺序解耦）
                 biometricUnlock.refreshUnlockModeAndAutoPrompt()
             }
@@ -227,10 +243,9 @@ class UnlockViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch {
-            // ISSUE-P3-04：恢复上次成功解锁记忆的密钥文件（受偏好开关与持久化授权双重裁决）
-            keyFileSession.restoreRememberedKeyFile()
-        }
+        // ISSUE-P3-04/P3-464 ②：密钥文件记忆恢复改由「活动库 id 变化」驱动（见上方 databases
+        // collect 的复位/恢复分支）——init 时的一次性恢复会话与切库后不同步，正是提示名与
+        // 实际加载名不同源、切库残留上一库驻留因子的根因
     }
 
     /** 解锁页一次性意图透传（ISSUE-P3-01）；守卫条件见 [BiometricUnlockCoordinator]，false = 幂等空操作 */

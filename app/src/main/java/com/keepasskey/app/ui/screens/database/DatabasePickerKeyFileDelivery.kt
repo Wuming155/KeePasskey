@@ -105,6 +105,19 @@ internal class DatabasePickerKeyFileDeliveryController(
                         vaultCopyStore.save(pendingDbId!!, bytes, actualName)
                         debugLog?.info(TAG, "交付状态机: 副本显示名已按用户保存命名回写")
                     }
+                    // ISSUE-P3-464 ①（KeePassDX 对齐）：记住的密钥文件＝用户实际保存的那个文件。
+                    // 写盘成功即按「保存位置 + 实际显示名」登记本库记忆（尊重偏好与持久授权，
+                    // 最小权限口径不变；未登记时副本仍在，恢复链不受影响）。
+                    val access = keyFileAccess
+                    val dbIdForMemory = pendingDbId
+                    if (access != null && dbIdForMemory != null && actualName.isNotBlank()) {
+                        val registered = access.isRememberEnabled() &&
+                            access.persistReadPermission(targetUri.toString())
+                        if (registered) {
+                            access.remember(dbIdForMemory, targetUri.toString(), actualName)
+                            debugLog?.info(TAG, "交付状态机: 已按保存位置登记本库密钥文件记忆")
+                        }
+                    }
                 }
                 // 密钥文件字节副本用毕即擦（成败路径都清零；会话内仍持有自己的副本供后续导出）
                 bytes.fill(0)

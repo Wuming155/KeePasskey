@@ -359,6 +359,25 @@ internal class KeyFileSessionCoordinator(
     }
 
     /**
+     * 活动库切换：密钥文件**表单态整体复位**（ISSUE-P3-464 ②，KeePassDX 对齐——每库一份记忆，
+     * 切库后不得残留上一库的驻留字节与「已自动载入」提示）。
+     *
+     * 清零驻留字节、复位来源与「用户显式选择」标记（否则会挡住新库的记忆恢复）、
+     * 清空 UiState 的密钥文件行与一次性提示；随后由调用方按**新库**记录重新恢复，
+     * 恢复提示名与实际加载名恒同源。
+     */
+    fun onActiveVaultChanged() {
+        keyFileData?.fill(0)
+        keyFileData = null
+        keyFileSourceUri = null
+        keyFileUserTouched = false
+        uiState.update {
+            it.copy(hasKeyFile = false, keyFileName = "", infoMessage = null, errorMessage = null)
+        }
+        debugLog.info(TAG, "活动库切换：密钥文件表单态已复位（驻留字节清零）")
+    }
+
+    /**
      * 擦除驻留的密钥文件字节与来源引用。
      *
      * 解锁成功后（会话已克隆缓存供保存使用）与 ViewModel 销毁收尾两处调用；
