@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -78,7 +79,9 @@ class DatabasePickerViewModel @Inject constructor(
         appContext = appContext,
         scope = viewModelScope,
         publish = { publishPickerMessage(it) },
-        vaultCopyStore = keyFileVaultCopyStore
+        vaultCopyStore = keyFileVaultCopyStore,
+        debugLog = debugLog,
+        keyFileAccess = keyFileAccess
     )
     val keyFileDelivery: StateFlow<KeyFileDeliveryState>
         get() = keyFileDeliveryController.delivery
@@ -218,21 +221,39 @@ class DatabasePickerViewModel @Inject constructor(
                 }
                 if (result is KdbxResult.Success) {
                     val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
+                    debugLog?.info(
+                        "DatabasePicker",
+                        "建库成功: generated=${resolved.generated} hasSourceUri=${!resolved.sourceUri.isNullOrBlank()} " +
+                            "targetUri=${!targetUri.isNullOrBlank()} dbIdInRegistry=targetUri?:fileName"
+                    )
                     showCreateDialogFlow.value = false
                     publishPickerMessage(UiMessage(R.string.db_picker_msg_created))
                     // ISSUE-P2-460 AC②：建库成功即收编副本 + 按库登记，不再等下次解锁
-                    // （真机取证：建库后弹窗宿主随会话锁定被拆，原「等解锁才登记」让
-                    // 生成型密钥文件永久丢失、而该库已带第二因子解不开）
+                    // （动作体在交付控制器：副本 / 登记 / 日志通道同源；§417 行数棘轮随迁）
                     if (resolved.factor != CreateKeyFileFactor.None) {
-                        adoptKeyFileOnCreate(dbId = targetUri ?: fileName, vaultName = name, resolution = resolved)
+                        keyFileDeliveryController.adoptOnCreate(
+                            dbId = targetUri ?: fileName, vaultName = name, resolution = resolved
+                        )
+                        debugLog?.info("DatabasePicker", "副本收编 + 按库登记流程已返回（成败见副本通道日志）")
                     }
                     if (resolved.generated) {
-                        // ISSUE-P3-21 验收 2：生成型密钥文件必须一次性交付（丢失即无法解锁）
+                        // ISSUE-P3-21 验收 2：生成型密钥文件必须一次性交付（丢失即无法解锁）。
+                        // ISSUE-P2-461：离页事件**推迟到交付了结**——挂出提示与离页同毫秒发射时，
+                        // 导航 popBackStack 会把承载交付弹窗的页面整页拆掉（真机取证：弹窗挂上
+                        // 0.78s 即卸载，用户无法点按）。等写盘成功或用户「暂不保存」→ None 再离页。
                         keyFileDeliveryController.requestSave(name, dbId = targetUri ?: fileName)
+                        val createdDbId = targetUri ?: fileName
+                        viewModelScope.launch {
+                            keyFileDeliveryController.delivery.first { it is KeyFileDeliveryState.None }
+                            debugLog?.info("DatabasePicker", "交付已了结 → 发 DatabaseSelected 事件（离页信号）")
+                            _events.emit(DatabasePickerEvent.DatabaseSelected(createdDbId))
+                        }
+                    } else {
+                        // ISSUE-P2-229：自选位置库在目录中的标识就是 uri 字符串（`importExternalDatabase` 同口径），
+                        // 以文件名下行的选中事件对这类库无效
+                        debugLog?.info("DatabasePicker", "发 DatabaseSelected 事件（离页信号）: idIsUri=${!targetUri.isNullOrBlank()}")
+                        _events.emit(DatabasePickerEvent.DatabaseSelected(targetUri ?: fileName))
                     }
-                    // ISSUE-P2-229：自选位置库在目录中的标识就是 uri 字符串（`importExternalDatabase` 同口径），
-                    // 以文件名下行的选中事件对这类库无效
-                    _events.emit(DatabasePickerEvent.DatabaseSelected(targetUri ?: fileName))
                 } else {
                     publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
                 }
@@ -241,40 +262,6 @@ class DatabasePickerViewModel @Inject constructor(
                 // ISSUE-P2-354 AC①：busy 在任何结果路径（含失败/提前返回）都回落
                 isCreatingFlow.value = false
             }
-        }
-    }
-
-    /**
-     * ISSUE-P2-460 AC②：建库成功即收编密钥文件副本并按库登记（不再等下次解锁）。
-     *
-     * - 副本：经既有导出通道现取会话绑定字节（生成型与既有因子同路），失败仅留痕不阻断
-     *   （库已建成，一次性交付提示仍在；副本缺失只降级恢复体验，不得谎报建库失败）；
-     * - 登记：既有因子在「记住密钥文件位置」偏好开启且取得持久化读授权时，把来源 Uri 记到
-     *   **本库名下**（与解锁页同口径；生成型因子无 SAF 来源，副本即其登记形态）。
-     */
-    private suspend fun adoptKeyFileOnCreate(
-        dbId: String,
-        vaultName: String,
-        resolution: KeyFileFactorResolution.Resolved
-    ) {
-        val bytes = vaultRepository.exportKeyFileBytes().getOrNull()
-        if (bytes != null) {
-            val displayName = resolution.sourceDisplayName
-                ?: keyFileDeliveryController.suggestedFileName(vaultName)
-            val saved = keyFileVaultCopyStore?.save(dbId, bytes, displayName)
-            bytes.fill(0)
-            if (saved != true) {
-                debugLog?.warn("DatabasePicker", "建库密钥文件副本收编失败（库已建成，交付提示仍有效）")
-            }
-        } else {
-            debugLog?.warn("DatabasePicker", "建库后取不到密钥文件字节，副本未收编")
-        }
-        val access = keyFileAccess
-        val sourceUri = resolution.sourceUri
-        if (access != null && sourceUri != null &&
-            access.isRememberEnabled() && access.persistReadPermission(sourceUri)
-        ) {
-            access.remember(dbId, sourceUri, resolution.sourceDisplayName.orEmpty())
         }
     }
 
@@ -362,6 +349,14 @@ class DatabasePickerViewModel @Inject constructor(
 
     fun clearUserMessage() {
         userMessageFlow.value = null
+    }
+
+    /**
+     * 界面层取证日志出口（ISSUE-P2-460 真机走查）：对话框挂载 / 卸载、事件接收等
+     * 组合层时序经此落 `KpLog`——只记状态与布尔值，绝不记库名 / Uri / 文件名。
+     */
+    fun logUiEvent(message: String) {
+        debugLog?.info("PickerUI", message)
     }
 
     /**

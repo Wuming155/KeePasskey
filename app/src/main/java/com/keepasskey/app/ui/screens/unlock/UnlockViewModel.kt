@@ -157,10 +157,16 @@ class UnlockViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            var lastHasDatabase: Boolean? = null
             vaultRepository.getDatabases().collect { databases ->
                 val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
                 if (active != null) {
                     activeDatabaseId = active.id
+                    // ISSUE-P2-460 真机取证：空状态 → 解锁表单切换（弹窗宿主存续判定）只在翻转时记
+                    if (lastHasDatabase == false) {
+                        debugLog.info("UnlockVM", "库状态翻转: 无库→有库（空状态分支将让位解锁表单）")
+                    }
+                    lastHasDatabase = true
                     // Wave 12：快速解锁可用性 = 统一封印存储中存在本库凭据（ISSUE-P1-08 起仅强生物识别路径）
                     val hasSealedCredential = biometricCredentialStorage?.hasEncryptedCredential(active.id) == true
                     if (hasSealedCredential) {
@@ -182,6 +188,10 @@ class UnlockViewModel @Inject constructor(
                     }
                 } else {
                     activeDatabaseId = null
+                    if (lastHasDatabase == true) {
+                        debugLog.info("UnlockVM", "库状态翻转: 有库→无库（回到空状态）")
+                    }
+                    lastHasDatabase = false
                     _uiState.update {
                         it.copy(
                             databaseName = "",

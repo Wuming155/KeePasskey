@@ -78,6 +78,7 @@ fun DatabasePickerScreen(
         viewModel.events.collect { event ->
             when (event) {
                 is DatabasePickerEvent.DatabaseSelected -> {
+                    viewModel.logUiEvent("库管理页收到 DatabaseSelected → onDatabaseSelected（即将离页）")
                     onDatabaseSelected(event.id)
                 }
             }
@@ -96,6 +97,7 @@ fun DatabasePickerScreen(
         onWeakPasswordConfirmed = viewModel::noteWeakMasterPasswordConfirmed,
         onSaveKeyFile = viewModel::saveGeneratedKeyFileTo,
         onKeyFileDeliveryDismissed = viewModel::dismissKeyFileDelivery,
+        onDeliveryDialogLifecycleLog = viewModel::logUiEvent,
         onOpenExistingClick = viewModel::openOpenSourceDialog,
         onCloseOpenSourceDialog = viewModel::closeOpenSourceDialog,
         onConsumeOpenVaultPrefill = viewModel::consumeOpenVaultPrefill,
@@ -143,6 +145,8 @@ fun DatabasePickerContent(
     keyFileDelivery: KeyFileDeliveryState = KeyFileDeliveryState.None,
     onSaveKeyFile: (Uri) -> Unit = {},
     onKeyFileDeliveryDismissed: () -> Unit = {},
+    /** 取证日志回调（交付弹窗挂载 / 卸载时序；默认 no-op 便于预览） */
+    onDeliveryDialogLifecycleLog: (String) -> Unit = {},
     // ISSUE-P3-400：远端目录浏览（状态与动作均经 ViewModel 透传）
     browseState: kotlinx.coroutines.flow.StateFlow<com.keepasskey.app.sync.RemoteBrowseUiState> = kotlinx.coroutines.flow.MutableStateFlow(com.keepasskey.app.sync.RemoteBrowseUiState.Idle),
     onBrowseWebDav: (String, String, CharArray, String, String?) -> Unit = { _, _, _, _, _ -> },
@@ -324,6 +328,10 @@ fun DatabasePickerContent(
 
     // ISSUE-P3-21：生成型密钥文件的一次性保存提示——复合密钥第二因子必须当场交付
     (keyFileDelivery as? KeyFileDeliveryState.PendingSave)?.let { pending ->
+        androidx.compose.runtime.DisposableEffect(pending.suggestedFileName) {
+            onDeliveryDialogLifecycleLog("交付弹窗挂载（库管理页宿主）")
+            onDispose { onDeliveryDialogLifecycleLog("交付弹窗卸载（库管理页宿主）") }
+        }
         KeyFileOneTimeSaveDialog(
             suggestedFileName = pending.suggestedFileName,
             onSaveClick = { keyFileSaveLauncher.launch(pending.suggestedFileName) },

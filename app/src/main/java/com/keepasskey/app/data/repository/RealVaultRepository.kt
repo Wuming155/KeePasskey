@@ -160,7 +160,11 @@ class RealVaultRepository @Inject constructor(
         lifecycle.changeKeyFileOnly(keyFileIntent)
 
     /** ISSUE-P3-305：锁定与刷新下沉 [VaultLifecycleCoordinator]。 */
-    override suspend fun lockDatabase() = lifecycle.lockDatabase()
+    override suspend fun lockDatabase() {
+        // ISSUE-P2-460 真机取证：会话锁定时点打点（判「弹窗消失」是否与会话锁定同刻）
+        debugLog.info("VaultRepo", "会话锁定请求（lockDatabase 调用，含自动锁/手动锁/导航触发）")
+        lifecycle.lockDatabase()
+    }
 
     /** ISSUE-P3-305：锁定态查询下沉 [VaultLifecycleCoordinator]。 */
     override fun isLocked(): Boolean = lifecycle.isLocked()

@@ -67,6 +67,10 @@ internal fun UnlockVaultDialogsHost(
 
     // 生成型密钥文件的一次性保存提示——必须当场交付
     (keyFileDelivery as? KeyFileDeliveryState.PendingSave)?.let { pending ->
+        androidx.compose.runtime.DisposableEffect(pending.suggestedFileName) {
+            pickerViewModel.logUiEvent("交付弹窗挂载（解锁页宿主）")
+            onDispose { pickerViewModel.logUiEvent("交付弹窗卸载（解锁页宿主）") }
+        }
         KeyFileOneTimeSaveDialog(
             suggestedFileName = pending.suggestedFileName,
             onSaveClick = { keyFileSaveLauncher.launch(pending.suggestedFileName) },

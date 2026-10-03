@@ -162,17 +162,25 @@ class DatabasePickerKeyFileCreateTest {
 
     /**
      * 轮询等待建库收编完成：`KeyFileVaultCopyStore.save` 内部 `withContext(Dispatchers.IO)`
-     * 在真实 IO 线程执行，`testScheduler.runCurrent()` 不等待其完成，须轮询至副本可读
-     * （每轮先推进 Main 队列让 VM 协程续跑，再真读一次副本）。
+     * 在真实 IO 线程执行，`testScheduler.runCurrent()` 不等待其完成，须轮询至副本可读。
+     *
+     * **轮询只盯落盘文件出现**（出现后才调一次 [KeyFileVaultCopyStore.load]）——
+     * 绝不把 `load` 当轮询原语反复调用：其损坏处置会**就地删除文件**，在写盘可见性
+     * 窗口内误读一次（Windows 文件系统时序偶发）就会把刚落盘的副本删掉，轮询自毁、
+     * 永远等不到（全量套件偶发红的实测根因，§417 过程留痕）。
      */
     private suspend fun TestScope.awaitCopy(
         store: com.keepasskey.app.security.KeyFileVaultCopyStore,
         dbId: String
     ): com.keepasskey.app.security.KeyFileVaultCopyStore.StoredCopy? {
-        val deadline = System.currentTimeMillis() + 5_000
+        val deadline = System.currentTimeMillis() + 15_000
         while (System.currentTimeMillis() < deadline) {
             testScheduler.runCurrent()
-            store.load(dbId)?.let { return it }
+            val onDisk = store.baseDirOverride!!.listFiles()
+                ?.any { it.name.endsWith(".kfc") } == true
+            if (onDisk) {
+                store.load(dbId)?.let { return it }
+            }
             kotlinx.coroutines.delay(5)
         }
         return null
@@ -430,6 +438,54 @@ class DatabasePickerKeyFileCreateTest {
             "existing.kdbx", CharArray(0), CreateKeyFileFactor.Existing(ByteArray(32)), PRESET
         )
         assertTrue("携带既有密钥文件因子却未实现通道时必须显式失败", existing.isFailure)
+    }
+
+    @Test
+    fun `生成型建库后离页事件推迟到交付了结（弹窗宿主不被导航拆掉）`() = runTest {
+        // ISSUE-P2-461 实锤根因：挂交付提示与发离页事件同毫秒执行，导航 popBackStack 把承载
+        // 弹窗的页面整页拆掉（真机取证：弹窗挂上 0.78s 即卸载）。锁定「先交付、后离页」时序。
+        val sessionBytes = ByteArray(32) { 7 }
+        val recording = RecordingVaultRepository()
+        val repository = object : VaultRepository by recording {
+            override suspend fun exportKeyFileBytes(): KdbxResult<ByteArray> =
+                KdbxResult.Success(sessionBytes.copyOf())
+        }
+        val store = newCopyStore()
+        val viewModel = createViewModel(repository, copyStore = store)
+        val selected = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { event ->
+                if (event is DatabasePickerEvent.DatabaseSelected) selected += event.id
+            }
+        }
+
+        viewModel.createDatabase(
+            "generated.kdbx", "Fake#Defer".toCharArray(),
+            keyFile = true, preset = PRESET
+        )
+        // 收编经真实 IO，轮询至完成后再推进主队列
+        val copy = awaitCopy(store, "generated.kdbx")
+        assertNotNull(copy)
+        copy!!.bytes.fill(0)
+        testScheduler.runCurrent()
+
+        assertTrue(
+            "交付提示驻留期间不得发离页事件（发了宿主即被拆）",
+            selected.isEmpty()
+        )
+        assertTrue(
+            "交付提示必须保持驻留待用户处置",
+            viewModel.keyFileDelivery.value is KeyFileDeliveryState.PendingSave
+        )
+
+        viewModel.dismissKeyFileDelivery()
+        testScheduler.runCurrent()
+
+        assertEquals(
+            "交付了结（暂不保存）后才发离页事件",
+            listOf("generated.kdbx"),
+            selected
+        )
     }
 
     private companion object {
