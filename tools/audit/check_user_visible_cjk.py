@@ -23,6 +23,13 @@
   要么是「会原样上浮 UI 的默认文案」（真实事故：`KdbxResult` 的 `DEFAULT_USER_MESSAGE = "未知错误"`），
   要么是本该本地化的日志文案。范围刻意只收这两个模块——app 层的中文常量多为日志 tag / 诊断口径，
   纳入即误报。
+* **规则 D（ISSUE-P3-459 增设）**：`StringsProviderModule.kt` 中 `provideStringsProvider` 的**生产绑定**
+  若①正文未出现 `localizedResourcesFor(` 派生、或②直接对传入的 `context`（`@ApplicationContext`）
+  调 `getString(` ⇒ 红。
+  规则 A–C 只能看见「**字面量里有没有中文**」，**看不见「取串通道本身跟不跟语言」**——
+  规则 A–C 全绿、真机却整屏中文，就是规则 D 存在的理由（详见脚本尾部事故注记）。
+  Application context 的 resources 按**系统 locale** 定形，既不随应用内语言重配、
+  也拿不到 UI 侧 `localizedContextOf` 的 Wrapper ⇒ 经它取到的串**恒为系统语言文案**。
 
 ## 口径与边界（静态启发式，不得据绿推定「全仓已无残留」）
 
@@ -31,8 +38,21 @@
   ② 跨行拼接（`"失败" + x`）只看首段字面量；
   ③ 三引号模板字符串按整体判定（含 CJK 即红）。
 * **未覆盖的通道**：`Toast` / `Snackbar` 直传字面量、`Notification` 文案、`strings.xml` 自身缺 en 键
-  （后者由语料审计覆盖，非本脚本职责）。本脚本只钉 `Failure` / `UiMessage` / 下层常量三条通道。
+  （后者由语料审计覆盖，非本脚本职责）。本脚本只钉 `Failure` / `UiMessage` / 下层常量 /
+  取串通道四条通道。
 * 防空扫：扫到的调用点数为 0 时判红——那说明 `--root` 或扫描口径给错了，这种「绿」没有鉴别力。
+* **规则 D 只锁这一个绑定点**，不做「全仓禁止 Application context 取串」的宽扫：后者误报率高
+  （大量合法转发场景），而误报会诱使后来者放宽判据——**误报比漏报更危险**。
+
+## 事故注记（规则 D 的由来，改判据前必读）
+
+§413 曾把 30+ 个用户可见消费点从「硬编码中文」改为走 `StringsProvider`，
+机检 A–C 全绿（中文字面量确已清零）、`test` 与门禁全过，但**英文界面真机实测五处仍是中文**
+（解锁页 / 生物识别 / 本地存储 / 改主密码 / 同步失败），唯一例外是走 Compose
+`stringResource(LocalContext)` 的「主密码错误」一条显示英文 `Incorrect master password…`。
+识别特征＝**两条通道口径不一致**：Composable 侧拿得到 `localizedContextOf` 的 Wrapper，
+`@ApplicationContext` 侧拿不到。⇒ 「没有中文字面量」**不等于**「文案已本地化」，
+机检必须盯住**通道**而不只是**内容**。
 
 用法：`python tools/audit/check_user_visible_cjk.py [--root 目录] [--selftest]`
 命中即退出码 1；`--selftest` 用内嵌的已知好/坏样本反校判据本身（**红样本与绿样本各验一次**）。
@@ -50,6 +70,12 @@ CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 FAILURE_CALL = "KdbxResult.Failure("
 UIMESSAGE_CALL = "UiMessage("
+
+# 规则 D：StringsProvider 的生产绑定必须经本地化派生 Resources（ISSUE-P3-459）
+SP_MODULE_NAME = "StringsProviderModule.kt"
+SP_FUN_RE = re.compile(r"\bfun\s+provideStringsProvider\s*\(")
+SP_NEXT_FUN_RE = re.compile(r"\n\s+fun\s+\w+")
+LOCALIZED_DERIVE = "localizedResourcesFor("
 
 # 规则 C 的两个下层模块（相对 --root 的父级判断：按包路径匹配更稳）
 LOWER_MODULES = ("core/src/main", "database/src/main")
@@ -173,6 +199,42 @@ def call_args(skel: str, idx: int) -> tuple[int, int] | None:
     return None
 
 
+def scan_strings_provider_binding(
+    path: pathlib.Path, src: str, line_of
+) -> list[str]:
+    """规则 D：`StringsProviderModule.kt` 的 provideStringsProvider 必须走本地化派生。
+
+    判据取两条，命中任意一条即红：
+    ① 函数体（到下一个顶层 `fun` 为止）里没有 `localizedResourcesFor(`；
+    ② 存在 `context.getString(` 且其前 60 字符内没有 `localizedResourcesFor(`。
+
+    只看「有没有 `localizedResourcesFor`」不足以锁死（写法形形色色），故同时保留②——
+    两者取并集，宁可把「派生后取串」这种写法也判红（届时改判据而不放水），
+    也不放过「裸 Application context 取串」这条真正的回潮路径。
+    """
+    hits: list[str] = []
+    m = SP_FUN_RE.search(src)
+    if m is None:
+        return hits
+    start = m.end()
+    nxt = SP_NEXT_FUN_RE.search(src, start)
+    end = nxt.start() if nxt is not None else len(src)
+    seg = src[start:end]
+    if LOCALIZED_DERIVE not in seg:
+        hits.append(
+            f"{path}:{line_of(start)} 规则D StringsProvider 生产绑定未派生本地化 Resources"
+            f"（缺少 {LOCALIZED_DERIVE}）：经它取到的串恒按系统 locale 解析"
+        )
+    for gm in re.finditer(r"\bcontext\.getString\(", seg):
+        pre = seg[max(0, gm.start() - 60) : gm.start()]
+        if LOCALIZED_DERIVE not in pre:
+            hits.append(
+                f"{path}:{line_of(start + gm.start())} 规则D StringsProvider 直接对 Application context 取串"
+                "（应用内语言切英文后仍是中文）"
+            )
+    return hits
+
+
 def scan_file(path: pathlib.Path) -> list[str]:
     src = path.read_text(encoding="utf-8", errors="replace")
     skel, strings = strip_comments_and_strings(src)
@@ -232,6 +294,10 @@ def scan_file(path: pathlib.Path) -> list[str]:
                     f"{', '.join(cjk_literals_within(p_start, p_end))}"
                 )
 
+    # ---- 规则 D：StringsProvider 生产绑定必须经本地化派生 ----
+    if path.name == SP_MODULE_NAME:
+        hits.extend(scan_strings_provider_binding(path, src, line_of))
+
     # ---- 规则 C：下层模块 const val 中文字面量 ----
     rel = path.as_posix()
     if any(m in rel for m in LOWER_MODULES):
@@ -288,6 +354,19 @@ const val DEFAULT_USER_MESSAGE = "未知错误"
 '''
 
 
+SELFTEST_SP_GOOD = '''
+package demo
+fun provideStringsProvider(@ApplicationContext context: Context, t: AppLocaleTracker): StringsProvider =
+    StringsProvider { id, args -> localizedResourcesFor(context, t.snapshot()).getString(id, *args) }
+'''
+
+SELFTEST_SP_BAD = '''
+package demo
+fun provideStringsProvider(@ApplicationContext context: Context): StringsProvider =
+    StringsProvider { id, args -> context.getString(id, *args) }
+'''
+
+
 def selftest() -> int:
     rc = 0
     tmp = pathlib.Path(tempfile.mkdtemp())
@@ -297,6 +376,9 @@ def selftest() -> int:
         ("app/src/main/Good.kt", GOOD_SAMPLE, 0),
         ("app/src/main/Bad.kt", BAD_SAMPLE, 2),
         ("core/src/main/BadConst.kt", BAD_SAMPLE, 3),
+        # 规则 D 只看**文件名**，样本必须叫 StringsProviderModule.kt 才能反校到该判据
+        ("app/src/main/StringsProviderModule.kt", SELFTEST_SP_GOOD, 0),
+        ("app/src/main/StringsProviderModule.kt", SELFTEST_SP_BAD, 2),
     ):
         p = tmp / rel
         p.parent.mkdir(parents=True, exist_ok=True)

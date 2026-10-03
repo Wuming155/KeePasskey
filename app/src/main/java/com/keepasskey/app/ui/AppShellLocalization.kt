@@ -6,7 +6,17 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.data.repository.SettingsRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.runBlocking
+import javax.inject.Inject
+import javax.inject.Singleton
 import java.util.Locale
 
 /**
@@ -67,6 +77,59 @@ internal suspend fun localizedContextForAppLanguage(
     context.resources.configuration,
     localeFor(settings.getSettings().first().appLanguage)
 )
+
+/**
+ * 按 [locale] 派生 [Resources]（`ISSUE-P3-459`：`StringsProvider` 走本函数取串）。
+ *
+ * **为什么不能直接用 Application context 的 `getString`**：`StringsProviderModule` 的生产绑定注入的是
+ * `@ApplicationContext`，而 Application 对象的 resources 在进程创建时即按**系统 locale** 定形，
+ * 既不会随应用内语言变更重新配置，也拿不到 [localizedContextOf] 包出来的 Wrapper
+ * ⇒ 应用内语言切到 English 后，所有经 `StringsProvider.get()` 的文案**恒为中文**。
+ * 派生Resources 逐次按目标 locale 重建，与 UI 侧 `localizedContextOf` 口径完全一致。
+ */
+internal fun localizedResourcesFor(context: Context, locale: Locale?): Resources =
+    if (locale == null) context.resources
+    else context.createConfigurationContext(
+        localizedConfigurationOf(context.resources.configuration, locale)
+    ).resources
+
+/**
+ * 应用内语言快照持有者（`ISSUE-P3-459`）。
+ *
+ * 职责：把 [SettingsRepository] 流里的 `appLanguage` 收敛成一个**可被同步读取**的 [Locale] 字段，
+ * 供非 Composable 的取串通道（[StringsProvider] 等）消费——这类调用点没有 Compose 组合树，
+ * 拿不到 `LocalContext`，只能读快照。
+ *
+ * - **冷启动不做同步首值**：构造只 `launchIn`，由 Flow 异步回填；若强行 `runBlocking` 取首值，
+ *   Hilt 会在主线程创建本类 ⇒ 主线程阻塞等 DataStore 冷读（首次 protobuf 解析），有启动期 ANR 风险。
+ *   代价是进程刚拉起的最初一帧可能仍是系统语言（数十毫秒后 Flow 回填生效）。
+ * - **首帧兜底**：[snapshot] 在 [locale] 尚未就绪时走一次同步补取（`Dispatchers.IO`），
+ *   覆盖「冷启动首帧即取串」的极窄窗口；此时 DataStore 通常已有内存缓存，代价可忽略。
+ */
+@Singleton
+class AppLocaleTracker @Inject constructor(
+    private val settings: SettingsRepository
+) {
+    @Volatile
+    var locale: Locale? = null
+        private set
+
+    init {
+        settings.getSettings()
+            .map { it.appLanguage }
+            .distinctUntilChanged()
+            .onEach { locale = localeFor(it) }
+            .launchIn(CoroutineScope(Dispatchers.IO))
+    }
+
+    /** 同步可取的目标 locale；未就绪时补取一次。 */
+    fun snapshot(): Locale? {
+        val ready = locale
+        if (ready != null) return ready
+        locale = runBlocking(Dispatchers.IO) { localeFor(settings.getSettings().first().appLanguage) }
+        return locale
+    }
+}
 
 /**
  * 沿 ContextWrapper 链解回宿主 FragmentActivity（§411 装机走查 P1 修复）。
