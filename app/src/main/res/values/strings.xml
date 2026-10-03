@@ -778,6 +778,8 @@
     <string name="ext_mod_merge_failed">合并失败：%1$s（已保留当前内存改动）</string>
     <string name="ext_mod_save_aborted">已中止保存：磁盘文件已被外部修改</string>
     <string name="ext_mod_merge_hint_fallback">「合并」走既有 KdbxMerger 三方合并；「重载」丢弃未保存的内存改动；「放弃」不写盘并保留当前会话。</string>
+    <!-- ISSUE-P3-447 AC③：保存被中止时列表页的未落库可感知提示 -->
+    <string name="vault_list_external_modification_pending">保存已被中止：库文件被外部修改，当前列表可能含尚未写入磁盘的改动</string>
     <!-- ISSUE-P3-382：健康检查重复条目报告 -->
     <string name="health_duplicate_title">重复条目</string>
     <string name="health_duplicate_sub">%1$d 组同 URL / 同账号条目；合并请逐条在条目编辑或删除中处理</string>

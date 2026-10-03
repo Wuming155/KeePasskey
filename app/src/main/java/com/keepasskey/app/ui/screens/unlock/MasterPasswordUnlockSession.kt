@@ -166,6 +166,9 @@ internal class MasterPasswordUnlockSession(
         keyFileSession.rememberKeyFileOnSuccess(usedKeyFile, uiState.value.keyFileName)
         // 解锁成功后立即擦除驻留的密钥文件字节（会话已克隆缓存供保存使用）
         keyFileSession.wipe()
+        // ISSUE-P3-466 ③：本次选择已消费——复位「用户显式选择」标记，使锁库回到解锁页后
+        // 能按本库记录重新恢复（否则残留标记会一直挡住恢复链，表现为「选择没保存」）
+        keyFileSession.consumeSelectionAfterUnlock()
         uiState.update {
             it.copy(
                 isLoading = false,

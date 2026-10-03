@@ -194,6 +194,11 @@ fun VaultListContent(
                     item { PendingConflictBanner(onClick = onNavigateToConflictResolver) }
                 }
 
+                // ISSUE-P3-447 AC③：保存被外部修改中止 ⇒ 明确提示列表可能含未落库改动
+                if (uiState.saveBlockedByExternalModification) {
+                    item { ExternalModificationPendingBanner() }
+                }
+
                 // 1. 面包屑路径导航
                 if (uiState.breadcrumbs.isNotEmpty() && searchQuery.isBlank()) {
                     item {

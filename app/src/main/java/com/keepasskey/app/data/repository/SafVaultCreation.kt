@@ -56,6 +56,8 @@ internal object SafVaultCreation {
         keyFileData: ByteArray?,
         preset: CreateVaultPreset,
         targetUri: Uri,
+        /** `ISSUE-P3-447` AC②：建库以 openStream 收尾（即该通道的「打开」时点），成功即留基线 */
+        baselineHolder: com.keepasskey.app.security.VaultFileBaselineHolder? = null,
         register: suspend (name: String, path: String) -> KdbxResult<Unit>
     ): KdbxResult<Unit> = withContext(Dispatchers.IO) {
         val displayName = name.removeSuffix(".kdbx")
@@ -120,6 +122,11 @@ internal object SafVaultCreation {
                 SafDocumentCleanup.deleteCreatedDocument(context, targetUri)
                 return@withContext opened
             }
+            // ISSUE-P3-447 AC②：新建的 SAF 库在首次保存前同样要有漂移防护——取真实文档元数据留基线
+            baselineHolder?.capture(
+                com.keepasskey.app.security.VaultFileMetadataProbe
+                    .baselineFor(context, targetUri.toString())
+            )
             register(name, targetUri.toString())
         } finally {
             runCatching { tempFile.delete() }

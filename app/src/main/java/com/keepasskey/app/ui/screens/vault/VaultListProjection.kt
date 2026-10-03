@@ -41,7 +41,9 @@ internal data class VaultListBatchAndSyncState(
     val isSyncing: Boolean,
     val lastSyncTimeText: String,
     val hasPendingConflict: Boolean = false,
-    val isReadOnly: Boolean = false
+    val isReadOnly: Boolean = false,
+    // ISSUE-P3-447 AC③：保存被外部修改中止的待处置态（列表页未落库提示的开关）
+    val saveBlockedByExternalModification: Boolean = false
 )
 
 /**
@@ -117,6 +119,7 @@ internal fun buildVaultListUiState(
         lastSyncTimeText = batchSync.lastSyncTimeText,
         hasPendingConflict = batchSync.hasPendingConflict,
         isReadOnly = batchSync.isReadOnly,
+        saveBlockedByExternalModification = batchSync.saveBlockedByExternalModification,
         userMessage = session.userMessage,
         showUsernameInList = settings.showUsernameInList,
         showOtpInList = settings.showOtpInList,

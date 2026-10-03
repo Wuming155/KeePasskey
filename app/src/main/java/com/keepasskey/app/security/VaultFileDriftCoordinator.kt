@@ -47,6 +47,23 @@ class VaultFileDriftCoordinator @Inject constructor(
         )
     }
 
+    /**
+     * SAF（`content://`）通道的保存前漂移检测（`ISSUE-P3-447` AC②）。
+     *
+     * 与 [checkDrift] 的差别只在「元数据不可读」的处置：本地 `File` 通道下
+     * `current == null` 表示**文件已消失** ⇒ 判漂移（宁可提示）；SAF 通道下
+     * `current == null` 通常只表示**提供方不暴露元数据** ⇒ 按既有口径「宁可不提示」
+     * 放行，绝不据此误报为「被外部修改」（2026-10-02 止血的教训）。
+     */
+    fun checkSafDrift(pathIdentifier: String, current: VaultFileBaseline?): Boolean {
+        if (current == null) return false
+        val base = baselineHolder.current() ?: return false
+        return VaultFileDriftPolicy.shouldAbortSave(
+            baseline = base.copy(pathIdentifier = pathIdentifier),
+            current = current
+        )
+    }
+
     /** 唤起三选提示（幂等：已有待决时覆盖为最新） */
     fun requestPrompt(pathIdentifier: String?) {
         _pending.value = VaultFileDriftPrompt(
@@ -59,9 +76,16 @@ class VaultFileDriftCoordinator @Inject constructor(
         _pending.value = null
     }
 
-    /** 成功处置后刷新基线（保存成功 / 重载成功 / 合并成功后调用） */
-    fun refreshBaselineAfterPersist(pathIdentifier: String, localFile: File?) {
-        baselineHolder.capture(pathIdentifier, localFile)
+    /**
+     * 成功处置后刷新基线（保存成功 / 重载成功 / 合并成功后调用）。
+     *
+     * `ISSUE-P3-447` AC② 起入参改为**调用方构造好的基线**：本地 `File` 走
+     * [VaultFileBaseline.fromFile]，SAF 走 `VaultFileMetadataProbe.baselineFor`
+     * （两者元数据来源不同）。传 `null` 表示元数据当前不可读 ⇒ 基线置空、漂移防护
+     * 暂时降级为「宁可不提示」（不得落占位假值）。
+     */
+    fun refreshBaselineAfterPersist(baseline: VaultFileBaseline?) {
+        baselineHolder.capture(baseline)
         _pending.value = null
     }
 

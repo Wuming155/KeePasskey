@@ -4,6 +4,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -12,8 +13,12 @@ import kotlinx.coroutines.launch
  * 密钥文件（复合密钥第二因子）会话协调器（ISSUE-P3-25 结构拆分，纯搬运零行为变更）。
  *
  * 承载原 `UnlockViewModel` 内 `keyFileData` 相关的全部逻辑：SAF 读取结果采纳、
- * 驻留字节的借用/克隆/清零、来源 Uri 登记、记忆写入与冷启动恢复。
+ * 驻留字节的借用/克隆/清零、来源 Uri 登记、记忆写入与恢复编排。
  * 字段名、清零时机、协程作用域（`viewModelScope`）与 UiState 更新均与原实现逐字一致。
+ *
+ * `ISSUE-P3-466`（§420）结构拆分：**恢复裁决链**（分支判定 + 探针 + 副本 / 按库记忆两级
+ * 恢复）移入同包协作者 [KeyFileRestoreChain]，本类经 [KeyFileRestoreHost] 只读 / 写会话态；
+ * 「何时发起恢复」（活动库切换 / 回前台）与在途任务取消留在本类（它才持有 [scope]）。
  *
  * 敏感数据铁律：密钥文件字节仅以 `ByteArray` 驻留本类内部（绝不进入 UiState/StateFlow/String）；
  * 覆盖采纳 / 取消选择 / 读取失败 / 解锁成功 / ViewModel 销毁五条路径均显式 `fill(0)` 清零。
@@ -30,7 +35,7 @@ internal class KeyFileSessionCoordinator(
     private val vaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
     /** 活动库 id 副本键（可空 = 单测未装配；null 时副本通道整体旁路，行为与既有一致） */
     private val activeDbId: () -> String? = { null }
-) {
+) : KeyFileRestoreHost {
 
     /**
      * 密钥文件原始字节（修复虚假开关整改）：复合密钥「主密码 + 密钥文件」的第二因子。
@@ -51,8 +56,35 @@ internal class KeyFileSessionCoordinator(
     /**
      * 用户是否已在本会话**显式**选择/清除过密钥文件（ISSUE-P3-04）：
      * 记忆恢复为异步 IO 流程，若用户抢先手动选择，则丢弃恢复结果，尊重用户显式选择。
+     * 经 [KeyFileRestoreHost.keyFileUserTouched] 只读暴露给恢复链（所有权仍在本类）。
      */
-    private var keyFileUserTouched = false
+    private var userTouched = false
+
+    /** 恢复裁决链（ISSUE-P3-466 拆出）：本类只提供会话态读写与发起时机 */
+    private val restoreChain = KeyFileRestoreChain(
+        host = this,
+        uiState = uiState,
+        keyFileAccess = keyFileAccess,
+        vaultCopyStore = vaultCopyStore,
+        debugLog = debugLog
+    )
+
+    /** 在途恢复任务（活动库切换 / 回前台重新发起时取消旧任务，防并发恢复互踩） */
+    private var restoreJob: Job? = null
+
+    // ===== KeyFileRestoreHost：恢复链对会话态的读写契约 =====
+
+    override val keyFileUserTouched: Boolean
+        get() = userTouched
+
+    override fun currentDatabaseId(): String? = activeDbId()
+
+    override fun adoptRestoredKeyFile(bytes: ByteArray, displayName: String) =
+        adoptKeyFile(bytes, displayName)
+
+    override fun setKeyFileSourceUri(uri: String?) {
+        keyFileSourceUri = uri
+    }
 
     /**
      * 密钥文件 SAF 选取结果上行（ISSUE-P3-04）：组合层只上传 Uri，
@@ -78,7 +110,7 @@ internal class KeyFileSessionCoordinator(
                             // 移交后立即擦除读取结果（VM 内部持独立副本）
                             outcome.bytes.fill(0)
                         }
-                        keyFileUserTouched = true
+                        userTouched = true
                         trackKeyFileSource(uri)
                     }
                     // 「读不到」分型：空文件 / 流异常一律显式反馈，绝不静默忽略
@@ -98,7 +130,7 @@ internal class KeyFileSessionCoordinator(
      */
     fun onKeyFileSelected(data: ByteArray, fileName: String) {
         adoptKeyFile(data, fileName)
-        keyFileUserTouched = true
+        userTouched = true
     }
 
     /** 采纳密钥文件字节：覆盖驻留副本（旧副本显式清零）并同步「已选择 + 显示名」语义 */
@@ -120,7 +152,7 @@ internal class KeyFileSessionCoordinator(
         keyFileData?.fill(0)
         keyFileData = null
         keyFileSourceUri = null
-        keyFileUserTouched = true
+        userTouched = true
         uiState.update { it.copy(hasKeyFile = false, keyFileName = "") }
     }
 
@@ -132,7 +164,7 @@ internal class KeyFileSessionCoordinator(
         keyFileData?.fill(0)
         keyFileData = null
         keyFileSourceUri = null
-        keyFileUserTouched = true
+        userTouched = true
         uiState.update {
             it.copy(hasKeyFile = false, keyFileName = "", errorMessage = UiMessage(R.string.unlock_keyfile_read_failed))
         }
@@ -165,149 +197,37 @@ internal class KeyFileSessionCoordinator(
         }
     }
 
+    /** 恢复本库记忆的密钥文件（裁决链与探针见 [KeyFileRestoreChain.restoreRememberedKeyFile]） */
+    suspend fun restoreRememberedKeyFile() = restoreChain.restoreRememberedKeyFile()
+
     /**
-     * 恢复本库记忆的密钥文件（ISSUE-P3-04；ISSUE-P2-460 起记忆**按库归属**）。
+     * ISSUE-P3-466 ③：回前台是否应发起恢复（判据见 [KeyFileRestoreChain.shouldRestoreOnResume]）。
+     * 与 [restoreOnResumeIfIdle] 同一判据的**可测出口**——后者是即发即弃，单测无法等待其结果。
+     */
+    fun shouldRestoreOnResume(): Boolean = restoreChain.shouldRestoreOnResume()
+
+    /**
+     * 活动库切换后的恢复发起（ISSUE-P3-464 ②）：复位表单态后按**新库**记录恢复，
+     * 取消在途恢复任务防并发互踩（提示名与加载名恒同源）。
+     */
+    fun resetForActiveVaultAndRestore() {
+        onActiveVaultChanged()
+        restoreJob?.cancel()
+        restoreJob = scope.launch { restoreChain.restoreRememberedKeyFile() }
+    }
+
+    /**
+     * ISSUE-P3-466 ③：解锁页回到前台时的恢复发起——判据见
+     * [KeyFileRestoreChain.shouldRestoreOnResume]（表单为空 + 非用户显式清除 + 有活动库 + 无在途读取）。
      *
-     * 裁决链：副本优先（§411）→ 本库按库 SAF 记忆（dbId 摘要键，结构上不可能读到其它库的
-     * 记录，跨库套用被结构性排除）→ 都未登记时旧版全局槽仅作一句话提示（**绝不载入**）。
-     * [KeyFileRememberPolicy.canRestore]（偏好开启 + 记录完整 + 仍持有持久化读授权）不满足
-     * 即**静默降级为「未记住」**并清除记录：恢复由系统在进入解锁页时自动发起，用户未做
-     * 任何操作，故不弹错误、不阻断解锁，仅记录**非敏感**日志（偏好/授权布尔值，不含 Uri 与显示名）。
+     * 立此入口的缘由：解锁成功即 `wipe()` 清空表单，而锁库回到解锁页时**同库同 VM 不满足
+     * 「活动库切换」条件**，此前无处触发恢复 ⇒ 表现为「选择没保存」（用户走查回执）。
      */
-    suspend fun restoreRememberedKeyFile() {
-        val access = keyFileAccess ?: return
-        if (keyFileUserTouched) return
-        val rememberEnabled = access.isRememberEnabled()
-        // ISSUE-P2-460 AC①：记忆按库归属——记录键含 dbId 摘要，本库记录只可能是本库的
-        val dbId = activeDbId()
-        val remembered = dbId?.let { access.loadRemembered(it) }
-        // 副本优先载入（不依赖 SAF 持久授权；缺失 / 损坏时回落按库 SAF Uri 记忆通道）
-        if (dbId != null && vaultCopyStore != null &&
-            restoreFromCopy(access, dbId, remembered, rememberEnabled)
-        ) {
-            return
-        }
-        if (!rememberEnabled) {
-            // 偏好关闭且无副本：清记忆（按库记录 + 旧版全局槽），静默降级为未记住
-            access.forget(dbId)
-            return
-        }
-        if (remembered == null) {
-            // ISSUE-P2-460 AC①：本库未登记记忆——旧版全局槽只作一句话提示，绝不载入
-            // （旧版记录无法归属到具体库，自动套用即跨库串因子）
-            showLegacyHintIfAny(access)
-            return
-        }
-        restoreFromMemory(access, dbId, remembered, rememberEnabled)
-    }
-
-    /**
-     * 恢复链第一级：私有目录收编副本（§411；ISSUE-P2-460 起按键即本库）。
-     * @return true = 已按副本完成恢复（含用户抢先选择的丢弃分支），调用方不必再走后续通道
-     */
-    private suspend fun restoreFromCopy(
-        access: KeyFileAccess,
-        dbId: String,
-        remembered: RememberedKeyFile?,
-        rememberEnabled: Boolean
-    ): Boolean {
-        val copy = vaultCopyStore?.load(dbId) ?: return false
-        if (keyFileUserTouched) {
-            // 读取期间用户已显式选择其它密钥文件：丢弃恢复结果，尊重用户选择
-            copy.bytes.fill(0)
-            return true
-        }
-        try {
-            adoptKeyFile(copy.bytes, copy.displayName)
-        } finally {
-            copy.bytes.fill(0)
-        }
-        // 偏好关闭：即便走副本载入，Uri 记忆仍须清除（副本归导入功能，不受影响）
-        if (!rememberEnabled) {
-            access.forget(dbId)
-        }
-        keyFileSourceUri = remembered?.uri
-        uiState.update {
-            it.copy(
-                infoMessage = UiMessage(
-                    R.string.keyfile_restored_from_memory,
-                    listOf(
-                        copy.displayName.ifBlank { remembered?.displayName.orEmpty() }
-                    )
-                )
-            )
-        }
-        return true
-    }
-
-    /** 旧版全局槽的一句话提示（ISSUE-P2-460 AC①：只提示、绝不载入） */
-    private suspend fun showLegacyHintIfAny(access: KeyFileAccess) {
-        val legacy = access.loadLegacyGlobalHint() ?: return
-        uiState.update {
-            it.copy(
-                infoMessage = UiMessage(
-                    R.string.keyfile_legacy_memory_hint,
-                    listOf(legacy.displayName)
-                )
-            )
-        }
-    }
-
-    /**
-     * 恢复链第二级：本库按库 SAF 记忆现读。
-     * [KeyFileRememberPolicy.canRestore]（记录完整 + 仍持有持久化读授权）不满足即静默降级
-     * 为「未记住」并清除记录：恢复由系统自动发起，不弹错误、不阻断解锁，仅记非敏感日志。
-     */
-    private suspend fun restoreFromMemory(
-        access: KeyFileAccess,
-        dbId: String?,
-        remembered: RememberedKeyFile,
-        rememberEnabled: Boolean
-    ) {
-        val permissionValid = access.hasPersistedReadPermission(remembered.uri)
-        if (!KeyFileRememberPolicy.canRestore(rememberEnabled, remembered, permissionValid)) {
-            debugLog.info(
-                TAG,
-                "密钥文件记忆不可用（偏好=$rememberEnabled，持久授权有效=$permissionValid），静默降级为未记住"
-            )
-            access.forget(dbId)
-            return
-        }
-        // ISSUE-P3-437 AC①：记忆现读期间呈现「正在读取密钥文件…」阶段文案
-        // （冷启动恢复不在 isLoading 窗口内、渲染层自然不挂出；生物识别解封后的现读在窗口内可见）
-        uiState.update { it.copy(loadStage = UnlockStage.READING_KEY_FILE) }
-        try {
-            when (val outcome = access.read(remembered.uri)) {
-                is KeyFileReadResult.Success -> {
-                    if (keyFileUserTouched) {
-                        // 读取期间用户已显式选择其它密钥文件：丢弃恢复结果，尊重用户选择
-                        outcome.bytes.fill(0)
-                        return
-                    }
-                    val displayName = outcome.displayName.ifBlank { remembered.displayName }
-                    try {
-                        adoptKeyFile(outcome.bytes, displayName)
-                    } finally {
-                        outcome.bytes.fill(0)
-                    }
-                    keyFileSourceUri = remembered.uri
-                    uiState.update {
-                        it.copy(
-                            infoMessage = UiMessage(
-                                R.string.keyfile_restored_from_memory,
-                                listOf(displayName)
-                            )
-                        )
-                    }
-                }
-                else -> {
-                    debugLog.warn(TAG, "记忆的密钥文件已不可读（授权有效但读取失败），清除记录并降级为未记住")
-                    access.forget(dbId)
-                }
-            }
-        } finally {
-            uiState.update { it.copy(loadStage = null) }
-        }
+    fun restoreOnResumeIfIdle() {
+        if (!restoreChain.shouldRestoreOnResume()) return
+        debugLog.info(TAG, "解锁页回前台：按当前库记录再恢复密钥文件")
+        restoreJob?.cancel()
+        restoreJob = scope.launch { restoreChain.restoreRememberedKeyFile() }
     }
 
     /**
@@ -363,14 +283,14 @@ internal class KeyFileSessionCoordinator(
      * 切库后不得残留上一库的驻留字节与「已自动载入」提示）。
      *
      * 清零驻留字节、复位来源与「用户显式选择」标记（否则会挡住新库的记忆恢复）、
-     * 清空 UiState 的密钥文件行与一次性提示；随后由调用方按**新库**记录重新恢复，
-     * 恢复提示名与实际加载名恒同源。
+     * 清空 UiState 的密钥文件行与一次性提示；随后由 [resetForActiveVaultAndRestore] 按
+     * **新库**记录重新恢复，恢复提示名与实际加载名恒同源。
      */
     fun onActiveVaultChanged() {
         keyFileData?.fill(0)
         keyFileData = null
         keyFileSourceUri = null
-        keyFileUserTouched = false
+        userTouched = false
         uiState.update {
             it.copy(hasKeyFile = false, keyFileName = "", infoMessage = null, errorMessage = null)
         }
@@ -378,11 +298,25 @@ internal class KeyFileSessionCoordinator(
     }
 
     /**
+     * ISSUE-P3-466 ③：**解锁成功即消费本次选择**——复位「用户显式选择」标记。
+     *
+     * 该标记的语义是「本会话内用户已表达过意图」，它同时会挡住恢复链。解锁成功意味着意图
+     * 已被消费（因子已用于解锁、字节已由 [wipe] 擦除），故此处复位，使随后锁库回到解锁页时
+     * 能按记录重新恢复（[KeyFileRestoreChain.shouldRestoreOnResume] 判据之一）。
+     * 显式**清除**（[clearKeyFile] / [onKeyFileReadFailed]）不在此列——那仍需挡住恢复。
+     */
+    fun consumeSelectionAfterUnlock() {
+        userTouched = false
+    }
+
+    /**
      * 擦除驻留的密钥文件字节与来源引用。
      *
      * 解锁成功后（会话已克隆缓存供保存使用）与 ViewModel 销毁收尾两处调用；
      * 原实现在两处的语句完全一致，此处收敛为单一清零点，清零时机与顺序不变。
-     * 注意：不重置 `keyFileUserTouched`（与原实现一致——用户显式选择在本会话内持续有效）。
+     * 注意：不重置「用户显式选择」标记（与原实现一致——用户显式选择在本会话内持续有效）；
+     * 解锁成功的「消费选择」由 [consumeSelectionAfterUnlock] 单独承担，
+     * 以便销毁路径仍保持原语义。
      */
     fun wipe() {
         keyFileData?.fill(0)
@@ -390,7 +324,7 @@ internal class KeyFileSessionCoordinator(
         keyFileSourceUri = null
     }
 
-    companion object {
-        private const val TAG = "Unlock"
+    private companion object {
+        const val TAG = "Unlock"
     }
 }

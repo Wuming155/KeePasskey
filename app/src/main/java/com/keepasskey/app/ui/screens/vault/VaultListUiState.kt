@@ -69,6 +69,12 @@ data class VaultListUiState(
     val userMessage: UiMessage? = null,
     // H2 整改：存在待解决的同步冲突会话时为 true，驱动「去解决冲突」入口
     val hasPendingConflict: Boolean = false,
+    /**
+     * ISSUE-P3-447 AC③：保存因「库文件被外部修改」被中止且用户尚未处置时为 true，
+     * 驱动列表页的「存在未落库改动」提示——内存树仍持有这些改动、列表照常渲染他们，
+     * 此前页面对此**没有任何说明**（只有全局三选对话框，关掉即无从判断哪些改动没落库）。
+     */
+    val saveBlockedByExternalModification: Boolean = false,
     // H4-只读整改：当前会话以只读模式打开时为 true，禁用新增/编辑/删除入口
     val isReadOnly: Boolean = false,
     val showUsernameInList: Boolean = true,

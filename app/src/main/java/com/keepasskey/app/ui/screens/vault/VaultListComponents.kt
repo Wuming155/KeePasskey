@@ -209,6 +209,45 @@ internal fun PendingConflictBanner(
 }
 
 /**
+ * ISSUE-P3-447 AC③：保存被「库文件被外部修改」中止时的列表页可感知提示。
+ *
+ * 内存树仍持有未落库的改动、列表照常渲染这些条目，此前页面对此**没有任何说明**
+ * （只剩全局三选对话框，关掉即无从判断列表里哪些改动没写进磁盘）。
+ *
+ * 用 `tertiaryContainer` 而非 `errorContainer`：这不是错误弹窗（三选对话框另有承载），
+ * 而是「当前视图与磁盘不一致」的状态说明；文案如实点明保存已中止。
+ */
+@Composable
+internal fun ExternalModificationPendingBanner(modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = stringResource(R.string.vault_list_external_modification_pending),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+/**
  * 面包屑路径导航：根目录 + 各级文件夹，当前层级高亮
  */
 @Composable

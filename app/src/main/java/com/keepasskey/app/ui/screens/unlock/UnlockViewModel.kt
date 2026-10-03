@@ -91,9 +91,6 @@ class UnlockViewModel @Inject constructor(
 
     private var activeDatabaseId: String? = null
 
-    /** ISSUE-P3-464 ②：活动库切换触发的密钥文件复位/恢复任务（新切换取消在途任务，防并发恢复互踩） */
-    private var keyFileRestoreJob: kotlinx.coroutines.Job? = null
-
     /** 密钥文件因子会话协调器（ISSUE-P3-25）：承载 `keyFileData` 全部借用/克隆/清零路径 */
     private val keyFileSession = KeyFileSessionCoordinator(
         scope = viewModelScope,
@@ -164,28 +161,44 @@ class UnlockViewModel @Inject constructor(
             // ISSUE-P3-464 ②：活动库 id 变化检测（见 collect 内复位/恢复分支）
             var lastSeenDbId: String? = null
             vaultRepository.getDatabases().collect { databases ->
-                val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
-                if (active != null) {
-                    activeDatabaseId = active.id
+                // ISSUE-P3-466 ②：**活动库认定只认显式活动项**（`isActive`）。列表刷新瞬时可能
+                // 无显式活动项，此时 `firstOrNull()` 回退只用于**展示**（名称 / 状态 / 快速解锁），
+                // 绝不据此改写 `activeDatabaseId`——否则会把密钥文件记忆与封印凭据错误绑到首项，
+                // 并误触发「活动库切换」复位 / 误恢复别的库（P3-466 疑点①）。
+                val explicitActive = databases.firstOrNull { it.isActive }
+                val displayActive = explicitActive ?: databases.firstOrNull()
+                if (displayActive != null) {
+                    if (explicitActive == null) {
+                        debugLog.info("UnlockVM", "列表暂无显式活动库：沿用上次活动 dbId（回退首项仅用于展示）")
+                    } else {
+                        activeDatabaseId = explicitActive.id
+                    }
                     // ISSUE-P2-460 真机取证：空状态 → 解锁表单切换（弹窗宿主存续判定）只在翻转时记
                     if (lastHasDatabase == false) {
                         debugLog.info("UnlockVM", "库状态翻转: 无库→有库（空状态分支将让位解锁表单）")
                     }
                     lastHasDatabase = true
-                    // Wave 12：快速解锁可用性 = 统一封印存储中存在本库凭据（ISSUE-P1-08 起仅强生物识别路径）
-                    val hasSealedCredential = biometricCredentialStorage?.hasEncryptedCredential(active.id) == true
-                    if (hasSealedCredential) {
-                        // ISSUE-P1-22：常驻声明自愈——确认记录残留而封印密钥实际已为硬件落位时清除标记，
-                        // 避免「降级声明」在硬件设备上误报（null 探测 = 无法证明，保持原状不误清）
-                        refreshQuickUnlockDowngradeFlag(active.id)
+                    // Wave 12：快速解锁可用性 = 统一封印存储中存在本库凭据（ISSUE-P1-08 起仅强生物识别路径）。
+                    // dbId 取显式活动项；无显式活动项时沿用上次 dbId，仍无则按不可用（fail-closed，
+                    // 不拿回退首项的 id 去查别库的封印凭据）
+                    val quickUnlockDbId = explicitActive?.id ?: activeDatabaseId
+                    var hasSealedCredential = false
+                    if (quickUnlockDbId != null) {
+                        hasSealedCredential =
+                            biometricCredentialStorage?.hasEncryptedCredential(quickUnlockDbId) == true
+                        if (hasSealedCredential) {
+                            // ISSUE-P1-22：常驻声明自愈——确认记录残留而封印密钥实际已为硬件落位时清除标记，
+                            // 避免「降级声明」在硬件设备上误报（null 探测 = 无法证明，保持原状不误清）
+                            refreshQuickUnlockDowngradeFlag(quickUnlockDbId)
+                        }
                     }
                     _uiState.update {
                         it.copy(
-                            databaseName = active.name,
-                            databaseStatus = if (active.isRemote) {
-                                strings.get(R.string.unlock_db_status_cloud, active.syncType)
+                            databaseName = displayActive.name,
+                            databaseStatus = if (displayActive.isRemote) {
+                                strings.get(R.string.unlock_db_status_cloud, displayActive.syncType)
                             } else {
-                                strings.get(R.string.unlock_db_status_local, active.path)
+                                strings.get(R.string.unlock_db_status_local, displayActive.path)
                             },
                             isQuickUnlockAvailable = hasSealedCredential,
                             hasDatabase = true
@@ -208,14 +221,11 @@ class UnlockViewModel @Inject constructor(
                 }
                 // ISSUE-P3-464 ②：活动库 id 变化 → 密钥文件表单态复位并按新库记录重新恢复
                 // （恢复提示名与实际加载名恒同源；切库不残留上一库的驻留因子）
+                // 在途恢复任务的取消与编排收口在协调器内（它才持有 viewModelScope）
                 if (activeDatabaseId != lastSeenDbId && activeDatabaseId != null) {
                     lastSeenDbId = activeDatabaseId
                     debugLog.info("UnlockVM", "活动库切换 → 密钥文件表单复位并按新库恢复")
-                    keyFileRestoreJob?.cancel()
-                    keyFileRestoreJob = launch {
-                        keyFileSession.onActiveVaultChanged()
-                        keyFileSession.restoreRememberedKeyFile()
-                    }
+                    keyFileSession.resetForActiveVaultAndRestore()
                 }
                 // ISSUE-P3-01：数据库/封印凭据状态变化后统一重算（与设置流抵达顺序解耦）
                 biometricUnlock.refreshUnlockModeAndAutoPrompt()
@@ -275,6 +285,13 @@ class UnlockViewModel @Inject constructor(
 
     /** 密钥文件读取失败：显式反馈用户，绝不静默忽略（禁止静默失败纪律） */
     fun onKeyFileReadFailed() = keyFileSession.onKeyFileReadFailed()
+
+    /**
+     * ISSUE-P3-466 ③：解锁页**回到前台**（ON_RESUME）时按当前库记录再恢复密钥文件。
+     * 该不该恢复（表单为空 + 非用户显式清除 + 有活动库 + 无在途读取）与任务编排
+     * 全在 [KeyFileSessionCoordinator.restoreOnResumeIfIdle]；本方法只是 Screen 的事件出口。
+     */
+    fun onScreenResumed() = keyFileSession.restoreOnResumeIfIdle()
 
     /** H4-只读整改：切换「只读打开」——开启后本次会话写盘硬拒绝 */
     fun onToggleReadOnly() {

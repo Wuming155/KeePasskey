@@ -47,8 +47,13 @@ internal class SyncCacheMaintenance(
     fun writeBaseContent(remotePath: String, data: ByteArray) {
         val baseFile = getFile(remotePath, SyncCache.SUFFIX_BASE_CACHE)
         val tmpFile = files.tmpFileFor(baseFile)
-        files.writeTmpSynced(tmpFile, data)
-        files.moveAtomically(tmpFile, baseFile)
+        try {
+            files.writeTmpSynced(tmpFile, data)
+            files.moveAtomically(tmpFile, baseFile)
+        } finally {
+            // ISSUE-P3-463：交付失败不得把承载密文片段的 tmp 留在缓存目录（与上/下方同类收口一致）
+            tmpFile.delete()
+        }
     }
 
     /**

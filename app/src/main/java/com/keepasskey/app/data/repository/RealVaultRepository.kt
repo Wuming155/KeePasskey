@@ -13,6 +13,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.security.VaultFileBaselineHolder
 import com.keepasskey.app.security.VaultFileDriftCoordinator
+import com.keepasskey.app.security.VaultFileDriftGuard
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -68,6 +69,9 @@ class RealVaultRepository @Inject constructor(
 ) : VaultRepository {
 
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** ISSUE-P3-447 AC②：保存侧漂移检测 / 基线刷新的单点收口（两通道元数据分流在此） */
+    private val driftGuard = VaultFileDriftGuard(driftCoordinator, context)
 
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
 
@@ -412,31 +416,21 @@ class RealVaultRepository @Inject constructor(
      * begin/end 成对（漏配对会令挂锁永不恢复）；挂起期间的锁定触发延迟至保存结束补执行。
      */
     private suspend fun persistSession(): KdbxResult<Unit> {
-        // ISSUE-P2-378 AC②：保存前外部修改漂移检测——漂移即 fail-closed 中止覆盖，
-        // 唤起 UI 三选（放弃 / 重载 / 合并），禁止静默整树覆盖
+        // ISSUE-P2-378 AC② / ISSUE-P3-447 AC②：保存前外部修改漂移检测——漂移即 fail-closed
+        // 中止覆盖并唤起 UI 三选（放弃 / 重载 / 合并）。本地 File 与 SAF 两通道的元数据分流
+        // 口径收口在 VaultFileDriftGuard（单点，重载 / 合并侧同源）
         val pathId = databaseSession.currentPathIdentifier.orEmpty()
         val localFile = databaseSession.currentFile
-        val drifted = driftCoordinator?.checkDrift(
-            pathIdentifier = pathId,
-            localFile = localFile
-        ) == true
-        if (drifted) {
-            driftCoordinator?.requestPrompt(pathIdentifier = pathId)
+        driftGuard.driftedFailure(pathId, localFile, strings.get(R.string.ext_mod_save_aborted))?.let {
             debugLog.error(TAG, "保存中止：库文件已被外部修改")
-            return KdbxResult.Failure(
-                IllegalStateException("Vault file modified externally"),
-                strings.get(R.string.ext_mod_save_aborted)
-            )
+            return it
         }
         autoLockGuard.beginLongTask()
         try {
             val result = databaseSession.save()
             secretReader.invalidateTotpCache()
             if (result is KdbxResult.Success) {
-                driftCoordinator?.refreshBaselineAfterPersist(
-                    pathIdentifier = pathId,
-                    localFile = localFile
-                )
+                driftGuard.captureAfterPersist(pathId, localFile)
             }
             if (result is KdbxResult.Failure) {
                 debugLog.error(TAG, "数据库保存失败: ${result.error.javaClass.simpleName}")
@@ -465,7 +459,8 @@ class RealVaultRepository @Inject constructor(
 
             com.keepasskey.app.security.ExternalModificationChoice.RELOAD_FROM_DISK,
             com.keepasskey.app.security.ExternalModificationChoice.MERGE_AND_SAVE -> {
-                VaultFileDriftResolve(databaseSession, strings, driftCoordinator).resolve(choice)
+                // ISSUE-P3-447 AC②：SAF 通道的重载 / 合并需要 ContentResolver
+                VaultFileDriftResolve(databaseSession, strings, driftCoordinator, context).resolve(choice)
             }
         }
     }

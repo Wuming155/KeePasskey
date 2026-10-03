@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.security.VaultFileBaselineHolder
+import com.keepasskey.app.security.VaultFileMetadataProbe
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultRemovalKind
@@ -111,11 +112,9 @@ internal class VaultLifecycleCoordinator(
         }
 
         if (result is KdbxResult.Success) {
-            // ISSUE-P2-378 AC①：打开成功后留存基线（本地 File 直读；SAF 用元数据构造）
-            baselineHolder?.capture(
-                pathIdentifier = activeDb.path,
-                file = if (activeDb.path.startsWith("content://")) null else File(activeDb.path)
-            )
+            // ISSUE-P2-378 AC① / ISSUE-P3-447 AC②：打开成功后留存真实元数据基线
+            // （本地 File 直读属性；SAF 取 content:// 文档的 lastModified + size）
+            baselineHolder?.capture(VaultFileMetadataProbe.baselineFor(context, activeDb.path))
             refresh()
         }
         return result
@@ -172,7 +171,8 @@ internal class VaultLifecycleCoordinator(
                     masterPassword = masterPassword,
                     keyFileData = keyFileData,
                     preset = preset,
-                    targetUri = uri
+                    targetUri = uri,
+                    baselineHolder = baselineHolder
                 ) { dbName, path -> importExternalDatabase(dbName, path, SYNC_TYPE_FILE_PICKER) }
             }
         } finally {

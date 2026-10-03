@@ -448,4 +448,55 @@ class UnlockViewModelTest {
         testScheduler.runCurrent()
         assertFalse("告知必须一次性消费，不跨页面残留", second.uiState.value.unsavedEditsDiscardedNotice)
     }
+
+    // ── ISSUE-P3-466 ②：活动库认定只认显式活动项 ─────────────────────────────
+
+    private suspend fun createKeyFileViewModel(repo: FakeVaultRepository): UnlockViewModel {
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember(
+            FakeKeyFileAccess.DEFAULT_DB_ID,
+            FakeKeyFileAccess.KEY_FILE_URI,
+            FakeKeyFileAccess.DISPLAY_NAME
+        )
+        return UnlockViewModel(
+            repo,
+            FakeSettingsRepository(),
+            null,
+            null,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            keyFileAccess = access
+        )
+    }
+
+    @Test
+    fun `列表无显式活动库时不以回退首项恢复密钥文件`() = runTest {
+        // 列表只剩「无 isActive」的条目：展示仍回退首项（库名可见），但 dbId 不得据此改写——
+        // 否则会按首项去恢复密钥文件（P3-466 疑点①：误恢复别的库 / 误触发切换复位）
+        val noActive = FakeVaultRepository.initialMockDatabases.map { it.copy(isActive = false) }
+        val viewModel = createKeyFileViewModel(FakeVaultRepository(initialDatabases = noActive))
+        MainDispatcherGuard.track(viewModel)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        testScheduler.runCurrent()
+
+        assertTrue("展示仍应回退首项（库名可见）", viewModel.uiState.value.hasDatabase)
+        assertFalse(
+            "无显式活动项时不得按回退首项恢复密钥文件（activeDatabaseId 必须保持 null）",
+            viewModel.uiState.value.hasKeyFile
+        )
+    }
+
+    @Test
+    fun `存在显式活动库时按其记录恢复密钥文件`() = runTest {
+        val viewModel = createKeyFileViewModel(FakeVaultRepository())
+        MainDispatcherGuard.track(viewModel)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        testScheduler.runCurrent()
+
+        assertTrue("显式活动库（db_personal）的记录应被恢复", viewModel.uiState.value.hasKeyFile)
+        assertEquals(
+            FakeKeyFileAccess.DISPLAY_NAME,
+            viewModel.uiState.value.keyFileName
+        )
+    }
 }

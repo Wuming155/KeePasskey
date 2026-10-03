@@ -83,10 +83,16 @@ fun UnlockScreen(
     // ISSUE-P3-117：接线「离开密码页清空已输入字符」开关——页面进入后台（ON_STOP）或离开组合
     // （onDispose）时通知 ViewModel 清空**未提交**的主密码缓冲区；是否真的清由该开关与
     // ViewModel 内的偏好判定决定（Screen 不做业务判断，只透传生命周期事件）。
+    // ISSUE-P3-466 ③：ON_RESUME 同样透传——锁库回到解锁页时按当前库记录再恢复密钥文件
+    // （该不该恢复由 ViewModel / 协调器判定，Screen 只转发事件）。
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) viewModel.onScreenLeft()
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.onScreenLeft()
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> viewModel.onScreenResumed()
+                else -> Unit
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {

@@ -347,4 +347,62 @@ class SyncCacheTest {
         assertFalse("旧裸键残留 tmp 亦必须被清（两代键都不得漏）: ${legacyTmp.name}", legacyTmp.exists())
         assertTrue("他人路径的 tmp 不得被越界清理: ${foreignTmp.name}", foreignTmp.isFile)
     }
+
+    // ===== ISSUE-P3-463：交付失败必须自行清理密文 tmp（不得只靠锁库时的清理兜底） =====
+
+    /**
+     * 在 [remotePath] 的 [suffix] 目标位置预置**非空目录**。
+     *
+     * 原子交付的目标是（非空）目录时，`renameTo` 与 `Files.move(REPLACE_EXISTING)` 都必然
+     * 失败——这是让「交付环节失败」在任意平台上都可确定复现的最小手段（无需注入 IO 故障）。
+     */
+    private fun blockTarget(dir: File, remotePath: String, suffix: String): File {
+        val key = SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8))
+        return File(dir, "$key$suffix").apply {
+            mkdirs()
+            File(this, "busy").writeText("x")
+        }
+    }
+
+    /**
+     * ISSUE-P3-463（生产侧）：`writeCache` / `writeCacheStreaming` / `writeBaseContent` 在
+     * **交付失败**（tmp 写入成功但原子替换失败）时，必须自行删除这次写出的 tmp。
+     *
+     * 缘由：这三条路径的 tmp 承载 KDBX **密文片段**；若交付失败即抛出而不清理，密文就留在
+     * `cacheDir/sync` 里，直到下一次锁库 / 凭据清空才被兜底清理——即「在途缓存写未收敛」
+     * 的真实生产形态（`writeStringSafely` / `updateBase` / `receiveRemote` 早已 `finally` 清理，
+     * 这三条是同类缺口）。
+     */
+    @Test
+    fun `交付失败不得把密文tmp留在缓存目录`() {
+        val dir = tmpFolder.newFolder("failed-delivery-cache")
+        val cache = SyncCache(dir)
+        val remotePath = "remote/vault.kdbx"
+        blockTarget(dir, remotePath, SyncCache.SUFFIX_CACHE)
+        blockTarget(dir, remotePath, SyncCache.SUFFIX_BASE_CACHE)
+
+        val outcomes = listOf(
+            "writeCache" to runCatching { cache.writeCache(remotePath, ByteArray(32) { 1 }) }.isFailure,
+            "writeBaseContent" to runCatching {
+                cache.writeBaseContent(remotePath, ByteArray(32) { 2 })
+            }.isFailure,
+            "writeCacheStreaming" to runCatching {
+                cache.writeCacheStreaming(remotePath, ByteArray(32) { 3 }.inputStream(), 32)
+            }.isFailure
+        )
+        assertTrue(
+            "前置：三条交付路径都必须真的失败（否则本用例无鉴别力）: $outcomes",
+            outcomes.all { it.second }
+        )
+
+        val tmpLeftovers = dir.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".tmp") }
+            .map { it.name }
+            .toList()
+        assertEquals(
+            "交付失败后不得残留承载密文片段的 .tmp（ISSUE-P3-463）: $tmpLeftovers",
+            emptyList<String>(),
+            tmpLeftovers
+        )
+    }
 }

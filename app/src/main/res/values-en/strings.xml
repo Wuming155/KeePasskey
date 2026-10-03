@@ -767,6 +767,8 @@
     <string name="ext_mod_merge_failed">Merge failed: %1$s (in-memory edits kept)</string>
     <string name="ext_mod_save_aborted">Save aborted: vault file was modified externally</string>
     <string name="ext_mod_merge_hint_fallback">Merge uses the existing KdbxMerger three-way path; Reload discards unsaved in-memory edits; Abandon skips the write and keeps the current session.</string>
+    <!-- ISSUE-P3-447 AC③: list-page notice while a save is blocked by external modification -->
+    <string name="vault_list_external_modification_pending">Save was aborted: the vault file changed externally — this list may contain changes not yet written to disk</string>
     <!-- ISSUE-P3-382: health check duplicate report -->
     <string name="health_duplicate_title">Duplicate entries</string>
     <string name="health_duplicate_sub">%1$d groups share URL + username; merge them one by one via entry edit or delete</string>

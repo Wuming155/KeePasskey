@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -89,7 +90,10 @@ class VaultListViewModel @Inject constructor(
     private val createEntryPrefill: com.keepasskey.app.ui.screens.edit.CreateEntryPrefillHost? = null,
     // ISSUE-P3-439：高级搜索选项的持久化写通道（与读通道 ExtendedSettingsSource 同一仓库）。
     // null 仅用于纯 JVM 单测；null 时选项仍会话内生效但不落盘（与偏好通道缺位语义一致）
-    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null
+    private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore? = null,
+    // ISSUE-P3-447 AC③：外部修改漂移的待决态（保存被中止时点亮列表页「未落库」提示）。
+    // null 仅用于纯 JVM 单测；生产 DI 注入 @Singleton 真实现（常驻态恒为 false）
+    private val vaultFileDriftCoordinator: com.keepasskey.app.security.VaultFileDriftCoordinator? = null
 ) : ViewModel() {
 
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
@@ -236,6 +240,16 @@ class VaultListViewModel @Inject constructor(
         VaultListFilterParams(query, isSearchActive, sortOption, selectedTag, favoriteOnly)
     }
 
+    /**
+     * ISSUE-P3-447 AC③：外部修改漂移的待决态（**须先于 [batchAndSyncFlow] 声明**，
+     * 否则属性初始化顺序会让后者读到尚未初始化的 null）。
+     *
+     * 取 `VaultFileDriftCoordinator.pending`（保存中止时置位、用户三选处置后清空），
+     * 未装配（纯 JVM 单测）时恒 false——不改变既有状态输出。
+     */
+    private val externalModificationFlow: Flow<Boolean> =
+        vaultFileDriftCoordinator?.pending?.map { it != null } ?: flowOf(false)
+
     private val batchAndSyncFlow = combine(
         actions.isBatchMode,
         actions.selectedEntryIds,
@@ -247,8 +261,10 @@ class VaultListViewModel @Inject constructor(
         state.copy(hasPendingConflict = hasConflict)
     }.combine(isReadOnlyFlow) { state, readOnly ->
         state.copy(isReadOnly = readOnly)
+    }.combine(externalModificationFlow) { state, blocked ->
+        // ISSUE-P3-447 AC③：保存被外部修改中止且尚未处置 ⇒ 列表页提示「含未落库改动」
+        state.copy(saveBlockedByExternalModification = blocked)
     }
-
     /**
      * ISSUE-P3-30：子库只读投影流。
      *

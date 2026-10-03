@@ -1,14 +1,20 @@
 package com.keepasskey.app.data.repository
 
+import android.content.Context
+import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ExternalModificationChoice
+import com.keepasskey.app.security.VaultFileBaseline
 import com.keepasskey.app.security.VaultFileDriftCoordinator
+import com.keepasskey.app.security.VaultFileMetadataProbe
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
 import java.io.File
+import java.io.IOException
+import java.io.InputStream
 
 /**
  * ISSUE-P2-378：漂移后的重载 / 合并执行体（自 `RealVaultRepository.reloadOrMergeAfterDrift` 拆出）。
@@ -17,11 +23,22 @@ import java.io.File
  * - 重载：克隆会话凭据后重新 open 磁盘版本（丢弃内存未落盘改动）；
  * - 合并：读磁盘 → 会话解析 → KdbxMerger 三方合并 → adoptDatabaseIfUnchanged → save；
  * - 任一步失败：保留内存树与脏标记，失败原因原样上浮（KeePassXC 811887e5）。
+ *
+ * `ISSUE-P3-447` AC②：本件同时覆盖**本地 `File` 与 SAF（`content://`）两通道**——
+ * 此前两分支都硬要求 `localFile != null`，SAF 库一旦进入漂移处置就只能得到
+ * 「磁盘库文件不可读」，即「检出漂移却无法重载 / 合并」的死路。现按通道取字节与重开流：
+ * 本地直读文件，SAF 经 `ContentResolver`（与解锁 / 建库共用 [SafVaultCreation] 的写回实现），
+ * 处置成功后的基线刷新同口径分流（本地直读属性 / SAF 取真实文档元数据）。
  */
 internal class VaultFileDriftResolve(
     private val databaseSession: DatabaseSession,
     private val strings: StringsProvider,
-    private val driftCoordinator: VaultFileDriftCoordinator?
+    private val driftCoordinator: VaultFileDriftCoordinator?,
+    /**
+     * `ISSUE-P3-447` AC②：SAF 通道重载 / 合并所需的上下文。null（纯 JVM 单测未装配）时
+     * SAF 通道按「磁盘库文件不可读」fail-closed——不得静默放行。
+     */
+    private val context: Context? = null
 ) {
 
     suspend fun resolve(
@@ -54,11 +71,10 @@ internal class VaultFileDriftResolve(
         pathId: String,
         localFile: File?
     ): KdbxResult<Unit> {
-        if (localFile == null || !localFile.exists()) {
-            return KdbxResult.Failure(
-                IllegalStateException("磁盘库文件不可读"),
-                strings.get(R.string.ext_mod_reload_failed, strings.get(R.string.err_drift_file_unreadable))
-            )
+        val saf = if (localFile == null) safChannel(pathId) else null
+        if (localFile == null && saf == null) return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
+        if (localFile != null && !localFile.exists()) {
+            return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
         }
         var pwdCopy: CharArray? = null
         var keyCopy: ByteArray? = null
@@ -67,13 +83,25 @@ internal class VaultFileDriftResolve(
             keyCopy = key?.copyOf()
         }
         val reload = try {
-            databaseSession.open(localFile, pwdCopy, keyCopy, readOnly = false)
+            if (localFile != null) {
+                databaseSession.open(localFile, pwdCopy, keyCopy, readOnly = false)
+            } else {
+                // SAF：与解锁 / 建库同一条 openStream 通道（写回仍走同一 saveWriter 实现）
+                databaseSession.openStream(
+                    pathIdentifier = pathId,
+                    inputStreamProvider = { saf!!.openInput() },
+                    saveWriter = saf!!.saveWriter,
+                    passwordChars = pwdCopy,
+                    keyFileData = keyCopy,
+                    readOnly = false
+                )
+            }
         } finally {
             pwdCopy?.fill('0')
             keyCopy?.fill(0)
         }
         if (reload is KdbxResult.Success) {
-            driftCoordinator?.refreshBaselineAfterPersist(pathId, localFile)
+            refreshBaseline(pathId, localFile)
         } else {
             driftCoordinator?.requestPrompt(pathId)
         }
@@ -84,13 +112,8 @@ internal class VaultFileDriftResolve(
         pathId: String,
         localFile: File?
     ): KdbxResult<Unit> {
-        if (localFile == null || !localFile.exists()) {
-            return KdbxResult.Failure(
-                IllegalStateException("磁盘库文件不可读"),
-                strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_drift_file_unreadable))
-            )
-        }
-        val diskBytes = localFile.readBytes()
+        val diskBytes = readCurrentBytes(localFile, pathId)
+            ?: return unreadable(ExternalModificationChoice.MERGE_AND_SAVE)
         val diskDb = databaseSession.parseExternalDatabase(diskBytes).getOrThrow()
         val localDb = databaseSession.databaseFlow.value
             ?: return KdbxResult.Failure(
@@ -137,11 +160,58 @@ internal class VaultFileDriftResolve(
         }
         val saveResult = databaseSession.save()
         if (saveResult is KdbxResult.Success) {
-            driftCoordinator?.refreshBaselineAfterPersist(pathId, localFile)
+            refreshBaseline(pathId, localFile)
         } else {
             driftCoordinator?.requestPrompt(pathId)
         }
         diskDb.clearSensitiveData()
         return saveResult
+    }
+
+    /** 处置成功后的基线刷新：本地直读文件属性；SAF 取真实文档元数据（不可读即置空） */
+    private fun refreshBaseline(pathId: String, localFile: File?) {
+        val baseline: VaultFileBaseline? =
+            if (localFile != null) VaultFileBaseline.fromFile(localFile)
+            else VaultFileMetadataProbe.baselineFor(context, pathId)
+        driftCoordinator?.refreshBaselineAfterPersist(baseline)
+    }
+
+    /**
+     * 当前库的**可读字节**（本地 `File` 直读；SAF 经 `ContentResolver` 读入）。
+     * 不可读返回 null，由调用方按 fail-closed 报「磁盘库文件不可读」。
+     */
+    private fun readCurrentBytes(localFile: File?, pathId: String): ByteArray? {
+        if (localFile != null) return if (localFile.exists()) localFile.readBytes() else null
+        val saf = safChannel(pathId) ?: return null
+        return runCatching { saf.openInput().use { it.readBytes() } }.getOrNull()
+    }
+
+    /** SAF 文档句柄（读流 + 写回）；非 `content://` 或未装配上下文时返回 null */
+    private fun safChannel(pathId: String): SafChannel? {
+        val ctx = context ?: return null
+        if (!VaultFileMetadataProbe.isSafPath(pathId)) return null
+        val uri = runCatching { Uri.parse(pathId) }.getOrNull() ?: return null
+        return SafChannel(ctx, uri)
+    }
+
+    private fun unreadable(choice: ExternalModificationChoice): KdbxResult.Failure =
+        KdbxResult.Failure(
+            IllegalStateException("磁盘库文件不可读"),
+            strings.get(
+                if (choice == ExternalModificationChoice.RELOAD_FROM_DISK) R.string.ext_mod_reload_failed
+                else R.string.ext_mod_merge_failed,
+                strings.get(R.string.err_drift_file_unreadable)
+            )
+        )
+
+    /** SAF 文档句柄：读流与写回共用同一 Uri 与上下文（写回实现与解锁 / 建库共用同一份） */
+    private class SafChannel(private val context: Context, private val uri: Uri) {
+
+        fun openInput(): InputStream =
+            context.contentResolver.openInputStream(uri)
+                ?: throw IOException("无法打开数据库文件流")
+
+        val saveWriter: suspend (ByteArray) -> Unit
+            get() = SafVaultCreation.saveWriter(context, uri, uri.lastPathSegment.orEmpty())
     }
 }

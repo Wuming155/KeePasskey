@@ -340,6 +340,11 @@ class DatabasePickerViewModel @Inject constructor(
             if (result is KdbxResult.Success) {
                 // §411（ISSUE-P3-448）：删库成功即清除其密钥文件收编副本（尽力清除，失败不影响回执）
                 keyFileVaultCopyStore?.clear(id)
+                // ISSUE-P3-466 ④：同批清除**按库密钥文件记忆键**——此前删库只清副本，
+                // 按库记忆（`keyfile_remember_*_<dbId摘要>`）成为无主陈旧记录并累积
+                // （真机取证：DataStore 按库记忆 5 条 vs 副本 2 个）。清除后即便同 id 再次建库，
+                // 也不会把「上一个同名库」的密钥文件当成自己的记忆。
+                keyFileAccess?.forget(id)
                 publishPickerMessage(UiMessage(R.string.db_picker_msg_removed))
             } else {
                 publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))

@@ -5,6 +5,7 @@ import com.keepasskey.app.security.KeyFileVaultCopyStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -282,6 +283,59 @@ class KeyFileSessionCoordinatorTest {
         assertEquals(
             com.keepasskey.app.R.string.keyfile_restored_from_memory,
             uiState.value.infoMessage?.resId
+        )
+    }
+
+    // ===== ISSUE-P3-466 ③：解锁页回前台再恢复与「解锁成功消费选择」 =====
+
+    @Test
+    fun `表单非空或用户显式清除时回前台不自动恢复`() = runTest {
+        val access = FakeKeyFileAccess()
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        val (subject, _, _) = coordinatorWithCopy(this, access)
+
+        // ① 表单非空：不重复恢复（否则会覆盖用户当前已加载的因子）
+        subject.onKeyFileSelected(ByteArray(4) { 9 }, "user-picked.keyx")
+        assertFalse("表单已有密钥文件时回前台不得再恢复", subject.shouldRestoreOnResume())
+
+        // ② 用户**显式清除**：即便表单空也必须尊重（非用户显式清除才恢复）
+        subject.clearKeyFile()
+        assertFalse("用户显式清除后回前台不得自动恢复", subject.shouldRestoreOnResume())
+        subject.restoreRememberedKeyFile()
+        assertNull("显式清除后恢复链同样必须被挡住", subject.keyFileData)
+    }
+
+    @Test
+    fun `解锁成功消费选择后回前台按本库记录再恢复`() = runTest {
+        // ISSUE-P3-466 ③回归：解锁成功后表单被 wipe() 清空，锁库回解锁页时同库同 VM
+        // 不满足「活动库切换」条件 ⇒ 此前无处触发恢复，表现为「选择没保存」
+        val access = FakeKeyFileAccess()
+        access.putSource(FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.FAKE_KEY_FILE_BYTES)
+        access.remember("db-1", FakeKeyFileAccess.KEY_FILE_URI, FakeKeyFileAccess.DISPLAY_NAME)
+        val (subject, _, uiState) = coordinatorWithCopy(this, access)
+
+        subject.onKeyFileSelected(FakeKeyFileAccess.KEY_FILE_URI)
+        testScheduler.runCurrent()
+        subject.rememberKeyFileOnSuccess(usedKeyFile = true, displayName = FakeKeyFileAccess.DISPLAY_NAME)
+        // 解锁成功收尾：wipe() 擦字节；UiState 的密钥文件行由 MasterPasswordUnlockSession 置空
+        // （此处按同一终态装配，聚焦协调器自身的判据与恢复链）
+        subject.wipe()
+        uiState.update { it.copy(hasKeyFile = false, keyFileName = "") }
+
+        assertFalse(
+            "「用户显式选择」标记未消费时会一直挡住恢复——这正是「选择没保存」的成因",
+            subject.shouldRestoreOnResume()
+        )
+
+        subject.consumeSelectionAfterUnlock()
+
+        assertTrue("解锁成功后回前台应放行恢复入口", subject.shouldRestoreOnResume())
+        // 放行后驱动真正的裁决链（直接调用，避免即发即弃入口与内部真实 IO 调度交织）
+        subject.restoreRememberedKeyFile()
+        assertArrayEquals(
+            "解锁成功后回前台必须按本库记录重新载入第二因子",
+            FakeKeyFileAccess.FAKE_KEY_FILE_BYTES,
+            subject.keyFileData!!
         )
     }
 

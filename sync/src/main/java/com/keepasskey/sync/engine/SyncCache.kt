@@ -133,9 +133,15 @@ open class SyncCache(
     ): String {
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
         val tmpFile = files.tmpFileFor(cacheFile)
-
-        files.writeTmpSynced(tmpFile, data)
-        files.moveAtomically(tmpFile, cacheFile)
+        try {
+            files.writeTmpSynced(tmpFile, data)
+            files.moveAtomically(tmpFile, cacheFile)
+        } finally {
+            // ISSUE-P3-463：写盘或交付任一步失败都不得把承载密文片段的 tmp 留在缓存目录
+            // （`delete` 幂等：交付成功后该路径已不存在）。与 [SyncCacheFiles.writeStringSafely] /
+            // [SyncCacheMaintenance.updateBase] / [receiveRemote] 的同类收口口径一致。
+            tmpFile.delete()
+        }
 
         val sha256 = precomputedDigest ?: sha256Hex(data)
         if (updateVersion) {
@@ -243,24 +249,29 @@ open class SyncCache(
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
         val tmpFile = files.tmpFileFor(cacheFile)
         val digest = MessageDigest.getInstance("SHA-256")
-        FileOutputStream(tmpFile).use { fos ->
-            // ISSUE-P3-202：先收敛再写——密文自落盘第一字节起即仅属主可见（原实现写完全量后才收敛）
-            files.restrictToOwnerOnly(tmpFile, isDirectory = false)
-            val buffer = ByteArray(STREAM_BUFFER_BYTES)
-            var remaining = size
-            while (remaining > 0) {
-                val toRead = minOf(buffer.size.toLong(), remaining).toInt()
-                val read = input.read(buffer, 0, toRead)
-                if (read < 0) throw EOFException("输入流数据不足：期望 $size 字节，尚缺 $remaining")
-                fos.write(buffer, 0, read)
-                digest.update(buffer, 0, read)
-                remaining -= read
+        try {
+            FileOutputStream(tmpFile).use { fos ->
+                // ISSUE-P3-202：先收敛再写——密文自落盘第一字节起即仅属主可见（原实现写完全量后才收敛）
+                files.restrictToOwnerOnly(tmpFile, isDirectory = false)
+                val buffer = ByteArray(STREAM_BUFFER_BYTES)
+                var remaining = size
+                while (remaining > 0) {
+                    val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                    val read = input.read(buffer, 0, toRead)
+                    if (read < 0) throw EOFException("输入流数据不足：期望 $size 字节，尚缺 $remaining")
+                    fos.write(buffer, 0, read)
+                    digest.update(buffer, 0, read)
+                    remaining -= read
+                }
+                fos.flush()
+                fos.fd.sync()
             }
-            fos.flush()
-            fos.fd.sync()
+            files.restrictToOwnerOnly(tmpFile, isDirectory = false)
+            files.moveAtomically(tmpFile, cacheFile)
+        } finally {
+            // ISSUE-P3-463：写中断（流不足 / IO 异常）与交付失败的退出路径都必须自清 tmp
+            tmpFile.delete()
         }
-        files.restrictToOwnerOnly(tmpFile, isDirectory = false)
-        files.moveAtomically(tmpFile, cacheFile)
 
         val sha256 = digest.digest().toHexString()
         files.writeStringSafely(getFile(remotePath, SUFFIX_VERSION), sha256)

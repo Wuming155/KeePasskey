@@ -214,4 +214,30 @@ class DatabasePickerViewModelTest {
         // 不得被 ViewModel 二次判定或吞掉
         assertEquals(VaultRemovalKind.PRIVATE_FILE, repo.lastRemovalKind)
     }
+
+    @Test
+    fun `移除数据库同时清除其按库密钥文件记忆键`() = runTest {
+        // ISSUE-P3-466 ④：删库此前只清副本，按库记忆键（keyfile_remember_*_<dbId摘要>）成为
+        // 无主陈旧记录并累积（真机取证：DataStore 按库记忆 5 条 vs 副本 2 个）
+        val access = com.keepasskey.app.ui.screens.unlock.FakeKeyFileAccess()
+        access.remember(
+            "db_work",
+            com.keepasskey.app.ui.screens.unlock.FakeKeyFileAccess.KEY_FILE_URI,
+            com.keepasskey.app.ui.screens.unlock.FakeKeyFileAccess.DISPLAY_NAME
+        )
+        val viewModel = DatabasePickerViewModel(FakeVaultRepository(), keyFileAccess = access)
+        MainDispatcherGuard.track(viewModel)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.uiState.collect {} }
+        testScheduler.runCurrent()
+
+        viewModel.removeDatabase("db_work", VaultRemovalKind.PRIVATE_FILE)
+        testScheduler.runCurrent()
+
+        assertEquals("删库必须同批清按库密钥文件记忆键", 1, access.forgetCount)
+        assertEquals(
+            "被删库名下不得再残留记忆",
+            "",
+            access.persistedKeyFileUri("db_work")
+        )
+    }
 }
