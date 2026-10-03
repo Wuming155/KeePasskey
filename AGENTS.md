@@ -42,10 +42,15 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
       （清单与条数随 `hygiene-gate` 段落自动解析，**本文件不写死**）方准入库；
       批次文档须**原样粘贴该脚本输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
       「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因，§308 立规。
+      **装机走查前置（§434 立规）**：先跑 `python tools/device/check_installed_build.py --expect-symbol <本批新增符号>`——
+      设备上跑的**不一定**是你刚打的那份包；「回执成功 + 新 UI 不存在」与真缺陷**外观完全一致**，§434 实测白走一轮。
    3. **流转归档**：整条**剪切**出 `ACTIVE_ISSUES.md` → `RESOLVED_LOG.md` 加一行 → `docs/resolved/batches/` 新增
       `<NN>-<中文短名>.md`（原样收录，编号续用不复用）。
    4. **提交推送**：文档与代码**同一次 `git commit`** 并**立即 `git push`**；信息以 `TASK-xx` / `ISSUE-xx` 引用并简述主题。
       **代理直接执行，无须再征询**（2026-09-17 用户明示约定：完成整改+验证即提交推送）。
+      **按本次任务的路径清单显式 `git add`**——`git add -A` / `git add .` 会把同一工作区里**别人的在途改动**
+      卷进你的提交（§434 实测：一条标题写「仅登记，未动代码」的提交带走了 9 个代码文件）。
+      同一工作区**不并行**两条代理工作线（确需并行用 `git worktree add` 各占目录）——并发提交 / 重置会互相撤销。
 7. **善用 MCP 知识服务器（强制）**：Android / Jetpack / Kotlin / Gradle / 加密库 / Google 平台 API → `google-developer-knowledge`；
    第三方库与框架（Compose / Hilt / OkHttp 等）→ Context7（`resolve-library-id` + `query-docs`）；**不得凭记忆臆测或盲改**，
    调用前先取该服务器各工具的最新参数 schema。
@@ -103,6 +108,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python tools/doc/gate_readings.py` — **门禁读数单点采集**（§308 立规；清单**直接解析**
   `.github/workflows/build.yml` 的 `hygiene-gate` 段落，故与 CI 不可能漂移；任一条非 0 即退出码 1，
   解析不到命令同样报红）。**每批结案前跑它，并把输出原样贴入批次文档 §3**
+- `python tools/device/check_installed_build.py [--expect-symbol <符号>] [--selftest]` — **装机走查前置读数**（§434 立规）：
+  核对设备包 `lastUpdateTime` **不早于**本地 APK mtime，**且** APK 的 `classes*.dex` 内含指定符号；
+  无 adb / 无设备 / 无包信息一律退出码 **2**（**不得**当绿）。`--selftest` 为口径反校（含反面样本）
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
   / `python tools/doc/logic_lines.py <文件> <函数名>` / `python tools/doc/count_test_results.py`
   / `python tools/doc/check_resolved_index_sync.py` / `python tools/doc/check_bounded_type_names.py`
