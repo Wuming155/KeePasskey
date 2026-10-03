@@ -39,7 +39,7 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 6. **极简闭环工作流（认领 → 整改+验证 → 流转归档 → 提交推送）**：
    1. **认领**：从 `ACTIVE_ISSUES.md` 顶部按优先级认领；发现新问题即时补登（**严禁只记聊天或脑中**），新条目附「核实时间点 + 核实方式」。
    2. **整改 + 验证**：`.\gradlew.bat test` 全绿（含相关回归）**且** `python tools/doc/gate_readings.py` **全 PASS**
-      （条数随 `hygiene-gate` 段落自动解析，当前 **8/8**）方准入库；
+      （清单与条数随 `hygiene-gate` 段落自动解析，**本文件不写死**）方准入库；
       批次文档须**原样粘贴该脚本输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
       「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因，§308 立规。
    3. **流转归档**：整条**剪切**出 `ACTIVE_ISSUES.md` → `RESOLVED_LOG.md` 加一行 → `docs/resolved/batches/` 新增
@@ -132,10 +132,10 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
 - CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言 / 复核 / 类型名 /
-  Box 内容槽机检的 **fail-closed 硬门禁**（§281，§285 扩至七条，`ISSUE-P3-337` 扩至八条）：`count_line_tiers` +
-  `long_functions` + `check_md_links` +
-  `check_resolved_index_sync` + `check_tautological_assertions` + `check_recheck_consistency` +
-  `check_bounded_type_names` + `check_box_slot_children`，非 0 即红；**严禁** `|| true` 吞掉
+  Box 内容槽 / 启动语言种子接线机检的 **fail-closed 硬门禁**：`count_line_tiers` + `long_functions` +
+  `check_md_links` + `check_resolved_index_sync` + `check_tautological_assertions` + `check_recheck_consistency` +
+  `check_bounded_type_names` + `check_box_slot_children` + `check_launch_language_seed`，非 0 即红；
+  **严禁** `|| true` 吞掉（**条数不写死**：以 `gate_readings.py` 现跑读数为准）
 - `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；
   PowerShell 直接可跑。历史命令 `bash …/check_recheck_consistency.sh` 仍可用，薄封装调本文件）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`
