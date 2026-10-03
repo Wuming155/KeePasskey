@@ -74,8 +74,6 @@ class CredentialUnlockPresenter @Inject constructor(
                     LocalConfiguration provides localizedConfiguration
                 ) {
                     UnlockScreen(
-                        currentTheme = settings.themeMode,
-                        onThemeToggle = { /* 凭据创建窗口不提供主题切换 */ },
                         onUnlockSuccess = { onUnlocked() },
                         onNavigateToDatabasePicker = { /* 凭据创建窗口不提供库切换导航 */ }
                     )

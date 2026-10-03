@@ -10,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiMessage
-import com.keepasskey.app.ui.theme.AppThemeMode
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 // （§392 自 UnlockScreen.kt 逐字搬移：该文件因 ISSUE-P3-427 新增一枚导航回调越入 400~500 档，
@@ -28,8 +27,6 @@ internal fun UnlockContentPreview() {
                 unlockMode = UnlockMode.STANDARD,
                 isQuickUnlockAvailable = true
             ),
-            currentTheme = AppThemeMode.SYSTEM,
-            onThemeToggle = {},
             onPasswordChange = {},
             onTogglePasswordVisibility = {},
             onSelectKeyFile = {},
@@ -60,8 +57,6 @@ internal fun UnlockContentAbnormalCloseNoticePreview() {
                 isQuickUnlockAvailable = true,
                 lastSessionAbnormalCloseNotice = true
             ),
-            currentTheme = AppThemeMode.SYSTEM,
-            onThemeToggle = {},
             onPasswordChange = {},
             onTogglePasswordVisibility = {},
             onSelectKeyFile = {},
@@ -102,8 +97,6 @@ internal fun UnlockContentErrorWithKeyFileInfoPreview() {
                 errorMessage = UiMessage(R.string.sec_biometric_auth_failed),
                 infoMessage = UiMessage(R.string.keyfile_restored_from_memory, listOf("usr.dat"))
             ),
-            currentTheme = AppThemeMode.SYSTEM,
-            onThemeToggle = {},
             onPasswordChange = {},
             onTogglePasswordVisibility = {},
             onSelectKeyFile = {},

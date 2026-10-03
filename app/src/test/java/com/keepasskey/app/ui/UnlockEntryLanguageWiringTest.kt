@@ -119,14 +119,17 @@ class UnlockEntryLanguageWiringTest {
 
     @Test
     fun `既有设置读取链不因语言覆盖被顺带改动（AC③）`() {
+        // §436 走查回执②留痕：解锁页主题切换胶囊移除（主题口径收敛到设置页），
+        // 三处独立解锁入口的 `UnlockScreen` 调用随之删除 `currentTheme = settings.themeMode`
+        // 实参——「themeMode 读取」锚点随功能移除而过时，**设置读取链本体锚点**
+        // （`getSettings().first()`）保留，AC③「不得顺带改动设置读取链」的判据强度不变。
         mapOf(
             AUTOFILL_UNLOCK to autofillUnlock,
             CREDENTIAL_UNLOCK to credentialUnlock,
             CREDENTIAL_PRESENTER to credentialPresenter
         ).forEach { (path, source) ->
             listOf(
-                "settingsRepository.getSettings().first()" to 1,
-                "currentTheme = settings.themeMode" to 1
+                "settingsRepository.getSettings().first()" to 1
             ).forEach { (anchor, lowerBound) ->
                 val count = source.occurrencesOf(anchor)
                 assertTrue(
@@ -136,6 +139,13 @@ class UnlockEntryLanguageWiringTest {
                 )
             }
         }
+        // 主外壳仍经既有设置链读 themeMode（VaultList 等页面仍消费主题切换；
+        // 主外壳实参形如 `themeMode = appSettings.themeMode`，锚定该形态）
+        assertTrue(
+            "[$APP_SHELL] 主外壳锚点「themeMode = appSettings.themeMode」解析出 " +
+                "${appShell.occurrencesOf("themeMode = appSettings.themeMode")} 处，期望 >= 1",
+            appShell.occurrencesOf("themeMode = appSettings.themeMode") >= 1
+        )
     }
 
     // ===== 基础设施 =====

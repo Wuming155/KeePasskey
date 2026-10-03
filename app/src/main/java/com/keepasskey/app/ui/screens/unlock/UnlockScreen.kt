@@ -41,20 +41,17 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
-import com.keepasskey.app.ui.components.ThemeToggleCapsule
 import com.keepasskey.app.ui.screens.database.DatabasePickerViewModel
-import com.keepasskey.app.ui.theme.AppThemeMode
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.HeroTitleStyle
 import com.keepasskey.app.ui.unwrapToFragmentActivity
 
 /**
  * 有状态解锁页面（Route），负责收集 ViewModel 状态与事件转发
+ * （§436 走查回执②：主题切换胶囊自解锁页移除——主题口径收敛到设置页，Route 相应删除两参数）
  */
 @Composable
 fun UnlockScreen(
-    currentTheme: AppThemeMode,
-    onThemeToggle: () -> Unit,
     onUnlockSuccess: () -> Unit,
     modifier: Modifier = Modifier,
     onNavigateToDatabasePicker: () -> Unit = {},
@@ -132,8 +129,6 @@ fun UnlockScreen(
 
     UnlockContent(
         uiState = uiState,
-        currentTheme = currentTheme,
-        onThemeToggle = onThemeToggle,
         onPasswordChange = viewModel::onPasswordChangeSecure,
         onTogglePasswordVisibility = viewModel::onTogglePasswordVisibility,
         onSelectKeyFile = { keyFilePickerLauncher.launch(arrayOf("*/*")) },
@@ -161,8 +156,6 @@ fun UnlockScreen(
 @Composable
 fun UnlockContent(
     uiState: UnlockUiState,
-    currentTheme: AppThemeMode,
-    onThemeToggle: () -> Unit,
     onPasswordChange: (CharArray) -> Unit,
     onTogglePasswordVisibility: () -> Unit,
     onSelectKeyFile: () -> Unit,
@@ -203,18 +196,8 @@ fun UnlockContent(
                 )
         )
 
-        // 右上角快速主题切换
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp, end = 20.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
-            ThemeToggleCapsule(
-                currentTheme = currentTheme,
-                onThemeToggle = onThemeToggle
-            )
-        }
+        // §436 走查回执②：右上角主题切换胶囊移除（主题口径收敛到设置页，
+        // ThemeToggleCapsule 组件本体保留于 ui/components 供后续复用）
 
         Column(
             modifier = Modifier

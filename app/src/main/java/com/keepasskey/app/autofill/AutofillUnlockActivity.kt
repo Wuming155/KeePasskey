@@ -135,8 +135,6 @@ class AutofillUnlockActivity : FragmentActivity() {
                     LocalConfiguration provides localizedConfiguration
                 ) {
                     UnlockScreen(
-                        currentTheme = settings.themeMode,
-                        onThemeToggle = { /* 自动填充解锁场景不提供主题切换 */ },
                         onUnlockSuccess = { chainToPicker() },
                         onNavigateToDatabasePicker = { /* 自动填充解锁场景不提供库切换导航 */ }
                     )

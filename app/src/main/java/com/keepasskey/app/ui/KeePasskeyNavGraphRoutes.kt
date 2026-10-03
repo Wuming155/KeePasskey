@@ -42,8 +42,6 @@ internal fun NavGraphBuilder.unlockRoute(
         popExitTransition = motion.topLevelExitTransition
     ) {
         UnlockScreen(
-            currentTheme = themeMode,
-            onThemeToggle = toggleTheme,
             onUnlockSuccess = {
                 autoLockManager?.onUnlockSuccess()
                 // ISSUE-P3-359 AC③：launchSingleTop 按 route pattern 匹配栈顶，
