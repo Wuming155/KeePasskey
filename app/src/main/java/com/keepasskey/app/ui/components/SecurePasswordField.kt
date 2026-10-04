@@ -119,6 +119,12 @@ fun SecurePasswordField(
         onDispose { wipeSecret() }
     }
 
+    // ISSUE-P3-472：本组件的 `OutlinedTextField` 是 **String 重载**，该重载**没有**
+    // `contentPadding` 参数（仅 `state: TextFieldState` 重载有）⇒ 调用方**不能**通过收窄内边距
+    // 来为硬限定的行高腾出正文空间。M3 会从正文可用高度里**无条件**扣掉 `supportingText` 槽的
+    // 固有高度（≈20dp，与槽内是否有文案无关）与上下内边距（无标签时各 16dp）⇒
+    // **调用方必须保证行高 ≥ 56dp + supporting 槽固有高度**，否则正文区被压成 0 高度，
+    // 占位提示与键入内容都画不出来（`ISSUE-P3-472` 真机实证 + `TextFieldImpl.kt` 逐行核对）。
     OutlinedTextField(
         value = displayText,
         onValueChange = { newValue ->

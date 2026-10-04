@@ -215,6 +215,20 @@ internal fun UnlockPasswordSupportingText(uiState: UnlockUiState) {
 }
 
 /**
+ * `ISSUE-P3-472`：「主密码 supported 槽是否有内容」的判据，与 [UnlockPasswordSupportingText]
+ * 的四条渲染分支**逐条对齐**（该函数里的每一行都由这里列出的三个状态之一驱动）。
+ *
+ * 用途：调用方据此决定**要不要挂** `supportingText` 槽——M3 会为**空槽**也预留固有高度
+ * （≈20dp，`TextFieldImpl.kt` 的 `supportingIntrinsicHeight` 与槽内是否有文案无关），
+ * 空挂会把行高从 56dp 抬到 76dp。改 [UnlockPasswordSupportingText] 的分支时**必须同批改本判据**，
+ * 否则会出现「文案在场却没预留空间（被裁）」或「空槽白占高度」。
+ */
+internal fun hasUnlockPasswordSupportingText(uiState: UnlockUiState): Boolean =
+    uiState.throttleLockoutRemainingMs > 0L ||
+        uiState.errorMessage != null ||
+        uiState.infoMessage != null
+
+/**
  * 完整主密码解锁区（§436 重排为原型布局：分组卡〔数据库行 + 扁平主密码行〕→
  * 高级认证凭证折叠卡〔密钥文件 / 只读开关〕→ 底部主操作）。
  *
@@ -248,14 +262,25 @@ internal fun UnlockStandardUnlockContent(
                 ) {
                     // 完整主密码输入框（SecurePasswordField：显示 String 仅存活于组件内部，
                     // CharArray 直达 ViewModel；embeddedFlat = 无边框行形态）
-                    // §436 走查回执①：默认 56dp 主体在分组卡内偏高，压到 48dp 紧凑档
-                    // （MD3 dense 档；leading icon 24dp 在上下 8dp 内容边距内不裁剪）
+                    // ISSUE-P3-472（真机确认的缺陷，取代 §436 走查回执① 的 48dp 硬高度上限）：
+                    // M3 的 `supportingIntrinsicHeight` 会把 supportingText 槽的**固有高度**
+                    //（≈20dp，与槽内有没有文案无关）连同上下内边距（无标签各 16dp）**无条件**从正文
+                    // 可用高度里扣掉；`.height(48.dp)` 硬压时 48−32−20 ≤ 0 ⇒ 正文区被压成 **0 高度**，
+                    // 占位提示与用户键入的内容都画不出来（真机 + `TextFieldImpl.kt` 逐行核对）。
+                    // `SecurePasswordField` 用的是 `OutlinedTextField` 的 **String 重载**，无
+                    // `contentPadding` 参数 ⇒ 无法靠收窄内边距腾空间（编译期验证）⇒ **必须**解除硬上限。
+                    // 同批把 supporting 槽改为**有文案才挂**：否则空槽也白占 20dp，行高会堆到 76dp；
+                    // 条件挂载后常态行高 = M3 自然高 56dp（原 48dp，+8dp），有提示时按需变高。
                     SecurePasswordField(
                         label = null,
                         placeholder = stringResource(R.string.unlock_master_password_hint),
                         onPasswordChanged = onPasswordChange,
                         isError = uiState.errorMessage != null,
-                        supportingText = { UnlockPasswordSupportingText(uiState) },
+                        supportingText = if (hasUnlockPasswordSupportingText(uiState)) {
+                            { UnlockPasswordSupportingText(uiState) }
+                        } else {
+                            null
+                        },
                         isPasswordVisible = uiState.isPasswordVisible,
                         onToggleVisibility = onTogglePasswordVisibility,
                         onDone = onUnlock,
@@ -263,9 +288,7 @@ internal fun UnlockStandardUnlockContent(
                         wipeToken = uiState.clearPasswordFieldToken,
                         leadingIcon = Icons.Default.Lock,
                         embeddedFlat = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }

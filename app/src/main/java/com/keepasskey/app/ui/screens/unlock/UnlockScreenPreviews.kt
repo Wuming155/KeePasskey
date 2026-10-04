@@ -6,7 +6,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiMessage
@@ -235,6 +239,77 @@ internal fun UnlockVaultGroupCardPreview() {
                         onToggleVisibility = {},
                         leadingIcon = Icons.Default.Lock,
                         embeddedFlat = true
+                    )
+                }
+            }
+        )
+    }
+}
+
+/**
+ * `ISSUE-P3-472` AC③：标准解锁页主密码行「未聚焦 / 聚焦 × 空值」两态预览（`ISSUE-P3-340` 口径）。
+ *
+ * 此前该行**只有** `UnlockVaultGroupCardPreview` 一态（未复刻生产的 `.height(48.dp)` 约束），
+ * 而 §438 走查在**生产形态**（`UnlockStandardUnlockContent`）的导出图上扫到该行「零文案像素」——
+ * 「48dp 高度上限」与「聚焦态」两个变量混在一起无法归因。故此处逐项复刻生产形态：
+ * 同样的 `UnlockVaultGroupCard` 嵌套、同样的 `placeholder = unlock_master_password_hint`、
+ * 同样的 `.height(48.dp)` 紧凑档（§436 走查回执①），只把「聚焦」做成两张图。
+ *
+ * 聚焦态经 `FocusRequester` + `LaunchedEffect` 强制取得（`SecurePasswordField` 不暴露焦点参数，
+ * 焦点由 M3 内部 `InteractionSource` 驱动）；预览渲染器若不执行该效果，两张图会等价——
+ * 这正是**必须真机先行**（`ISSUE-P3-472` AC①）的原因，不得据此推定为渲染器限界。
+ */
+@androidx.compose.ui.tooling.preview.Preview(name = "主密码行（未聚焦 + 空值）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "主密码行（未聚焦 + 空值）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockPasswordRowUnfocusedPreview() {
+    UnlockPasswordRowStatePreview(focused = false)
+}
+
+@androidx.compose.ui.tooling.preview.Preview(name = "主密码行（聚焦 + 空值）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "主密码行（聚焦 + 空值）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockPasswordRowFocusedPreview() {
+    UnlockPasswordRowStatePreview(focused = true)
+}
+
+@Composable
+private fun UnlockPasswordRowStatePreview(focused: Boolean) {
+    val focusRequester = remember { FocusRequester() }
+    if (focused) {
+        LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    }
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        UnlockVaultGroupCard(
+            databaseRow = {
+                UnlockDatabaseRow(
+                    name = "phellords.kdbx",
+                    status = "本地存储 · 42 个凭据",
+                    onOpen = {},
+                    onSwitchTap = {}
+                )
+            },
+            passwordRow = {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    com.keepasskey.app.ui.components.SecurePasswordField(
+                        label = null,
+                        placeholder = androidx.compose.ui.res.stringResource(R.string.unlock_master_password_hint),
+                        onPasswordChanged = {},
+                        isError = false,
+                        supportingText = null,
+                        isPasswordVisible = false,
+                        onToggleVisibility = {},
+                        onDone = {},
+                        wipeToken = null,
+                        leadingIcon = Icons.Default.Lock,
+                        embeddedFlat = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester)
                     )
                 }
             }
