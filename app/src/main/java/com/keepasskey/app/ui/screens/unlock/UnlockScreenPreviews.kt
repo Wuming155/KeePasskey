@@ -42,6 +42,37 @@ internal fun UnlockContentPreview() {
     }
 }
 
+// §438：极速解锁页此前**没有**页面级预览（只有 STANDARD 形态的 `UnlockContentPreview` 与卡片级预览），
+// 而用户走查投诉的正是这一屏——动作卡落底锚定后，卡片与品牌区的相对位置在导出图上可直接查。
+// 提示态取真机同形（截图为「上次会话未正常关闭」提示在场时拍的）。
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页（极速解锁）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页（极速解锁）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockContentQuickUnlockPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        UnlockContent(
+            uiState = UnlockUiState().copy(
+                hasDatabase = true,
+                databaseName = "Preview Vault.kdbx",
+                databaseStatus = "Ready",
+                unlockMode = UnlockMode.QUICK_UNLOCK,
+                lastSessionAbnormalCloseNotice = true
+            ),
+            onPasswordChange = {},
+            onTogglePasswordVisibility = {},
+            onSelectKeyFile = {},
+            onClearKeyFile = {},
+            onToggleReadOnly = {},
+            onSwitchMode = {},
+            onUnlock = {},
+            onBiometricUnlock = {},
+            onDowngradeDecision = {},
+            onNavigateToDatabasePicker = {},
+            onOpenExistingVault = {}
+        )
+    }
+}
+
 // ISSUE-P3-438：一次性轻提示态（上次会话未正常关闭）——预览画反向态，保证该态非真机不可见
 @androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 会话未正常关闭提示 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 会话未正常关闭提示 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)

@@ -10,14 +10,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -172,6 +176,10 @@ fun UnlockContent(
     onCreateNewVault: () -> Unit = onNavigateToDatabasePicker
 ) {
     val scrollState = rememberScrollState()
+    // §438：动作区落底只对「有库 + 快速解锁」这一屏生效——该屏内容短、无 IME 交互，剩余高度充裕；
+    // 标准解锁页的主密码行与 IME 耦合（键盘开合会把空隙在 0 与满之间反复挤压，白造一次跳动），
+    // 空状态则维持 §436 的 Logo 置顶形态。
+    val anchorsActionAtBottom = uiState.hasDatabase && uiState.unlockMode == UnlockMode.QUICK_UNLOCK
 
     Box(
         modifier = modifier
@@ -204,12 +212,20 @@ fun UnlockContent(
                 .fillMaxSize()
                 // P0 整改：官方 edge-to-edge 约束下 imePadding 必须置于 verticalScroll 之前，
                 // 使滚动容器先被 IME 压缩高度再滚动；置于其后会导致容器不参与避让、输入框被键盘遮挡。
-                .imePadding()
+                // §438：改取「导航栏 ∪ IME」并集——动作卡落底后，只有 24dp 内边距的底部会被导航栏 /
+                // 手势条压住（三键导航下可达 48dp）；并集逐边取最大值，键盘弹起时不会与键盘高度叠加，
+                // 故本改动仍满足上述 P0 口径（仍是滚动容器**之前**的避让）。
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                 .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            // §436 走查回执③：内容整体上移——由垂直居中改为顶部对齐
-            verticalArrangement = Arrangement.Top
+            // §436 走查回执③：内容整体上移——由垂直居中改为顶部对齐。
+            // §438 改判（仅快速解锁页）：动作卡落底拇指区——品牌组顶锚、卡片贴底，剩余高度由两者间的空隙吸收。
+            // 机制：`fillMaxSize` 的最小高度约束会**穿过** `verticalScroll` 抵达本列
+            // （foundation `Scroll.kt` 的 `ScrollNode.measure` 只改写 `maxHeight`，`minHeight` 原样下传），
+            // 内容不足一屏时本列仍有一屏高，`SpaceBetween` 才分得出空隙；内容超一屏时无空隙可分
+            // ⇒ 退化为顶部对齐 + 滚动，与改版前逐像素一致。
+            verticalArrangement = if (anchorsActionAtBottom) Arrangement.SpaceBetween else Arrangement.Top
         ) {
             if (!uiState.hasDatabase) {
                 UnlockVaultLogo(uiState = uiState)
@@ -222,50 +238,57 @@ fun UnlockContent(
                     onCreateNewVault = onCreateNewVault
                 )
             } else {
-                // §436 走查回执②：锁块缩小并与标题同行（标题左侧）
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    UnlockVaultLogo(uiState = uiState)
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_title) else stringResource(R.string.unlock_title),
-                        style = HeroTitleStyle,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                }
+                // §438：品牌区整组（锁块 + 标题 + 状态胶囊 + 一次性提示）——外层 Column 的直接子节点
+                // 收敛为「品牌组 / 动作组」两个，`SpaceBetween` 的空隙才落在两者之间。
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // §436 走查回执②：锁块缩小并与标题同行（标题左侧）
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        UnlockVaultLogo(uiState = uiState)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) stringResource(R.string.unlock_quick_title) else stringResource(R.string.unlock_title),
+                            style = HeroTitleStyle,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                // §436：副标题改绘为「状态胶囊」（点 + 文案），文案仍按实测安全等级条件渲染——
-                // ISSUE-P2-285 AC①：软件级降级态（quickUnlockDowngraded）下如实呈现「无硬件隔离」，
-                // 禁硬件 / 软件一律渲染硬件文案
-                val subtitleText = when {
-                    uiState.unlockMode != UnlockMode.QUICK_UNLOCK -> stringResource(R.string.unlock_subtitle)
-                    uiState.quickUnlockDowngraded -> stringResource(R.string.unlock_quick_subtitle_software)
-                    else -> stringResource(R.string.unlock_quick_subtitle)
-                }
-                UnlockStatusPill(subtitle = subtitleText)
+                    // §436：副标题改绘为「状态胶囊」（点 + 文案），文案仍按实测安全等级条件渲染——
+                    // ISSUE-P2-285 AC①：软件级降级态（quickUnlockDowngraded）下如实呈现「无硬件隔离」，
+                    // 禁硬件 / 软件一律渲染硬件文案
+                    val subtitleText = when {
+                        uiState.unlockMode != UnlockMode.QUICK_UNLOCK -> stringResource(R.string.unlock_subtitle)
+                        uiState.quickUnlockDowngraded -> stringResource(R.string.unlock_quick_subtitle_software)
+                        else -> stringResource(R.string.unlock_quick_subtitle)
+                    }
+                    UnlockStatusPill(subtitle = subtitleText)
 
-                Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
-                // ISSUE-P3-438：上次会话未正常关闭（进程死亡时库仍处于解锁态）的一次性轻提示——
-                // 文案如实中性，不渲染为错误告警（onSurfaceVariant，区别于下方丢弃编辑的 error 色）
-                if (uiState.lastSessionAbnormalCloseNotice) {
-                    Text(
-                        text = stringResource(R.string.unlock_last_session_abnormal_close),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
+                    // ISSUE-P3-438：上次会话未正常关闭（进程死亡时库仍处于解锁态）的一次性轻提示——
+                    // 文案如实中性，不渲染为错误告警（onSurfaceVariant，区别于下方丢弃编辑的 error 色）
+                    if (uiState.lastSessionAbnormalCloseNotice) {
+                        Text(
+                            text = stringResource(R.string.unlock_last_session_abnormal_close),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
 
-                // ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知（UnlockViewModel.init 消费注册表后置位）
-                if (uiState.unsavedEditsDiscardedNotice) {
-                    Text(
-                        text = stringResource(R.string.unlock_unsaved_edits_discarded),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    // ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知（UnlockViewModel.init 消费注册表后置位）
+                    if (uiState.unsavedEditsDiscardedNotice) {
+                        Text(
+                            text = stringResource(R.string.unlock_unsaved_edits_discarded),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
                 }
 
                 // QuickUnlock 模式与完整解锁模式切换
