@@ -94,9 +94,11 @@ pykeepass 解锁成功；<EntryTemplatesGroup> = 'v1asc5B7frDX+N0hqFaXqA=='
 ## 437.5 如实声明（未美化）
 
 1. **真机视觉走查待用户**：三条均未做人工视觉走查。已按 §434 前置流程构建并 `adb install -r` 到
-   `com.keepasskey.debug`（与正式版 `com.keepasskey` 独立沙箱，不影响用户库数据），
-   `python tools/device/check_installed_build.py --expect-symbol markTemplatesGroup` = **OK**
-   （本地 APK 22:30:49 / 设备 22:31:09，符号在包内）。走查回执若提出新观感问题，按惯例另批整改。
+   `com.keepasskey.debug`（与正式版 `com.keepasskey` 独立沙箱，不影响用户库数据）：
+   首次安装（rebase 前基线上）`check_installed_build.py --expect-symbol markTemplatesGroup` = OK（APK 22:30:49 / 设备 22:31:09）；
+   本批 rebase 到 `main`（提交 `4e8e3f2b`）后**按最终代码重建并重装**，读数 = OK
+   （APK 2026-10-04 08:38:59 / 设备 08:39:04，符号在包内）——设备上当前跑的即推送提交对应包。
+   走查回执若提出新观感问题，按惯例另批整改。
 2. **F 项的 release 分支无 JVM 用例覆盖**：`headerRes = null` 只在 `BuildConfig.DEBUG = false` 时生效，
    单测恒跑 debug 变体，故「release 下不渲染『系统』标题」仅由类型与代码判据成立，未由测试锁定——
    本批未新造 release 变体测试（成本不抵收益）。
