@@ -62,7 +62,8 @@ data class KdbxDatabase(
     /**
      * 擦除库内全部敏感驻留：明文条目树 + 外层头部 KDF secret `K` + **内层二进制池**
      * （`ISSUE-P3-258` / 契约 Step 4 起，池内 ≤ 落盘阈值的附件明文一并就地清零，
-     * 不再仅随引用丢弃等待 GC——限界 §1.6 的解除）。
+     * 不再仅随引用丢弃等待 GC——限界 §1.6 的解除）+ **Meta 级自定义图标池**
+     * （`ISSUE-P3-471` 起，`customIcons` 的 PNG 字节与二进制池同点、同判据清零）。
      *
      * ISSUE-P2-60（审计 RUST-06）：`header.kdfParameters`（Argon2）的 `secretKey`
      * 原先全仓无清零点，会话锁定 / 关闭后仍以普通 `ByteArray` 滞留至 GC。
@@ -85,6 +86,7 @@ data class KdbxDatabase(
         rootGroup.clearSensitiveData()
         header.kdfParameters.clearSensitive()
         clearBinaryPool(emptyList())
+        clearCustomIconPool(emptyList())
     }
 
     /**
@@ -110,6 +112,32 @@ data class KdbxDatabase(
         live.addAll(liveBinaries)
         for (item in binaries) {
             if (!live.contains(item)) item.clear()
+        }
+    }
+
+    /**
+     * 图标池内擦除的**身份集合判定**入口（`ISSUE-P3-471`；判据与 [clearBinaryPool] 逐条对齐）。
+     *
+     * 以 [liveIcons] 为存活侧收集 `CustomIcon` 的**实例身份**（引用相等，IdentityHashMap 支撑——
+     * `CustomIcon.equals` 是内容相等，含全部字段，不可用于本判定），只清零本库 [customIcons] 中
+     * **不被存活侧以同一实例引用**的条目字节；[liveIcons] 为空即全量擦除。
+     *
+     * **禁止**把本方法退化为无存活侧参数的 `customIcons.forEach { it.data.fill(0) }` 裸擦：
+     * `KdbxMerger.mergeCustomIcons` 对「单侧独有 / 胜出的图标」**复用原 `CustomIcon` 实例**
+     * （`sync/src/main/java/com/keepasskey/sync/merge/KdbxMerger.kt`），故合并 / 漂移合并采用后的
+     * 会话库与「待丢弃的解析树」会同时可达同一实例（`SECURITY_RECHECK_2026-09.md` §9.6 #19 同型）；
+     * 裸擦会静默清空活动库的图标字节（并在下次保存时把全零字节写回库文件）。
+     * 契约用例：`KdbxCustomIconPoolErasureTest`（database 侧原语与收口点）、
+     * `SyncPendingTreeErasureTest`（app 侧 `eraseDiscardedDatabase` 链路）。
+     */
+    fun clearCustomIconPool(liveIcons: Collection<CustomIcon>) {
+        if (customIcons.isEmpty()) return
+        val live = java.util.Collections.newSetFromMap(
+            java.util.IdentityHashMap<CustomIcon, Boolean>()
+        )
+        live.addAll(liveIcons)
+        for (icon in customIcons) {
+            if (!live.contains(icon)) icon.data.fill(0)
         }
     }
 }

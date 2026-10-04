@@ -44,16 +44,7 @@
 > **暂无开放项**。（最近一条 `ISSUE-P2-465` 云同步配置按库隔离已于 §422 整条闭环，
 > 见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §422）
 
-## P3 低危问题、特性接线与体验优化（2 项）
-
-### ISSUE-P3-471：锁库清零路径漏 `CustomIcon` 字节——敏感清理纪律不对称
-
-- **核实时间点**：2026-10-03；**核实方式**：代码定位（`database/src/main/java/com/keepasskey/database/KdbxDatabase.kt` L84-88：`clearSensitiveData` 只清 rootGroup / kdfParameters / 二进制池；`core/src/main/java/com/keepasskey/core/model/CustomIcon.kt` L15：`data: ByteArray` 不在任何清零路径内；`CustomIconCoordinator` 亦非 `SessionLockObserver`）+ 参考项目对拍（`references/KeePassDX-架构分析.md` §5.6 / §8.3-11：KeePassDX `clearAndClose` 清图标/附件缓存）。
-- **背景**：本仓敏感清理纪律为锁库全路径对称（密钥、凭据缓存、二进制池、附件缓存均有清理路径与 SessionLockObserver 观察者），唯 Meta 级 `customIcons` 的 PNG 字节数组遗漏——锁库后图标字节驻留堆至 GC。单看风险小（图标非凭据材料），属清理纪律一致性缺口，用户 2026-10-03 拍板补齐。
-- **验收标准**：  
-  ① `clearSensitiveData` 对每个 `CustomIcon.data` 显式清零（与 rootGroup 同点清理）；锁库后无 UI/渲染缓存仍持有图标字节（有则一并清，口径为「清零至 GC 可及」，与仓内其它 ByteArray 清零纪律一致）；  
-  ② 新增单测断言清零行为；既有锁库/换库回归全绿；  
-  ③ 全量 test 绿 + `python tools/doc/gate_readings.py` 全 PASS；批次文档留痕。
+## P3 低危问题、特性接线与体验优化（1 项）
 
 ### ISSUE-P3-472：标准解锁页主密码行「未聚焦 + 空值」态无任何文案——无标签 + 48dp 上限下占位提示不可见
 

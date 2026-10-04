@@ -4,6 +4,7 @@ import android.content.Context
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.model.CustomIcon
 import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -438,6 +439,67 @@ class SyncPendingTreeErasureTest {
         eraseDiscardedDatabase(db, db)
 
         assertArrayEquals("同一实例绝不可被擦", ByteArray(4) { 0x44 }, item.data)
+    }
+
+    // ------------------------------------------------------------------ 图标池擦除（ISSUE-P3-471）
+
+    @Test
+    fun `丢弃库的图标池按身份集合判定擦除：共享图标存活、独立图标清零`() {
+        // P0 护栏：`KdbxMerger.mergeCustomIcons` 对单侧独有 / 胜出的图标**复用原 CustomIcon 实例**，
+        // 故合并采用后的活动库与待丢弃解析树会同时可达同一实例。把 eraseDiscardedDatabase 的图标池
+        // 擦除退化为裸 `customIcons.forEach { it.data.fill(0) }` 时，下方「共享图标不得被擦」断言必红。
+        val sharedIcon = CustomIcon(uuid = uuidOf("0000000000000000000000000000000A"), data = byteArrayOf(0x11))
+        val live = KdbxDatabase(
+            header = headerWithSecret(),
+            rootGroup = KdbxGroup(name = "Root"),
+            customIcons = listOf(sharedIcon)
+        )
+        val ownIcon = CustomIcon(uuid = uuidOf("0000000000000000000000000000000B"), data = byteArrayOf(0x22))
+        val discarded = live.copy(
+            rootGroup = KdbxGroup(name = "Root"),
+            customIcons = listOf(sharedIcon, ownIcon)
+        )
+
+        eraseDiscardedDatabase(discarded, live)
+
+        assertArrayEquals(
+            "P0 护栏：被存活侧以同一实例引用的图标绝不可被清零（裸擦实现即红）",
+            byteArrayOf(0x11),
+            sharedIcon.data
+        )
+        assertTrue(
+            "待丢弃库独有的图标必须清零（否则图标字节滞留 GC，改动退化为空）",
+            ownIcon.data.all { it == 0.toByte() }
+        )
+        assertArrayEquals("存活侧的图标不受影响", byteArrayOf(0x11), live.customIcons.single().data)
+    }
+
+    @Test
+    fun `存活侧为空时丢弃库的图标池全量擦除（会话终止路径）`() {
+        val icon = CustomIcon(uuid = uuidOf("0000000000000000000000000000000C"), data = byteArrayOf(0x33))
+        val discarded = KdbxDatabase(
+            header = headerWithSecret(),
+            rootGroup = KdbxGroup(name = "Root"),
+            customIcons = listOf(icon)
+        )
+
+        eraseDiscardedDatabase(discarded, null)
+
+        assertTrue("无存活别名 ⇒ 图标池字节全量清零", icon.data.all { it == 0.toByte() })
+    }
+
+    @Test
+    fun `丢弃库与存活库为同一实例时图标池不做任何动作`() {
+        val icon = CustomIcon(uuid = uuidOf("0000000000000000000000000000000D"), data = byteArrayOf(0x44))
+        val db = KdbxDatabase(
+            header = headerWithSecret(),
+            rootGroup = KdbxGroup(name = "Root"),
+            customIcons = listOf(icon)
+        )
+
+        eraseDiscardedDatabase(db, db)
+
+        assertArrayEquals("同一实例绝不可被擦", byteArrayOf(0x44), icon.data)
     }
 
     @Test

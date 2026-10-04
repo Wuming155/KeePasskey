@@ -160,12 +160,18 @@ internal fun truncateMergedHistory(db: KdbxDatabase): KdbxDatabase {
  * （`localDb.copy(...)` 共享同一池列表的形态即由此护栏保住），[live] 为 null 时全量擦池。
  * 裸 `binaries.forEach { it.clear() }` 会使共享池的存活库拿到全零附件，由
  * `SyncPendingTreeErasureTest` 的共享池护栏机检。
+ *
+ * **图标池同口径**（`ISSUE-P3-471`）：[db] 的自定义图标池按**实例身份**判定擦除——
+ * `KdbxMerger.mergeCustomIcons` 复用原 `CustomIcon` 实例，故合并采用后的会话库与待丢弃树
+ * 会同时可达同一实例；`customIcons.forEach { it.data.fill(0) }` 裸擦会使存活库的图标字节被清零。
+ * 由 `SyncPendingTreeErasureTest` 的共享图标护栏机检。
  */
 internal fun eraseDiscardedDatabase(db: KdbxDatabase, live: KdbxDatabase?) {
     if (db === live) return
     eraseDiscardedGroup(db.rootGroup, live?.rootGroup)
     if (db.header !== live?.header) db.header.kdfParameters.clearSensitive()
     db.clearBinaryPool(live?.binaries ?: emptyList())
+    db.clearCustomIconPool(live?.customIcons ?: emptyList())
 }
 
 /**

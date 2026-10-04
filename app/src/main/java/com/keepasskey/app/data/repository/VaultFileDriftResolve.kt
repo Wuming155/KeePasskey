@@ -7,6 +7,7 @@ import com.keepasskey.app.security.ExternalModificationChoice
 import com.keepasskey.app.security.VaultFileBaseline
 import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.app.security.VaultFileMetadataProbe
+import com.keepasskey.app.sync.eraseDiscardedDatabase
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
@@ -164,7 +165,11 @@ internal class VaultFileDriftResolve(
         } else {
             driftCoordinator?.requestPrompt(pathId)
         }
-        diskDb.clearSensitiveData()
+        // ISSUE-P3-471：此处**必须**走身份集合判定，不得裸调 `diskDb.clearSensitiveData()`——
+        // 合并器对「磁盘独有 / 磁盘胜出的条目」与「磁盘独有的图标」**复用原实例**，采用后这些
+        // 实例同时可达于活动会话树（`SECURITY_RECHECK_2026-09.md` §9.6 #19 同型）；裸擦会把活动库
+        // 仍在用的口令 / 图标字节清零。存活侧取**当前**会话树（`save()` 可能因历史修剪再换实例）。
+        eraseDiscardedDatabase(diskDb, live = databaseSession.databaseFlow.value)
         return saveResult
     }
 
