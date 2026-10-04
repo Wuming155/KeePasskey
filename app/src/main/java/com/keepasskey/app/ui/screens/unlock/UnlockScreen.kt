@@ -187,26 +187,6 @@ fun UnlockContent(
             .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // ISSUE-P3-349：顶部品牌渐变锚点——primaryContainer → 透明的静态幕布，
-        // 为锁圆 / 标题提供视觉锚，消除顶部约 1/3 的无层次空白。
-        // 取色仅用语义令牌（动态取色 / OLED 盘自动跟随），非常驻动画、零 GPU 常耗。
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(340.dp)
-                .background(
-                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0f)
-                        )
-                    )
-                )
-        )
-
-        // §436 走查回执②：右上角主题切换胶囊移除（主题口径收敛到设置页，
-        // ThemeToggleCapsule 组件本体保留于 ui/components 供后续复用）
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -240,6 +220,7 @@ fun UnlockContent(
             } else {
                 // §438：品牌区整组（锁块 + 标题 + 状态胶囊 + 一次性提示）——外层 Column 的直接子节点
                 // 收敛为「品牌组 / 动作组」两个，`SpaceBetween` 的空隙才落在两者之间。
+                // §442：极速解锁页在品牌组下方承载活动库卡片与只读卡片，消除上方大面积死白，实现双重心平衡。
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -267,27 +248,41 @@ fun UnlockContent(
                     }
                     UnlockStatusPill(subtitle = subtitleText)
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        UnlockQuickUnlockDatabaseCard(
+                            name = uiState.databaseName,
+                            status = uiState.databaseStatus,
+                            onOpen = { onNavigateToDatabasePicker() }
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        UnlockQuickUnlockReadOnlyCard(
+                            openReadOnly = uiState.openReadOnly,
+                            onToggleReadOnly = onToggleReadOnly
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
 
                     // ISSUE-P3-438：上次会话未正常关闭（进程死亡时库仍处于解锁态）的一次性轻提示——
                     // 文案如实中性，不渲染为错误告警（onSurfaceVariant，区别于下方丢弃编辑的 error 色）
                     if (uiState.lastSessionAbnormalCloseNotice) {
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = stringResource(R.string.unlock_last_session_abnormal_close),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
                     }
 
                     // ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知（UnlockViewModel.init 消费注册表后置位）
                     if (uiState.unsavedEditsDiscardedNotice) {
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = stringResource(R.string.unlock_unsaved_edits_discarded),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
                     }
                 }
 

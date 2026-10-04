@@ -327,3 +327,57 @@ internal fun UnlockStandardUnlockContent(
         }
     }
 }
+
+/**
+ * 极速解锁页活动数据库卡片（§442 双重心排版上半部骨架）：
+ * 复用 [UnlockDatabaseRow]，外包 Surface 与描边，点击整卡或尾部切换均导航至选择库。
+ */
+@Composable
+internal fun UnlockQuickUnlockDatabaseCard(
+    name: String,
+    status: String,
+    onOpen: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        UnlockDatabaseRow(
+            name = name,
+            status = status,
+            onOpen = onOpen,
+            onSwitchTap = onOpen
+        )
+    }
+}
+
+/**
+ * 极速解锁页只读开关卡片（§442 双重心排版上半部骨架）：
+ * 复用 [UnlockReadOnlyRow]，外包独立 Surface，为指纹解锁前提供明确只读状态控制。
+ */
+@Composable
+internal fun UnlockQuickUnlockReadOnlyCard(
+    openReadOnly: Boolean,
+    onToggleReadOnly: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+        ) {
+            UnlockReadOnlyRow(
+                openReadOnly = openReadOnly,
+                onToggleReadOnly = onToggleReadOnly
+            )
+        }
+    }
+}
+

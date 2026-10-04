@@ -191,108 +191,104 @@ internal fun UnlockLoadProgressSection(uiState: UnlockUiState) {
 }
 
 /**
- * QuickUnlock 卡片区域 (KP2A / KeePassDX 风格)
+ * QuickUnlock 动作卡片区域（§442 落底大拇指触控舒适区）：
+ * 包含降级提示、错误提示、52dp 饱满胶囊主生物识别按钮、加载进度与切回标准密码解锁。
+ *
+ * §442：按用户裁决与纯原生原型重排为「双重心排版」——活动库与只读开关上移至上半部，
+ * 撑起骨架消除大面积死白；本区域专注落底大拇指黄金触控区，主按钮解除卡片嵌套，
+ * 改为全宽饱满胶囊按钮，右手单手盲按即中。
  */
 @Composable
 internal fun UnlockQuickUnlockCard(
     uiState: UnlockUiState,
     onBiometricUnlock: () -> Unit,
     onSwitchMode: (UnlockMode) -> Unit,
-    onToggleReadOnly: () -> Unit
+    @Suppress("UNUSED_PARAMETER") onToggleReadOnly: () -> Unit = {}
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // ISSUE-P1-22：本机快速解锁封印为软件密钥时的常驻声明（AC②：
-            // UI 常驻声明「不提供硬件级保护」，与降级确认记录绑定，非一次性提示）
-            if (uiState.quickUnlockDowngraded) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.quick_unlock_software_key_notice),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ISSUE-P2-343：只读开关此前**只画在口令解锁页**，而指纹路径又不消费它
-            // ⇒ 用户看不到"这次会怎样"，还会以为先前打开的选择被记住了。现在两条路径共用同一个
-            // 开关与同一个真相源（`completeBiometricUnlock` 已改为透传 `openReadOnly`）。
-            UnlockReadOnlyRow(
-                openReadOnly = uiState.openReadOnly,
-                onToggleReadOnly = onToggleReadOnly
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // ISSUE-P2-355 AC①：快速解锁卡错误槽位——失败文案不再因卡片无渲染点而静默
-            // （回落 STANDARD 由各失败路径负责；本槽位兜住「错误已置、模式仍为 QUICK」的一切窗口）
-            uiState.errorMessage?.let { message ->
-                Text(
-                    text = message.resolveText(),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
+        // ISSUE-P1-22：本机快速解锁封印为软件密钥时的常驻声明（AC②：
+        // UI 常驻声明「不提供硬件级保护」，与降级确认记录绑定，非一次性提示）
+        if (uiState.quickUnlockDowngraded) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.quick_unlock_software_key_notice),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
+        }
 
-            // ISSUE-P1-08 统一快速解锁：仅 Class 3 强生物识别经硬件密钥解封（锁屏凭据不再可解封）——
-            // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
-            Button(
-                onClick = onBiometricUnlock,
-                enabled = !uiState.isLoading,
-                shape = CapsuleShape,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.5.dp
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Fingerprint,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = stringResource(R.string.unlock_biometric_primary_btn),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
+        // ISSUE-P2-355 AC①：快速解锁卡错误槽位——失败文案不再因卡片无渲染点而静默
+        uiState.errorMessage?.let { message ->
+            Text(
+                text = message.resolveText(),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+
+        // ISSUE-P1-08 统一快速解锁：仅 Class 3 强生物识别经硬件密钥解封（锁屏凭据不再可解封）——
+        // 认证入口由系统 BiometricPrompt 承载，不再提供自研 PIN 输入
+        // §442：按原型优化为 52dp 饱满高度胶囊按钮，右手大拇指自然落位舒适区盲按即中
+        Button(
+            onClick = onBiometricUnlock,
+            enabled = !uiState.isLoading,
+            shape = CapsuleShape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            if (uiState.isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.5.dp
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Fingerprint,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.unlock_biometric_primary_btn),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
             }
+        }
 
-            Spacer(modifier = Modifier.height(6.dp))
+        UnlockLoadProgressSection(uiState)
 
-            UnlockLoadProgressSection(uiState)
+        Spacer(modifier = Modifier.height(4.dp))
 
-            TextButton(
-                onClick = { onSwitchMode(UnlockMode.STANDARD) },
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            ) {
-                Text(stringResource(R.string.unlock_switch_to_full), style = MaterialTheme.typography.labelSmall)
-            }
+        TextButton(
+            onClick = { onSwitchMode(UnlockMode.STANDARD) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = stringResource(R.string.unlock_switch_to_full),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
+
 
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
