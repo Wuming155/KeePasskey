@@ -50,8 +50,18 @@ internal fun ColumnScope.EntryEditGroupSection(
     // ISSUE-P3-179：回收站过滤下沉到 `LazyRow` **之外**——`LazyRow` 的 content 是 `LazyListScope`
     // （非 `@Composable`），不能在其中 `remember`；原实现把 `filter` 写在 `items(...)` 实参里，
     // 编辑表单每敲一个字符都会重组并重跑一次整表过滤。
+    // ISSUE：根组（parentId == null，即库名本身，如「phellords」）已在上方以「根目录 (未分类)」
+    // 哨兵项（groupId == null）独立呈现；投影层 groupsFlow 把根组也拍平进了列表，若此处不过滤，
+    // 根组会作为普通 chip 与哨兵项重复出现、且两者落到同一位置（均归根组）。故显式排除根组，
+    // 仅其唯一 parentId == null 的节点，顶层子组 parentId 为根组 id（非 null）不受影响。
     val selectableGroups = remember(uiState.availableGroups) {
-        uiState.availableGroups.filter { !it.isRecycleBin }
+        uiState.availableGroups.filter { !it.isRecycleBin && it.parentId != null }
+    }
+    // 根组（parentId == null，即库名本身）在投影层与哨兵项之间二选一呈现；此处取根组 id，
+    // 供下方哨兵选中判定——根级条目的父组是根组 id（非空），其 groupId 形如「根组id」而非 null，
+    // 若哨兵仅按 groupId == null 判选中，这类条目编辑时会丢失高亮，故把「根组 id」同视作根。
+    val rootGroupId = remember(uiState.availableGroups) {
+        uiState.availableGroups.firstOrNull { it.parentId == null }?.id
     }
     if (uiState.availableGroups.isEmpty()) return
 
@@ -64,7 +74,8 @@ internal fun ColumnScope.EntryEditGroupSection(
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             FilterChip(
-                selected = uiState.groupId == null,
+                // 根级条目的父组是根组 id（非空），同样映射为「根目录」哨兵选中态
+                selected = uiState.groupId == null || uiState.groupId == rootGroupId,
                 onClick = { onGroupChange(null) },
                 label = { Text(stringResource(R.string.edit_group_root)) },
                 shape = CapsuleShape,

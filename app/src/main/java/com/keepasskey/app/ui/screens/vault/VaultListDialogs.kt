@@ -288,7 +288,11 @@ internal fun VaultBatchMoveDialog(
                 // 原实现把全部分组 `forEach` 铺进 `Column` ⇒ 分组多时超出屏幕的部分**无法触达**；
                 // 同时补 `key`，使选择位置在增删分组后可稳定复用（同 `AppPickerDialog` 的写法）。
                 // 过滤在组合之外做一次（原实现写在 `forEach` 实参里，每次重组都重跑一次整表过滤）。
-                val selectableGroups = remember(allGroups) { allGroups.filter { !it.isRecycleBin } }
+                // ISSUE：根组（parentId == null，即库名本身，如「phellords」）已在上方以
+                // 「移动至根目录」哨兵项（onMove(null)）独立呈现；投影层把根组也拍平进列表，
+                // 若此处不过滤，根组会作为普通行与哨兵项重复、且两者落到同一位置（均归根组）。
+                // 故显式排除根组（唯一 parentId == null 的节点），顶层子组不受影响。
+                val selectableGroups = remember(allGroups) { allGroups.filter { !it.isRecycleBin && it.parentId != null } }
                 LazyColumn(
                     modifier = Modifier.heightIn(max = 280.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
