@@ -298,9 +298,7 @@ fun UnlockContent(
                     // ISSUE-P3-215 曾在此承载无障碍提示、后迁设置页；ISSUE-P3-324 该提示与
                     // 整条信号链路一并移除（含系统预装服务的口径对未开无障碍用户构成假提示），
                     // 解锁页同样不得回潮渲染任何无障碍状态卡。
-                    // §436：数据库行 + 主密码行整合进同一张分组卡（原型布局）；
-                    // 「切换库」两处入口（整行点击 / 尾部「切换」胶囊）都走 onNavigateToDatabasePicker。
-                    var advancedExpanded by remember { mutableStateOf(true) }
+                    // §436/§443：4合1 一体化分组卡（数据库行 + 主密码行 + 密钥文件行 + 只读开关行）
                     UnlockStandardUnlockContent(
                         uiState = uiState,
                         databaseRow = {
@@ -317,9 +315,7 @@ fun UnlockContent(
                         onClearKeyFile = onClearKeyFile,
                         onToggleReadOnly = onToggleReadOnly,
                         onUnlock = onUnlock,
-                        onSwitchMode = onSwitchMode,
-                        advancedExpanded = advancedExpanded,
-                        onToggleAdvancedExpanded = { advancedExpanded = !advancedExpanded }
+                        onSwitchMode = onSwitchMode
                     )
                 }
             }

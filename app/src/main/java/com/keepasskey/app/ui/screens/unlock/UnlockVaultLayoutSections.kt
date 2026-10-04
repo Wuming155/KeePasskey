@@ -30,6 +30,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.components.DismissibleHelpTip
+import com.keepasskey.app.ui.components.HelpTip
 import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
@@ -125,15 +127,17 @@ internal fun UnlockDatabaseRow(
 }
 
 /**
- * 分组卡容器：数据库行 + 内部分隔线 + 主密码行，同一张卡（§436 原型核心形态）。
+ * 4合1 通栏分组卡容器：数据库行 + 主密码行 + 密钥文件行 + 只读开关行，同一张卡（方案 A 极简连贯形态）。
  *
- * 内容槽为普通 `@Composable () -> Unit`（非 `BoxScope`），两个槽都由调用方以单节点
- * `Column` 承载，无 Box 同层兄弟叠放风险（`check_box_slot_children.py` 口径）。
+ * 内容槽为普通 `@Composable () -> Unit`（非 `BoxScope`），各槽由调用方承载，无 Box 同层兄弟叠放风险。
+ * 默认向后兼容：当 [keyFileRow] 与 [readOnlyRow] 缺省时仅呈现前两行。
  */
 @Composable
 internal fun UnlockVaultGroupCard(
     databaseRow: @Composable () -> Unit,
-    passwordRow: @Composable () -> Unit
+    passwordRow: @Composable () -> Unit,
+    keyFileRow: (@Composable () -> Unit)? = null,
+    readOnlyRow: (@Composable () -> Unit)? = null
 ) {
     Surface(
         shape = MaterialTheme.shapes.extraLarge,
@@ -149,6 +153,22 @@ internal fun UnlockVaultGroupCard(
                 color = MaterialTheme.colorScheme.outlineVariant
             )
             passwordRow()
+            if (keyFileRow != null) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 66.dp, end = 16.dp),
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+                keyFileRow()
+            }
+            if (readOnlyRow != null) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 66.dp, end = 16.dp),
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+                readOnlyRow()
+            }
         }
     }
 }
@@ -246,12 +266,13 @@ internal fun UnlockStandardUnlockContent(
     onClearKeyFile: () -> Unit,
     onToggleReadOnly: () -> Unit,
     onUnlock: () -> Unit,
-    onSwitchMode: (UnlockMode) -> Unit,
-    advancedExpanded: Boolean,
-    onToggleAdvancedExpanded: () -> Unit
+    onSwitchMode: (UnlockMode) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        // 分组卡：数据库行 + 内嵌扁平主密码行（同一张卡）
+        // ISSUE-P3-445 AC①：密钥文件高困惑点一次性可关闭提示（关闭态持久化，非模态）
+        DismissibleHelpTip(tip = HelpTip.UNLOCK_KEYFILE)
+
+        // 4合1 一体化分组卡：数据库行 + 内嵌扁平主密码行 + 密钥文件行 + 只读开关行
         UnlockVaultGroupCard(
             databaseRow = databaseRow,
             passwordRow = {
@@ -260,17 +281,6 @@ internal fun UnlockStandardUnlockContent(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
-                    // 完整主密码输入框（SecurePasswordField：显示 String 仅存活于组件内部，
-                    // CharArray 直达 ViewModel；embeddedFlat = 无边框行形态）
-                    // ISSUE-P3-472（真机确认的缺陷，取代 §436 走查回执① 的 48dp 硬高度上限）：
-                    // M3 的 `supportingIntrinsicHeight` 会把 supportingText 槽的**固有高度**
-                    //（≈20dp，与槽内有没有文案无关）连同上下内边距（无标签各 16dp）**无条件**从正文
-                    // 可用高度里扣掉；`.height(48.dp)` 硬压时 48−32−20 ≤ 0 ⇒ 正文区被压成 **0 高度**，
-                    // 占位提示与用户键入的内容都画不出来（真机 + `TextFieldImpl.kt` 逐行核对）。
-                    // `SecurePasswordField` 用的是 `OutlinedTextField` 的 **String 重载**，无
-                    // `contentPadding` 参数 ⇒ 无法靠收窄内边距腾空间（编译期验证）⇒ **必须**解除硬上限。
-                    // 同批把 supporting 槽改为**有文案才挂**：否则空槽也白占 20dp，行高会堆到 76dp；
-                    // 条件挂载后常态行高 = M3 自然高 56dp（原 48dp，+8dp），有提示时按需变高。
                     SecurePasswordField(
                         label = null,
                         placeholder = stringResource(R.string.unlock_master_password_hint),
@@ -284,30 +294,28 @@ internal fun UnlockStandardUnlockContent(
                         isPasswordVisible = uiState.isPasswordVisible,
                         onToggleVisibility = onTogglePasswordVisibility,
                         onDone = onUnlock,
-                        // ISSUE-P1-04：失败/锁定后令牌递增，驱动输入框擦除显示态，与 VM 主密码清零同步
                         wipeToken = uiState.clearPasswordFieldToken,
                         leadingIcon = Icons.Default.Lock,
                         embeddedFlat = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
+            },
+            keyFileRow = {
+                UnlockKeyFileRow(
+                    hasKeyFile = uiState.hasKeyFile,
+                    keyFileName = uiState.keyFileName,
+                    keyFileSourcePath = uiState.keyFileSourcePath,
+                    onSelectKeyFile = onSelectKeyFile,
+                    onClearKeyFile = onClearKeyFile
+                )
+            },
+            readOnlyRow = {
+                UnlockReadOnlyRow(
+                    openReadOnly = uiState.openReadOnly,
+                    onToggleReadOnly = onToggleReadOnly
+                )
             }
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // ISSUE-P3-445 AC①：密钥文件高困惑点提示与密钥文件 / 只读开关一并收入
-        // 「高级认证凭证」折叠卡（默认展开，功能可见性与改版前一致）
-        UnlockAdvancedAuthCard(
-            hasKeyFile = uiState.hasKeyFile,
-            keyFileName = uiState.keyFileName,
-            keyFileSourcePath = uiState.keyFileSourcePath,
-            onSelectKeyFile = onSelectKeyFile,
-            onClearKeyFile = onClearKeyFile,
-            openReadOnly = uiState.openReadOnly,
-            onToggleReadOnly = onToggleReadOnly,
-            expanded = advancedExpanded,
-            onToggleExpand = onToggleAdvancedExpanded
         )
 
         Spacer(modifier = Modifier.height(18.dp))
@@ -368,16 +376,10 @@ internal fun UnlockQuickUnlockReadOnlyCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp)
-        ) {
-            UnlockReadOnlyRow(
-                openReadOnly = openReadOnly,
-                onToggleReadOnly = onToggleReadOnly
-            )
-        }
+        UnlockReadOnlyRow(
+            openReadOnly = openReadOnly,
+            onToggleReadOnly = onToggleReadOnly
+        )
     }
 }
 

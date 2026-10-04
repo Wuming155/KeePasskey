@@ -1,6 +1,9 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,11 +13,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -33,9 +40,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
 import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
@@ -51,12 +60,11 @@ import com.keepasskey.app.ui.theme.CapsuleShape
  */
 
 /**
- * 附加密钥文件：文件选择行为（非布尔开关）——点击唤起 SAF；已选时展示文件名并提供清除。
- *
- * §433（ISSUE-P3-448 走查续）：已选且已知**加载来源**（[keyFileSourcePath]，私有目录副本绝对路径
- * 或 SAF Uri）时，在行下方另起一行呈现来源路径——默认**中间省略**、点右侧眼睛展开完整路径。
- * 该行刻意落在**可点击行之外**：整行点击是「清除密钥文件」，若把来源行纳入同一手势，
- * 用户想看清路径就会把密钥文件清掉。
+ * 附加密钥文件（KeePassDX 风格一体化行）：
+ * 1. 标题固定为「密钥文件」+ 状态圆点（已就绪/未关联）；
+ * 2. 默认以密码圆点掩码隐藏路径（平时不显示敏感绝对路径）；
+ * 3. 右侧眼睛按钮控制路径显隐，独立清除按钮直接清除；
+ * 4. 点击行主体唤起 SAF 选择器重新选择。
  */
 @Composable
 internal fun UnlockKeyFileRow(
@@ -64,174 +72,222 @@ internal fun UnlockKeyFileRow(
     keyFileName: String,
     keyFileSourcePath: String?,
     onSelectKeyFile: () -> Unit,
-    onClearKeyFile: () -> Unit
+    onClearKeyFile: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
+    var isPathVisible by remember { mutableStateOf(false) }
+    UnlockKeyFileRowContent(
+        hasKeyFile = hasKeyFile,
+        keyFileName = keyFileName,
+        keyFileSourcePath = keyFileSourcePath,
+        isPathVisible = isPathVisible,
+        onTogglePathVisibility = { isPathVisible = !isPathVisible },
+        onSelectKeyFile = onSelectKeyFile,
+        onClearKeyFile = onClearKeyFile,
+        modifier = modifier
+    )
+}
+
+/**
+ * 密钥文件行内容呈现（状态外提，供 @Preview 覆盖掩码与展开两态）。
+ */
+@Composable
+internal fun UnlockKeyFileRowContent(
+    hasKeyFile: Boolean,
+    keyFileName: String,
+    keyFileSourcePath: String?,
+    isPathVisible: Boolean,
+    onTogglePathVisibility: () -> Unit,
+    onSelectKeyFile: () -> Unit,
+    onClearKeyFile: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelectKeyFile)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(MaterialTheme.shapes.medium)
-                .clickable {
-                    if (hasKeyFile) onClearKeyFile() else onSelectKeyFile()
-                }
-                .padding(vertical = 10.dp, horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.AttachFile,
                 contentDescription = stringResource(R.string.unlock_keyfile),
                 tint = if (hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(19.dp)
             )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.unlock_keyfile),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (hasKeyFile && keyFileName.isNotBlank()) {
-                    Text(
-                        text = stringResource(R.string.unlock_keyfile_selected, keyFileName),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        UnlockKeyFileTextSection(
+            hasKeyFile = hasKeyFile,
+            keyFileName = keyFileName,
+            keyFileSourcePath = keyFileSourcePath,
+            isPathVisible = isPathVisible,
+            modifier = Modifier.weight(1f)
+        )
+        UnlockKeyFileTrailingActions(
+            hasKeyFile = hasKeyFile,
+            isPathVisible = isPathVisible,
+            onTogglePathVisibility = onTogglePathVisibility,
+            onClearKeyFile = onClearKeyFile
+        )
+    }
+}
+
+@Composable
+private fun UnlockKeyFileTextSection(
+    hasKeyFile: Boolean,
+    keyFileName: String,
+    keyFileSourcePath: String?,
+    isPathVisible: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.unlock_keyfile),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (hasKeyFile) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
                     )
-                } else {
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = stringResource(R.string.unlock_keyfile_none),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = stringResource(R.string.unlock_keyfile_ready_badge),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
-            Icon(
-                imageVector = if (hasKeyFile) Icons.Default.CheckCircle else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = if (hasKeyFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
         }
-        if (hasKeyFile && !keyFileSourcePath.isNullOrBlank()) {
-            KeyFileSourceRow(path = keyFileSourcePath)
+        if (hasKeyFile) {
+            val displayPath = keyFileSourcePath?.takeIf { it.isNotBlank() }
+                ?: keyFileName.takeIf { it.isNotBlank() }
+                ?: ""
+            if (isPathVisible) {
+                Text(
+                    text = displayPath,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = Int.MAX_VALUE,
+                    softWrap = true
+                )
+            } else {
+                Text(
+                    text = "••••••••••••••••••••••••",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 2.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+        } else {
+            Text(
+                text = stringResource(R.string.unlock_keyfile_none),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
-/**
- * §433（ISSUE-P3-448 走查续）：密钥文件**加载来源**行。
- *
- * 回答用户走查原话「有没有导入私有目录我看不出来」——显示本次加载的**真实路径**
- * （私有目录收编副本为绝对路径，SAF 来源为 Uri）：默认**中间省略**（不整段铺开），
- * 点右侧按钮展开完整路径，再次点击收起。
- */
 @Composable
-private fun KeyFileSourceRow(path: String) {
-    var expanded by remember { mutableStateOf(false) }
-    KeyFileSourceRowContent(path = path, expanded = expanded, onToggle = { expanded = !expanded })
-}
-
-/**
- * §434 装机回执修正（两轮）：
- *
- * 1. **展开态必须真的能看全**：原实现展开后仍是单行 + `Ellipsis`，固定行宽下 118 字符的真实
- *    路径必然截尾（用户回执「完整的路径在当前空间根本看不全」）；
- * 2. **标签 / 按钮不得悬在换行块中间**：单行 `Row` + `CenterVertically` 在展开成多行后，
- *    「来源」与眼睛会落到整块文字的**垂直中线**上，读起来像路径属于上一行的「密钥文件」
- *    （装机截图实测）；且路径只拿到「行宽 − 标签 − 按钮」而多折行。
- *
- * 故改为**上下两段**：首行＝标签 + （折叠态路径 / 展开态占位）+ 眼睛按钮；展开时路径落到
- * **下一段独占整行宽度**（少折行、彻底消除悬浮）。折叠态仍是单行中间省略。
- *
- * 状态外提为 [expanded] / [onToggle] 而非内持 `remember`，是为了让展开态**能被 @Preview 覆盖**
- * ——该态曾两度只能靠真机撞见（ISSUE-P3-340 口径）；两态预览见 `UnlockScreenPreviews.kt`。
- */
-@Composable
-internal fun KeyFileSourceRowContent(
-    path: String,
-    expanded: Boolean,
-    onToggle: () -> Unit
+private fun UnlockKeyFileTrailingActions(
+    hasKeyFile: Boolean,
+    isPathVisible: Boolean,
+    onTogglePathVisibility: () -> Unit,
+    onClearKeyFile: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            // 左缩进对齐上行文字列（图标 20dp + 间隔 10dp + 行内水平内边距 4dp）
-            .padding(start = 34.dp, end = 4.dp)
-    ) {
+    if (hasKeyFile) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(R.string.unlock_keyfile_source_label),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            if (expanded) {
-                // 展开态：路径落到下一段独占整行，首行只留标签与按钮（占位撑开右侧）
-                Spacer(modifier = Modifier.weight(1f))
-            } else {
-                Text(
-                    text = abbreviatePath(path),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            IconButton(onClick = onToggle) {
+            IconButton(
+                onClick = onTogglePathVisibility,
+                modifier = Modifier.size(36.dp)
+            ) {
                 Icon(
-                    imageVector = if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    imageVector = if (isPathVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                     contentDescription = stringResource(R.string.cd_toggle_keyfile_path),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp)
                 )
             }
+            IconButton(
+                onClick = onClearKeyFile,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = stringResource(R.string.cd_clear_keyfile),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
-        if (expanded) {
-            Text(
-                text = path,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                // 不限行数换行铺满（路径含 `/`，系统排版在斜杠后断行），完整可读、不截断
-                maxLines = Int.MAX_VALUE,
-                softWrap = true
-            )
-        }
+    } else {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
-/**
- * §433（ISSUE-P3-448 走查续）：路径**中间省略**（默认折叠态）——首尾保留、中段以 `…` 代。
- *
- * 纯函数，供 JVM 单测直断言（不依赖 Compose 排版）；超长路径（如 64 位哈希文件名）由此收敛，
- * 用户需要看全时经 [KeyFileSourceRow] 的展开按钮切换。
- */
-internal fun abbreviatePath(path: String, max: Int = PATH_ABBREV_MAX_CHARS): String {
-    if (path.length <= max) return path
-    val head = (max - 1) / 2
-    val tail = max - 1 - head
-    return path.take(head) + "…" + path.takeLast(tail)
-}
 
-/** 折叠态路径长度上限（首尾对称保留，中段省略） */
-private const val PATH_ABBREV_MAX_CHARS = 40
-
-/** H4-只读整改：只读打开开关（KeePassDX/KP2A 同款能力） */
+/** H4-只读整改：只读打开开关（KeePassDX/KP2A 同款能力，方案 A 4合1 通栏规整对齐） */
 @Composable
 internal fun UnlockReadOnlyRow(
     openReadOnly: Boolean,
-    onToggleReadOnly: () -> Unit
+    onToggleReadOnly: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.medium)
-            .padding(vertical = 4.dp, horizontal = 4.dp),
+            .clickable(onClick = onToggleReadOnly)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = stringResource(R.string.unlock_readonly),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(19.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = stringResource(R.string.unlock_readonly),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(

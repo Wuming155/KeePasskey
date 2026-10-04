@@ -174,45 +174,44 @@ private const val PREVIEW_KEY_FILE_COPY_PATH =
 
 // ===== §436 分组卡改版预览 =====
 
-// ISSUE-P3-340 规则条文：折叠卡的 expanded 开关两态都要画——收起态下密钥文件 / 只读开关
-// 全部不可见，若只画展开态，收起态的间距与头部徽章只有真机能撞见
-@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（展开）- 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（展开）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（收起）- 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "高级认证凭证卡（收起）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+// ISSUE-P3-340 规则条文：带默认值的 Boolean 开关参数两态都要画——
+// 密钥文件行 isPathVisible 掩码/明文两态预览
+@androidx.compose.ui.tooling.preview.Preview(name = "密钥文件行（掩码）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "密钥文件行（掩码）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
-internal fun UnlockAdvancedAuthCardPreview() {
+internal fun UnlockKeyFileRowMaskedPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
-            UnlockAdvancedAuthCard(
-                hasKeyFile = true,
-                keyFileName = "hellisllords.keyx",
-                keyFileSourcePath = PREVIEW_KEY_FILE_COPY_PATH,
-                onSelectKeyFile = {},
-                onClearKeyFile = {},
-                openReadOnly = false,
-                onToggleReadOnly = {},
-                expanded = true,
-                onToggleExpand = {}
-            )
-            // 收起态 + 无密钥文件（徽章不呈现的反向态）
-            UnlockAdvancedAuthCard(
-                hasKeyFile = false,
-                keyFileName = "",
-                keyFileSourcePath = null,
-                onSelectKeyFile = {},
-                onClearKeyFile = {},
-                openReadOnly = true,
-                onToggleReadOnly = {},
-                expanded = false,
-                onToggleExpand = {}
-            )
-        }
+        UnlockKeyFileRowContent(
+            hasKeyFile = true,
+            keyFileName = "hellisllords.keyx",
+            keyFileSourcePath = PREVIEW_KEY_FILE_COPY_PATH,
+            isPathVisible = false,
+            onTogglePathVisibility = {},
+            onSelectKeyFile = {},
+            onClearKeyFile = {}
+        )
     }
 }
 
-@androidx.compose.ui.tooling.preview.Preview(name = "分组卡（数据库行 + 主密码行）- 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "分组卡（数据库行 + 主密码行）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@androidx.compose.ui.tooling.preview.Preview(name = "密钥文件行（明文）- 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "密钥文件行（明文）- 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun UnlockKeyFileRowRevealedPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        UnlockKeyFileRowContent(
+            hasKeyFile = true,
+            keyFileName = "hellisllords.keyx",
+            keyFileSourcePath = PREVIEW_KEY_FILE_COPY_PATH,
+            isPathVisible = true,
+            onTogglePathVisibility = {},
+            onSelectKeyFile = {},
+            onClearKeyFile = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(name = "4合1 一体化分组卡 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "4合1 一体化分组卡 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
 internal fun UnlockVaultGroupCardPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {
@@ -241,6 +240,21 @@ internal fun UnlockVaultGroupCardPreview() {
                         embeddedFlat = true
                     )
                 }
+            },
+            keyFileRow = {
+                UnlockKeyFileRow(
+                    hasKeyFile = true,
+                    keyFileName = "hellisllords.keyx",
+                    keyFileSourcePath = PREVIEW_KEY_FILE_COPY_PATH,
+                    onSelectKeyFile = {},
+                    onClearKeyFile = {}
+                )
+            },
+            readOnlyRow = {
+                UnlockReadOnlyRow(
+                    openReadOnly = false,
+                    onToggleReadOnly = {}
+                )
             }
         )
     }
