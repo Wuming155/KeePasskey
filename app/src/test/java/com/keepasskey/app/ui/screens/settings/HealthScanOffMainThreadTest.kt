@@ -90,6 +90,64 @@ class HealthScanOffMainThreadTest {
         assertTrue("扫描完成后应复位扫描中标志", !controller.state.value.isHealthScanning)
     }
 
+    /**
+     * ISSUE-P2-470 回归：`scanDuplicates()`（全库扁平化 + `DuplicateEntryScanner.scan`）
+     * 必须随审计一并落在 `Default` 派发器，而非 `Main`。
+     *
+     * 探针形态与首个用例同源（真实运行现场）：注入记录调用线程的 `scanDuplicates`，
+     * 要求其线程名为 `DefaultDispatcher-worker-*` 且与 Main 线程不同——若有人把该调用
+     * 移回 `withContext` 块外，断言立即失败。
+     */
+    @Test
+    fun `重复条目扫描与整库投影同在 Default 派发器执行而非 Main 派发器`() = runBlocking {
+        val mainDispatcherThread = Thread.currentThread().name
+        var fetchThread: String? = null
+        var duplicateThread: String? = null
+
+        val repo = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun getKdbxEntries(): List<KdbxEntry> {
+                fetchThread = Thread.currentThread().name
+                return emptyList()
+            }
+        }
+
+        val controller = SettingsHealthController(
+            vaultRepository = repo,
+            breachCheckCoordinator = BreachCheckCoordinator(NoOpBreachRangeClient),
+            strings = StringsProvider { _, _ -> "" },
+            breachCheckEnabled = { false },
+            scope = MainDispatcherGuard.trackScope(CoroutineScope(Dispatchers.Main)),
+            scanDuplicates = {
+                duplicateThread = Thread.currentThread().name
+                SettingsHealthController.DuplicateScanResult.EMPTY
+            }
+        )
+
+        controller.rescanHealth()
+        var waited = 0L
+        while ((fetchThread == null || duplicateThread == null) && waited < WAIT_TIMEOUT_MS) {
+            testDispatcher.scheduler.advanceUntilIdle()
+            Thread.sleep(POLL_INTERVAL_MS)
+            waited += POLL_INTERVAL_MS
+        }
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        val observedFetch = fetchThread
+        val observedDuplicate = duplicateThread
+        assertNotNull("测试前提：仓库必须已被调用", observedFetch)
+        assertNotNull("测试前提：重复扫描必须已被调用", observedDuplicate)
+        assertTrue(
+            "重复扫描不得在 Main 派发器线程（$mainDispatcherThread）执行，实际=$observedDuplicate",
+            observedDuplicate != mainDispatcherThread
+        )
+        assertTrue(
+            "重复扫描应落在 Default 派发器工作线程，实际=$observedDuplicate",
+            observedDuplicate!!.startsWith("DefaultDispatcher-worker")
+        )
+        assertTrue("扫描完成后应回写 hasScanned", controller.state.value.hasScanned)
+        assertTrue("扫描完成后应复位扫描中标志", !controller.state.value.isHealthScanning)
+    }
+
     private companion object {
         const val WAIT_TIMEOUT_MS = 5_000L
         const val POLL_INTERVAL_MS = 10L

@@ -2,7 +2,7 @@
 # 版本货币性核对（2026-09-08）：hilt 2.60.1 / credentials 1.6.0 / okhttp 5.5.0 /
 # coroutines 1.11.0 / zxing 4.3.0 均为当前稳定渠道版本。
 # Dependabot PR #1/#2/#3 批量落地：AGP 9.4.0（**后按 IDE 兼容性降回 9.2.1，见下方 [versions] 说明**）/
-# navigation 2.10.0 / hilt-ext 1.4.0 / bcprov 1.85.2 / coroutines 1.11.0 / okhttp 5.5.0 /
+# navigation 2.10.0 / hilt-ext 1.4.0 / bcprov 1.86 / coroutines 1.11.0 / okhttp 5.5.0 /
 # foojay-resolver 1.0.0 / wrapper 9.7.1
 [versions]
 # AGP 版本演进（ISSUE-P3-481，如实记录，2026-10-05 核对；ISSUE-P3-488 回审补当前态结论）：
@@ -61,6 +61,14 @@ autofill = "1.3.0"
 camera = "1.6.2"
 zxingCore = "3.5.4"
 okhttp = "5.5.0"
+# ISSUE-P2-469：BouncyCastle 为 KDF / 分组密码的**生产兜底路径**（`CipherFallbackParityTest`
+# 锁定与原生内核等价），非仅构建期工具——**兜底路径亦须随上游安全修复上调**，不得以
+# 「主路径已原生化」为由滞留旧版。
+# 版本货币性核对（2026-10-05）：Maven Central `org.bouncycastle/bcprov-jdk18on/maven-metadata.xml`
+# `latest = release = 1.86`（`lastUpdated 20260911045244`）；官网 `latest_releases.html`
+# 确认 1.86 为当前最新（2026-09-11 发布，hardening 合集，修复 OpenPGP / MLS / CMS /
+# PKIX / PKCS#12-BCFKS 相关 CVE，含时序/侧信道收口）。结论：本仓 1.86 已为最新，无滞后；
+# 后续 Dependabot（gradle 生态，目录 `/` 已覆盖版本目录）发出 BC 安全更新时须同批跟进。
 bouncycastle = "1.86"
 # ISSUE-P3-09（ZT-20）AC3：原 argon2kt = "1.6.0" 为孤儿版本项——TASK-52（Argon2 内核
 # C→Rust 迁移）后全仓已无消费方，[libraries] 无别名、无模块声明依赖，全仓 grep 仅命中

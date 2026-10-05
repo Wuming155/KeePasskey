@@ -105,7 +105,7 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcEncryp
     iv: JByteArray<'local>,
     data: JByteArray<'local>,
 ) -> jbyteArray {
-    twofish_cbc_jni(env, key, iv, data, true)
+    block_cbc_jni(env, key, iv, data, BLOCK_LEN, twofish_cbc::cbc_encrypt)
 }
 
 /// Twofish-CBC 链式解密（**不做去填充**；语义与加密侧对称，`iv` 同样原地演化）。
@@ -117,16 +117,24 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeTwofish_cbcDecryp
     iv: JByteArray<'local>,
     data: JByteArray<'local>,
 ) -> jbyteArray {
-    twofish_cbc_jni(env, key, iv, data, false)
+    block_cbc_jni(env, key, iv, data, BLOCK_LEN, twofish_cbc::cbc_decrypt)
 }
 
-/// 加解密共用实现（仅方向不同），确保两条路径的闸门与擦除语义完全一致。
-fn twofish_cbc_jni<'local>(
+/// 加解密共用实现（ISSUE-P2-466：AES / Twofish 单一真相源）。
+///
+/// 两 cipher 的 JNI 整块路径除链值长度常量与内核函数指针外逐字一致，故收敛为单个
+/// 私有泛型入口：调用方按方向传入已选定的内核（加密传 `*_cbc_encrypt`、解密传
+/// `*_cbc_decrypt`），不再经 `bool` 二次分派。擦除语义（入参 `Zeroizing`、失败归一
+/// `null`、有符号闸门先行）与 JNI 定长布局契约均不变。
+type CbcKernelFn = fn(&[u8], &mut [u8], &[u8]) -> Option<Vec<u8>>;
+
+fn block_cbc_jni<'local>(
     env: JNIEnv<'local>,
     key: JByteArray<'local>,
     iv: JByteArray<'local>,
     data: JByteArray<'local>,
-    encrypt: bool,
+    block_len: usize,
+    kernel: CbcKernelFn,
 ) -> jbyteArray {
     if key.is_null() || iv.is_null() || data.is_null() {
         return null_mut();
@@ -137,19 +145,15 @@ fn twofish_cbc_jni<'local>(
         let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
         let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
 
-        if iv_buf.len() != BLOCK_LEN || data_buf.len() % BLOCK_LEN != 0 {
+        if iv_buf.len() != block_len || data_buf.len() % block_len != 0 {
             return None;
         }
 
-        let out = if encrypt {
-            twofish_cbc::cbc_encrypt(&key_buf, &mut iv_buf, &data_buf)?
-        } else {
-            twofish_cbc::cbc_decrypt(&key_buf, &mut iv_buf, &data_buf)?
-        };
+        let out = kernel(&key_buf, &mut iv_buf, &data_buf)?;
 
         // 回写演化后的链值（IV 非秘密，但仍在 Zeroizing 缓冲中处理）
         let java_iv = iv;
-        // SAFETY：iv_buf 长度已校验为 BLOCK_LEN 且为有效内存
+        // SAFETY：iv_buf 长度已校验为 block_len 且为有效内存
         env.set_byte_array_region(&java_iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
             .ok()?;
 
@@ -182,7 +186,14 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeAes_cbcEncryptBlo
     iv: JByteArray<'local>,
     data: JByteArray<'local>,
 ) -> jbyteArray {
-    aes_cbc_jni(env, key, iv, data, true)
+    block_cbc_jni(
+        env,
+        key,
+        iv,
+        data,
+        aes_cbc::BLOCK_LEN,
+        aes_cbc::cbc_encrypt,
+    )
 }
 
 /// AES-256-CBC 链式解密（**不做去填充**；语义与加密侧对称，`iv` 同样原地演化）。
@@ -194,54 +205,14 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlo
     iv: JByteArray<'local>,
     data: JByteArray<'local>,
 ) -> jbyteArray {
-    aes_cbc_jni(env, key, iv, data, false)
-}
-
-/// 加解密共用实现（与 [`twofish_cbc_jni`] 同构，仅内核不同）。
-fn aes_cbc_jni<'local>(
-    env: JNIEnv<'local>,
-    key: JByteArray<'local>,
-    iv: JByteArray<'local>,
-    data: JByteArray<'local>,
-    encrypt: bool,
-) -> jbyteArray {
-    if key.is_null() || iv.is_null() || data.is_null() {
-        return null_mut();
-    }
-
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
-        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
-        let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
-        let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
-
-        if iv_buf.len() != aes_cbc::BLOCK_LEN || data_buf.len() % aes_cbc::BLOCK_LEN != 0 {
-            return None;
-        }
-
-        let out = if encrypt {
-            aes_cbc::cbc_encrypt(&key_buf, &mut iv_buf, &data_buf)?
-        } else {
-            aes_cbc::cbc_decrypt(&key_buf, &mut iv_buf, &data_buf)?
-        };
-
-        // 回写演化后的链值（IV 非秘密，但仍在 Zeroizing 缓冲中处理）
-        let java_iv = iv;
-        // SAFETY：iv_buf 长度已校验为 BLOCK_LEN 且为有效内存
-        env.set_byte_array_region(&java_iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
-            .ok()?;
-
-        let out = Zeroizing::new(out);
-        let java_out = env.new_byte_array(out.len() as jint).ok()?;
-        // SAFETY：out 为有效内存，长度取自 out.len()
-        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&out[..]) })
-            .ok()?;
-        Some(java_out.into_raw())
-    }));
-
-    match outcome {
-        Ok(Some(arr)) => arr,
-        _ => null_mut(),
-    }
+    block_cbc_jni(
+        env,
+        key,
+        iv,
+        data,
+        aes_cbc::BLOCK_LEN,
+        aes_cbc::cbc_decrypt,
+    )
 }
 
 // ============================================================================
@@ -283,7 +254,7 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeAes_cbcDecryptBlo
     aes_cbc_direct_jni(env, key, iv, data, false)
 }
 
-/// AES direct 加解密共用实现（与 [`aes_cbc_jni`] / ChaCha20 直扣同构，仅内核不同）。
+/// AES direct 加解密共用实现（与 [`block_cbc_jni`] / ChaCha20 直扣同构，仅内核不同）。
 fn aes_cbc_direct_jni<'local>(
     env: JNIEnv<'local>,
     key: JByteArray<'local>,

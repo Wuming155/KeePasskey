@@ -40,61 +40,32 @@
 
 > **暂无开放项**。（最近一条 `ISSUE-P1-431` 封印载荷瘦身已于 §401 整条闭环，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md) §401）
 
-## P2 中危缺陷与协议/测试缺口（5 项）
+## P2 中危缺陷与协议/测试缺口（3 项）
 
-> 本批 5 条出自 [`records/软件工程质量审查记录_2026-10-05.md`](records/软件工程质量审查记录_2026-10-05.md)（五维度静态审查 + 高风险面深审；严重度 medium 或 low/medium 映射 P2）。
-> **Rust 原生面条目**（`ISSUE-P2-466` / `467` / `468`）按 AGENTS.md 测试资产纪律须**四层 `connectedDebugAndroidTest` 真机实跑**方可入库；执行前按 §263 确认设备上无待保留数据（或改用 AVD）。
+> 前 5 条（`ISSUE-P2-466` ~ `470`，出自 [`records/软件工程质量审查记录_2026-10-05.md`](records/软件工程质量审查记录_2026-10-05.md)）已于 §446 整条闭环。
+> 后 3 条为 **§446 真机实跑新发现**：`490` 设备侧测试判据在等号边界自相矛盾（`maxHeap` 恰为 256 MiB 即必红，**已修，待跨设备复跑**）；`491` 漏更设备侧用例致 `:app:androidTest` 编译失败并**静默阻断**第四层真机义务（**已修，剩 CI 机检接线**）；`492` `:app:` 层设备侧在 MIUI 真机上因系统 UID 冻结 + autofill 服务反复 bind/unbind 无法推进（**环境面欠账**）。
 
-### ISSUE-P2-466：`jni_bridge_ext.rs` AES / Twofish 两个 JNI 入口约 45 行逐字重复
 
-- **核实时间点**：2026-10-05；**核实方式**：逐行比对 `twofish_cbc_jni`(124-168) 与 `aes_cbc_jni`(201-245) 函数体（差异恰 3 行），并核对两内核 `cbc_encrypt/decrypt` 签名一致（`aes_cbc.rs:64/95`、`twofish_cbc.rs:60/89`）；`grep twofish` 于 `已知工程限界.md` 零命中。
-- **背景**：两函数体除 3 行（140↔217 的 `BLOCK_LEN` 常量、145↔222 与 147↔224 的内核调用）外逐字一致，涵盖判空 / `catch_unwind` / 入参转 `Zeroizing` / 长度闸门 / IV 回写 / `new_byte_array` + `set_byte_array_region` / 失败归一 null。这是安全敏感边界样板（擦除语义、panic 归一、有符号闸门全在其中），两份拷贝意味着任一侧修复必须记得同步另一处，否则两条 cipher 路径**静默漂移**。`jni_bridge_ext.rs:200` 文档注释原样承认「与 `twofish_cbc_jni` 同构，仅内核不同」。
-- **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`（依赖 `aes_cbc.rs` / `twofish_cbc.rs` 的签名面）。
-- **验收标准**：
-  ① 合并为单个私有 `block_cbc_jni(env, key, iv, data, encrypt, kernel: fn(&[u8], &mut [u8], &[u8]) -> Option<Vec<u8>>)`，加密 / 解密侧分别传两内核函数指针；两个 `#[no_mangle]` 导出仅一行转发，**不改** JNI 定长布局契约与擦除语义；
-  ② 既有 AES / Twofish KAT 与等价用例全绿（`cargo test`）；
-  ③ 原生面改动四层 `connectedDebugAndroidTest` 真机实跑 + 门禁 9/9 PASS，批次文档原样粘贴读数。
+### ISSUE-P2-490：`InlineCompressedBinaryBudgetDeviceTest` 的 `2D ≤ M` 分支判据在**等号边界**必然失败（设备侧测试缺陷 · §446 发现）
 
-### ISSUE-P2-467：`aes_cbc.rs` CBC 加/解密「拷出形态」与「原地形态」双份手写实现
+- **核实时间点**：2026-10-05（真机 `M332BF` / Android 17 / API 37 实跑）；**核实方式**：真机 `:database:connectedDebugAndroidTest` 18 例中 1 例红，取其 `TEST-M332BF - 17.xml` 的 `<failure>` 原文（`InlineCompressedBinaryBudgetDeviceTest.kt:68`，`maxHeap=268435456` 即 **256 MiB**）；对照 §217 批次记录该用例在 Pixel_10 AVD 上 `maxHeap = 192 MiB` 时走 OOM 分支通过 ⇒ **同一用例在不同堆界设备上结论相反**。另经 `git diff --stat -- database/` 确认本批零触碰该模块，非回归。
+- **背景**：该用例以「解压峰值下界 `≈ 2D`」为判据（`D = 128 MiB`，故 `2D = 256 MiB`）：`2D > M` 断言必须 OOM，`2D ≤ M` 断言必须成功。但 `2D` 只是**下界**——真实峰值还含 base64 解码中间态、`GZIPOutputStream` 解压缓冲与 `toByteArray()` 副本，故实际占用**严格大于 `2D`**。于是 `2D == M`（本机恰好 `256 MiB == 256 MiB`）时 else 分支要求成功，而真实行为必然 OOM ⇒ **判据在等号边界自相矛盾**。这不是环境噪声：`maxHeap = 256 MiB` 是 Android 常见堆界，凡命中该值的设备都会红；此前只在 192 MiB 的 AVD 上验证过，缺陷被掩盖。
+- **涉及文件**：`database/src/androidTest/java/com/keepasskey/database/xml/InlineCompressedBinaryBudgetDeviceTest.kt`。
+- **验收标准**：① 判据改为区分「`2D` 下界」与「实测峰值」，使 `2D ≤ M < 真实峰值` 区间不再自相矛盾（可按 `Assume` 标注该区间为环境不可判别，或改为断言「成功 ⇒ `M` 显著大于 `2D`」并写明余量依据）；② 须在 `maxHeap` 为 192 MiB 与 256 MiB 两类设备上各实跑一次绿（AVD + 真机），不得只在单台设备上验证；③ `:database:connectedDebugAndroidTest` 全绿且 `skipped == 0`；④ 结论回写 `docs/architecture/已知工程限界.md` §4.1 设备侧覆盖现状（`ISSUE-P2-200` 落点① 的量化结论依赖此判据）。
 
-- **核实时间点**：2026-10-05；**核实方式**：逐行核对 `cbc_encrypt`/`cbc_decrypt`(64-89 / 95-120) 与 `cbc_encrypt_in_place`/`cbc_decrypt_in_place`(128-149 / 155-177) 的闸门、链值 `Zeroizing` 缓冲与循环体；确认 `jni_bridge_ext.rs:311/313` 走 in_place、`:222/224` 走拷出形态。
-- **背景**：两形态是同一套 CBC 链接逻辑的两份实现（参数闸门 65/96/129/156、链值单缓冲 71/101/135/161、逐块 XOR-变换-推进循环全同）；原地版 KDoc 自述「与 `cbc_encrypt` 语义逐字节一致（含 `iv` 出口契约）」（124 行），一致性目前**仅靠人工对照 + 测试维持**。两形态分别服务整块 JNI 路径与 direct ByteBuffer 零拷贝路径，任一侧漂移将导致**两条生产管线密文不一致**。
-- **涉及文件**：`crypto/src/main/rust/src/aes_cbc.rs`、`crypto/src/main/rust/tests/aes_cbc_tests.rs`（既有 NIST KAT 与等价用例 202-235）。
-- **验收标准**：
-  ① 拷出形态改为薄委托（`data.to_vec()` → `cbc_encrypt_in_place` → `Some(out)`，解密同），闸门与循环只留 in_place 一份；
-  ② 既有 KAT / 等价用例全绿且产物逐字节不变（`cargo test`）；
-  ③ 原生面改动四层 `connectedDebugAndroidTest` 真机实跑 + 门禁 9/9 PASS。
+### ISSUE-P2-491：`ISSUE-P1-431` 移除 `keyFileBytes` 时漏更设备侧用例，`:app:androidTest` 编译失败已阻断第四层真机实跑（§446 发现 · 本批已修）
 
-### ISSUE-P2-468：`strength.rs` 热路径每次调用全量分配 `Vec<char>` / `String`（性能 · 维度②）
+- **核实时间点**：2026-10-05（真机 `M332BF`）；**核实方式**：真机 `:app:connectedDebugAndroidTest` 报 `Kotlin compiler: NAMED_PARAMETER_NOT_FOUND / No parameter with name 'keyFileBytes' found`（`QuickUnlockSealDowngradeDeviceTest.kt:70`）；经 `git log -S keyFileBytes` 定位移除方为 `5c3005ea`（`ISSUE-P1-431` 封印载荷瘦身），经 `git diff --stat -- app/src/androidTest/` 确认本批零触碰该文件 ⇒ **先前批次遗留，非本批回归**。
+- **背景**：`BiometricEnrollmentCoordinator` 的 `keyFileBytes` 形参已随封印载荷瘦身移除（密钥文件字节不再进 Keystore 载荷），但该设备侧用例的 `buildCoordinator` 仍传该具名实参 ⇒ `:app:androidTest` **编译期**即失败。后果不止一例红：AGENTS.md 测试资产纪律要求原生面改动须**四层 `connectedDebugAndroidTest` 真机实跑**方可入库，而 `:app:` 层编译不过即**根本无法实跑**，该义务被静默阻断——与 `ISSUE-P3-305`「闸门存在 ≠ 闸门被执行」同型，只是形态是「用例存在 ≠ 用例可编译」。本批已删除该陈旧具名实参（**只删一行、不删用例**）解除阻断。
+- **涉及文件**：`app/src/androidTest/java/com/keepasskey/app/security/QuickUnlockSealDowngradeDeviceTest.kt`。
+- **验收标准**：① `:app:connectedDebugAndroidTest` 编译通过并在真机实跑（用例不得被删除或 `Assume` 跳过）；② **补一条机检**：`*/src/androidTest/**` 与 `src/main` 的构造器具名实参一致性属编译期事实，但 `compileDebugAndroidTestKotlin` **不在 `test` 任务依赖图内** ⇒ 须新增把 `:app:compileDebugAndroidTestKotlin`（及余三层同任务）纳入 CI 的门禁条，避免同类遗漏再次静默阻断真机义务；③ 回写 `AGENTS.md` §5：设备侧「编译通过」亦不构成验证证据的补充说明（与 `:app:compileDebugScreenshotTestKotlin` 同款，须显式跑）。
 
-- **核实时间点**：2026-10-05；**核实方式**：通读 `strength.rs:estimate`(158-279) 全函数并逐处定位分配点（160 / 200 / 499 / 520 / 548 / 582），核对 `MAX_ANALYZED_CHARS=256`(84) 是否约束这些分配。
-- **背景**：`estimate` 在文档明示的「全库审计对每条口令调用」热路径(23-29)上，每次调用都全量分配：`chars: Zeroizing<Vec<char>>`(160，把口令以 UTF-32 物化，长度×4 字节)、`lowered: Zeroizing<String>`(200)、`date_like_weight` 的 `Zeroizing<String>`（499、520 两处）、`unique_char_count` 的 `Vec<char> others`(548)、`minimal_period` 的 `Vec<usize>`(582)。模块已把三条平方级路径线性化，但**逐调用全量分配**未解决，对长口令 / 超长恶意输入放大堆压力。
-- **涉及文件**：`crypto/src/main/rust/src/strength.rs`（及其 `tests/strength_tests.rs`）。
-- **验收标准**：
-  ① 字符类别 / 键盘 / 周期判定改为直接消费入参 UTF-8 字节，消除 `Vec<char>` 物化；`lowered` 以 `&[u8]` 小写视图替代 `String` 分配（或等效方式）；
-  ② 语义与分档**逐字节等价**（既有 `strength_tests.rs` 全量用例锁定，含常见口令 / 周期 / 超长惩罚用例）；
-  ③ 原生面改动四层 `connectedDebugAndroidTest` 真机实跑 + 门禁 9/9 PASS。
+### ISSUE-P2-492：`:app:` 层设备侧在 MIUI 真机上无法推进（系统 UID 冻结 + autofill 服务反复 bind/unbind，环境面欠账 · §446 登记）
 
-### ISSUE-P2-469：`libs.versions.toml` bouncycastle 版本登记与兜底路径健康度（维度④依赖）
-
-- **核实时间点**：2026-10-05；**核实方式**：直读 `gradle/libs.versions.toml`（字段 59 行 / 文件头 2-6 行）；核对 `.github/dependabot.yml` 的生态与目录覆盖；仓库内证据核对 `RESOLVED_LOG.md` §330。**未联网核实 CVE**。
-- **背景**：`bouncycastle = "1.86"`(59 行) 是 KDF / 分组密码的**兜底（fallback）路径**（`CipherFallbackParityTest` 锁定等价性），属密码学大攻击面依赖。该版本项**无「货币性核对」登记**，且文件头(5 行)记的 `bcprov 1.85.2` 与字段值 `1.86` **不一致**（陈旧注释）⇒ 该依赖的货币性与 CVE 状态在仓内无留痕。
-- **涉及文件**：`gradle/libs.versions.toml`、`.github/dependabot.yml`、`app/.../SupplyChainScanSurfaceTest`。
-- **验收标准**：
-  ① 文件头陈旧注释就地修正（`bcprov 1.85.2` → `1.86`）；
-  ② 版本项补「货币性核对」注释（含核对日期、Maven Central 最新 1.8x 与官方安全公告结论）；
-  ③ 在文档中明确「**兜底路径也须随安全修复上调**」的规则（BC 非仅构建期，而是生产兜底）；
-  ④ 门禁 9/9 PASS。
-
-### ISSUE-P2-470：`SettingsHealthController.scanDuplicates()` 未随审计移入 `Dispatchers.Default`，仍在主线程全库遍历（性能 · 调度器）
-
-- **核实时间点**：2026-10-05；**核实方式**：直读 `SettingsHealthController.kt:133-151`（确认 `withContext(Dispatchers.Default)` 块为 142-145、`scanDuplicates()` 在 148 行块外）、`SettingsViewModel.kt:224-236`（确认 `scope = viewModelScope` 为唯一生产构造点）、`SettingsDatabaseMetaController.kt:63-74`（确认实现为全库扁平化 + `DuplicateEntryScanner.scan`）。
-- **背景**：`ISSUE-P2-58` AC④ 已把 `getKdbxEntries()` + `HealthCheckEngine.analyzeEntries` 搬入 `Dispatchers.Default`，但同一次装配里的 `scanDuplicates()`（148 行）在**该块之外**求值，仍跑在 `viewModelScope`（Main）上；其实现链为全库遍历（`SettingsDatabaseMetaController.scanDuplicateEntries` → `DuplicateEntryScanner.scan`）⇒ **万级条目库上整库遍历阻塞主线程**。`DuplicateEntryScanner.scan` 本身为 O(n)（哈希分桶），问题在**执行线程**而非复杂度。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsHealthController.kt`、`SettingsDatabaseMetaController.kt`、`SettingsViewModel.kt`。
-- **验收标准**：
-  ① `scanDuplicates()` 的求值随 `analyzeEntries` 一并移入同一 `Dispatchers.Default` 块（`runBreachCheck` 为挂起网络调用，按既有口径另判）；
-  ② 既有单测全绿（测试调度器注入口径不变），并以「主线程零阻塞」类守卫用例或探针锁定该调用点；
-  ③ 大库（万级条目）真机走查无主线程 jank；全量 `test` 绿 + 门禁 9/9 PASS。
+- **核实时间点**：2026-10-05（真机 `M332BF` / Android 17 / API 37 / MIUI 定制系统）；**核实方式**：`:app:connectedDebugAndroidTest` 首轮运行 **40 分钟零结果**（无 `TestRunner` 日志、无宿主结果 XML），主动终止；按 CI 既定口径（`build.yml:482` 将 `AutofillAuthChainDeviceTest` 登记为「系统填充 UI 呈现」环境敏感面、对模拟器以 `notClass` 排除）排除该类重跑，推进 14 分钟仍未出结果，再次主动终止。`logcat` 取证：系统对被测进程反复 `freezeUid SUCCESS`（`reason=freeze_able` / `from system`），且 `KeePasskeyAutofillService` 持续 bind/unbind（`MiuiAutofillServiceHelper: initAutofillServicePackageName`）；`ps` 确认 `am instrument` 与被测进程均存活但无进展。
+- **背景**：`:app:` 层设备侧共 24 个测试文件，含自动填充认证链路、系统 UI、生物识别等**深度依赖系统服务生命周期**的用例。在 MIUI 的 UID 冻结策略下，被测进程被系统冻结且 autofill 服务持续解绑重绑，设备侧无法推进。**性质判定为环境面**（厂商系统冻结策略），非产品缺陷、非回归——`git diff --stat -- app/src/` 确认本批在该模块只改协程调度器归属（`SettingsHealthController`），其验证面是宿主单测、不依赖设备层。须如实登记而非以「设备侧无新增义务」一笔带过：本条是 §446 四层实跑中**唯一未取得读数的一层**。
+- **涉及文件**：`app/src/androidTest/**`（涉事用例集待定位到具体类）。
+- **验收标准**：① 在**非 MIUI 设备或 AVD** 上跑通 `:app:connectedDebugAndroidTest` 并取得读数（须含 `skipped == 0`）；② 定位并登记具体受阻用例类/方法（当前只能确认「整层无法推进」，**未能定位到单个用例**——如实登记该取证缺口）；③ 评估该层是否需拆分「依赖系统服务生命周期的用例」与「纯应用内用例」两个 `notClass` 分组，使厂商系统差异不至于**整层不可测**；④ 结论回写 `docs/architecture/已知工程限界.md` §4.1 设备侧覆盖现状。
 
 ## P3 低危问题、特性接线与体验优化（8 项）
 
@@ -149,6 +120,7 @@
 - **背景**：`minimal_period`(576-601) 为 KMP 前缀函数分配随输入长度线性增长的 `Vec<usize>`，调用点传入**未经截断**的全量字符 ⇒ 恶意超长口令可在热路径上放大内存峰值。
 - **涉及文件**：`crypto/src/main/rust/src/strength.rs`。
 - **验收标准**：① 改为 O(1) 额外空间的滚动 / 双指针判定（或固定上限缓冲），删除随输入增长的分配；② 周期判定语义不变（`abc×100` 仍命中 `FLAG_PERIODIC_REPEAT`），既有用例全绿；③ `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
+
 
 ### ISSUE-P3-489：全量单测首轮红的失败证据无保留工序（§445 立规待办，流程）
 

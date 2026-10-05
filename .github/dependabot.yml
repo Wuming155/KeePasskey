@@ -1,6 +1,9 @@
 # TASK-20（P3）：供应链自动化——每周依赖更新巡检。
 # - package-ecosystem: gradle 以目录 "/" 覆盖仓库内全部模块 build.gradle.kts 与版本目录
 #   （本项目依赖版本集中于 gradle/libs.versions.toml，5 模块统一受控）。
+# - ISSUE-P2-469：BouncyCastle（bcprov-jdk18on）为 KDF / 分组密码的**生产兜底路径**
+#   （`CipherFallbackParityTest` 锁定等价），其安全更新须同批跟进，不得以「主路径已原生化」
+#   为由滞留；本 gradle 生态已覆盖版本目录，故 BC 更新会正常进入 Dependabot PR。
 # - 分组策略：gradle minor/patch 合并为单 PR 防风暴；major 保持独立 PR（人工重点评审
 #   破坏性变更，如 AGP / Kotlin / KSP / Hilt 大版本需配合迁移）。
 # - timezone 使用 Asia/Shanghai，周末凌晨低频扫描。

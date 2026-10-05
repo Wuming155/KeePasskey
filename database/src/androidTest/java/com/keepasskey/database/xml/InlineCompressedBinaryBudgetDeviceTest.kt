@@ -27,11 +27,19 @@ import java.util.zip.GZIPOutputStream
  *
  * ## 判别口径（与设备无关的自洽判据，避免"这台机器恰好"的伪结论）
  *
- * 令解压产物 `D`、堆界 `M`。单节点成功路径的峰值下界 ≈ `2D`（输出缓冲 + `toByteArray()` 副本）。
- * - `2D > M` ⇒ **必须**失败于 `OutOfMemoryError`（本用例断言此预测）；
- * - `2D ≤ M` ⇒ 允许成功（本用例断言成功）。
+ * 令解压产物 `D`、堆界 `M`。单节点成功路径的峰值**下界** ≈ `2D`（输出缓冲 + `toByteArray()` 副本）。
+ * - `2D > M` ⇒ **必须**失败于 `OutOfMemoryError`（本用例断言此预测；该方向判据可靠）。
+ * - `2D ≤ M` ⇒ **不能**推出成功（ISSUE-P2-490）：真实峰值还要叠加 base64 字符串 / char 数组 /
+ *   压缩体 / gunzip 缓冲等中间态，恒**大于** `2D`。故此区间属临界带，"成功 / OOM" 皆可能。
+ *   本用例的处理方式是**按构造规避**临界带：在安全带内（`D = M/4`，即 `2D = M/2`）另取一次
+ *   断言成功——此处余量足矣，成功才是可判定的期望；若把满额规模放在临界带断言成功，
+ *   则在 `2D == M` 的设备（如真机 M332BF：maxHeap = 256 MiB 与 2D = 256 MiB 恰好相等）必然假红。
  *
  * 另设 1 MiB 对照：证明该代码路径本身可用，排除"因为代码坏了才失败"的误读。
+ *
+ * 跨设备一致性（本条判据的立规缘由）：同一用例曾在 192 MiB 的 AVD 上走 OOM 分支通过、
+ * 在 256 MiB 真机上走成功分支假红——**结论随设备堆界翻转**。改后两个方向均由规模与堆界
+ * 的显式关系决定，与"这台机器恰好"无关。
  *
  * ## 边界（如实声明）
  *
@@ -59,17 +67,40 @@ class InlineCompressedBinaryBudgetDeviceTest {
         val peakLowerBound = 2L * MEMBER_LIMIT_BYTES
 
         if (peakLowerBound > maxHeap) {
+            // 方向一（本分支判据是**可靠**的）：峰值下界已超堆界 ⇒ 必然 OOM。
+            // 这正是 ISSUE-P2-200 落点① 的「单节点即打崩堆」结论。
             assertTrue(
                 "maxHeap=$maxHeap 低于单节点解压峰值下界（≈2×$MEMBER_LIMIT_BYTES=$peakLowerBound）" +
                     "⇒ 必须失败于 OutOfMemoryError（ISSUE-P2-200 落点① 的「单节点即打崩堆」）；实际=$outcome",
                 outcome is InflateOutcome.OutOfMemory
             )
-        } else {
-            assertTrue(
-                "maxHeap=$maxHeap 足以容纳峰值下界 $peakLowerBound，解析应当成功；实际=$outcome",
-                outcome is InflateOutcome.Success
-            )
+            return
         }
+
+        // ISSUE-P2-490：`peakLowerBound` 只是**下界**（≈2D），真实峰值还要叠加
+        // base64 字符串 / char 数组 / 压缩体 / gunzip 缓冲等中间态，故实际占用**严格大于 2D**。
+        // 原实现在此分支断言「成功」，于是 `2D ≤ M` 一旦成立（尤其 `2D == M` 的临界值，
+        // 如真机 M332BF 的 maxHeap=256MiB 与 2D=256MiB 恰好相等）就与真实行为矛盾：
+        // 同一用例在 192 MiB 的 AVD 上走 OOM 分支通过、在 256 MiB 真机上走成功分支必红。
+        // 现改为在**安全带**内取规模断言成功——令 2D = maxHeap/2，为中间态留足一倍余量，
+        // 使「成功」成为可判定的期望；临界带（2D ≤ M < 2D+中间态）由构造方式**规避**而非断言。
+        val safeBytes = maxHeap / SAFE_BAND_DIVISOR
+        assertTrue(
+            "测试前提：安全带规模须不超过生产允许上界 $MEMBER_LIMIT_BYTES（maxHeap=$maxHeap）",
+            safeBytes in 1..MEMBER_LIMIT_BYTES
+        )
+        val safeOutcome = inflateInlineCompressed(safeBytes)
+        assertTrue(
+            "maxHeap=$maxHeap 下 2×$safeBytes=${
+                2L * safeBytes
+            } 仅为堆界一半（留足中间态余量），单节点内联压缩附件应当成功；实际=$safeOutcome",
+            safeOutcome is InflateOutcome.Success
+        )
+        assertEquals(
+            "安全带规模下解压产物字节数必须与压缩前一致",
+            safeBytes,
+            (safeOutcome as InflateOutcome.Success).bytes
+        )
     }
 
     /** 解压结果三态（把「OOM」与「其它失败」分开，避免把损坏误读为内存结论） */
@@ -127,6 +158,13 @@ class InlineCompressedBinaryBudgetDeviceTest {
     }
 
     private companion object {
+        /**
+         * ISSUE-P2-490：安全带的分母——取 `maxHeap / 4` 作为解压产物规模，使峰值下界
+         * `2D = maxHeap/2`，为「base64 中间态 + gunzip 缓冲 + `toByteArray()` 副本」
+         * 留出约一倍堆界余量，使该带的「成功」成为可判定期望。
+         */
+        const val SAFE_BAND_DIVISOR = 4L
+
         /** 对照规模：必须成功 */
         const val CONTROL_BYTES = 1L * 1024 * 1024
 

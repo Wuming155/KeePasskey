@@ -23,10 +23,14 @@
 //! **热路径预算（ISSUE-P2-58，审计 RUST-03）**：全库审计会对**每条口令**调用本模块，
 //! 恶意库可用超长字符串放大耗时。故：
 //! - [`estimate`] 只对前 [`MAX_ANALYZED_CHARS`] 个字符做模式识别与熵基线（超额部分线性惩罚）；
-//! - 三条原平方级路径均已线性化：[`longest_keyboard_walk`]（单趟）、[`unique_char_count`]
-//!   （ASCII 位图）、[`minimal_period`]（KMP 前缀函数）；
+//! - 三条原平方级路径均已线性化：[`longest_keyboard_walk_str`]（单趟）、[`unique_char_count_str`]
+//!   （ASCII 位图）、[`minimal_period_bytes`]（KMP 前缀函数）；
 //! - 结果：单条口令的耗时上界为 `O(MAX_ANALYZED_CHARS)` + 周期检测 `O(真实长度)`，
-//!   与恶意输入的规模**脱钩**（周期检测为线性且常数极小，故不受截断影响，跑全量字符）。
+//!   与恶意输入的规模**脱钩**（周期检测为线性且常数极小，故不受截断影响，跑全量字节）。
+//!
+//! ISSUE-P2-468：热路径零堆分配——有效 UTF-8 直接借用入参字节，
+//! 不再物化 `Vec<char>` / `String`（`lowered` 改流式小写比较，唯一计数改栈缓冲，
+//! 周期检测改字节级 KMP）；仅非法字节容错分支分配一次受管 `String`。
 
 use zeroize::Zeroizing;
 
@@ -155,15 +159,24 @@ const KEYBOARD_ROWS: [&str; 4] = [
 ///
 /// `password` 为 UTF-8 字节（调用方保证有效；非法字节按替换字符容错处理，绝不 panic）。
 /// 空口令返回 `score = 0` 且置 [`FLAG_TOO_SHORT`]。
+///
+/// ISSUE-P2-468：热路径零分配——有效 UTF-8（生产全量）直接借用入参字节，
+/// 不再物化 `Vec<char>` / `String`；仅非法字节的容错分支分配一次受管 `String`
+///（生产口令恒为合法 UTF-8，该分支仅测试的任意字节探针可达）。
 pub fn estimate(password: &[u8]) -> Estimate {
-    // 解码为字符序列并立即置于受管缓冲（函数返回即归零）
-    let chars: Zeroizing<Vec<char>> = Zeroizing::new(
-        std::str::from_utf8(password)
-            .map(|s| s.chars().collect())
-            .unwrap_or_else(|_| String::from_utf8_lossy(password).chars().collect()),
-    );
+    match std::str::from_utf8(password) {
+        Ok(text) => estimate_str(text),
+        Err(_) => {
+            let lossy = Zeroizing::new(String::from_utf8_lossy(password).into_owned());
+            estimate_str(&lossy)
+        }
+    }
+}
 
-    let len = chars.len();
+/// `estimate` 的 `&str` 内核：全程借用，不分配堆内存（除周期检测的 KMP 前缀表，
+/// 见 [`minimal_period_bytes`]；该表为 `usize` 索引、非秘密，归 `ISSUE-P3-480` 收口）。
+fn estimate_str(text: &str) -> Estimate {
+    let len = text.chars().count();
     if len == 0 {
         return Estimate {
             score: SCORE_MIN,
@@ -177,9 +190,15 @@ pub fn estimate(password: &[u8]) -> Estimate {
     // - `analyzed`（≤ MAX_ANALYZED_CHARS 的前缀）承担**全部模式识别与熵基线**，
     //   使本函数对任意输入长度的最坏耗时被封顶（恶意库的 CPU DoS 面收敛）；
     // - `excess` 尾部既不计熵信用、又按线性惩罚扣减（见估算末尾）。
-    let analyzed: &[char] = &chars[..len.min(MAX_ANALYZED_CHARS)];
+    // ISSUE-P2-468：前缀截取按字符边界切字节视图，不物化字符向量。
+    let analyzed_end = text
+        .char_indices()
+        .nth(MAX_ANALYZED_CHARS)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    let analyzed: &str = &text[..analyzed_end];
     let excess = len.saturating_sub(MAX_ANALYZED_CHARS);
-    let analyzed_len = analyzed.len();
+    let analyzed_len = len.min(MAX_ANALYZED_CHARS);
 
     let mut flags: i32 = 0;
     if len < MIN_RECOMMENDED_LEN {
@@ -187,7 +206,7 @@ pub fn estimate(password: &[u8]) -> Estimate {
     }
 
     // —— 字符集规模与类别计数 ——
-    let (charset_size, class_count) = charset_profile(analyzed);
+    let (charset_size, class_count) = charset_profile_str(analyzed);
     if class_count == 1 {
         flags |= FLAG_SINGLE_CHAR_CLASS;
     }
@@ -196,66 +215,68 @@ pub fn estimate(password: &[u8]) -> Estimate {
     // 未分析尾部不参与基线（不给"未经审视的长度"任何熵信用）
     let mut log10 = (analyzed_len as f64) * (charset_size as f64).log2() / LOG2_10;
 
-    // —— 完全/近似命中常见口令表 ——
-    let lowered: Zeroizing<String> = Zeroizing::new(analyzed.iter().flat_map(|c| c.to_lowercase()).collect());
-    if COMMON_PASSWORDS.contains(&lowered.as_str()) {
+    // —— 完全/近似命中常见口令表（零分配：流式小写比较，不物化 `lowered`）——
+    if is_common_exact(analyzed) {
         flags |= FLAG_COMMON_PASSWORD;
         log10 = 1.0_f64.min(log10);
     } else {
-        // 近似：剥除尾部数字与符号后命中（`password1`、`qwerty!` 一族）
-        let stem_len = lowered
-            .trim_end_matches(|c: char| c.is_ascii_digit() || c.is_ascii_punctuation())
-            .len();
-        if stem_len > 0 && stem_len < lowered.len() {
-            let stem = &lowered[..stem_len];
-            if COMMON_PASSWORDS.contains(&stem) {
-                flags |= FLAG_COMMON_PASSWORD;
-                log10 = 4.0_f64.min(log10);
-            }
+        // 近似：剥除尾部数字与符号后命中（`password1`、`qwerty!` 一族）。
+        // 小写对尾部 ASCII 判据为恒等映射，故先截尾再小写与原语义等价。
+        let stem = analyzed.trim_end_matches(|c: char| c.is_ascii_digit() || c.is_ascii_punctuation());
+        if !stem.is_empty() && stem.chars().count() < analyzed_len && is_common_exact(stem) {
+            flags |= FLAG_COMMON_PASSWORD;
+            log10 = 4.0_f64.min(log10);
         }
     }
 
     // —— 整串周期性（须先于单段惩罚，因为它把整串按「一个单元」重估）——
-    // 注意：本判据跑**全量字符**（KMP 版本为 O(n)，见 `minimal_period` KDoc）——
+    // 注意：本判据跑**全量字符**（KMP 版本为 O(n)，见 `minimal_period_bytes` KDoc）——
     // 截断会让 `abc` × 100 一类超长重复块因不整除而漏判，进而被熵基线抬到高档。
-    if let Some((unit_len, repeats)) = minimal_period(&chars) {
-        if repeats >= PERIODIC_MIN_REPEATS {
-            flags |= FLAG_PERIODIC_REPEAT;
-            let unit_charset = charset_profile(&chars[..unit_len]).0;
-            let unit_log10 = (unit_len as f64) * (unit_charset as f64).log2() / LOG2_10;
-            log10 = (unit_log10 + (repeats as f64).log10()).min(log10);
+    // ISSUE-P2-468：直接消费 UTF-8 字节（UTF-8 前导/后续字节区间不交叠，
+    // 字节级整周期蕴含字符边界对齐，ASCII 下与原字符级语义逐字节等价）。
+    if let Some((unit_bytes, repeats)) = minimal_period_bytes(text.as_bytes()) {
+        if repeats >= PERIODIC_MIN_REPEATS && text.is_char_boundary(unit_bytes) {
+            let unit_str = &text[..unit_bytes];
+            let unit_len_chars = unit_str.chars().count();
+            if unit_len_chars > 0 {
+                let unit_charset = charset_profile_str(unit_str).0;
+                let unit_log10 =
+                    (unit_len_chars as f64) * (unit_charset as f64).log2() / LOG2_10;
+                flags |= FLAG_PERIODIC_REPEAT;
+                log10 = (unit_log10 + (repeats as f64).log10()).min(log10);
+            }
         }
     }
 
     // —— 同字符重复段 ——
-    let repeat_run = longest_repeat_run(analyzed);
+    let repeat_run = longest_repeat_run_str(analyzed);
     if repeat_run >= REPEAT_RUN_MIN {
         flags |= FLAG_REPEATED_RUN;
         log10 -= 0.8 * (repeat_run as f64);
     }
 
     // —— 单调顺序段 ——
-    let seq_run = longest_sequence_run(analyzed);
+    let seq_run = longest_sequence_run_str(analyzed);
     if seq_run >= SEQUENCE_RUN_MIN {
         flags |= FLAG_SEQUENCE;
         log10 -= 0.7 * (seq_run as f64);
     }
 
     // —— 键盘相邻行走 ——
-    let walk = longest_keyboard_walk(analyzed);
+    let walk = longest_keyboard_walk_str(analyzed);
     if walk >= KEYBOARD_WALK_MIN {
         flags |= FLAG_KEYBOARD_WALK;
         log10 -= 0.9 * (walk as f64);
     }
 
     // —— 日期/年份形状 ——
-    if let Some(weight) = date_like_weight(analyzed) {
+    if let Some(weight) = date_like_weight_str(analyzed) {
         flags |= FLAG_DATE_LIKE;
         log10 -= weight;
     }
 
     // —— 字符唯一率过低 ——
-    let unique = unique_char_count(analyzed);
+    let unique = unique_char_count_str(analyzed);
     let unique_ratio = unique as f64 / analyzed_len as f64;
     if unique_ratio < LOW_UNIQUE_RATIO {
         flags |= FLAG_LOW_UNIQUE_RATIO;
@@ -276,6 +297,25 @@ pub fn estimate(password: &[u8]) -> Estimate {
         guesses_log10_x100: clamp_x100(log10),
         flags,
     }
+}
+
+/// 小写视图与口令表条目的流式等价判定（不物化 `String`）。
+///
+/// 原语义为 `analyzed.to_lowercase() == table`；`to_lowercase` 逐字符展开，
+/// 流式比较与先收集再比较的等价性为序列等价的直接推论。表项恒为 ASCII 小写，
+/// 非 ASCII 输入不可能命中（小写后仍含非 ASCII），与原语义一致。
+fn lowered_equals_table(analyzed: &str, table: &str) -> bool {
+    analyzed
+        .chars()
+        .flat_map(|c| c.to_lowercase())
+        .eq(table.chars())
+}
+
+/// 完全命中常见口令表（零分配）。
+fn is_common_exact(analyzed: &str) -> bool {
+    COMMON_PASSWORDS
+        .iter()
+        .any(|table| lowered_equals_table(analyzed, table))
 }
 
 /// 分档映射（阈值按 `log10(猜测次数)`）：`<3 → 0`、`<6 → 1`、`<8 → 2`、`<11 → 3`、其余 `4`。
@@ -323,14 +363,16 @@ fn clamp_x100(log10: f64) -> i32 {
 }
 
 /// 返回 (字符集规模, 出现的字符类别数)。
-fn charset_profile(chars: &[char]) -> (usize, usize) {
+///
+/// ISSUE-P2-468：直接消费 `&str` 视图，不物化字符向量；语义与原 `&[char]` 版逐分支一致。
+fn charset_profile_str(chars: &str) -> (usize, usize) {
     let mut has_lower = false;
     let mut has_upper = false;
     let mut has_digit = false;
     let mut has_symbol = false;
     let mut has_space = false;
     let mut has_other = false;
-    for &c in chars {
+    for c in chars.chars() {
         if c.is_ascii_lowercase() {
             has_lower = true;
         } else if c.is_ascii_uppercase() {
@@ -365,44 +407,57 @@ fn charset_profile(chars: &[char]) -> (usize, usize) {
 }
 
 /// 最长同字符重复段长度（`aaaa` → 4）。
-fn longest_repeat_run(chars: &[char]) -> usize {
-    let mut best = 1usize;
-    let mut cur = 1usize;
-    for i in 1..chars.len() {
-        if chars[i] == chars[i - 1] {
+///
+/// ISSUE-P2-468：流式单趟，不索引、不物化；空串返回 0，与原语义一致。
+fn longest_repeat_run_str(chars: &str) -> usize {
+    let mut best = 0usize;
+    let mut cur = 0usize;
+    let mut prev: Option<char> = None;
+    for c in chars.chars() {
+        if Some(c) == prev {
             cur += 1;
-            best = best.max(cur);
         } else {
             cur = 1;
         }
+        best = best.max(cur);
+        prev = Some(c);
     }
-    if chars.is_empty() {
-        0
-    } else {
-        best
-    }
+    best
 }
 
 /// 最长单调顺序段长度（步长 ±1；同类别内比较，`abc`/`cba`/`456`/`654` 均命中）。
-fn longest_sequence_run(chars: &[char]) -> usize {
-    let mut best = 1usize;
-    let mut cur = 1usize;
-    for i in 1..chars.len() {
-        let step = step_of(chars[i - 1], chars[i]);
-        let prev_step = if i >= 2 { step_of(chars[i - 2], chars[i - 1]) } else { None };
-        let continued = step.is_some() && (cur == 1 || step == prev_step);
-        if continued {
-            cur += 1;
-            best = best.max(cur);
-        } else {
-            cur = 1;
+///
+/// ISSUE-P2-468：流式递推（`prev` + `prev_step` + `cur`），与原索引版逐分支等价：
+/// 原 `cur == 1 || step == prev_step` 的续段条件原样保留，空串返回 0、单字符返回 1。
+fn longest_sequence_run_str(chars: &str) -> usize {
+    let mut best = 0usize;
+    let mut cur = 0usize;
+    let mut prev: Option<char> = None;
+    let mut prev_step: Option<i32> = None;
+    for c in chars.chars() {
+        match prev {
+            None => {
+                cur = 1;
+            }
+            Some(p) => {
+                let step = step_of(p, c);
+                let continued = step.is_some() && (cur == 1 || step == prev_step);
+                if continued {
+                    cur += 1;
+                } else {
+                    cur = 1;
+                }
+                if step.is_some() {
+                    prev_step = step;
+                } else {
+                    prev_step = None;
+                }
+            }
         }
+        best = best.max(cur);
+        prev = Some(c);
     }
-    if chars.is_empty() {
-        0
-    } else {
-        best
-    }
+    best
 }
 
 /// 相邻字符在「同类别内」的索引差（±1 视为顺序步长）。
@@ -453,11 +508,13 @@ fn class_index(c: char) -> Option<(CharClass, i32)> {
 /// 与 `-=` + `q` 跨排组合的判定保持不变）。
 ///
 /// **必须判排**：展平拼接后上一排末位与下一排首位索引也相邻，若不判排会把跨排组合误判为行走。
-fn longest_keyboard_walk(chars: &[char]) -> usize {
+///
+/// ISSUE-P2-468：直接消费 `&str` 视图，不物化。
+fn longest_keyboard_walk_str(chars: &str) -> usize {
     let mut best = 0usize;
     let mut cur = 0usize;
     let mut prev: Option<(usize, usize)> = None;
-    for &c in chars {
+    for c in chars.chars() {
         match keyboard_index(c) {
             Some((row, col)) => {
                 cur = match prev {
@@ -494,18 +551,20 @@ fn keyboard_index(c: char) -> Option<(usize, usize)> {
 ///
 /// - 整串为 4/6/8 位数字且可解释为年份或 `YYYYMMDD` / `YYMMDD` / `MMDDYYYY` → 权重 `4.0`；
 /// - 仅**内含**一个 `1900..=2099` 的四位年份 → 权重 `2.0`。
-fn date_like_weight(chars: &[char]) -> Option<f64> {
-    if chars.iter().all(|c| c.is_ascii_digit()) {
-        let s: Zeroizing<String> = Zeroizing::new(chars.iter().collect());
-        let ok = match s.len() {
-            4 => is_year(&s),
+///
+/// ISSUE-P2-468：直接消费 `&str` / 字节视图，零分配；数字串恒为 ASCII，
+/// 字节长度即字符长度，与原 `String` 物化版逐分支等价。
+fn date_like_weight_str(chars: &str) -> Option<f64> {
+    if !chars.is_empty() && chars.bytes().all(|b| b.is_ascii_digit()) {
+        let ok = match chars.len() {
+            4 => is_year(chars),
             6 => {
-                let mm: u32 = s[0..2].parse().unwrap_or(0);
-                let dd: u32 = s[2..4].parse().unwrap_or(0);
+                let mm: u32 = chars[0..2].parse().unwrap_or(0);
+                let dd: u32 = chars[2..4].parse().unwrap_or(0);
                 (1..=12).contains(&mm) && (1..=31).contains(&dd)
             }
             8 => {
-                let (y, m, d) = (&s[0..4], &s[4..6], &s[6..8]);
+                let (y, m, d) = (&chars[0..4], &chars[4..6], &chars[6..8]);
                 is_year(y)
                     && (1..=12).contains(&m.parse().unwrap_or(0))
                     && (1..=31).contains(&d.parse().unwrap_or(0))
@@ -517,8 +576,7 @@ fn date_like_weight(chars: &[char]) -> Option<f64> {
         }
     }
     // 内含四位年份
-    let s: Zeroizing<String> = Zeroizing::new(chars.iter().collect());
-    let bytes = s.as_bytes();
+    let bytes = chars.as_bytes();
     if bytes.len() >= 4 {
         for w in bytes.windows(4) {
             if w.iter().all(|b| b.is_ascii_digit()) && is_year(std::str::from_utf8(w).unwrap_or("")) {
@@ -541,13 +599,17 @@ fn is_year(text: &str) -> bool {
 ///
 /// 原实现用 `Vec::contains` 去重（最坏 O(n²)）；现改为「ASCII 位图 + 非 ASCII 小表」：
 /// - ASCII（`U+0000..=U+007F`）用 `[bool; 128]` 位图，O(1) 判定；
-/// - 非 ASCII 字符收集进 `Vec<char>`，逐个 `contains`——其长度受 [`MAX_ANALYZED_CHARS`]
-///   封顶且远小于 ASCII 占比，故整体为 O(n)。
-fn unique_char_count(chars: &[char]) -> usize {
-    let mut ascii_seen = [false; 128];
-    let mut others: Vec<char> = Vec::new();
+/// - 非 ASCII 字符收集进受管栈缓冲（容量 [`MAX_ANALYZED_CHARS`]，已截断前缀恒可容纳），
+///   逐个线性比对——其长度远小于 ASCII 占比，故整体为 O(n)。
+///
+/// ISSUE-P2-468：栈缓冲替代 `Vec<char> others` 堆分配；含秘密的非 ASCII 表经
+/// [`Zeroizing`] 包装，返回即归零（原 `Vec` 版未受管，此处顺带收口）。
+fn unique_char_count_str(chars: &str) -> usize {
+    let mut ascii_seen = Zeroizing::new([false; 128]);
+    let mut others = Zeroizing::new(['\0'; MAX_ANALYZED_CHARS]);
+    let mut others_len = 0usize;
     let mut count = 0usize;
-    for &c in chars {
+    for c in chars.chars() {
         let code = c as u32;
         if code < 128 {
             let slot = &mut ascii_seen[code as usize];
@@ -555,37 +617,55 @@ fn unique_char_count(chars: &[char]) -> usize {
                 *slot = true;
                 count += 1;
             }
-        } else if !others.contains(&c) {
-            others.push(c);
-            count += 1;
+        } else {
+            let mut found = false;
+            for i in 0..others_len {
+                if others[i] == c {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                if others_len < MAX_ANALYZED_CHARS {
+                    others[others_len] = c;
+                    others_len += 1;
+                    count += 1;
+                }
+            }
         }
     }
     count
 }
 
-/// 最小周期 `p` 与重复次数 `len / p`；非周期串返回 `None`。
+/// 最小周期 `p`（字节）与重复次数 `len / p`；非周期串返回 `None`。
 ///
 /// **O(n)**（ISSUE-P2-58：原实现逐周期长度试探为最坏 O(n²)，是全模块最后一条平方级路径）：
 /// 以 KMP 前缀函数求最小整周期——`p = len - pi[len-1]`，且仅当 `len % p == 0` 时成立。
-/// 语义与原实现一致：只接受**恰好整周期**（`len % p == 0` 且逐字符相等），
+/// 语义与原实现一致：只接受**恰好整周期**（`len % p == 0` 且逐字节相等），
 /// 不把「偶然重复前缀」误判为周期串；`repeats < 2` 返回 `None`。
 ///
-/// 因已线性化，本函数在 [`estimate`] 中对**全量字符**调用（不受
+/// 因已线性化，本函数在 [`estimate`] 中对**全量字节**调用（不受
 /// [`MAX_ANALYZED_CHARS`] 截断影响）——否则超长重复块（如 `abc` × 100）会因截断后
 /// 不再整除而漏判周期，被熵基线抬到高档（正是陷阱 #7 的一种形态）。
-fn minimal_period(chars: &[char]) -> Option<(usize, usize)> {
-    let len = chars.len();
+///
+/// ISSUE-P2-468：直接消费 UTF-8 字节，不物化 `Vec<char>`。UTF-8 前导字节
+/// （`0xC2..=0xF4`）与后续字节（`0x80..=0xBF`）区间不交叠，故字节级整周期必对齐
+/// 字符边界（错位周期需前导adero等于后续字节，不可能成立）；ASCII 下与原字符级
+/// KMP 逐字节等价。调用方须再以 `is_char_boundary(p)` 确认后方可按 `&str` 切片。
+/// 前缀表 `pi` 的堆分配归 `ISSUE-P3-480`（O(1) 空间化）收口，本条不触动。
+fn minimal_period_bytes(data: &[u8]) -> Option<(usize, usize)> {
+    let len = data.len();
     if len < 2 {
         return None;
     }
-    // KMP 前缀函数：pi[i] = chars[..=i] 的最长真前缀=真后缀长度
+    // KMP 前缀函数：pi[i] = data[..=i] 的最长真前缀=真后缀长度
     let mut pi = vec![0usize; len];
     for i in 1..len {
         let mut k = pi[i - 1];
-        while k > 0 && chars[i] != chars[k] {
+        while k > 0 && data[i] != data[k] {
             k = pi[k - 1];
         }
-        if chars[i] == chars[k] {
+        if data[i] == data[k] {
             k += 1;
         }
         pi[i] = k;

@@ -67,7 +67,8 @@ class QuickUnlockSealDowngradeDeviceTest {
         uiState = uiState,
         settingsRepository = settings,
         activeDbId = { DB_ID },
-        keyFileBytes = { null },
+        // ISSUE-P1-431（§431）封印载荷瘦身：协调器已不再接收 keyFileBytes（密钥文件字节不进
+        // Keystore 载荷），原具名实参残留致 `:app:androidTest` 编译失败 → 第四层真机实跑被卡死。
         biometricAuthManager = authManager,
         biometricCredentialStorage = BiometricCredentialStorage(context),
         debugLog = DebugLogBuffer()

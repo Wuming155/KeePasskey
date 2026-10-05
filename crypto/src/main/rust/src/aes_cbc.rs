@@ -61,30 +61,12 @@ pub fn ecb_encrypt_block(key: &[u8], plain: &[u8]) -> Option<[u8; BLOCK_LEN]> {
 ///   （流式路径每 64 KiB 一段，正是靠该契约推进）。
 ///
 /// 任一前置条件不满足返回 `None`（对应 JNI 层 `null` → Kotlin 抛 `CipherException`）。
+///
+/// ISSUE-P2-467：本函数为薄委托——闸门与循环只留 [`cbc_encrypt_in_place`] 一份，
+/// 此处仅拷贝输入后复用原地实现，避免两份手写 CBC 逻辑静默漂移。
 pub fn cbc_encrypt(key: &[u8], iv: &mut [u8], data: &[u8]) -> Option<Vec<u8>> {
-    if key.len() != KEY_LEN || iv.len() != BLOCK_LEN || data.len() % BLOCK_LEN != 0 {
-        return None;
-    }
-    let cipher = Aes256::new_from_slice(key).ok()?;
-
-    // 链值单缓冲（全路径 Zeroizing）；**逐块零分配**：直接写进输出缓冲，不经 Vec::push
-    let mut chain = Zeroizing::new([0u8; BLOCK_LEN]);
-    chain.copy_from_slice(iv);
-
-    let mut out = vec![0u8; data.len()];
-    for (src, dst) in data
-        .chunks_exact(BLOCK_LEN)
-        .zip(out.chunks_exact_mut(BLOCK_LEN))
-    {
-        // dst = E(src ⊕ chain)，随后密文本身成为下一链值（CBC 定义）
-        for i in 0..BLOCK_LEN {
-            dst[i] = src[i] ^ chain[i];
-        }
-        cipher.encrypt_block(as_block_mut(dst));
-        chain.copy_from_slice(dst);
-    }
-
-    iv.copy_from_slice(&chain[..]);
+    let mut out = data.to_vec();
+    cbc_encrypt_in_place(key, iv, &mut out)?;
     Some(out)
 }
 
@@ -92,30 +74,11 @@ pub fn cbc_encrypt(key: &[u8], iv: &mut [u8], data: &[u8]) -> Option<Vec<u8>> {
 ///
 /// 语义与 [`cbc_encrypt`] 对称：`iv` 原地更新为最后一组**密文**（解密侧链值同样取密文）。
 /// 数据非整数倍分组时返回 `None`——**不做任何静默截断**，交由上层 fail-closed。
+///
+/// ISSUE-P2-467：同上，薄委托至 [`cbc_decrypt_in_place`]。
 pub fn cbc_decrypt(key: &[u8], iv: &mut [u8], data: &[u8]) -> Option<Vec<u8>> {
-    if key.len() != KEY_LEN || iv.len() != BLOCK_LEN || data.len() % BLOCK_LEN != 0 {
-        return None;
-    }
-    let cipher = Aes256::new_from_slice(key).ok()?;
-
-    let mut chain = Zeroizing::new([0u8; BLOCK_LEN]);
-    chain.copy_from_slice(iv);
-
-    let mut out = vec![0u8; data.len()];
-    for (src, dst) in data
-        .chunks_exact(BLOCK_LEN)
-        .zip(out.chunks_exact_mut(BLOCK_LEN))
-    {
-        // dst = D(src) ⊕ chain；解密侧链值取**密文**（即本组输入 src，故无需副本）
-        dst.copy_from_slice(src);
-        cipher.decrypt_block(as_block_mut(dst));
-        for i in 0..BLOCK_LEN {
-            dst[i] ^= chain[i];
-        }
-        chain.copy_from_slice(src);
-    }
-
-    iv.copy_from_slice(&chain[..]);
+    let mut out = data.to_vec();
+    cbc_decrypt_in_place(key, iv, &mut out)?;
     Some(out)
 }
 

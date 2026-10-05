@@ -139,13 +139,18 @@ internal class SettingsHealthController(
                 // （对**每条口令**跑一遍模式扫描）都是纯 CPU 工作——原先在 `scope`（调用方为
                 // `viewModelScope`，即 Main 派发器）上直接执行，会阻塞主线程直至整库扫描完毕。
                 // 现整体移入 `Dispatchers.Default`：仅结果回写发生在原派发器上。
-                val (entries, issues) = withContext(Dispatchers.Default) {
+                // ISSUE-P2-470：同一次装配里的 `scanDuplicates()`（全库扁平化 +
+                // `DuplicateEntryScanner.scan`，万级条目即整库遍历）一并移入同一块——
+                // 此前它在块外求值，仍跑在 Main 上；`runBreachCheck` 为挂起网络调用，按既有口径另判。
+                val (entries, issues, duplicateScan) = withContext(Dispatchers.Default) {
                     val fetched = vaultRepository.getKdbxEntries()
-                    fetched to HealthCheckEngine.analyzeEntries(fetched)
+                    val analyzed = HealthCheckEngine.analyzeEntries(fetched)
+                    val duplicates = scanDuplicates()
+                    Triple(fetched, analyzed, duplicates)
                 }
                 val summary = buildHealthScanSummary(
                     issues = issues,
-                    duplicateScan = scanDuplicates(),
+                    duplicateScan = duplicateScan,
                     breachOutcome = runBreachCheck(entries)
                 )
                 applyHealthScanSummary(summary)
