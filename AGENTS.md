@@ -42,6 +42,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
       （清单与条数随 `hygiene-gate` 段落自动解析，**本文件不写死**）方准入库；
       批次文档须**原样粘贴该脚本输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
       「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因，§308 立规。
+      **首轮红取证（`ISSUE-P3-489` 立规）**：`test` 非零退出时**先**跑
+      `python tools/doc/preserve_test_failures.py` 把肇事用例清单落盘（`build/failure-evidence/`）**再**重跑——
+      `--rerun-tasks` 会全量覆盖 `test-results`，覆盖后首轮肇事者不可复原（§445.6 实测）。
       **装机走查前置（§434 立规）**：先跑 `python tools/device/check_installed_build.py --expect-symbol <本批新增符号>`——
       设备上跑的**不一定**是你刚打的那份包；「回执成功 + 新 UI 不存在」与真缺陷**外观完全一致**，§434 实测白走一轮。
    3. **流转归档**：整条**剪切**出 `ACTIVE_ISSUES.md` → `RESOLVED_LOG.md` 加一行 → `docs/resolved/batches/` 新增
@@ -108,6 +111,10 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python tools/doc/gate_readings.py` — **门禁读数单点采集**（§308 立规；清单**直接解析**
   `.github/workflows/build.yml` 的 `hygiene-gate` 段落，故与 CI 不可能漂移；任一条非 0 即退出码 1，
   解析不到命令同样报红）。**每批结案前跑它，并把输出原样贴入批次文档 §3**
+- `python tools/doc/preserve_test_failures.py [--selftest]` — **全量单测首轮红证据留存**（`ISSUE-P3-489` 立规）：
+  扫描 `*/build/test-results/**` 的 JVM 单测 XML（口径与 `count_test_results.py` **共用**），把失败 / 错误用例的
+  类名 + 用例名 + 信息摘要打印并落盘 `build/failure-evidence/<UTC 戳>.txt`；无失败退 0、有失败退 1、
+  无 XML 退 2（**不得**当绿）。`test` 非零退出后**先跑它再重跑**。`--selftest` 为口径反校（内嵌正 / 反样本）
 - `python tools/device/check_installed_build.py [--expect-symbol <符号>] [--selftest]` — **装机走查前置读数**（§434 立规）：
   核对设备包 `lastUpdateTime` **不早于**本地 APK mtime，**且** APK 的 `classes*.dex` 内含指定符号；
   无 adb / 无设备 / 无包信息一律退出码 **2**（**不得**当绿）。`--selftest` 为口径反校（含反面样本）

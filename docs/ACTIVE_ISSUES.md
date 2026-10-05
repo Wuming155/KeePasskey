@@ -67,67 +67,31 @@
 - **涉及文件**：`app/src/androidTest/**`（涉事用例集待定位到具体类）。
 - **验收标准**：① 在**非 MIUI 设备或 AVD** 上跑通 `:app:connectedDebugAndroidTest` 并取得读数（须含 `skipped == 0`）；② 定位并登记具体受阻用例类/方法（当前只能确认「整层无法推进」，**未能定位到单个用例**——如实登记该取证缺口）；③ 评估该层是否需拆分「依赖系统服务生命周期的用例」与「纯应用内用例」两个 `notClass` 分组，使厂商系统差异不至于**整层不可测**；④ 结论回写 `docs/architecture/已知工程限界.md` §4.1 设备侧覆盖现状。
 
-## P3 低危问题、特性接线与体验优化（8 项）
+## P3 低危问题、特性接线与体验优化（1 项）
 
-> 本批剩余 7 条出自 [`records/软件工程质量审查记录_2026-10-05.md`](records/软件工程质量审查记录_2026-10-05.md)（五维度静态审查 + 高风险面深审；严重度 low 映射 P3；`ISSUE-P3-481` / `482` / `483` / `484` / `485` / `486` / `487` 七条已于 §444 闭环）。
-> 其中 **Rust 原生面条目**（`ISSUE-P3-474` / `475` / `476` / `477` / `478` / `479` / `480`）按 AGENTS.md 测试资产纪律须**四层 `connectedDebugAndroidTest` 真机实跑**方可入库。
+> 原 **8 项**（`ISSUE-P3-474` ~ `480` 七条 Rust 原生面去重 / 空间收口 + `ISSUE-P3-489` 工序项）已于 §447 整条闭环
+> （四层 `connectedDebugAndroidTest` 真机实跑：Redmi 4X `:crypto:` 37/37 · `:database:` 18/18 · `:sync:` 25/25 · `:app:` 67/67，全 `skipped=0`）。
+> 本条为 §447 真机取证过程的**新发现**（规则 6.1：发现新问题即时补登）。
 
-### ISSUE-P3-474：`twofish_cbc.rs` 仍用 `aes_cbc.rs` 文件头明令禁止的旧循环形态
+### ISSUE-P3-493：设备侧 connected 任务在「被测应用起不来」时静默 `tests=0` 且 `BUILD SUCCESSFUL`
 
-- **核实时间点**：2026-10-05；**核实方式**：直读 `aes_cbc.rs:14-16` 禁令原文与 `twofish_cbc.rs:66-83`、`95-112` 循环体；确认 twofish 无 `*_in_place`。
-- **背景**：`aes_cbc.rs:14-16` 立有「逐块循环里**禁止**任何逐块分配 / 逐块 `Vec::push` / 逐块 `Zeroizing`」的性能纪律（§147 实测教训）；`twofish_cbc.rs` 加/解密循环（71/100 与 78/107 行）仍是每块 `Zeroizing::new(*as_block_ref(chunk))` + `out.extend_from_slice(&block[..])` 的旧形态，且无 in_place 变体。Twofish 自述「作用于整库数据流，属数据面热点」。
-- **涉及文件**：`crypto/src/main/rust/src/twofish_cbc.rs`。
-- **验收标准**：① 改写为「预分配 out + 链值单缓冲 + 直接写切片」循环（可一并补 `*_in_place`）；② `cargo test` 既有 KAT / 等价用例全绿且产物逐字节不变；③ 原生面四层真机 + 门禁 9/9 PASS。
-
-### ISSUE-P3-475：`jni_bridge_ext.rs` direct ByteBuffer 取址 / 容量校验 unsafe 样板两处逐字重复
-
-- **核实时间点**：2026-10-05；**核实方式**：逐行比对 `aes_cbc_direct_jni`(301-309) 与 `applyKeystreamDirect`(442-450) 的取址序列与 SAFETY 注释；确认 `:425` KDoc 明言后者为非生产路径探针。
-- **背景**：两处各自手写 `get_direct_buffer_address` → `get_direct_buffer_capacity` → `is_null() || len == 0` 判定 → `from_raw_parts_mut`，连 SAFETY 注释都逐字重复；unsafe 样板重复意味着任何一处修订（如容量上界校验）需人工双改。
-- **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`。
-- **验收标准**：① 抽 `unsafe fn direct_buffer_slice<'a>(…) -> Option<&'a mut [u8]>`（唯一一份 SAFETY 注释）供两处共用；② `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
-
-### ISSUE-P3-476：`jni_bridge_ext.rs` JNI `catch_unwind` 护栏样板跨 8 个导出路径重复
-
-- **核实时间点**：2026-10-05；**核实方式**：全文件清点 `catch_unwind(AssertUnwindSafe(...))` 出现点（67 / 135 / 212 / 298 / 346 / 384 / 439 / 504）与其收尾 `match` 形态。
-- **背景**：8 处导出路径的 `catch_unwind` 护栏原文一致；**但收尾 `match` 分两类**——6 处 `Ok(Some(arr)) => arr, _ => null_mut()`（`deriveKey` / `twofish_cbc_jni` / `aes_cbc_jni` / `estimate` / `applyKeystream` / `passkey_sign_jni`），2 处 `Ok(Some(n)) => n, _ => -1`（`aes_cbc_direct_jni` / `applyKeystreamDirect`，返回 `jint`）。任一处 panic→失败归一语义的修订需人工同步 8 处，存在静默漂移风险。
-- **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`。
-- **验收标准**：① 抽按返回型参数化的护栏（`jbyteArray` / `jintArray` / `jint` 三类薄包装，或返回 `Result<Option<T>, ()>` 的泛型护栏）；**注意**返回 `Option<R>` 却写 `null_mut()` 不可编译，须按返回型分型；② 全部导出符号的既有静态签名断言用例保持绿；③ `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
-
-### ISSUE-P3-477：`jni_bridge_ext.rs` 输出字节数组发射样板跨 5 处重复
-
-- **核实时间点**：2026-10-05；**核实方式**：逐处核对 `new_byte_array` + `set_byte_array_region` + `into_raw()` 序列（80-84 / 157-161 / 234-237 / 396-399 / 514-517）与 `estimate` 的 IntArray 变体(351-352)。
-- **背景**：5 处逐字重复（含 u8↔i8 同宽同布局的 SAFETY 注释），另有 `new_int_array` + `set_int_array_region` 的同构变体。
-- **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`。
-- **验收标准**：① 抽 `emit_byte_array` / `emit_int_array`（各含唯一 SAFETY 注释）供 5 处 + `estimate` 共用；② `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
-
-### ISSUE-P3-478：`aes_cbc` / `twofish_cbc` 名义同构但已实质漂移
-
-- **核实时间点**：2026-10-05；**核实方式**：直读两文件模块头自述（`aes_cbc.rs:3`）与四个 `cbc_encrypt/decrypt` 实现；确认 aes 有 in_place、twofish 无。
-- **背景**：`aes_cbc.rs:3` 自述与 `twofish_cbc`「完全同构」，但 `aes_cbc` 已下沉 `*_in_place`(128-177) 而 twofish 完全没有，且 twofish 仍用旧循环形态（见 `ISSUE-P3-474`）⇒ 名义同构、实际不对称，漂移风险随各自迭代上升。
-- **涉及文件**：`crypto/src/main/rust/src/aes_cbc.rs`、`twofish_cbc.rs`。
-- **验收标准**：① 采纳 `ISSUE-P2-467` 的委托整改后为 twofish 补 `*_in_place`，或抽共享 `cbc_loop` 使两内核面完全对称；② 两内核模块头自述与实际形态一致（防「名义同构」误导）；③ `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
-
-### ISSUE-P3-479：`jni_bridge_ext.rs` 导出函数局部 JNI 引用未显式 `DeleteLocalRef`（防御性）
-
-- **核实时间点**：2026-10-05；**核实方式**：全文件 `grep DeleteLocalRef` 零命中；清点 `new_byte_array` / `new_int_array` 产出点（80 / 157 / 234 / 351 / 396 / 514）。
-- **背景**：各导出函数在 `catch_unwind` 闭包内创建局部 JNI 引用 `java_out` 后未显式释放，依赖 native method 返回时统一回收。当前均为单次调用（无实际泄漏），但长数据分段若将来在某函数内循环处理，默认 512 的 local ref 帧会被耗尽。
-- **涉及文件**：`crypto/src/main/rust/src/jni_bridge_ext.rs`。
-- **验收标准**：① 对创建后即刻消费完的局部引用显式 `DeleteLocalRef`，**或**在模块级注释固化「导出函数不得在本帧内累积 local ref」纪律（二选一，写明取舍）；② `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
-
-### ISSUE-P3-480：`strength.rs` 超长口令 `minimal_period` 全量 `Vec<usize>` 分配放大（DoS 内存面）
-
-- **核实时间点**：2026-10-05；**核实方式**：直读 `strength.rs:221`（`minimal_period(&chars)` 传全量）与 582（`vec![0usize; len]`），核对 `MAX_ANALYZED_CHARS` 不约束此处（218-220 注释明言跑全量字符）。
-- **背景**：`minimal_period`(576-601) 为 KMP 前缀函数分配随输入长度线性增长的 `Vec<usize>`，调用点传入**未经截断**的全量字符 ⇒ 恶意超长口令可在热路径上放大内存峰值。
-- **涉及文件**：`crypto/src/main/rust/src/strength.rs`。
-- **验收标准**：① 改为 O(1) 额外空间的滚动 / 双指针判定（或固定上限缓冲），删除随输入增长的分配；② 周期判定语义不变（`abc×100` 仍命中 `FLAG_PERIODIC_REPEAT`），既有用例全绿；③ `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
-
-
-### ISSUE-P3-489：全量单测首轮红的失败证据无保留工序（§445 立规待办，流程）
-
-- **核实时间点**：2026-10-05；**核实方式**：复盘 §445.6 ——首轮 `.\gradlew.bat test --rerun-tasks --max-workers=1` 报 `BUILD FAILED`（2m09s，93 tasks），但截取的末 8 行输出不含肇事用例名，且 `*/build/test-results/**/*.xml` 随即被次轮 `--rerun-tasks` 全量覆盖，肇事者永久不可考；次轮起连续两轮绿。
-- **背景**：「闸门存在 ≠ 闸门被执行」已由 `gate_readings.py` 收口（ISSUE-P3-305）；其下一层缺口是「闸门红了 ≠ 红在哪可查」——首轮红若为真回归，现有工序下将无任何证据留存（输出截断 + XML 覆盖双重丢失），只能记为「未定位偶发」。§428 / §416-417 的偶发红有同型取证缺口（仅凭形态归类，无当轮肇事者名单）。
-- **涉及文件**：暂无（工序性条目；落点待定，如 `tools/doc/` 取证脚本或批次文档 §3 取证口径）。
+- **核实时间点**：2026-10-05；**核实方式**：AVD `emulator-5554`（`Pixel_10` / API 36，用户 0 `RUNNING_LOCKED`）上两次
+  `:app:connectedDebugAndroidTest`（含一次单类 `-P...class=` 过滤）均产出 `TEST-Pixel_10(AVD) - 16.xml` 的
+  `<testsuites tests="0" .../>`、`test-result-exit-code.txt` = `0`、`BUILD SUCCESSFUL`，而 `adb shell pm list packages`
+  显示设备上**从未**装上 app / 测试包（UTP 未安装）；同一设备手动 `am instrument` 复现真实成因：
+  `INSTRUMENTATION_RESULT: shortMsg=Process crashed` + `INSTRUMENTATION_CODE: 0`，异常原文
+  `IllegalStateException: SharedPreferences in credential encrypted storage are not available until after user (id 0) is unlocked`
+  （app 在 `MainApplication.onCreate` 即崩）。对照：同批在真机 `Redmi 4X`（已解锁）上同一任务 67/67 全绿。
+- **背景**：`am instrument` 在「一个用例都没跑」时返回 `INSTRUMENTATION_CODE: 0`（成功码），UTP 据此归为
+  `tests=0 + 成功` ⇒ **整层设备门禁空转而显绿**，与 `ISSUE-P3-305`「闸门存在 ≠ 闸门被执行」同型、
+  与 `ISSUE-P2-491`「用例存在 ≠ 用例可编译」互为两层。触发前提（Android 用户未解锁 / 被测进程起不来）属环境面，
+  但本仓消费方对 `connectedDebugAndroidTest` 的 `BUILD SUCCESSFUL` **无任何「真的跑了用例」判别**，
+  故同类环境一旦出现，第四层义务会再次被静默豁免。
+- **涉及文件**：`tools/doc/`（新增结果断言脚本落点）；`.github/workflows/build.yml` 的 `device-gate`。
 - **验收标准**：
-  ① 全量 `test` 非零退出时，肇事用例清单（类名 + 用例名 + 失败信息摘要）必须落盘留痕后才允许重跑覆盖；
-  ② 门禁 9/9 PASS（含本条落点自身的机检，若立脚本）。
+  ① 新增机检：解析 `*/build/outputs/androidTest-results/connected/**/TEST-*.xml`，对**本应有用例的层**断言
+  `tests > 0`（`tests == 0` 即退出码 1）；与本仓既有「唯一尺子」`count_test_results.py` 分工不重叠（后者只数 JVM 单测）；
+  ② `device-gate` 挂该断言（或 CI 内等价步骤），使「空转」不再显绿；
+  ③ 如实登记：本形态在「Android 用户未解锁」前置下实测可复现；修复前**不得**据 `connectedDebugAndroidTest` 的
+  `BUILD SUCCESSFUL` 推定「该层已跑」。
 

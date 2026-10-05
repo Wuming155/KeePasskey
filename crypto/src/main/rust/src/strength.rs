@@ -24,9 +24,10 @@
 //! 恶意库可用超长字符串放大耗时。故：
 //! - [`estimate`] 只对前 [`MAX_ANALYZED_CHARS`] 个字符做模式识别与熵基线（超额部分线性惩罚）；
 //! - 三条原平方级路径均已线性化：[`longest_keyboard_walk_str`]（单趟）、[`unique_char_count_str`]
-//!   （ASCII 位图）、[`minimal_period_bytes`]（KMP 前缀函数）；
-//! - 结果：单条口令的耗时上界为 `O(MAX_ANALYZED_CHARS)` + 周期检测 `O(真实长度)`，
-//!   与恶意输入的规模**脱钩**（周期检测为线性且常数极小，故不受截断影响，跑全量字节）。
+//!   （ASCII 位图）、[`minimal_period_bytes`]（因子约简；`ISSUE-P3-480` 起 O(1) 额外空间）；
+//! - 结果：单条口令的耗时上界为 `O(MAX_ANALYZED_CHARS)` + 周期检测 `O(真实长度 · log 真实长度)`，
+//!   且**周期检测不再有随输入增长的内存**（原 KMP 前缀表 `Vec<usize>` 已删除），故不受截断影响、
+//!   跑全量字节。
 //!
 //! ISSUE-P2-468：热路径零堆分配——有效 UTF-8 直接借用入参字节，
 //! 不再物化 `Vec<char>` / `String`（`lowered` 改流式小写比较，唯一计数改栈缓冲，
@@ -173,8 +174,8 @@ pub fn estimate(password: &[u8]) -> Estimate {
     }
 }
 
-/// `estimate` 的 `&str` 内核：全程借用，不分配堆内存（除周期检测的 KMP 前缀表，
-/// 见 [`minimal_period_bytes`]；该表为 `usize` 索引、非秘密，归 `ISSUE-P3-480` 收口）。
+/// `estimate` 的 `&str` 内核：全程借用，**不分配堆内存**（`ISSUE-P3-480` 起周期检测亦为
+/// O(1) 额外空间，见 [`minimal_period_bytes`]）。
 fn estimate_str(text: &str) -> Estimate {
     let len = text.chars().count();
     if len == 0 {
@@ -230,7 +231,7 @@ fn estimate_str(text: &str) -> Estimate {
     }
 
     // —— 整串周期性（须先于单段惩罚，因为它把整串按「一个单元」重估）——
-    // 注意：本判据跑**全量字符**（KMP 版本为 O(n)，见 `minimal_period_bytes` KDoc）——
+    // 注意：本判据跑**全量字符**（见 `minimal_period_bytes` KDoc：O(1) 额外空间，无内存放大面）——
     // 截断会让 `abc` × 100 一类超长重复块因不整除而漏判，进而被熵基线抬到高档。
     // ISSUE-P2-468：直接消费 UTF-8 字节（UTF-8 前导/后续字节区间不交叠，
     // 字节级整周期蕴含字符边界对齐，ASCII 下与原字符级语义逐字节等价）。
@@ -637,41 +638,64 @@ fn unique_char_count_str(chars: &str) -> usize {
     count
 }
 
-/// 最小周期 `p`（字节）与重复次数 `len / p`；非周期串返回 `None`。
+/// `data` 是否以 `p` 为周期（`data[i] == data[i + p]`，须 `0 < p < len`）。O(len)、O(1) 空间。
+#[inline]
+fn is_period_of(data: &[u8], p: usize) -> bool {
+    debug_assert!(p > 0 && p < data.len(), "周期候选须落在 (0, len) 内");
+    (0..data.len() - p).all(|i| data[i] == data[i + p])
+}
+
+/// 最小周期 `p`（字节）与重复次数 `len / p`；非整周期串返回 `None`。
 ///
-/// **O(n)**（ISSUE-P2-58：原实现逐周期长度试探为最坏 O(n²)，是全模块最后一条平方级路径）：
-/// 以 KMP 前缀函数求最小整周期——`p = len - pi[len-1]`，且仅当 `len % p == 0` 时成立。
-/// 语义与原实现一致：只接受**恰好整周期**（`len % p == 0` 且逐字节相等），
-/// 不把「偶然重复前缀」误判为周期串；`repeats < 2` 返回 `None`。
+/// **O(1) 额外空间（ISSUE-P3-480）**：不再分配随输入长度线性增长的 KMP 前缀表
+/// （原 `vec![0usize; len]` 是恶意超长口令在热路径上的内存放大面）。改为利用
+/// 「**整周期必整除长度**」这一性质做**因子约简**：
+/// 若 `p` 与整除 `len` 的 `q` 同为周期，则由 Fine–Wilf 引理 `gcd(p, q)` 亦为周期，
+/// 反复取极小即得**极小周期整除任何整周期**（故 `p | len`）。于是 `p` 自 `len` 起步，
+/// 枚举 `len` 的全部素因子 `q`，只要 `p / q` 仍是周期就把 `p` 缩小，直到不可再约——
+/// 终态即最小整周期。
 ///
-/// 因已线性化，本函数在 [`estimate`] 中对**全量字节**调用（不受
+/// 语义与原 KMP 版**逐例等价**：返回的仍是「最小整周期」与重复次数，只接受**恰好整周期**
+/// （`len % p == 0` 且逐字节相等），不把「偶然重复前缀」误判为周期串；`repeats < 2` 返回 `None`。
+/// 因已 O(1) 空间化，本函数在 [`estimate`] 中对**全量字节**调用（不受
 /// [`MAX_ANALYZED_CHARS`] 截断影响）——否则超长重复块（如 `abc` × 100）会因截断后
 /// 不再整除而漏判周期，被熵基线抬到高档（正是陷阱 #7 的一种形态）。
 ///
+/// 代价：最坏 `O(len · log len)` 时间（至多 `O(log len)` 次全长周期判定），与输入线性同阶、
+/// 常数极小，且**不再有随规模增长的内存**。
+///
 /// ISSUE-P2-468：直接消费 UTF-8 字节，不物化 `Vec<char>`。UTF-8 前导字节
 /// （`0xC2..=0xF4`）与后续字节（`0x80..=0xBF`）区间不交叠，故字节级整周期必对齐
-/// 字符边界（错位周期需前导adero等于后续字节，不可能成立）；ASCII 下与原字符级
-/// KMP 逐字节等价。调用方须再以 `is_char_boundary(p)` 确认后方可按 `&str` 切片。
-/// 前缀表 `pi` 的堆分配归 `ISSUE-P3-480`（O(1) 空间化）收口，本条不触动。
+/// 字符边界（错位周期需前导字节等于后续字节，不可能成立）；ASCII 下与原字符级
+/// 逐字节等价。调用方须再以 `is_char_boundary(p)` 确认后方可按 `&str` 切片。
 fn minimal_period_bytes(data: &[u8]) -> Option<(usize, usize)> {
     let len = data.len();
     if len < 2 {
         return None;
     }
-    // KMP 前缀函数：pi[i] = data[..=i] 的最长真前缀=真后缀长度
-    let mut pi = vec![0usize; len];
-    for i in 1..len {
-        let mut k = pi[i - 1];
-        while k > 0 && data[i] != data[k] {
-            k = pi[k - 1];
+    // p：当前已知周期（初值 len 恒为周期）；m：为枚举素因子而剥离出的剩余量。
+    let mut p = len;
+    let mut m = len;
+    let mut q = 2usize;
+    while q <= m / q {
+        if m % q == 0 {
+            // 把 q 从 m 中除尽（枚举素数用）；再用 q 反复约简 p（只要 p/q 仍是周期）
+            while m % q == 0 {
+                m /= q;
+            }
+            while p % q == 0 && is_period_of(data, p / q) {
+                p /= q;
+            }
         }
-        if data[i] == data[k] {
-            k += 1;
-        }
-        pi[i] = k;
+        q += 1;
     }
-    let p = len - pi[len - 1];
-    if p == 0 || len % p != 0 {
+    if m > 1 {
+        // m 为 len 的剩余素因子，同样尝试约简
+        while p % m == 0 && is_period_of(data, p / m) {
+            p /= m;
+        }
+    }
+    if p == len {
         return None;
     }
     let repeats = len / p;

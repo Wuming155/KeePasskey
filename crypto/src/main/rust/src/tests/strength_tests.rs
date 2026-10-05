@@ -301,3 +301,45 @@ fn analyzed_length_boundary_semantics() {
         at.guesses_log10_x100
     );
 }
+
+// ================= ISSUE-P3-480（O(1) 空间因子约简）：语义逐例等价反校 =================
+
+/// 暴力参照：最小整周期（最小 `d | len` 且 `d` 为周期），`repeats >= 2`；无则 `None`。
+fn brute_min_period(data: &[u8]) -> Option<(usize, usize)> {
+    let len = data.len();
+    if len < 2 {
+        return None;
+    }
+    for p in 1..len {
+        if len % p == 0 && (p..len).all(|i| data[i] == data[i - p]) {
+            return Some((p, len / p));
+        }
+    }
+    None
+}
+
+/// 穷举 `{a,b}` 长度 2..=12 与 `{a,b,c}` 长度 2..=9 的全部串，`minimal_period_bytes`
+/// 必须与暴力参照**逐例一致**——`ISSUE-P3-480` 因子约简「周期判定语义不变」的经验反校
+/// （原 KMP 前缀表实现删除后，此用例锁住等价性，防口径漂移）。
+#[test]
+fn minimal_period_matches_brute_force_exhaustively() {
+    for (alpha, max_len) in [(2u8, 12usize), (3, 9)] {
+        for len in 2..=max_len {
+            let total = (alpha as usize).pow(len as u32);
+            for code in 0..total {
+                let mut n = code;
+                let mut s = Vec::with_capacity(len);
+                for _ in 0..len {
+                    s.push(b'a' + (n % alpha as usize) as u8);
+                    n /= alpha as usize;
+                }
+                assert_eq!(
+                    minimal_period_bytes(&s),
+                    brute_min_period(&s),
+                    "串 {:?} 的周期判定与暴力参照不一致",
+                    String::from_utf8_lossy(&s)
+                );
+            }
+        }
+    }
+}

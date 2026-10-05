@@ -6,6 +6,16 @@
 //! 2. **秘密全程受管**：入参拷贝进 [`Zeroizing`]，中间缓冲同样受管，任何返回路径确定性归零；
 //! 3. **有符号闸门先行**：`jint` / `jlong` 先按有符号判定合法性，再窄化，杜绝负数经
 //!    `as u*` 变成巨值绕过上界。
+//! 4. **本帧不累积局部引用**（`ISSUE-P3-479`，纪律固化而非逐处 `DeleteLocalRef`）：导出函数一律
+//!    在返回前把本帧创建的局部引用**交还 JVM**（`into_raw()` 随返回值一并移交），不留下既未返回、
+//!    也未显式释放的 `JByteArray` / `JIntArray`。当前各导出函数均为**单次调用**形态——每个
+//!    `emit_byte_array` / `emit_int_array` 产出的引用都在同一路径立即 `into_raw()` 返回——
+//!    故无需 `DeleteLocalRef`；**禁止**在本帧内对同一构造做循环累积（默认 512 的 local ref 帧
+//!    会被耗尽），若将来出现分段循环，必须先 `env.delete_local_ref(...)` 再进入下一轮。
+//!
+//! 去重收口（`ISSUE-P3-475` / `476` / `477`）：取址切片、panic 护栏、数组发射三类样板各**唯一一份**
+//! （[`direct_buffer_slice`] / [`guard_byte_array`] · [`guard_int_array`] · [`guard_int`] /
+//! [`emit_byte_array`] · [`emit_int_array`]），各导出处只保留业务主体。
 //!
 //! 符号名与 Kotlin 侧 `external fun` 声明**逐字绑定**：
 //! - `Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey`
@@ -43,6 +53,74 @@ unsafe fn as_jbyte(bytes: &[u8]) -> &[i8] {
     std::slice::from_raw_parts(bytes.as_ptr().cast::<i8>(), bytes.len())
 }
 
+/// 从 **direct** `ByteBuffer` 取得 `&mut [u8]` 视图（`ISSUE-P3-475`）。
+///
+/// 唯一一份取址 / 容量校验 unsafe 样板：`get_direct_buffer_address` → `get_direct_buffer_capacity`
+/// → `is_null() || len == 0` 判定 → `from_raw_parts_mut`。非 direct 缓冲 / 地址为空 / 容量为 0
+/// 一律返回 `None`（调用方归一为失败返回，不产生任何写入）。
+///
+/// SAFETY：调用方须保证返回切片在本函数返回后、该 buffer 被释放前使用，且期间不与其它引用别名；
+/// `from_raw_parts_mut` 的安全前提由 JNI 引用界定（切片不逃逸出当前导出调用）。
+#[inline]
+unsafe fn direct_buffer_slice<'local, 'a>(
+    env: &JNIEnv<'local>,
+    data: &JByteBuffer<'local>,
+) -> Option<&'a mut [u8]> {
+    let ptr = env.get_direct_buffer_address(data).ok()?;
+    let len = env.get_direct_buffer_capacity(data).ok()?;
+    if ptr.is_null() || len == 0 {
+        return None;
+    }
+    Some(std::slice::from_raw_parts_mut(ptr, len))
+}
+
+/// 把字节切片发射为新的 Java `byte[]`（`ISSUE-P3-477`）。
+///
+/// 唯一一份 `new_byte_array` + `set_byte_array_region` 样板（含下方 SAFETY 注释）；任一 JNI 调用
+/// 失败返回 `None`，由 [`guard_byte_array`] 归一为 `null`。
+fn emit_byte_array(env: &JNIEnv, bytes: &[u8]) -> Option<jbyteArray> {
+    let arr = env.new_byte_array(bytes.len() as jint).ok()?;
+    // SAFETY：bytes 为有效内存；u8 与 i8 同宽同布局，长度取自 bytes.len()
+    env.set_byte_array_region(&arr, 0, unsafe { as_jbyte(bytes) })
+        .ok()?;
+    Some(arr.into_raw())
+}
+
+/// 把 `i32` 切片发射为新的 Java `int[]`（`ISSUE-P3-477`；`estimate` 的定长 3 元布局用）。
+fn emit_int_array(env: &JNIEnv, values: &[i32]) -> Option<jintArray> {
+    let arr = env.new_int_array(values.len() as jint).ok()?;
+    env.set_int_array_region(&arr, 0, values).ok()?;
+    Some(arr.into_raw())
+}
+
+/// panic 护栏 + 失败归一（`ISSUE-P3-476`）：`body` 内 panic 或返回 `None` 一律归一为 `null`
+/// `jbyteArray`，**绝不**把 Rust unwind 过 FFI 边界（那会 abort 进程）。
+#[inline]
+fn guard_byte_array(body: impl FnOnce() -> Option<jbyteArray>) -> jbyteArray {
+    catch_unwind(AssertUnwindSafe(body))
+        .ok()
+        .flatten()
+        .unwrap_or(null_mut())
+}
+
+/// 同 [`guard_byte_array`]，返回型为 `jintArray`（定长布局 `estimate` 用）。
+#[inline]
+fn guard_int_array(body: impl FnOnce() -> Option<jintArray>) -> jintArray {
+    catch_unwind(AssertUnwindSafe(body))
+        .ok()
+        .flatten()
+        .unwrap_or(null_mut())
+}
+
+/// 同 [`guard_byte_array`]，返回型为 `jint`（失败归一为 `-1`，direct 路径用）。
+#[inline]
+fn guard_int(body: impl FnOnce() -> Option<jint>) -> jint {
+    catch_unwind(AssertUnwindSafe(body))
+        .ok()
+        .flatten()
+        .unwrap_or(-1)
+}
+
 // ============================================================================
 // 1) AES-KDF
 // ============================================================================
@@ -64,30 +142,18 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey<'lo
         return null_mut();
     }
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
+    guard_byte_array(|| -> Option<jbyteArray> {
         let key = Zeroizing::new(env.convert_byte_array(&composite_key).ok()?);
         let seed_buf = Zeroizing::new(env.convert_byte_array(&seed).ok()?);
         if key.len() != COMPOSITE_KEY_LEN || seed_buf.len() != COMPOSITE_KEY_LEN {
             return None;
         }
 
-        let out = {
-            // ISSUE-P2-57：直接写入受管缓冲，避免返回值拷出为不可擦栈副本
-            let mut buf = Zeroizing::new([0u8; OUT_LEN]);
-            aes_kdf::aes_kdf_into(&key, &seed_buf, rounds as u64, &mut buf)?;
-            buf
-        };
-        let java_out = env.new_byte_array(OUT_LEN as jint).ok()?;
-        // SAFETY：out 长度恒为 OUT_LEN 且为有效内存
-        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&out[..]) })
-            .ok()?;
-        Some(java_out.into_raw())
-    }));
-
-    match outcome {
-        Ok(Some(arr)) => arr,
-        _ => null_mut(),
-    }
+        // ISSUE-P2-57：直接写入受管缓冲，避免返回值拷出为不可擦栈副本
+        let mut buf = Zeroizing::new([0u8; OUT_LEN]);
+        aes_kdf::aes_kdf_into(&key, &seed_buf, rounds as u64, &mut buf)?;
+        emit_byte_array(&env, &buf[..])
+    })
 }
 
 // ============================================================================
@@ -140,7 +206,7 @@ fn block_cbc_jni<'local>(
         return null_mut();
     }
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
+    guard_byte_array(|| -> Option<jbyteArray> {
         let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
         let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
         let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
@@ -149,26 +215,14 @@ fn block_cbc_jni<'local>(
             return None;
         }
 
-        let out = kernel(&key_buf, &mut iv_buf, &data_buf)?;
+        let out = Zeroizing::new(kernel(&key_buf, &mut iv_buf, &data_buf)?);
 
         // 回写演化后的链值（IV 非秘密，但仍在 Zeroizing 缓冲中处理）
-        let java_iv = iv;
         // SAFETY：iv_buf 长度已校验为 block_len 且为有效内存
-        env.set_byte_array_region(&java_iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
+        env.set_byte_array_region(&iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
             .ok()?;
-
-        let out = Zeroizing::new(out);
-        let java_out = env.new_byte_array(out.len() as jint).ok()?;
-        // SAFETY：out 为有效内存，长度取自 out.len()
-        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&out[..]) })
-            .ok()?;
-        Some(java_out.into_raw())
-    }));
-
-    match outcome {
-        Ok(Some(arr)) => arr,
-        _ => null_mut(),
-    }
+        emit_byte_array(&env, &out[..])
+    })
 }
 
 // ============================================================================
@@ -266,18 +320,13 @@ fn aes_cbc_direct_jni<'local>(
         return -1;
     }
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jint> {
+    guard_int(|| -> Option<jint> {
         let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
         let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
-        // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null 此处返回 Err → -1）。
-        // SAFETY：ptr 在 buffer 存活期内有效；len 取自 GetDirectBufferCapacity，
-        // from_raw_parts_mut 的安全前提由 JNI 引用界定（本函数内不逃逸）。
-        let ptr = env.get_direct_buffer_address(&data).ok()?;
-        let len = env.get_direct_buffer_capacity(&data).ok()?;
-        if ptr.is_null() || len == 0 {
-            return None;
-        }
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
+        // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null / 空缓冲 → None → -1）。
+        // SAFETY：见 [`direct_buffer_slice`]；切片仅在本调用内使用，不逃逸。
+        let slice = unsafe { direct_buffer_slice(&env, &data)? };
+        let len = slice.len() as jint;
         if encrypt {
             aes_cbc::cbc_encrypt_in_place(&key_buf, &mut iv_buf, slice)?;
         } else {
@@ -286,13 +335,8 @@ fn aes_cbc_direct_jni<'local>(
         // 回写演化后的链值（iv 出口契约；IV 非秘密，但仍在 Zeroizing 缓冲中处理）
         env.set_byte_array_region(&iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
             .ok()?;
-        Some(len as jint)
-    }));
-
-    match outcome {
-        Ok(Some(n)) => n,
-        _ => -1,
-    }
+        Some(len)
+    })
 }
 
 // ============================================================================
@@ -314,20 +358,14 @@ pub extern "system" fn Java_com_keepasskey_crypto_strength_NativePasswordStrengt
         return null_mut();
     }
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jintArray> {
+    guard_int_array(|| -> Option<jintArray> {
         let pw = Zeroizing::new(env.convert_byte_array(&password).ok()?);
         let result = strength::estimate(&pw);
 
         let layout = [result.score, result.guesses_log10_x100, result.flags];
-        let java_out = env.new_int_array(ESTIMATE_LEN as jint).ok()?;
-        env.set_int_array_region(&java_out, 0, &layout).ok()?;
-        Some(java_out.into_raw())
-    }));
-
-    match outcome {
-        Ok(Some(arr)) => arr,
-        _ => null_mut(),
-    }
+        debug_assert_eq!(layout.len(), ESTIMATE_LEN, "定长 3 元布局契约");
+        emit_int_array(&env, &layout)
+    })
 }
 
 // ============================================================================
@@ -352,7 +390,7 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
         return null_mut();
     }
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
+    guard_byte_array(|| -> Option<jbyteArray> {
         let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
         let nonce_buf = Zeroizing::new(env.convert_byte_array(&nonce).ok()?);
         let mut data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
@@ -364,17 +402,8 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
             &mut data_buf,
         )?;
 
-        let java_out = env.new_byte_array(data_buf.len() as jint).ok()?;
-        // SAFETY：data_buf 为有效内存，长度取自其 len
-        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&data_buf[..]) })
-            .ok()?;
-        Some(java_out.into_raw())
-    }));
-
-    match outcome {
-        Ok(Some(arr)) => arr,
-        _ => null_mut(),
-    }
+        emit_byte_array(&env, &data_buf[..])
+    })
 }
 
 // ============================================================================
@@ -407,32 +436,16 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
         return -1;
     }
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jint> {
+    guard_int(|| -> Option<jint> {
         let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
         let nonce_buf = Zeroizing::new(env.convert_byte_array(&nonce).ok()?);
-        // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null 此处返回 Err → -1）。
-        // SAFETY：ptr 在 buffer 存活期内有效；len 取自 GetDirectBufferCapacity，
-        // from_raw_parts_mut 的安全前提由 JNI 引用界定（本函数内不逃逸）。
-        let ptr = env.get_direct_buffer_address(&data).ok()?;
-        let len = env.get_direct_buffer_capacity(&data).ok()?;
-        if ptr.is_null() || len == 0 {
-            return None;
-        }
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
-        let processed = len as jint;
-        chacha20_stream::apply_keystream_at(
-            &key_buf,
-            &nonce_buf,
-            byte_offset as u64,
-            slice,
-        )?;
+        // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null / 空缓冲 → None → -1）。
+        // SAFETY：见 [`direct_buffer_slice`]；切片仅在本调用内使用，不逃逸。
+        let slice = unsafe { direct_buffer_slice(&env, &data)? };
+        let processed = slice.len() as jint;
+        chacha20_stream::apply_keystream_at(&key_buf, &nonce_buf, byte_offset as u64, slice)?;
         Some(processed)
-    }));
-
-    match outcome {
-        Ok(Some(n)) => n,
-        _ => -1,
-    }
+    })
 }
 
 // ============================================================================
@@ -472,7 +485,7 @@ fn passkey_sign_jni<'local>(
         return null_mut();
     }
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
+    guard_byte_array(|| -> Option<jbyteArray> {
         let key_buf = Zeroizing::new(env.convert_byte_array(&private_key).ok()?);
         let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
 
@@ -482,17 +495,8 @@ fn passkey_sign_jni<'local>(
             passkey_sign::ed25519_sign_raw(&key_buf, &data_buf)?
         };
 
-        let java_out = env.new_byte_array(out.len() as jint).ok()?;
-        // SAFETY：out 为有效内存，长度取自 out.len()
-        env.set_byte_array_region(&java_out, 0, unsafe { as_jbyte(&out[..]) })
-            .ok()?;
-        Some(java_out.into_raw())
-    }));
-
-    match outcome {
-        Ok(Some(arr)) => arr,
-        _ => null_mut(),
-    }
+        emit_byte_array(&env, &out)
+    })
 }
 
 #[cfg(test)]

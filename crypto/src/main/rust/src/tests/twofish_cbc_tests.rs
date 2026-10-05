@@ -113,3 +113,58 @@ fn cbc_chaining_is_effective_not_ecb() {
     // 换 IV 整体改变
     assert_ne!(a, b);
 }
+
+/// 原地形态与分配形态逐字节一致（含 `iv` 出口契约）——`ISSUE-P3-474` 改写的正确性依据。
+/// 与 `aes_cbc_tests::in_place_matches_allocating_variant` 同构，锁住两内核形态对称。
+#[test]
+fn in_place_matches_allocating_variant() {
+    for key_len in SUPPORTED_KEY_LENS {
+        let key: Vec<u8> = (0..key_len).map(|i| (i * 11 + 7) as u8).collect();
+        for blocks in [0usize, 1, 3, 16, 64] {
+            let plain: Vec<u8> = (0..blocks * BLOCK_LEN).map(|i| (i * 17 + 9) as u8).collect();
+            let iv0 = [0x6Cu8; BLOCK_LEN];
+
+            // 加密：原地 vs 分配
+            let mut ip_iv = iv0;
+            let mut ip_data = plain.clone();
+            cbc_encrypt_in_place(&key, &mut ip_iv, &mut ip_data).unwrap();
+            let mut alloc_iv = iv0;
+            let alloc_ct = cbc_encrypt(&key, &mut alloc_iv, &plain).unwrap();
+            assert_eq!(alloc_ct, ip_data, "key_len={key_len} blocks={blocks}：原地密文须与分配形态一致");
+            assert_eq!(alloc_iv, ip_iv, "key_len={key_len} blocks={blocks}：iv 出口须一致");
+
+            // 解密：原地往返 vs 分配
+            let mut ip_iv = iv0;
+            let mut ip_data = alloc_ct.clone();
+            cbc_decrypt_in_place(&key, &mut ip_iv, &mut ip_data).unwrap();
+            let mut alloc_iv = iv0;
+            let alloc_pt = cbc_decrypt(&key, &mut alloc_iv, &alloc_ct).unwrap();
+            assert_eq!(alloc_pt, ip_data, "key_len={key_len} blocks={blocks}：原地明文须与分配形态一致");
+            assert_eq!(alloc_pt, plain, "key_len={key_len} blocks={blocks}：原地往返须还原");
+        }
+    }
+}
+
+/// 原地形态参数闸门：与分配形态同口径（fail-closed，不做静默截断）。
+#[test]
+fn in_place_gate_rejects_invalid_params() {
+    let key = [0u8; 32];
+    let mut iv = [0u8; BLOCK_LEN];
+    let mut data = [0x33u8; BLOCK_LEN * 2];
+    // 不支持的密钥长度
+    assert!(cbc_encrypt_in_place(&[0u8; 20], &mut iv, &mut data).is_none());
+    // IV 长度错
+    let mut short_iv = [0u8; 8];
+    assert!(cbc_encrypt_in_place(&key, &mut short_iv, &mut data).is_none());
+    // 非整数倍分组
+    let mut odd = [0x33u8; BLOCK_LEN + 1];
+    let mut iv2 = [0u8; BLOCK_LEN];
+    assert!(cbc_encrypt_in_place(&key, &mut iv2, &mut odd).is_none());
+    let mut odd2 = [0x33u8; BLOCK_LEN + 1];
+    let mut iv3 = [0u8; BLOCK_LEN];
+    assert!(cbc_decrypt_in_place(&key, &mut iv3, &mut odd2).is_none());
+    // 空输入合法且不改动 iv
+    let mut empty: Vec<u8> = Vec::new();
+    assert!(cbc_encrypt_in_place(&key, &mut iv, &mut empty).is_some());
+    assert_eq!(iv, [0u8; BLOCK_LEN]);
+}
