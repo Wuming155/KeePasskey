@@ -166,10 +166,10 @@
 
 ### ISSUE-P3-483：`SyncCache.openCacheStream` 以裸 `FileInputStream` 返回，关闭责任在调用方
 
-- **核实时间点**：2026-10-05；**核实方式**：直读 `SyncCache.kt:282-285`；全仓 `grep openStream()` 清点生产消费点（`InnerHeader.kt:125`、`KdbxBinaryDeduplicator.kt:153-154`、`FileBinaryStore.kt:54-55`、`KdbxAttachment.kt:55`）。
-- **背景**：`openCacheStream` 直接返回 `FileInputStream(file)`，无任何 `.use{}` 强制，所有权移交调用方；若后续新增调用点遗漏关闭即泄漏文件描述符（当前两处生产消费者均已 `.use{}`，故为纪律性风险而非实测泄漏）。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt`。
-- **验收标准**：① 二选一——改为「接收消费 lambda」形态以内建 `use`，或在 KDoc 显式固化「调用方必须 `use`」纪律；② `:sync:` 单测绿 + 门禁 9/9 PASS。
+- **核实时间点**：2026-10-05（用户复核更正，同日）；**核实方式**：直读 `SyncCache.kt:282-285` 并**逐层**清点调用链——`SyncCache.openCacheStream(key)` ← `FileBinaryStore.openStream(key)`（`app/.../data/binary/FileBinaryStore.kt:54-55`，**唯一生产消费，且为纯透传**）← `BinaryStore.openStream(key)`（接口，`core/.../security/BinaryStore.kt:35`）← `InnerHeader.BinaryItem.openStream()`（`database/.../file/InnerHeader.kt:70-71`）← 链路末端生产消费者 `InnerHeader.kt:125`（`openStream().use { it.copyTo(...) }`）与 `KdbxBinaryDeduplicator.kt:153-154`（`a.openStream().use { … }`），二者均已 `.use{}`；`KdbxAttachment.kt:55` 属另一条无参 `BinarySource.openStream()` 链，未查到生产消费者。
+- **背景**：`openCacheStream` 直接返回 `FileInputStream(file)`，无任何 `.use{}` 强制，所有权移交调用方；**关闭责任跨越两层上移**（`FileBinaryStore.openStream` 再上移一级，`InnerHeader.BinaryItem.openStream` 第三级），故泄漏点不在本函数而在**链路末端的每个消费点**——新增任一消费点遗漏 `.use{}` 即泄漏文件描述符。当前末端两处消费者均已闭合，故属纪律性风险而非实测泄漏。
+- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt`、`app/src/main/java/com/keepasskey/app/data/binary/FileBinaryStore.kt`。
+- **验收标准**：① 在**契约层**固化关闭责任——可选落点为 `SyncCache.openCacheStream`（改「接收消费 lambda」形态以内建 `use`）或 `BinaryStore.openStream`（在接口 KDoc 固化「调用方必须 `use`」并说明多级透传链）；**须写明所选层级与理由**（仅在 `SyncCache` 的 KDoc 加一句不足以覆盖经 `FileBinaryStore` 透传的调用方）；② 就地为链路末端两处消费者（`InnerHeader.kt:125`、`KdbxBinaryDeduplicator.kt:153-154`）标注该纪律；③ `:sync:` / `:database:` 单测绿 + 门禁 9/9 PASS。
 
 ### ISSUE-P3-484：健康度页 UI 为行数治理做「逐字搬动」复制，展示映射存在多份拷贝
 
@@ -187,10 +187,10 @@
 
 ### ISSUE-P3-486：`SyncCacheMaintenance.clearAll` KDoc 仍称防回滚状态含 Keystore HMAC（文档漂移）
 
-- **核实时间点**：2026-10-05；**核实方式**：直读 `SyncCacheMaintenance.kt:173-194`（181 行原文）与 `SyncRollbackGuard.kt` 类 KDoc + `PREFIX_MAC` 遗留过滤注释(242-243)。
-- **背景**：`ISSUE-P3-326` 已按用户裁决**移除**防回滚状态的 Keystore MAC 认证层（`SyncRollbackGuard` KDoc 已更新为「明文摘要文件」，`mac=` 仅为遗留兼容过滤），但 `SyncCacheMaintenance.clearAll` 的 KDoc(:181) 仍写「内容仅 SHA-256 摘要 + Keystore HMAC」⇒ 两处口径矛盾，会给后续维护者错误的信任边界认知。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheMaintenance.kt`。
-- **验收标准**：① 该句同步为「仅 SHA-256 摘要的明文状态文件（`ISSUE-P3-326` 起无 MAC）」；② 全仓 `grep Keystore HMAC` 无残留同型陈旧表述；③ 门禁 9/9 PASS。
+- **核实时间点**：2026-10-05（用户复核扩面，同日）；**核实方式**：`grep "Keystore HMAC"` 全仓逐处分类——「原 / 遗留」语境的沿革叙述（`AutofillFieldSignature.kt:29/37`、`AutofillFieldBlocklistStore.kt:22/110/150`、`UnlockThrottle.kt:60`）**不属**陈旧；**当前时态**且描述防回滚状态的陈旧站点实为 **4 处**：① `sync/.../engine/SyncCacheMaintenance.kt:181`（「内容仅 SHA-256 摘要 + Keystore HMAC，无密文、无明文」）、② `sync/.../engine/SyncEngine.kt:26`（「防回滚守卫……由 app 层以 AndroidKeystore HMAC 认证实现注入」）、③ `app/.../sync/SyncCacheEvictor.kt:51`（「该文件仅含 SHA-256 摘要 + Keystore HMAC，不是密文快照」）、④ `app/.../di/DatabaseModule.kt:77`（「该目录承载由 Keystore HMAC 认证的『已见内容摘要链』（仅 SHA-256 摘要 + MAC，无明文）」）。`SyncRollbackGuard.kt:31-32/51/65-66/242-243` 已更新为「明文摘要文件 / 不再附加 MAC / `mac=` 仅遗留过滤」。
+- **背景**：`ISSUE-P3-326` 已按用户裁决**移除**防回滚状态的 Keystore MAC 认证层（`SyncRollbackGuard` KDoc 已同步），但上述 **4 处** KDoc 仍以当前时态宣称该状态「由 Keystore HMAC 认证 / 含 MAC」⇒ 与事实矛盾，会给后续维护者错误的信任边界认知（**范围大于单点**，须一并收口）。
+- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheMaintenance.kt`、`sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncCacheEvictor.kt`、`app/src/main/java/com/keepasskey/app/di/DatabaseModule.kt`。
+- **验收标准**：① 上述 4 处逐处同步为「仅 SHA-256 摘要的明文状态文件（`ISSUE-P3-326` 起无 MAC）」（保留「无密文 / 无明文」的既有表述）；② 复查判据：`grep "Keystore HMAC"` 的命中**全部**落入「原 / 遗留」沿革语境（即无当前时态的陈旧表述）；③ 门禁 9/9 PASS。
 
 ### ISSUE-P3-487：旧版无障碍回填通道的口令 `String` 承载未登记入 `已知工程限界.md` §2.6
 
