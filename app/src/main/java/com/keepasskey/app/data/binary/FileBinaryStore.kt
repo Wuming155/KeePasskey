@@ -51,6 +51,7 @@ class FileBinaryStore @Inject constructor(
 
     override fun load(key: String): ByteArray = cache.readCache(key) ?: ByteArray(0)
 
+    /** ISSUE-P3-483：纯透传 `SyncCache.openCacheStream`；关闭纪律见 [BinaryStore.openStream] 契约，调用方必须 `use{}`。 */
     override fun openStream(key: String): InputStream =
         cache.openCacheStream(key) ?: ByteArrayInputStream(ByteArray(0))
 

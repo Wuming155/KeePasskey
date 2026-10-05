@@ -74,7 +74,7 @@ object DatabaseModule {
     /**
      * F-23 整改：防回滚高水位状态目录（`filesDir/<SyncRollbackGuard.STATE_DIR_NAME>`）。
      *
-     * 该目录承载由 Keystore HMAC 认证的「已见内容摘要链」（仅 SHA-256 摘要 + MAC，**无明文**），
+     * 该目录承载「已见内容摘要链」（仅 SHA-256 摘要的明文状态文件，ISSUE-P3-326 起无 MAC，**无明文**），
      * 是 Assume Breach（云端不可信）下唯一的重放防线，必须**跨会话锁定保留**。
      * 整改前它与 `cacheDir/sync` 同目录，被 [SyncCacheEvictor.onSessionLocked] →
      * `SyncCache.clearAll()` 在每次锁库时连根清除，云侧只需等用户锁定一次即可重放旧库。

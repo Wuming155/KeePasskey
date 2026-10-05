@@ -146,7 +146,7 @@ object KdbxBinaryDeduplicator {
         return index
     }
 
-    /** 流式逐字节比对（不整份物化），作为哈希碰撞的最终裁决。 */
+    /** 流式逐字节比对（不整份物化），作为哈希碰撞的最终裁决（ISSUE-P3-483：末端消费点，双流均已 `.use{}` 闭合）。 */
     private fun contentEquals(a: InnerHeader.BinaryItem, b: InnerHeader.BinaryItem): Boolean {
         if (a === b) return true
         if (a.flags != b.flags || a.size != b.size) return false

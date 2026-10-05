@@ -228,8 +228,8 @@ internal fun HealthCheckComponentsPreview() {
 /**
  * ISSUE-P3-61 的三态口径：计数类审计项**未扫描时一律中性**——「安全 / 需注意」这类结论
  * 只有真实扫描结果才能支撑。§191 把这条判定从页面里两处内联 `Triple` 链收敛为纯函数
- * （宿主可单测，见 `HealthCheckAuditToneTest`），图标 / 配色 / 文案的展示映射留在
- * [HealthCountAuditRow] 里。
+ * （宿主可单测，见 `HealthCheckAuditToneTest`）；ISSUE-P3-484 把图标 / 配色 / 文案的展示映射
+ * 同口径收敛为 [healthCountRowPresentation]（单一真相源，此前为行内三处 `when(tone)` 拷贝）。
  */
 internal enum class HealthAuditTone { NOT_SCANNED, WARNING, PASS }
 
@@ -243,6 +243,46 @@ internal fun healthAuditTone(hasScanned: Boolean, violationCount: Int): HealthAu
     !hasScanned -> HealthAuditTone.NOT_SCANNED
     violationCount > 0 -> HealthAuditTone.WARNING
     else -> HealthAuditTone.PASS
+}
+
+/**
+ * 计数类审计行的展示映射单一真相源（ISSUE-P3-484）。
+ *
+ * 收敛前 [HealthCountAuditRow] 内有三处 `when(tone)` 拷贝（图标 / 配色 / 文案各一），
+ * 任一映射修订需同步三处；现三者同源自本函数的一次 `when`，调用方只读返回件。
+ * 泄露行（[HealthBreachAuditRow]）为另一维度（五态检测状态），不与本映射合并，
+ * 其与本映射共享的图标语义（中性 Security / 警告 WarningAmber / 通过 CheckCircle）属有意一致而非拷贝。
+ */
+internal data class HealthCountRowPresentation(
+    val icon: ImageVector,
+    val iconTint: Color,
+    val statusText: String,
+    val isWarning: Boolean
+)
+
+@Composable
+internal fun healthCountRowPresentation(tone: HealthAuditTone): HealthCountRowPresentation {
+    val securityColors = LocalSecurityColors.current
+    return when (tone) {
+        HealthAuditTone.NOT_SCANNED -> HealthCountRowPresentation(
+            icon = Icons.Default.Security,
+            iconTint = MaterialTheme.colorScheme.outline,
+            statusText = stringResource(R.string.health_status_not_scanned),
+            isWarning = false
+        )
+        HealthAuditTone.WARNING -> HealthCountRowPresentation(
+            icon = Icons.Default.WarningAmber,
+            iconTint = securityColors.warning,
+            statusText = stringResource(R.string.health_status_warn),
+            isWarning = true
+        )
+        HealthAuditTone.PASS -> HealthCountRowPresentation(
+            icon = Icons.Default.CheckCircle,
+            iconTint = securityColors.success,
+            statusText = stringResource(R.string.health_status_pass),
+            isWarning = false
+        )
+    }
 }
 
 /**
@@ -263,33 +303,19 @@ internal fun HealthCountAuditRow(
     onIssueClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val securityColors = LocalSecurityColors.current
     val tone = healthAuditTone(hasScanned, violationCount)
+    val presentation = healthCountRowPresentation(tone)
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         HealthAuditRowItem(
-            icon = when (tone) {
-                HealthAuditTone.NOT_SCANNED -> Icons.Default.Security
-                HealthAuditTone.WARNING -> Icons.Default.WarningAmber
-                HealthAuditTone.PASS -> Icons.Default.CheckCircle
-            },
-            iconTint = when (tone) {
-                HealthAuditTone.NOT_SCANNED -> MaterialTheme.colorScheme.outline
-                HealthAuditTone.WARNING -> securityColors.warning
-                HealthAuditTone.PASS -> securityColors.success
-            },
+            icon = presentation.icon,
+            iconTint = presentation.iconTint,
             title = title,
             subtitle = subtitle,
-            statusText = stringResource(
-                when (tone) {
-                    HealthAuditTone.NOT_SCANNED -> R.string.health_status_not_scanned
-                    HealthAuditTone.WARNING -> R.string.health_status_warn
-                    HealthAuditTone.PASS -> R.string.health_status_pass
-                }
-            ),
-            isWarning = tone == HealthAuditTone.WARNING
+            statusText = presentation.statusText,
+            isWarning = presentation.isWarning
         )
         // ISSUE-P3-405：仅在已扫描且确有明细时展示——未扫描 / 计数为 0 时列表为空，自然不出现
         if (hasScanned && issues.isNotEmpty()) {

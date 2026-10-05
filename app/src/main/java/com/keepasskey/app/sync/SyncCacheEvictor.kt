@@ -48,7 +48,7 @@ class SyncCacheEvictor @Inject constructor(
      * F-23：防回滚状态**不在此目录**（生产为 `filesDir/rollback`，`SyncRollbackGuard.STATE_DIR_NAME`），
      * 且 [SyncCache.clearAll] 亦不会删除 `SUFFIX_STATE` 命名的文件。因此「残留计数」必须把
      * 这类文件排除在外，否则升级前落在本目录的历史状态文件会让每次锁库都误报
-     * 「密文可能仍可恢复」——该文件仅含 SHA-256 摘要 + Keystore HMAC，不是密文快照。
+     * 「密文可能仍可恢复」——该文件仅含 SHA-256 摘要的明文状态文件（ISSUE-P3-326 起无 MAC），不是密文快照。
      *
      * @return 缓存目录已不存在或（应清理的）内容已清空时返回 true；存在删除失败项返回 false
      */

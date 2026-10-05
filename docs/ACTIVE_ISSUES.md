@@ -96,9 +96,9 @@
   ② 既有单测全绿（测试调度器注入口径不变），并以「主线程零阻塞」类守卫用例或探针锁定该调用点；
   ③ 大库（万级条目）真机走查无主线程 jank；全量 `test` 绿 + 门禁 9/9 PASS。
 
-## P3 低危问题、特性接线与体验优化（14 项）
+## P3 低危问题、特性接线与体验优化（7 项）
 
-> 本批 14 条出自 [`records/软件工程质量审查记录_2026-10-05.md`](records/软件工程质量审查记录_2026-10-05.md)（五维度静态审查 + 高风险面深审；严重度 low 映射 P3）。
+> 本批剩余 7 条出自 [`records/软件工程质量审查记录_2026-10-05.md`](records/软件工程质量审查记录_2026-10-05.md)（五维度静态审查 + 高风险面深审；严重度 low 映射 P3；`ISSUE-P3-481` / `482` / `483` / `484` / `485` / `486` / `487` 七条已于 §444 闭环）。
 > 其中 **Rust 原生面条目**（`ISSUE-P3-474` / `475` / `476` / `477` / `478` / `479` / `480`）按 AGENTS.md 测试资产纪律须**四层 `connectedDebugAndroidTest` 真机实跑**方可入库。
 
 ### ISSUE-P3-474：`twofish_cbc.rs` 仍用 `aes_cbc.rs` 文件头明令禁止的旧循环形态
@@ -149,53 +149,4 @@
 - **背景**：`minimal_period`(576-601) 为 KMP 前缀函数分配随输入长度线性增长的 `Vec<usize>`，调用点传入**未经截断**的全量字符 ⇒ 恶意超长口令可在热路径上放大内存峰值。
 - **涉及文件**：`crypto/src/main/rust/src/strength.rs`。
 - **验收标准**：① 改为 O(1) 额外空间的滚动 / 双指针判定（或固定上限缓冲），删除随输入增长的分配；② 周期判定语义不变（`abc×100` 仍命中 `FLAG_PERIODIC_REPEAT`），既有用例全绿；③ `cargo test` + 原生面四层真机 + 门禁 9/9 PASS。
-
-### ISSUE-P3-481：`libs.versions.toml` 的 `agp` 字段值与注释叙述不一致（配置漂移）
-
-- **核实时间点**：2026-10-05；**核实方式**：直读 `gradle/libs.versions.toml:17`（`agp = "9.4.1"`）与 8-16 行注释；`grep 9.2.1 / 9.4.1 / 9.4.0` 于全仓 `*.kts` 零命中（无第二版本来源）；核对 `RESOLVED_LOG.md` §330。
-- **背景**：字段值为 `9.4.1`，而注释(8-16 行)整段陈述「降级到 AGP 9.2.1」；`RESOLVED_LOG.md` §330 已记「AGP 9.2.1→9.4.1」由 Dependabot PR 合并（commit `d53fc93e`，附 `SupplyChainScanSurfaceTest` 对 9.4.1 工具链面的 fail-closed 验证）⇒ **9.4.1 为实际生效值，注释为陈旧遗留**；另 14 行「Gradle 9.7.1 ≥ AGP 9.2 要求的 9.4.1」表述错乱。
-- **涉及文件**：`gradle/libs.versions.toml`。
-- **验收标准**：① 注释改为如实记录版本演进（9.4.0 → 9.2.1（IDE 兼容）→ 9.4.1（回升级））与当前依据；② 修正 14 行错乱表述；③ `assembleDebug` 绿 + 门禁 9/9 PASS。
-
-### ISSUE-P3-482：`libs.versions.toml` alpha 依赖的风险登记（`composeScreenshot` 未标 dev-only）
-
-- **核实时间点**：2026-10-05；**核实方式**：直读 `libs.versions.toml:44 / 76 / 91` 与 33-44 行注释；核对 `docs/records/退役依据承接-ISSUE-P3-09.md` 与 `产品裁决登记.md`（后者无 `ISSUE-P3-09` 条目）。
-- **背景**：`material3 = "1.5.0-alpha28"`(44) 的 alpha 依赖**属已裁决取舍、非缺陷**，管控结论登记于 `libs.versions.toml` 35-43 行与 `退役依据承接-ISSUE-P3-09.md`（含退出条件：1.5.0 stable 发布后回归 Compose BOM）；`composeScreenshot = "0.0.1-alpha16"`(76) 为**仅开发期**工具（非生产依赖）但未在该项显式标注属性。
-- **涉及文件**：`gradle/libs.versions.toml`。
-- **验收标准**：① `composeScreenshot` 版本项显式标注「dev-only / 非生产依赖」；② `material3` alpha 维持退出条件跟踪（stable 发布即触发回归），不新增管控信息缺口；③ 门禁 9/9 PASS。
-
-### ISSUE-P3-483：`SyncCache.openCacheStream` 以裸 `FileInputStream` 返回，关闭责任在调用方
-
-- **核实时间点**：2026-10-05（用户复核更正，同日）；**核实方式**：直读 `SyncCache.kt:282-285` 并**逐层**清点调用链——`SyncCache.openCacheStream(key)` ← `FileBinaryStore.openStream(key)`（`app/.../data/binary/FileBinaryStore.kt:54-55`，**唯一生产消费，且为纯透传**）← `BinaryStore.openStream(key)`（接口，`core/.../security/BinaryStore.kt:35`）← `InnerHeader.BinaryItem.openStream()`（`database/.../file/InnerHeader.kt:70-71`）← 链路末端生产消费者 `InnerHeader.kt:125`（`openStream().use { it.copyTo(...) }`）与 `KdbxBinaryDeduplicator.kt:153-154`（`a.openStream().use { … }`），二者均已 `.use{}`；`KdbxAttachment.kt:55` 属另一条无参 `BinarySource.openStream()` 链，未查到生产消费者。
-- **背景**：`openCacheStream` 直接返回 `FileInputStream(file)`，无任何 `.use{}` 强制，所有权移交调用方；**关闭责任跨越两层上移**（`FileBinaryStore.openStream` 再上移一级，`InnerHeader.BinaryItem.openStream` 第三级），故泄漏点不在本函数而在**链路末端的每个消费点**——新增任一消费点遗漏 `.use{}` 即泄漏文件描述符。当前末端两处消费者均已闭合，故属纪律性风险而非实测泄漏。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt`、`app/src/main/java/com/keepasskey/app/data/binary/FileBinaryStore.kt`。
-- **验收标准**：① 在**契约层**固化关闭责任——可选落点为 `SyncCache.openCacheStream`（改「接收消费 lambda」形态以内建 `use`）或 `BinaryStore.openStream`（在接口 KDoc 固化「调用方必须 `use`」并说明多级透传链）；**须写明所选层级与理由**（仅在 `SyncCache` 的 KDoc 加一句不足以覆盖经 `FileBinaryStore` 透传的调用方）；② 就地为链路末端两处消费者（`InnerHeader.kt:125`、`KdbxBinaryDeduplicator.kt:153-154`）标注该纪律；③ `:sync:` / `:database:` 单测绿 + 门禁 9/9 PASS。
-
-### ISSUE-P3-484：健康度页 UI 为行数治理做「逐字搬动」复制，展示映射存在多份拷贝
-
-- **核实时间点**：2026-10-05；**核实方式**：直读四个文件的 KDoc 自陈（`HealthCheckScreenSections.kt:36/111/151`、`HealthCheckComponents.kt:249`）与集中处（`HealthAuditTone` 枚举 :234、`healthAuditTone` 函数 :242）。
-- **背景**：`ISSUE-P3-188/382/405/409` 等分拆批次以「逐字搬动、零行为变更」满足 `count_line_tiers` tier 预算，逻辑重复度低、漂移风险小，但图标 / 配色 / 文案的展示映射在多文件存在拷贝。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/{HealthCheckScreen,HealthCheckComponents,HealthCheckIssueList,HealthCheckScreenSections}.kt`。
-- **验收标准**：① 跨文件重复的「审计行展示映射」收敛为单一真相源 helper（判定侧已集中在 `healthAuditTone`，展示侧同口径收口）；② 收敛后 `count_line_tiers`（`tier1=0` / `tier2` 不超预算）与 `long_functions` 仍绿；③ 全量 `test` 绿 + 门禁 9/9 PASS。
-
-### ISSUE-P3-485：`applyResolvedEntriesToGroup` 组内线性查找构成 O(k²)
-
-- **核实时间点**：2026-10-05；**核实方式**：直读 `SyncConflictMergeAdjudication.kt:224-254`（`own.forEach { … working.indexOfFirst { it.id == entry.id } … }` 在 233 行）。
-- **背景**：批量落位已裁决条目时，组内以 `indexOfFirst` 逐条线性查找（嵌于 `forEach`）⇒ 单组 O(k²)（`k` = 同组裁决条目数）。同组裁决条目通常很小，故为低优先；同组大量条目一次性裁决时随数量平方增长。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncConflictMergeAdjudication.kt`。
-- **验收标准**：① 先以 `id → 下标` 表（一次建表）替代内层 `indexOfFirst`，单组降回 O(k)；② 落位语义不变（同父组内按原冲突顺序「找到即替换、找不到即追加」），既有合并等价用例全绿；③ 门禁 9/9 PASS。
-
-### ISSUE-P3-486：`SyncCacheMaintenance.clearAll` KDoc 仍称防回滚状态含 Keystore HMAC（文档漂移）
-
-- **核实时间点**：2026-10-05（用户复核扩面，同日）；**核实方式**：`grep "Keystore HMAC"` 全仓逐处分类——「原 / 遗留」语境的沿革叙述（`AutofillFieldSignature.kt:29/37`、`AutofillFieldBlocklistStore.kt:22/110/150`、`UnlockThrottle.kt:60`）**不属**陈旧；**当前时态**且描述防回滚状态的陈旧站点实为 **4 处**：① `sync/.../engine/SyncCacheMaintenance.kt:181`（「内容仅 SHA-256 摘要 + Keystore HMAC，无密文、无明文」）、② `sync/.../engine/SyncEngine.kt:26`（「防回滚守卫……由 app 层以 AndroidKeystore HMAC 认证实现注入」）、③ `app/.../sync/SyncCacheEvictor.kt:51`（「该文件仅含 SHA-256 摘要 + Keystore HMAC，不是密文快照」）、④ `app/.../di/DatabaseModule.kt:77`（「该目录承载由 Keystore HMAC 认证的『已见内容摘要链』（仅 SHA-256 摘要 + MAC，无明文）」）。`SyncRollbackGuard.kt:31-32/51/65-66/242-243` 已更新为「明文摘要文件 / 不再附加 MAC / `mac=` 仅遗留过滤」。
-- **背景**：`ISSUE-P3-326` 已按用户裁决**移除**防回滚状态的 Keystore MAC 认证层（`SyncRollbackGuard` KDoc 已同步），但上述 **4 处** KDoc 仍以当前时态宣称该状态「由 Keystore HMAC 认证 / 含 MAC」⇒ 与事实矛盾，会给后续维护者错误的信任边界认知（**范围大于单点**，须一并收口）。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheMaintenance.kt`、`sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt`、`app/src/main/java/com/keepasskey/app/sync/SyncCacheEvictor.kt`、`app/src/main/java/com/keepasskey/app/di/DatabaseModule.kt`。
-- **验收标准**：① 上述 4 处逐处同步为「仅 SHA-256 摘要的明文状态文件（`ISSUE-P3-326` 起无 MAC）」（保留「无密文 / 无明文」的既有表述）；② 复查判据：`grep "Keystore HMAC"` 的命中**全部**落入「原 / 遗留」沿革语境（即无当前时态的陈旧表述）；③ 门禁 9/9 PASS。
-
-### ISSUE-P3-487：旧版无障碍回填通道的口令 `String` 承载未登记入 `已知工程限界.md` §2.6
-
-- **核实时间点**：2026-10-05；**核实方式**：直读 `LegacyAutofillCoordinator.kt:27-39` 与 `LegacyAutofillAccessibilityService.kt:200-218`；`grep LegacyAutofill / P3-324 / ACTION_SET_TEXT` 于 `已知工程限界.md` §2.6 零命中。
-- **背景**：旧版无障碍回填通道以 `PendingFill(password: String)` 承载口令明文并经 `Bundle.putCharSequence` 交付（`ACTION_SET_TEXT` 只收 `CharSequence`）。该形态属 `已知工程限界.md` §2.6（平台 Autofill / CM **边界瞬时** `String` 副本）**同类**、就地 KDoc 亦自述与 `ISSUE-P2-15` 同源，但 §2.6 的枚举未列入本处（该节 2026-09-23 清点，早于 `ISSUE-P3-324` / §332 落地）⇒ 限界表「仅生产路径列入本节」口径存在缺口。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/autofill/legacy/LegacyAutofillCoordinator.kt`、`LegacyAutofillAccessibilityService.kt`、`docs/architecture/已知工程限界.md`。
-- **验收标准**：① 在 `已知工程限界.md` §2.6 补登记本处（同类、非新类别，含「String 是 `ACTION_SET_TEXT` API 硬约束」的理由与生命周期压缩口径）；② 门禁 9/9 PASS（`check_md_links` 断链为 0）。
 

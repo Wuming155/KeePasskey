@@ -117,7 +117,7 @@ data class InnerHeader(
             inlineData.fill(0)
         }
 
-        /** 序列化时直接写出（落盘条目流式拷贝，不整份物化）。 */
+        /** 序列化时直接写出（落盘条目流式拷贝，不整份物化；ISSUE-P3-483：末端消费点，已 `.use{}` 闭合）。 */
         internal fun writeTo(outputStream: OutputStream) {
             if (spillKey == null) {
                 if (inlineData.isNotEmpty()) outputStream.write(inlineData)

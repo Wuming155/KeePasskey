@@ -5,14 +5,15 @@
 # navigation 2.10.0 / hilt-ext 1.4.0 / bcprov 1.85.2 / coroutines 1.11.0 / okhttp 5.5.0 /
 # foojay-resolver 1.0.0 / wrapper 9.7.1
 [versions]
-# AGP 版本对齐本机 Android Studio（Quail 1 | 2026.1.1 RC 2）支持的**上限 AGP 9.2.1**：
-# 原为 9.4.0（Dependabot 批量落地），但该版本超出 IDE 支持范围，导致 Studio 无法
-# 同步 / 索引本项目——表现为 IDE 报「incompatible version of the Android Gradle plugin…
+# AGP 版本演进（ISSUE-P3-481，如实记录，2026-10-05 核对）：
+# 9.4.0（Dependabot 批量落地）→ 9.2.1（IDE 兼容性降级：本机 Android Studio Quail 1 | 2026.1.1 RC 2
+# 支持的上限为 AGP 9.2.1，超限时 Studio 报「incompatible version of the Android Gradle plugin…
 # Latest supported version is AGP 9.2.1」，且 Android CLI 的 studio 子命令一律返回
-# "not implemented"（IDE 侧能力整体不可用，含 Compose 预览渲染）。
-# 降级不损失构建能力：AGP 9.2 与 9.4 的最大 API 支持级别同为 **API 37.0**，
-# 故 compileSdk = 37 / targetSdk = 36 / minSdk 36 均无需调整；Gradle 9.7.1 ≥ AGP 9.2
-# 要求的 9.4.1，wrapper 亦无需改动。
+# "not implemented"）→ 9.4.1（Dependabot 回升级，当前生效值；
+# RESOLVED_LOG.md §330 记其合并 commit d53fc93e，附 SupplyChainScanSurfaceTest 对 9.4.1 工具链面的 fail-closed 验证）。
+# 降级/回升级不损失构建能力：AGP 9.2 与 9.4 的最大 API 支持级别同为 **API 37.0**，
+# 故 compileSdk = 37 / targetSdk = 36 / minSdk 36 均无需调整；Gradle 9.7.1 ≥ AGP 9.2 / 9.4
+# 要求的最低 Gradle 9.4.1，wrapper 亦无需改动。
 # 依据：https://developer.android.com/build/releases/agp-9-2-0-release-notes（Compatibility 表）
 agp = "9.4.1"
 # Kotlin 版本：经顶层 buildscript classpath 提升内置 Kotlin 的 KGP 至 2.4.20，
@@ -71,8 +72,9 @@ androidxAnnotation = "1.9.1"
 datastore = "1.2.1"
 profileinstaller = "1.4.1"
 foojayResolver = "1.0.0"
-# Compose Preview 截图导出（本地开发工具，非生产依赖）：
+# Compose Preview 截图导出（本地开发工具，非生产依赖，ISSUE-P3-482：dev-only 显式标注）：
 # 官方插件发现 main 源集全部 @Preview 并渲染为 PNG；最新稳定 alpha 见 Google Maven。
+# 属性：仅开发期工具——生产 APK / AAB 不打包、不执行本插件逻辑。
 composeScreenshot = "0.0.1-alpha16"
 
 [libraries]

@@ -278,7 +278,7 @@ open class SyncCache(
         return sha256
     }
 
-    /** 以流式打开缓存内容（不存在返回 null，ISSUE-P2-24）。 */
+    /** 以流式打开缓存内容（不存在返回 null，ISSUE-P2-24；ISSUE-P3-483 关闭纪律见 `BinaryStore.openStream`）。 */
     open fun openCacheStream(remotePath: String): InputStream? {
         val file = getFile(remotePath, SUFFIX_CACHE)
         return if (file.exists() && file.isFile) FileInputStream(file) else null

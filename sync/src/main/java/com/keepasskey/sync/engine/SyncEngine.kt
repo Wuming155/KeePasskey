@@ -23,7 +23,7 @@ class SyncEngine(
      */
     internal val cache: SyncCache,
     /**
-     * 防回滚守卫（ISSUE-P2-18）：由 app 层以 AndroidKeystore HMAC 认证实现注入；
+     * 防回滚守卫（ISSUE-P2-18）：由 app 层注入（ISSUE-P3-326 起状态为仅 SHA-256 摘要的明文文件，无 MAC 认证层）；
      * 默认 null 表示未接线（行为与接线前逐字节一致，既有单测不受影响）。
      * `ISSUE-P2-308` 起由 `private` 放宽为 `internal`（同上，供结算句柄记录高水位）。
      */

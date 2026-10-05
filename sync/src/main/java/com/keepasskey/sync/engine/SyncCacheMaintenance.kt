@@ -178,7 +178,7 @@ internal class SyncCacheMaintenance(
      * 仅清空目录内容（目录本身保留，[SyncCache] 构造期保证其存在）。
      *
      * **例外（F-23）**：命中 [SyncCache.isRollbackStateFileName] 的子项一律**保留**——防回滚状态是
-     * 跨会话安全状态（内容仅 SHA-256 摘要 + Keystore HMAC，无密文、无明文），
+     * 跨会话安全状态（内容仅 SHA-256 摘要的明文状态文件，ISSUE-P3-326 起无 MAC，无密文、无明文），
      * 缓存销毁不得连带摧毁重放防护。生产布局下它不在此目录，此分支仅兜底误配 / 历史残留。
      *
      * @return 是否全部（应删除的）子项删除成功（存在删除失败项时返回 false，调用方可据此告警）
