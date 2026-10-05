@@ -3,8 +3,10 @@ package com.keepasskey.app.passkey
 import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Assume
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.FileInputStream
@@ -46,6 +48,39 @@ class CredentialSaveChainDeviceTest {
 
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val testContext = instrumentation.context
+
+    /** 登记前的原值（收尾还原；`null` = 原本为空键） */
+    private var originalCredentialService: String? = null
+
+    /**
+     * 环境自备（`ISSUE-P2-494`）：系统把创建请求路由到本 provider 的**必要条件**是
+     * `Settings.Secure.credential_service` 登记本组件（§240 §3.1 的 E1 / E3 对照实证：
+     * 只写 `credential_service_primary` 不足够）。该键只有 shell / 系统可写，此前依赖**带外手工**
+     * `adb shell settings put secure credential_service …`（§447 §2.9）——CI `device-gate` 上
+     * 不存在该前置 ⇒ 本用例在 CI 上恒以 `Assume` 收场，「路由成立」这一结论从未被 CI 证过。
+     * 此处经 `UiAutomation`（shell 身份，持 `WRITE_SECURE_SETTINGS`）**就地登记**，
+     * 收尾还原（与 `AutofillAuthChainDeviceTest` 对 `autofill_service` 的处置同款，均为共享设备不留痕）。
+     */
+    @Before
+    fun registerCredentialProvider() {
+        originalCredentialService =
+            shell("settings get secure credential_service").trim().ifEmpty { null }
+        shell(
+            "settings put secure credential_service " +
+                "${instrumentation.targetContext.packageName}/" +
+                KeePasskeyCredentialProviderService::class.java.name
+        )
+    }
+
+    @After
+    fun restoreCredentialService() {
+        val original = originalCredentialService
+        if (original == null) {
+            shell("settings delete secure credential_service")
+        } else {
+            shell("settings put secure credential_service $original")
+        }
+    }
 
     @Test
     fun `系统保存请求必须能路由到本应用的凭据提供者`() {

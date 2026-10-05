@@ -66,6 +66,14 @@ class InlineCompressedBinaryBudgetDeviceTest {
         val outcome = inflateInlineCompressed(MEMBER_LIMIT_BYTES)
         val peakLowerBound = 2L * MEMBER_LIMIT_BYTES
 
+        // ISSUE-P2-490 AC②：把「本机堆界 + 走哪条分支」打成可核对读数——跨堆界实跑的证据
+        // 必须能从用例输出直接读出是哪一档（192 MiB / 256 MiB），不得靠外部推断。
+        println(
+            "[ISSUE-P2-200 落点① 堆界读数] maxHeap=$maxHeap (${maxHeap / MIB} MiB)" +
+                ", 单节点峰值下界 2D=$peakLowerBound (${peakLowerBound / MIB} MiB)" +
+                " ⇒ ${if (peakLowerBound > maxHeap) "OOM 分支（2D > M）" else "安全带分支（2D ≤ M）"}"
+        )
+
         if (peakLowerBound > maxHeap) {
             // 方向一（本分支判据是**可靠**的）：峰值下界已超堆界 ⇒ 必然 OOM。
             // 这正是 ISSUE-P2-200 落点① 的「单节点即打崩堆」结论。
@@ -85,6 +93,10 @@ class InlineCompressedBinaryBudgetDeviceTest {
         // 现改为在**安全带**内取规模断言成功——令 2D = maxHeap/2，为中间态留足一倍余量，
         // 使「成功」成为可判定的期望；临界带（2D ≤ M < 2D+中间态）由构造方式**规避**而非断言。
         val safeBytes = maxHeap / SAFE_BAND_DIVISOR
+        println(
+            "[ISSUE-P2-200 落点① 安全带读数] 解压产物 D=$safeBytes (${safeBytes / MIB} MiB)" +
+                ", 峰值下界 2D=${2L * safeBytes} (${2L * safeBytes / MIB} MiB) = maxHeap/2"
+        )
         assertTrue(
             "测试前提：安全带规模须不超过生产允许上界 $MEMBER_LIMIT_BYTES（maxHeap=$maxHeap）",
             safeBytes in 1..MEMBER_LIMIT_BYTES
@@ -164,6 +176,9 @@ class InlineCompressedBinaryBudgetDeviceTest {
          * 留出约一倍堆界余量，使该带的「成功」成为可判定期望。
          */
         const val SAFE_BAND_DIVISOR = 4L
+
+        /** 读数换算用（仅用于打印堆界档位，不参与判据） */
+        const val MIB = 1024L * 1024
 
         /** 对照规模：必须成功 */
         const val CONTROL_BYTES = 1L * 1024 * 1024

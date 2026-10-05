@@ -148,6 +148,26 @@ jobs:
       - name: Android Lint（显式排除与静态分析无关的原生构建）
         run: ./gradlew lint -x :crypto:cargoNdkBuild --console=plain
 
+      # ISSUE-P2-491（2026-10-05 立规）：**用例存在 ≠ 用例可编译**。
+      # 实测事故：`ISSUE-P1-431` 移除 `keyFileBytes` 形参后，设备侧用例仍传该具名实参 ⇒
+      # `:app:androidTest` **编译期**失败；而 `compileDebugAndroidTestKotlin` **不在 `test`
+      # 任务依赖图内**、CI 四个 job 也从未编译设备侧源集 ⇒ AGENTS.md 测试资产纪律要求的
+      # 「原生面改动须四层 `connectedDebugAndroidTest` 真机实跑」被**静默阻断**
+      # （与 `ISSUE-P3-305`「闸门存在 ≠ 闸门被执行」同型，形态是「用例存在 ≠ 用例可编译」）。
+      # 本步用**真编译任务**（非聚合任务 `:app:compileDebugAndroidTestSources`——它只做依赖
+      # 编排，报 UP-TO-DATE 不能证明编译发生过）把五模块设备侧源集纳入机检。
+      # 可留在本 job（不装 NDK）：dry-run 实测该任务图**不含** `:crypto:cargoNdkBuild`
+      # （原生产物只参与打包、不参与 Kotlin 编译）。
+      - name: 设备侧（androidTest）源集编译门禁（ISSUE-P2-491）
+        run: |
+          ./gradlew \
+            :core:compileDebugAndroidTestKotlin \
+            :crypto:compileDebugAndroidTestKotlin \
+            :database:compileDebugAndroidTestKotlin \
+            :sync:compileDebugAndroidTestKotlin \
+            :app:compileDebugAndroidTestKotlin \
+            --console=plain
+
       - name: 归档测试与 Lint 报告
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -601,6 +621,16 @@ jobs:
         run: |
           ./gradlew connectedDebugAndroidTest --console=plain \
             -Pandroid.testInstrumentationRunnerArguments.notClass=com.keepasskey.app.autofill.AutofillAuthChainDeviceTest
+
+      # ISSUE-P3-493（2026-10-05 立规）：上一步的 `BUILD SUCCESSFUL` **不构成**「用例真的跑了」的
+      # 证据——实测 AVD 在被测进程起不来时产出 `<testsuites tests="0"/>` + `test-result-exit-code.txt=0`
+      # + `BUILD SUCCESSFUL`（`am instrument` 的「零用例」返回成功码，UTP 据此归为成功），
+      # 整层门禁空转而显绿。本步按判据断言各层 `tests > 0`（缺结果 XML 亦判「无法判定」，
+      # 同样非绿），fail-closed，**不得**加 `|| true` / `continue-on-error`。
+      # `if: always()`：即使上一步已红，也把「跑了几条」的读数与空转判定打出来（诊断用途）。
+      - name: 断言 connected 结果非空转（ISSUE-P3-493）
+        if: always()
+        run: python3 tools/device/check_connected_device_results.py
 
       - name: 归档 connected 测试报告
         if: always()

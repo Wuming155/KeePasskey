@@ -1,5 +1,6 @@
 package com.keepasskey.app.scan
 
+import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Point
 import android.util.Log
@@ -20,6 +21,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertTrue
 import org.junit.Assume
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -84,6 +86,39 @@ class CameraAnalysisResolutionDeviceTest {
         executor.shutdown()
         assertTrue("$config 未拿到任何分析帧（CAMERA 权限未授 / 相机被占用？）", got)
         return size
+    }
+
+    /**
+     * 环境自备（`ISSUE-P2-494`）：`CAMERA` 是**运行时**权限，`connectedDebugAndroidTest` 的安装
+     * **不会**默认授予（2026-10-05 实测：AVD `kp-256` 上未授即整例红；CI `device-gate` 的模拟器
+     * 同样不授 ⇒ 该层在 CI 上恒红）。而「权限未授」与「相机真的取不到帧」在断言层**外观一致**
+     * ——这正是 `ISSUE-P2-192` 余量第 8 项要消除的形态（环境不满足被误读为产品缺陷）。
+     * 此处经 `UiAutomation`（shell 身份，持 `GRANT_RUNTIME_PERMISSIONS`）**就地自授**，
+     * 使本用例不再依赖带外 `adb shell pm grant`（§447 §2.9 的手工前置）。
+     * 自授失败（平台拒绝）时 `Assume` 跳过，**不得**以「没跑到」冒充「分辨率够用」。
+     */
+    @Before
+    fun grantCameraPermission() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val packageName = instrumentation.targetContext.packageName
+        if (instrumentation.targetContext.checkSelfPermission(Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        val granted = runCatching {
+            instrumentation.uiAutomation.grantRuntimePermission(
+                packageName,
+                Manifest.permission.CAMERA
+            )
+            instrumentation.targetContext.checkSelfPermission(Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+        Assume.assumeTrue(
+            "无法自授 CAMERA 运行时权限（平台拒绝），本用例不适用；" +
+                "不得据此判定「分辨率请求无效」",
+            granted
+        )
     }
 
     @Test

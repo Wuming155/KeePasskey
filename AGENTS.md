@@ -91,6 +91,12 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   或 `tools/export_previews/` 生成器后跑；无需设备，`test` 不覆盖它。**用真编译任务 `...Kotlin`**：
   聚合任务 `:app:compileDebugScreenshotTestSources` 只做依赖编排，见到它报 UP-TO-DATE 并不能证明编译发生过；
   需要确凿证据时加 `--rerun`（实测该 Kotlin 任务强制执行约 3s））
+- `.\gradlew.bat :core:compileDebugAndroidTestKotlin :crypto:compileDebugAndroidTestKotlin :database:compileDebugAndroidTestKotlin :sync:compileDebugAndroidTestKotlin :app:compileDebugAndroidTestKotlin` —
+  **设备侧（`androidTest`）源集编译门禁**（`ISSUE-P2-491` 立规；CI 挂在 `fast-gate`）：`compileDebugAndroidTestKotlin`
+  **不在 `test` 任务依赖图内**，`test` 全绿**不代表**设备侧用例可编译——实测 `ISSUE-P1-431` 移除 `keyFileBytes` 形参后
+  设备侧用例仍传该具名实参 ⇒ `:app:androidTest` **编译期**失败，四层真机义务被静默阻断。**「设备侧编译通过」同样不构成
+  验证证据**（与 `:app:compileDebugScreenshotTestKotlin` 同款，须显式跑），真机实跑仍按测试资产纪律执行。
+  不依赖 NDK / Rust（该任务图**不含** `:crypto:cargoNdkBuild`，故可留在 `fast-gate`）
 - `export-preview-main.bat` / `export-preview-secondary.bat` — 根目录一键导出 Compose `@Preview` 截图：
   先跑 `tools/export_previews/generate_screenshot_test_wrappers.py` 重生包装，再
   `:app:exportMainPreviewScreenshots` / `:app:exportSecondaryPreviewScreenshots`（主屏 20 张白名单
@@ -118,6 +124,11 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python tools/device/check_installed_build.py [--expect-symbol <符号>] [--selftest]` — **装机走查前置读数**（§434 立规）：
   核对设备包 `lastUpdateTime` **不早于**本地 APK mtime，**且** APK 的 `classes*.dex` 内含指定符号；
   无 adb / 无设备 / 无包信息一律退出码 **2**（**不得**当绿）。`--selftest` 为口径反校（含反面样本）
+- `python tools/device/check_connected_device_results.py [--selftest]` — **设备侧结果非空转断言**（`ISSUE-P3-493` 立规；
+  CI 挂在 `device-gate`，紧随 `connectedDebugAndroidTest` 之后）：解析
+  `*/build/outputs/androidTest-results/connected/**/TEST-*.xml`，对建有 `src/androidTest` 的五层断言 `tests > 0`——
+  `tests == 0` 即**空转**（实测：Android 用户未解锁时 UTP 未装包、`am instrument` 以**成功码**返回零用例，
+  任务仍 `BUILD SUCCESSFUL`）；缺结果 XML 判 `2`（**不得**当绿）。`--selftest` 为口径反校（6 组正 / 反样本）
 - `python tools/doc/count_line_tiers.py` / `python tools/doc/long_functions.py` / `python tools/doc/check_md_links.py`
   / `python tools/doc/logic_lines.py <文件> <函数名>` / `python tools/doc/count_test_results.py`
   / `python tools/doc/check_resolved_index_sync.py` / `python tools/doc/check_bounded_type_names.py`
@@ -173,6 +184,10 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 > （有意降级），**构建失败则 fail-closed 直接失败**——严禁再引入吞退出码的开关；真实语料缺失时 `RealKdbxCorpusUnlockTest` 抛
 > `AssumptionViolatedException`（task 仍 `BUILD SUCCESSFUL`，但 `TEST-*.xml` 记为 `<failure>`、`skipped=0`）。
 > 涉及正则 / XML / 平台 API 的逻辑不可只靠宿主单测。
+> **但 task 结果本身也不够（`ISSUE-P3-493` 立规）**：`am instrument` 在「一个用例都没跑」时返回**成功码**，
+> UTP 据此归为 `tests=0 + SUCCESS` ⇒ 整层空转而显绿（与「闸门存在 ≠ 闸门被执行」同型）。故完整判定＝
+> task 结果 **且** `python tools/device/check_connected_device_results.py` 各层 `tests > 0`。
+> 注意该脚本读出的 `failures` **不是**门槛数——`Assume` 跳过在 UTP XML 里同样记 `<failure>`（`skipped` 恒 0）。
 
 > **Rust 单测落位约定（ISSUE-P3-57，须遵守）**：单测放 `crypto/src/main/rust/src/tests/<name>_tests.rs`，源文件中以
 > `#[cfg(test)] #[path = "tests/<name>_tests.rs"] mod tests;` 引用——Code scanning 的 `paths-ignore` 只能做文件级排除，
