@@ -229,11 +229,12 @@ internal fun applyResolvedEntriesToGroup(
     var newEntries: List<KdbxEntry>? = null
     if (!own.isNullOrEmpty()) {
         val working = group.entries.toMutableList()
-        // ISSUE-P3-485：一次建表替代内层 indexOfFirst，单组由 O(k²) 降回 O(k)。
-        // 语义不变：同父组内按原冲突顺序「找到即替换、找不到即追加」；重复 id 以表中最新下标为准，
-        // 与逐条覆盖的终态一致（含追加后又被替换的路径，因追加即同步回表）。
+        // ISSUE-P3-485 / ISSUE-P3-488：一次建表替代内层 indexOfFirst，单组由 O(k²) 降回 O(k)。
+        // 语义与逐条覆盖逐例等价：建表取首个下标（first-wins，与 indexOfFirst 同）——组内重复 UUID
+        // 落位首个槽位；同父组内按原冲突顺序「找到即替换、找不到即追加」；own 内重复（先替换后又替换 /
+        // 先追加后又替换）因追加即同步回表，终态与逐条覆盖一致。
         val indexById = HashMap<KdbxUuid, Int>(working.size * 2)
-        working.forEachIndexed { index, existing -> indexById[existing.id] = index }
+        working.forEachIndexed { index, existing -> indexById.putIfAbsent(existing.id, index) }
         own.forEach { entry ->
             val idx = indexById[entry.id]
             if (idx != null) {

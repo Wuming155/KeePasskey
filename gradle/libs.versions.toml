@@ -5,12 +5,16 @@
 # navigation 2.10.0 / hilt-ext 1.4.0 / bcprov 1.85.2 / coroutines 1.11.0 / okhttp 5.5.0 /
 # foojay-resolver 1.0.0 / wrapper 9.7.1
 [versions]
-# AGP 版本演进（ISSUE-P3-481，如实记录，2026-10-05 核对）：
+# AGP 版本演进（ISSUE-P3-481，如实记录，2026-10-05 核对；ISSUE-P3-488 回审补当前态结论）：
 # 9.4.0（Dependabot 批量落地）→ 9.2.1（IDE 兼容性降级：本机 Android Studio Quail 1 | 2026.1.1 RC 2
 # 支持的上限为 AGP 9.2.1，超限时 Studio 报「incompatible version of the Android Gradle plugin…
 # Latest supported version is AGP 9.2.1」，且 Android CLI 的 studio 子命令一律返回
 # "not implemented"）→ 9.4.1（Dependabot 回升级，当前生效值；
-# RESOLVED_LOG.md §330 记其合并 commit d53fc93e，附 SupplyChainScanSurfaceTest 对 9.4.1 工具链面的 fail-closed 验证）。
+# RESOLVED_LOG.md §330 记其合并 commit d53fc93e，附 SupplyChainScanSurfaceTest 对 AGP 工具链配置族
+# 扫描面收口的验证（版本无关不变式，非针对 9.4.1 的版本断言））。
+# 当前态结论：9.4.1（> IDE 上限 9.2.1）是否重现上述 Studio 超限报错未经本次核实；
+# Android CLI 部分子命令返回 not implemented 属 CLI↔Studio 桥接缺失，同类症状见
+# docs/architecture/已知工程限界.md §4.2（RESOLVED_LOG.md §100）。
 # 降级/回升级不损失构建能力：AGP 9.2 与 9.4 的最大 API 支持级别同为 **API 37.0**，
 # 故 compileSdk = 37 / targetSdk = 36 / minSdk 36 均无需调整；Gradle 9.7.1 ≥ AGP 9.2 / 9.4
 # 要求的最低 Gradle 9.4.1，wrapper 亦无需改动。

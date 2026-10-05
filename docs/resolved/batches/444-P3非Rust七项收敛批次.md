@@ -23,7 +23,7 @@
 ## 444.4 ISSUE-P3-484：健康度页展示映射收敛
 
 - **前提复核**：判定侧已集中（`HealthCheckComponents.kt:234 healthAuditTone` + `HealthCheckAuditToneTest`）；展示侧 `HealthCountAuditRow` 内有三处 `when(tone)` 拷贝（图标 / 配色 / 文案各一，272-291 行）。
-- **整改**：新增单一真相源 `HealthCountRowPresentation`（icon / iconTint / statusText / isWarning）+ `@Composable healthCountRowPresentation(tone)`（一次 `when` 同源返回三者）；`HealthCountAuditRow` 改为一次调用取件，删除三处 `when`。泄露行（`HealthBreachAuditRow` 五态）为另一维度，不合并，仅在新 helper KDoc 声明「共享图标语义属有意一致而非拷贝」。`HealthCheckComponents.kt` 350→约 390 行，仍在 tier2 下限 400 之下；`long_functions` 仍绿。
+- **整改**：新增单一真相源 `HealthCountRowPresentation`（icon / iconTint / statusText / isWarning）+ `@Composable healthCountRowPresentation(tone)`（一次 `when` 同源返回三者）；`HealthCountAuditRow` 改为一次调用取件，删除三处 `when`。泄露行（`HealthBreachAuditRow` 五态）为另一维度，不合并，仅在新 helper KDoc 声明「共享图标语义属有意一致而非拷贝」。`HealthCheckComponents.kt` 363→389 行（`read_bytes().splitlines()` 口径，与 `count_line_tiers.py` 同尺子），仍在 tier2 下限 400 之下；`long_functions` 仍绿。
 
 ## 444.5 ISSUE-P3-485：`applyResolvedEntriesToGroup` 组内 O(k²)
 

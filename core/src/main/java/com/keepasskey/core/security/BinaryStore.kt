@@ -34,11 +34,12 @@ interface BinaryStore {
     /** 以流式读回（不整份物化）。
      *
      * ISSUE-P3-483 关闭责任契约（选定落点：本接口层，理由见下）：
-     * - 返回流的所有权移交调用方，调用方**必须**以 `use {}` 闭合；实现方不得代替关闭
+     * - **不变量**：返回流的所有权移交调用方，调用方**必须**以 `use {}` 闭合；实现方不得代替关闭
      *   （流需返回给调用方消费，函数返回前关闭即截断数据）。
-     * - 透传链：`SyncCache.openCacheStream` → `FileBinaryStore.openStream`（纯透传，唯一生产消费）
-     *   → `BinaryStore.openStream`（本契约）→ `InnerHeader.BinaryItem.openStream`（第三级透传）
-     *   → 末端消费者（`InnerHeader.writeTo` / `KdbxBinaryDeduplicator.contentEquals`，均已 `.use{}`）。
+     * - 当前生产透传链（示例，非规范拓扑，随实现演进）：`SyncCache.openCacheStream` →
+     *   `FileBinaryStore.openStream`（纯透传）→ `BinaryStore.openStream`（本契约）→
+     *   `InnerHeader.BinaryItem.openStream` → 末端消费者（`InnerHeader.writeTo` /
+     *   `KdbxBinaryDeduplicator.contentEquals` / `BinaryItem.contentHash` 经 `asStream()`，均已 `.use{}`）。
      *   泄漏点不在中间透传层而在链路末端的新增消费点——新增任一消费点遗漏 `.use{}` 即泄漏文件描述符。
      * - 落点理由：若仅在 `SyncCache` 的 KDoc 加一句，不足以覆盖经 `FileBinaryStore` 透传的调用方；
      *   改「接收消费 lambda」形态虽可内建 `use`，但须改接口 + 全部透传层与调用点，爆破面大于 P3 纪律性风险的收益。
