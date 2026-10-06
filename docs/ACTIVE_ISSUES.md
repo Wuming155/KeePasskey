@@ -46,23 +46,10 @@
 
 > **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（4 项）
+## P2 中危缺陷与协议/测试缺口（3 项）
 
-> 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499` 为该报告 F12 母条目与其三张子集台账（F03/F07/F11）合并后的单条登记。`ISSUE-P2-498` / `ISSUE-P2-502` 已于 §451 闭环归档。
-> **优先认领**：`P2-497` / `P2-499` 两条属报告判定的**「已触发但被掩盖」**（masked）——错误效果已产生或曾实际发作、且被零观测机制屏蔽；`P2-500` / `P2-501` 两条为 dormant（零错误效果、前瞻性风险）。
-
-### ISSUE-P2-497：云同步页「离线缓存」开关为零行为消费方死开关
-
-- **核实时间点**：2026-10-06；**核实方式**：全仓 grep `useOfflineCache|use_offline_cache`（`--type kotlin/xml`）确认 `sync` / `database` / `core` / `crypto` 四模块**零消费**，命中仅 store 读写（`ExtendedSettingsStore.kt:64/:163/:380`）、数据类字段（`ExtendedSettings.kt:14` 默认 `true`）、UI 回显（`SettingsUiState.kt:108` / `SettingsUiStateProjection.kt:154` / `CloudSyncSections.kt:80`）与 setter（`SettingsExtendedPreferencesController.kt:145`）；`setOfflineMode` 全仓无生产调用方（仅定义 `SyncCoordinator.kt:198-199` + 守卫测试 `OfflineCacheNotEngineOfflineTest.kt:14-33` 的源码文本反断言）⇒ `SyncSessionState.kt:29` `isOfflineMode` 恒 false ⇒ `SyncCycleSetup.kt:122` / `SyncCycleRunner.kt:251` 恒 false；实读 `CloudSyncComponents.kt:57-63` 确认 `SyncSwitchItem` 签名**无 `enabled` 形参**（开关未禁用）；实读 `SettingsExtendedPreferencesController.kt` 确认 `syncCoordinator` 依赖（`:21`）在本文件内**仅此一处命中**＝残留未用；实读 `SyncEngine.kt:93/:223/:294/:344/:359-361/:423-425` 确认离线缓存语义为引擎**无条件内置**。
-- **背景**：commit `2a0dd5d1`（2026-09-30）为修「首传永不联网」拆掉 `useOfflineCache → setOfflineMode` 误接后，开关变成零消费方——但 KDoc（`:139-143`）与副标题文案（`strings.xml:961`「断网时继续读写本地缓存，联网后自动同步」）仍以可用开关口吻书写，UI 仍可拨动、持久化并回显。承诺的行为实为引擎无条件内置（缓存先行 + 失败保底重试），故**开关两向均为 no-op**：ON 无增量、OFF 关不掉。该修复及其死开关现状**无任何文档登记**（`git show --stat 2a0dd5d1` 仅 6 文件、无 `docs/`；`docs/` 全库 grep 零命中）。
-  - **触发状态：masked**（判据 E1 现行错误产出，兼 E2）——开关位于常显设置页（默认 true），每次拨动必经「落盘 + 回显」闭环使其看起来完全正常，而行为侧零读取，**虚假可供性被持续产出**并被持久化 / 回显通路掩盖；E2 方面 `2a0dd5d1` 提交信息自录该开关默认开启曾真实触发首传必败并误报。
-  - 登记表核查：`PD-39` / `PD-40` 逐项裁定表均不含 `useOfflineCache`，`产品裁决登记.md:1806` 仅以「云同步页不拆分」口径提及离线缓存区块名，`已知工程限界.md` 无对应条目 ⇒ 不属已接受项。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExtendedPreferencesController.kt`（`:21` 残留依赖 / `:139-146` setter 与 KDoc）、`app/src/main/res/values/strings.xml:961`、`ExtendedSettings.kt` / `ExtendedSettingsStore.kt` / `SettingsUiState.kt` / `SettingsUiStateProjection.kt` / `CloudSyncSections.kt` / `CloudSyncComponents.kt`。
-- **验收标准**：
-  ① 按 PD-39/PD-40 全链移除模式处置（数据类字段、偏好键、字符串资源、UI 行、controller setter 同批清干净），或引入真实可关断语义并**重写文案**——按 PD-50 第 2 条，**不得保留可拨动假象**；
-  ② 顺带清理 `SettingsExtendedPreferencesController.kt:21` 的 `syncCoordinator` 残留未用依赖；
-  ③ 既有守卫 `OfflineCacheNotEngineOfflineTest.kt` 须随处置同步改写（按测试资产纪律不得直接删除用例）；
-  ④ 门禁 9/9 PASS。
+> 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499` 为该报告 F12 母条目与其三张子集台账（F03/F07/F11）合并后的单条登记。`ISSUE-P2-498` / `ISSUE-P2-502` 已于 §451 闭环归档、`ISSUE-P2-497` 已于 §453 闭环归档。
+> **优先认领**：`P2-499` 一条属报告判定的**「已触发但被掩盖」**（masked）——错误效果已产生或曾实际发作、且被零观测机制屏蔽；`P2-500` / `P2-501` 两条为 dormant（零错误效果、前瞻性风险）。
 
 ### ISSUE-P2-499：原生探活失败静默回落零观测（母条目 · 含 cipher / 强度 / Passkey 签名三面）
 

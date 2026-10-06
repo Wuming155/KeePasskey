@@ -61,7 +61,7 @@ class ExtendedSettingsStore @Inject constructor(
         val defaults = ExtendedSettings()
         return ExtendedSettings(
             // 文件处理与进阶同步
-            useOfflineCache = p.getBoolean(K_USE_OFFLINE_CACHE, defaults.useOfflineCache),
+            // ISSUE-P2-497：离线缓存偏好键已整链移除（PD-75，假开关）
             periodicBackgroundSyncEnabled = p.getBoolean(
                 K_PERIODIC_SYNC_ENABLED, defaults.periodicBackgroundSyncEnabled
             ),
@@ -160,7 +160,6 @@ class ExtendedSettingsStore @Inject constructor(
     fun save(settings: ExtendedSettings) {
         val p = prefs ?: return
         p.edit()
-            .putBoolean(K_USE_OFFLINE_CACHE, settings.useOfflineCache)
             .putBoolean(K_PERIODIC_SYNC_ENABLED, settings.periodicBackgroundSyncEnabled)
             .putInt(K_PERIODIC_SYNC_INTERVAL, settings.periodicBackgroundSyncIntervalMinutes)
             .putBoolean(K_AUTO_SYNC_ENABLED, settings.autoSyncEnabled)
@@ -377,7 +376,6 @@ class ExtendedSettingsStore @Inject constructor(
         /** ISSUE-P3-439：字段范围逗号串的分隔符（枚举名不含逗号，安全） */
         const val SEPARATOR = ","
 
-        const val K_USE_OFFLINE_CACHE = "use_offline_cache"
         const val K_PERIODIC_SYNC_ENABLED = "periodic_sync_enabled"
         const val K_PERIODIC_SYNC_INTERVAL = "periodic_sync_interval_minutes"
         // ISSUE-P3-272：自动同步总开关（控制解锁后自动同步触发点）

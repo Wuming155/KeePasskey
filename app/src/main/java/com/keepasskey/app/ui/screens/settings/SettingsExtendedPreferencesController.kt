@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.sync.PeriodicSyncScheduler
-import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +17,6 @@ import kotlinx.coroutines.flow.update
  */
 internal class SettingsExtendedPreferencesController(
     private val extendedSettingsStore: ExtendedSettingsStore,
-    private val syncCoordinator: SyncCoordinator,
     private val periodicSyncScheduler: PeriodicSyncScheduler,
     private val databaseSession: DatabaseSession?,
     /** 周期同步重排需读取当前 wifiOnly 生效值（由同步控制器承载） */
@@ -136,14 +134,9 @@ internal class SettingsExtendedPreferencesController(
     fun setSearchMatchMode(mode: SearchMatchMode) = updateExtended { it.copy(searchMatchMode = mode) }
 
     // ========== KP2A 扩展：文件处理与高级同步策略 ==========
-    /**
-     * 离线缓存开关：断网时继续读写本地缓存副本。
-     * **不**映射为 `SyncEngine.isOffline`（强制不联网）——两者语义不同；
-     * 误接会使首传永远失败（见 ISSUE 关联修复 2026-10-30）。
-     */
-    fun setUseOfflineCache(enabled: Boolean) {
-        updateExtended { it.copy(useOfflineCache = enabled) }
-    }
+    // ISSUE-P2-497：「离线缓存」假开关已整链移除（PD-75）——离线缓存（缓存先行 + 失败保底
+    // 重试）是 SyncEngine 的**无条件内置语义**，该开关两向均 no-op；移除数据类字段 / 偏好键 /
+    // UI 行 / 本 setter 与文案，不得保留可拨动假象（重开条件见裁决登记）。
 
     fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) {
         updateExtended { it.copy(periodicBackgroundSyncEnabled = enabled) }

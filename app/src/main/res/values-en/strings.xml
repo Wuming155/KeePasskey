@@ -941,8 +941,6 @@
     <string name="sync_error_vault_takeover_failed">Overwrite upload failed; binding not applied. You can retry later</string>
     <string name="sync_feedback_error">Sync failed: %1$s</string>
     <string name="sync_section_offline">Offline &amp; background sync</string>
-    <string name="sync_offline_cache_title">Offline cache</string>
-    <string name="sync_offline_cache_sub">Keep reading and writing locally while offline, sync when back online</string>
     <string name="sync_cold_start_title">Sync on cold start</string>
     <string name="sync_cold_start_sub">Check for cloud updates automatically on launch</string>
     <string name="sync_auto_sync_title">Auto sync</string>

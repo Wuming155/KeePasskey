@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Backup
-import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Save
@@ -49,7 +48,6 @@ import com.keepasskey.app.ui.screens.settings.SettingsUiState
 @Composable
 internal fun OfflineSyncSection(
     uiState: SettingsUiState,
-    onUseOfflineCacheToggle: (Boolean) -> Unit,
     onSyncOnColdStartToggle: (Boolean) -> Unit,
     onAutoSyncToggle: (Boolean) -> Unit,
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit,
@@ -73,13 +71,8 @@ internal fun OfflineSyncSection(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SyncSwitchItem(
-                icon = Icons.Default.Cached,
-                title = stringResource(R.string.sync_offline_cache_title),
-                subtitle = stringResource(R.string.sync_offline_cache_sub),
-                checked = uiState.useOfflineCache,
-                onCheckedChange = onUseOfflineCacheToggle
-            )
+            // ISSUE-P2-497：「离线缓存」假开关已整链移除（PD-75）——离线缓存为引擎无条件
+            // 内置语义，开关两向均 no-op；连同文案资源一并清除（重开条件见裁决登记）。
 
             SyncSwitchItem(
                 icon = Icons.Default.Sync,
@@ -352,7 +345,6 @@ internal fun OfflineSyncSectionPreview() {
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(
                 periodicBackgroundSyncEnabled = true
             ),
-            onUseOfflineCacheToggle = {},
             onSyncOnColdStartToggle = {},
             onAutoSyncToggle = {},
             onPeriodicBackgroundSyncToggle = {},

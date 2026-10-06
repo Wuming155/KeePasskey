@@ -957,8 +957,6 @@
     <string name="sync_error_remote_rejected">同步失败：远端拒绝请求（%1$s）。可能是服务端限流（429/503）或临时故障，请稍后重试</string>
     <string name="sync_error_https_required">拒绝保存：%1$s 端点必须使用 HTTPS（https:// 开头）。明文 HTTP 已被禁止，以保护凭据与密码库传输安全</string>
     <string name="sync_section_offline">离线与后台同步</string>
-    <string name="sync_offline_cache_title">离线缓存</string>
-    <string name="sync_offline_cache_sub">断网时继续读写本地缓存，联网后自动同步</string>
     <string name="sync_cold_start_title">冷启动自动同步</string>
     <string name="sync_cold_start_sub">应用启动时自动检查云端更新</string>
     <string name="sync_auto_sync_title">自动同步</string>

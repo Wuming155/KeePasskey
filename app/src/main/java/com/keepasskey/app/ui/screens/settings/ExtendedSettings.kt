@@ -11,7 +11,8 @@ package com.keepasskey.app.ui.screens.settings
  */
 data class ExtendedSettings(
     // 文件处理与进阶同步
-    val useOfflineCache: Boolean = true,
+    // ISSUE-P2-497：离线缓存开关字段已整链移除（PD-75）——离线缓存为引擎无条件内置语义，
+    // 开关两向均无可观察差异（假开关）。
     val periodicBackgroundSyncEnabled: Boolean = false,
     val periodicBackgroundSyncIntervalMinutes: Int = 30,
     // ISSUE-P3-272：自动同步总开关真实接线——控制「解锁后进入列表页自动同步一次」

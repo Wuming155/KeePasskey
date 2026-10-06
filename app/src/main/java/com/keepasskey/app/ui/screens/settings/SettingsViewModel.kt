@@ -191,7 +191,6 @@ class SettingsViewModel @Inject constructor(
 
     internal val extendedPreferences = SettingsExtendedPreferencesController( // ISSUE-P3-444：放宽为 internal 供设置页直取（同 masterKeyChangeController 口径）
         extendedSettingsStore = extendedSettingsStore,
-        syncCoordinator = syncCoordinator,
         periodicSyncScheduler = periodicSyncScheduler,
         databaseSession = databaseSession,
         currentWifiOnlySync = { syncController.currentWifiOnlySync() },
@@ -287,9 +286,9 @@ class SettingsViewModel @Inject constructor(
         // ISSUE-P2-406：Keystore 解密/封印探测/wifi 回填不在 init 同步执行；见 hydrateSyncUi()
         // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
         sessionLockGuard.register()
-        // 注意：useOfflineCache（离线缓存）≠ SyncEngine 强制离线。
-        // 原先把缓存开关误接到 setOfflineMode(true) 会使同步引擎永不联网，
-        // 首传被标成「首次同步上传云端失败」——已移除误接（2026-10-30）。
+        // ISSUE-P2-497：「离线缓存」假开关已整链移除（PD-75）——本页不得再把该缓存开关
+        // 误接到引擎「强制离线」（该误接曾使同步引擎永不联网、首传被误报为
+        // 「首次同步上传云端失败」，2026-10-30 已拆；现字段本身下架）。
         coldStartSyncGate.checkAndTrigger()
         // ISSUE-P2-212：跟踪活动库（开启生物识别开关时据此判定封印凭据是否就绪）
         viewModelScope.launch {
@@ -449,7 +448,6 @@ class SettingsViewModel @Inject constructor(
     fun setSearchMatchMode(mode: SearchMatchMode) = extendedPreferences.setSearchMatchMode(mode)
 
     // ===== KP2A 扩展：文件处理与高级同步策略 =====
-    fun setUseOfflineCache(enabled: Boolean) = extendedPreferences.setUseOfflineCache(enabled)
     fun setPeriodicBackgroundSyncEnabled(enabled: Boolean) = extendedPreferences.setPeriodicBackgroundSyncEnabled(enabled)
     fun setPeriodicBackgroundSyncInterval(minutes: Int) = extendedPreferences.setPeriodicBackgroundSyncInterval(minutes)
     fun setCreateBackupBeforeSave(enabled: Boolean) = extendedPreferences.setCreateBackupBeforeSave(enabled)

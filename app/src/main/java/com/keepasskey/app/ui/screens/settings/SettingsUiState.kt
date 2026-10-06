@@ -105,7 +105,7 @@ data class SettingsUiState(
     val isSyncing: Boolean = false,
     val syncFeedbackMessage: UiMessage? = null,
     // KP2A 进阶文件与同步机制
-    val useOfflineCache: Boolean = true, // KP2A: 离线本地安全缓存副本
+    // ISSUE-P2-497：离线缓存开关字段已整链移除（PD-75，假开关）
     val syncOnColdStart: Boolean = true, // 软件杀死后重新启动时自动与云端同步 (冷启动自动同步)
     val periodicBackgroundSyncEnabled: Boolean = false, // KP2A: 周期性定时后台同步
     val periodicBackgroundSyncIntervalMinutes: Int = 30, // KP2A: 定时同步周期 (分钟)

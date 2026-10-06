@@ -27,8 +27,9 @@ class PeriodicSyncSchedulerTest {
         val store = ExtendedSettingsStore(context = null)
         assertEquals(ExtendedSettings(), store.load())
         assertTrue(store.loadWifiOnlySync())
-        // 写操作静默 no-op，不崩溃
-        store.save(ExtendedSettings(useOfflineCache = false))
+        // 写操作静默 no-op，不崩溃（ISSUE-P2-497 后 useOfflineCache 字段已移除，
+        // 改用同组非默认值以保持「非默认写入不回读」的判据强度）
+        store.save(ExtendedSettings(createBackupBeforeSave = false))
         store.saveWifiOnlySync(false)
         assertEquals(ExtendedSettings(), store.load())
     }

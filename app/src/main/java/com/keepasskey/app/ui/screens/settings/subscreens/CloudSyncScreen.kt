@@ -83,7 +83,6 @@ fun CloudSyncScreen(
     onS3SecretKeyEdited: () -> Unit = {},
     onS3AccessKeyEdited: () -> Unit = {},
     // KP2A 扩展文件处理操作
-    onUseOfflineCacheToggle: (Boolean) -> Unit = {},
     onSyncOnColdStartToggle: (Boolean) -> Unit = {},
     onPeriodicBackgroundSyncToggle: (Boolean) -> Unit = {},
     onPeriodicIntervalChange: (Int) -> Unit = {},
@@ -409,7 +408,6 @@ fun CloudSyncScreen(
             item {
                 OfflineSyncSection(
                     uiState = uiState,
-                    onUseOfflineCacheToggle = onUseOfflineCacheToggle,
                     onSyncOnColdStartToggle = onSyncOnColdStartToggle,
                     onAutoSyncToggle = onAutoSyncToggle,
                     onPeriodicBackgroundSyncToggle = onPeriodicBackgroundSyncToggle,

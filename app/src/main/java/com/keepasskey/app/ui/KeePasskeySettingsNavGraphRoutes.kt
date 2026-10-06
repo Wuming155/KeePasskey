@@ -149,7 +149,6 @@ internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController)
             onWebDavPasswordEdited = settingsViewModel::clearWebDavPasswordPrefill,
             onS3SecretKeyEdited = settingsViewModel::clearS3SecretKeyPrefill,
             onS3AccessKeyEdited = settingsViewModel::clearS3AccessKeyPrefill,
-            onUseOfflineCacheToggle = settingsViewModel::setUseOfflineCache,
             onSyncOnColdStartToggle = settingsViewModel::setSyncOnColdStart,
             onPeriodicBackgroundSyncToggle = settingsViewModel::setPeriodicBackgroundSyncEnabled,
             onPeriodicIntervalChange = settingsViewModel::setPeriodicBackgroundSyncInterval,
