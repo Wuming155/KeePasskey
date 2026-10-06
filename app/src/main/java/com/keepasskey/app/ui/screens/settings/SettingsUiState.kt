@@ -246,8 +246,10 @@ data class SettingsUiState(
     val debugLogRecordsCount: Int = 128,
 
     // 9. 关于与系统信息 (About & Info)
-    val appVersion: String = "v1.0.0-Preview (2026 Edition)",
-    val buildNumber: String = "Build 2026.09.04",
+    // ISSUE-P2-498：默认值即取自 BuildConfig（[AppVersionInfo] 单一真相源）——投影链与首帧
+    // initialValue 均由此得到真实版本读数，不得再回落为静态虚构字面量。
+    val appVersion: String = AppVersionInfo.versionLabel,
+    val buildNumber: String = AppVersionInfo.buildLabel,
     // ISSUE-P3-126③：此处原有 `kdbxFormat = "KDBX 4.1 (Argon2id + ChaCha20)"` 字段——
     // 经全仓检索确认**零消费方**（死字段），且其字面量向用户声明了一个未经活动库文件头
     // 核实的具体版本。故整体删除，避免静态字面量失真。

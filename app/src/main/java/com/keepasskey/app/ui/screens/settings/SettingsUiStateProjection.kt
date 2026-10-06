@@ -265,6 +265,10 @@ internal fun buildSettingsUiState(
     verboseSyncLog = extState.verboseSyncLog,
     debugLogLines = debugLogLines,
 
+    // 9. 关于与系统信息（ISSUE-P2-498：版本读数取自 BuildConfig，单一真相源 [AppVersionInfo]）
+    appVersion = AppVersionInfo.versionLabel,
+    buildNumber = AppVersionInfo.buildLabel,
+
     // 10. 更换主密钥任务（ISSUE-P2-354 AC③）
     isChangingMasterKey = masterKeyTask.isChanging,
     masterKeyChangeFeedback = masterKeyTask.feedback

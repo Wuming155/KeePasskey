@@ -18,7 +18,10 @@
 # 4. 版本固定：NDK / Rust / cargo-ndk / cargo-deny 全部在 env 中写死，禁止漂移。
 #    - NDK 28.2.13676358 与 crypto/build.gradle.kts:13 的 ndkVersionStr 严格一致；
 #    - Rust 1.97.1 为本次整改在开发机实际验证通过的 stable 版本（crate 无 rust-toolchain.toml，
-#      故在 workflow 侧固定，升级需人工评审）。
+#      故在 workflow 侧固定，升级需人工评审）；`env.RUST_TOOLCHAIN` 经各 job 的
+#      dtolnay/rust-toolchain 的 `with.toolchain` 展开（ISSUE-P2-502：`steps.with` 可用 env 上下文），
+#      并由 native-gate 的「校验实际工具链版本」步骤断言 rustc 实际版本含该值
+#      —— 改 env 即真实生效，工具链漂移即红（旧版三处字面量与本 env 实为零消费的装饰性双写）。
 # 5. CI 环境的 release 构建**没有** keystore.properties / release.jks（两者均不入库），
 #    因此 native-gate 先现场生成一把**一次性 CI 密钥**用于验证签名方案，再断言
 #    「v1 关闭（包内无 META-INF/*.SF|*.RSA）、v2 块按 AGP 规则省略、v3 + v4 启用」。
@@ -233,16 +236,21 @@ jobs:
       - name: Set up Rust（固定版本 + 4 个 Android target）
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          # 与 env.RUST_TOOLCHAIN 保持一致（with: 不适于引用 workflow env，故此处为字面量）
-          toolchain: "1.97.1"
+          # ISSUE-P2-502：工具链版本取自 workflow env.RUST_TOOLCHAIN（单一事实源；`steps.with` 支持
+          # env 上下文）——原来的「with: 不适于引用 workflow env」判断经官方 contexts 文档证伪。
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
-      - name: 打印实际工具链版本（可审计）
+      - name: 校验实际工具链版本与 env.RUST_TOOLCHAIN 一致（漂移即红）
         run: |
           set -euo pipefail
           rustc --version
           cargo --version
           java -version
+          # ISSUE-P2-502：把原「可审计打印」升格为断言——rustc 实际版本不含 env.RUST_TOOLCHAIN 即失败，
+          # 使 env 与安装工具链之间的漂移可见（原先只打印、零比对，属装饰性控制点）。
+          rustc --version | grep -q "$RUST_TOOLCHAIN" \
+            || { echo "::error::rustc 实际版本与 env.RUST_TOOLCHAIN=${RUST_TOOLCHAIN} 不一致（工具链漂移）"; exit 1; }
 
       - name: 安装 cargo-ndk（固定版本）
         run: cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
@@ -471,7 +479,8 @@ jobs:
       - name: Set up Rust（固定版本 + 4 个 Android target，deny.toml 的 graph.targets 需要）
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.97.1"
+          # ISSUE-P2-502：与 workflow env.RUST_TOOLCHAIN 同源（不再手写字面量，防 job 间工具链分叉）
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
       - name: cargo test（Rust Argon2 内核单测，Cargo.lock 锁定的依赖树）
@@ -549,7 +558,8 @@ jobs:
       - name: Set up Rust（固定版本 + 4 个 Android target）
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: "1.97.1"
+          # ISSUE-P2-502：与 workflow env.RUST_TOOLCHAIN 同源（不再手写字面量，防 job 间工具链分叉）
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
       - name: 安装 cargo-ndk（固定版本）

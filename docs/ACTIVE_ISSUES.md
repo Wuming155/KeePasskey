@@ -46,9 +46,9 @@
 
 > **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（7 项）
+## P2 中危缺陷与协议/测试缺口（5 项）
 
-> 本批 6 条出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499` 为该报告 F12 母条目与其三张子集台账（F03/F07/F11）合并后的单条登记。
+> 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499` 为该报告 F12 母条目与其三张子集台账（F03/F07/F11）合并后的单条登记。`ISSUE-P2-498` / `ISSUE-P2-502` 已于 §451 闭环归档。
 > **优先认领**：`P2-496` ~ `499` 四条属报告判定的**「已触发但被掩盖」**（masked）——错误效果已产生或曾实际发作、且被零观测机制屏蔽；其余三条为 dormant（零错误效果、前瞻性风险）。
 
 ### ISSUE-P2-496：回前台 / 网络恢复远端探测通道整条空转（自败节流 + 提示位零消费者）
@@ -75,18 +75,6 @@
   ① 按 PD-39/PD-40 全链移除模式处置（数据类字段、偏好键、字符串资源、UI 行、controller setter 同批清干净），或引入真实可关断语义并**重写文案**——按 PD-50 第 2 条，**不得保留可拨动假象**；
   ② 顺带清理 `SettingsExtendedPreferencesController.kt:21` 的 `syncCoordinator` 残留未用依赖；
   ③ 既有守卫 `OfflineCacheNotEngineOfflineTest.kt` 须随处置同步改写（按测试资产纪律不得直接删除用例）；
-  ④ 门禁 9/9 PASS。
-
-### ISSUE-P2-498：「关于」页与设置主页展示的版本号恒为写死虚构字面量
-
-- **核实时间点**：2026-10-06；**核实方式**：实读 `SettingsUiState.kt:249-250`（`val appVersion: String = "v1.0.0-Preview (2026 Edition)"` / `val buildNumber: String = "Build 2026.09.04"`）；全仓 grep `appVersion|buildNumber`（含隐藏文件，排除参考项目 / build / .gradle）确认项目源码仅 4 文件命中且**全为默认值 / 传参 / 渲染**，零赋值点、零测试引用；`SettingsUiStateProjection.kt` 内 grep 零命中、`:89` `initialValue = SettingsUiState(appLanguage = ...)` 走默认值；实读 `SettingsGroups.kt:255` 确认 `if (BuildConfig.DEBUG)` 只包住调试行、「关于」行在 `:268-277` 无条件 `add`（**release 同样渲染**）、`:274` 为副标题渲染点；实读 `app/build.gradle.kts:162` 确认真实 `versionName = "0.1.0"`（`:161` versionCode = 1）；`git log -S "VERSION_NAME" -- app/` 为空、`git log -S "v1.0.0-Preview"` 仅命中初始化提交 `47eee328` ⇒ **真实来源从未接线**。
-- **背景**：字段名与渲染位宣称展示应用版本，实际是自初始化提交起从未接线的静态虚构值——「看似读真实版本、实为静态假读数」。已排查「Preview 品牌属有意取舍」的反假设：`产品裁决登记.md` 无任何版本品牌口径裁决条目，同文件 `ISSUE-P3-126③` 先例（`kdbxFormat` 静态字面量已删，立规「不得再写为静态字面量」）与 §66 批次（2026-09-15，`docs/resolved/batches/66-…md:73-74` 已把它登记为「未核查疑似死字段」）均按「静态字面量失真」定性。
-  - **触发状态：masked**（判据 E1 现行错误产出）——投影链零赋值 ⇒ 每次设置页 / 关于页渲染必显错误字面量，**错误输出被持续产出、用户可感**，且全仓零测试引用无任何拦截。需如实说明：错值本身对用户是明示的，**被掩盖的是「与真实来源脱节」这一事实**而非值本身被藏。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiState.kt:249-250`、`SettingsUiStateProjection.kt:89`、`SettingsGroups.kt:274`、`subscreens/AboutSettingsScreen.kt:56-57`、`subscreens/AboutSettingsScreenSections.kt:48-49/86/94`、`app/build.gradle.kts:161-162`。
-- **验收标准**：
-  ① 改由真实来源接线（`BuildConfig.VERSION_NAME` / `VERSION_CODE`，或 `PackageManager` 读 `versionName`），投影链与 `initialValue` 均有赋值点；
-  ② 若产品裁决为「Preview 品牌即期望展示」，须**改字段名与文案**使其不再宣称是版本读数，并按 `ISSUE-P3-126③` 先例在两登记表中登记该取舍；
-  ③ 补宿主接线守卫测试（断言 `appVersion` 来自 `BuildConfig.VERSION_NAME` 而非字面量），并加跑 `python tools/audit/check_tautological_assertions.py`（防重言断言）；
   ④ 门禁 9/9 PASS。
 
 ### ISSUE-P2-499：原生探活失败静默回落零观测（母条目 · 含 cipher / 强度 / Passkey 签名三面）
@@ -134,19 +122,6 @@
   ③ 补 MockWebServer 负向样本：412 后 `PROPFIND` 持续失败，断言合并上传**携带 `If` 头**；
   ④ 复核 S3 侧同源面并给出与 WebDAV 一致的处置；
   ⑤ 门禁 9/9 PASS。
-
-### ISSUE-P2-502：`RUST_TOOLCHAIN` workflow env 零消费（改 env 静默无效的装饰性控制点）
-
-- **核实时间点**：2026-10-06；**核实方式**：全仓 grep `RUST_TOOLCHAIN` 确认命中仅 `.github/workflows/build.yml:59`（定义）`:236`（注释）与一份文档提及，**零消费点**；实读 `build.yml:237/:474/:552` 三处 `toolchain: "1.97.1"` 字面量为真实钉版点；实读 `:50` 块注释「构建工具链固定版本（禁止漂移）」与 `:18` 头注释「Rust 全部在 env 中写死，禁止漂移」；实读 `:240-245` 打印步骤仅 `rustc --version` / `cargo --version` / `java -version`，**无比对断言**；`ls crypto/src/main/rust/` 确认**无** `rust-toolchain.toml`（故 workflow 字面量即 CI 唯一 Rust 固定点）；另两份 workflow（`codeql.yml` / `dependency-scan.yml`）不装 Rust。
-- **背景**：同 env 块内 `ANDROID_NDK_VERSION` / `CARGO_NDK_VERSION` / `CARGO_DENY_VERSION` 均经 `run:` 内 shell 展开真实消费，唯 `RUST_TOOLCHAIN` 是装饰物；而 `:18` 与 `:236` 两处注释都在向维护者**承诺一个不存在的控制点**，`:236` 甚至把「人工保持一致」写成义务却不设机检。危害方向：未来升级 Rust 时三处注释都会引导改 env ⇒ CI 静默继续安装旧版本（「可审计」打印步骤只打印、无断言报红），形成**无声 no-op 升级**；且 3 处字面量互无机检，部分升级漏改会造成 job 间工具链分叉并全绿。`:236` 给出的理由「`with:` 不适于引用 workflow env」经 GitHub 官方 contexts 文档证伪（`jobs.<job_id>.steps.with` 可用上下文含 `env`）。
-  - **触发状态：dormant**——当前 env 值与 3 处字面量同为 `1.97.1`、零漂移；git `-S` 全史显示 env 与字面量同笔引入、env 从未被消费亦从未被单独改动，「改 env 期望生效而被静默无视」的实机事件从未发生。
-  - **未核实项**：`${{ env.RUST_TOOLCHAIN }}` 在 dtolnay action 下的可用性依据官方 contexts 文档**可用性表**（报告方 WebFetch 实读），**未实跑 GitHub Actions runner 验证解析**。
-  - 登记表核查：两表 grep 零命中 ⇒ 不属已接受项。
-- **涉及文件**：`.github/workflows/build.yml:18` / `:50` / `:59` / `:236-245` / `:474` / `:552`。
-- **验收标准**：
-  ① 二选一并使代码与注释同向——**接线**（`toolchain: ${{ env.RUST_TOOLCHAIN }}` 替换 3 处字面量）或**承认字面量为唯一事实源**（删 env 与 `:18` / `:236` 的失真注释）；本仓 `dependency-scan.yml:19-20` 已有「此处不复述条目数」的正确先例可仿；
-  ② 若保留 env，则把 `:240-245` 的打印步骤升格为**断言**（`rustc --version | grep -q "$RUST_TOOLCHAIN"`），使漂移能变红；
-  ③ 门禁 9/9 PASS。
 
 ## P3 低危问题、特性接线与体验优化（14 项）
 
