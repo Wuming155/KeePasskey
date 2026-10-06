@@ -24,7 +24,12 @@
 
 - `0` = 扫描到的 JVM 单测 XML 中**无**失败 / 错误（无需留痕）；
 - `1` = 存在失败 / 错误（已打印并落盘留痕）；
-- `2` = 未找到任何 JVM 单测 XML（**不得**当绿：无法判别「没红」还是「没跑」）。
+- `2` = 无可用证据——未找到任何 JVM 单测 XML，**或全部 XML 均 `ET.ParseError`**
+  （**不得**当绿：无法判别「没红」还是「没跑」/「没解析出来」）。
+
+解析失败处理（`ISSUE-P3-515`）：单份 XML 解析失败**不**中断（best-effort 收集是对的，首文件崩会
+连累其余证据），但份数与路径清单必须打到 stderr（warning 标记），且「已扫描 N 份」的话术须同时
+报出不可解析份数——否则这句话会**反向暗示**证据完整；全不可解析时与「零 XML」同型退 `2`。
 
 判据与 `count_test_results.py` **共用**（同一 `test<Variant>UnitTest` 目录口径），
 以免与本仓「唯一尺子」漂移。
@@ -51,13 +56,20 @@ def discover(module_root: Path) -> list:
     ]
 
 
-def collect_failures(paths) -> list:
-    """返回按 (classname, name) 排序的 `(类名, 用例名, kind, 摘要)`；kind ∈ {failure, error}。"""
-    found = []
+def collect_failures(paths):
+    """返回 `(found, unparsable)`。
+
+    - `found`：按 (classname, name) 排序的 `(类名, 用例名, kind, 摘要)`；kind ∈ {failure, error}；
+    - `unparsable`：`ET.ParseError` 的 XML **路径清单**——best-effort 跳过策略本身是对的
+      （首文件崩会连累其余证据），缺陷仅在「静默」（`ISSUE-P3-515`）：调用方必须把份数
+      与清单显式报出来，否则「已扫描 N 份 XML」这句话会**反向暗示**证据完整。
+    """
+    found, unparsable = [], []
     for path in paths:
         try:
             root = ET.parse(path).getroot()
         except ET.ParseError:
+            unparsable.append(str(path))
             continue
         if root.tag != "testsuite":
             continue
@@ -76,7 +88,20 @@ def collect_failures(paths) -> list:
                     message,
                 ))
     found.sort()
-    return found
+    return found, unparsable
+
+
+def judge(total: int, found, unparsable) -> int:
+    """退出码判据（`ISSUE-P3-515`）：不可解析**全覆盖**时与「零 XML」同型，判「无法判定」。
+
+    - `2` = 无任何可用证据（零 XML，或全部 XML 均解析失败）——与 `:27` 的 exit-2 立据同型，
+      不得当绿；
+    - `1` = 存在失败 / 错误（已打印并落盘留痕）；
+    - `0` = 无失败 / 错误（无需留痕）；部分不可解析时仍按证据可用处理，但份数须显式报出。
+    """
+    if total and len(unparsable) == total:
+        return 2
+    return 1 if found else 0
 
 
 def render(found, stamp: str) -> str:
@@ -109,6 +134,12 @@ SAMPLE_CLEAN = """<?xml version="1.0" encoding="UTF-8"?>
 </testsuite>
 """
 
+# 反面样本③（ISSUE-P3-515）：`test` 进程被 Ctrl+C / OOM / daemon 被杀时半写的截断 XML。
+SAMPLE_BROKEN = """<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.HalfTest" tests="2" failures="1" errors="0" skipped="0">
+  <testcase classname="com.example.HalfTest" name="boom" time="0.02">
+    <failure message="truncated"""
+
 
 def _write_sample(base: Path, dir_name: str, xml_text: str) -> None:
     d = base / "app" / "build" / "test-results" / dir_name
@@ -122,9 +153,10 @@ def selftest() -> int:
         base = Path(tmp)
         _write_sample(base, "testDebugUnitTest", SAMPLE_DIRTY)
         paths = discover(base / "app")
-        found = collect_failures(paths)
+        found, unparsable = collect_failures(paths)
         # 反面样本：1 failure + 1 error，字段与摘要逐项核对
         checks.append(("dirty 命中 2 条", len(found) == 2))
+        checks.append(("dirty 无可解析失败项", unparsable == []))
         checks.append(("排序后首条为 BarTest#kaboom(error)",
                        found[0][0] == "com.example.BarTest" and found[0][2] == "error"))
         checks.append(("次条为 FooTest#boom(failure)",
@@ -136,7 +168,30 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         _write_sample(base, "testDebugUnitTest", SAMPLE_CLEAN)
-        checks.append(("clean 样本零命中", collect_failures(discover(base / "app")) == []))
+        found_clean, bad_clean = collect_failures(discover(base / "app"))
+        checks.append(("clean 样本零命中", found_clean == [] and bad_clean == []))
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        # 截断 XML：必须被计入 unparsable，且**不得**静默混入「已扫描 N 份」的完整证据口径
+        _write_sample(base, "testDebugUnitTest", SAMPLE_BROKEN)
+        paths_bad = discover(base / "app")
+        found_bad, bad_bad = collect_failures(paths_bad)
+        checks.append(("截断 XML 计入 unparsable（1 份）", len(bad_bad) == 1))
+        checks.append(("截断 XML 不产出失败条目", found_bad == []))
+        checks.append(("全损坏 ⇒ judge 判 2（无法判定，不当绿）",
+                       judge(len(paths_bad), found_bad, bad_bad) == 2))
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        # 混合场景：一份良构（含失败）+ 一份截断 ⇒ 证据部分可用，判据仍为 1（有红）
+        _write_sample(base, "testDebugUnitTest", SAMPLE_DIRTY)
+        d = base / "app" / "build" / "test-results" / "testDebugUnitTest"
+        (d / "TEST-com.example.HalfTest.xml").write_text(SAMPLE_BROKEN, encoding="utf-8")
+        paths_mix = discover(base / "app")
+        found_mix, bad_mix = collect_failures(paths_mix)
+        checks.append(("混合场景：良构证据仍被收集", len(found_mix) == 2))
+        checks.append(("混合场景：损坏份数被如实计数", len(bad_mix) == 1))
+        checks.append(("混合场景：judge 判 1（有红，不因部分损坏改判）",
+                       judge(len(paths_mix), found_mix, bad_mix) == 1))
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:
         print(f"  [{'ok' if ok else 'FAIL'}] {name}")
@@ -157,12 +212,24 @@ def main() -> int:
     if not paths:
         print("::warning::未找到任何 JVM 单测 XML（无法判别「没红」还是「没跑」）", file=sys.stderr)
         return 2
-    found = collect_failures(paths)
+    found, unparsable = collect_failures(paths)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    if unparsable:
+        print(f"::warning::{len(unparsable)}/{len(paths)} 份 XML 解析失败（已跳过，证据不完整）：",
+              file=sys.stderr)
+        for bad in unparsable:
+            print(f"  unparsable: {bad}", file=sys.stderr)
+    code = judge(len(paths), found, unparsable)
+    if code == 2:
+        print("::error::全部 XML 均不可解析——无法判别「没红」还是「没跑」，"
+              "按 ISSUE-P3-515 判无证据（exit 2，不得当绿）", file=sys.stderr)
+        return 2
     text = render(found, stamp)
     print(text, end="")
     if not found:
-        print(f"无失败用例（已扫描 {len(paths)} 份 XML，无需留痕）")
+        print(f"无失败用例（已扫描 {len(paths)} 份 XML"
+              + (f"，其中 {len(unparsable)} 份不可解析" if unparsable else "")
+              + "，无需留痕）")
         return 0
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
     out = EVIDENCE_DIR / f"unit-test-failures-{stamp}.txt"
