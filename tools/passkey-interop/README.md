@@ -13,9 +13,12 @@
 ## 常用命令
 
 ```bash
-# 写入半边：产出探针产物 → 跑权威对拍（退出码 1 即失败，可直接引为硬证据）
+# 写入半边：产出探针产物 → 跑权威对拍（退出码 0 = 通过；1 = 判据失败；2 = 环境缺失，不得当绿）
 ./gradlew.bat :database:testDebugUnitTest --tests "*PasskeyInteropProbeTest*"
 python tools/passkey-interop/verify_interop.py
+
+# 口径反校（不读探针产物）：PATH 无 keepassxc-cli 时必须非 0 退出、且不产出「对拍通过」摘要
+python tools/passkey-interop/verify_interop.py --selftest
 
 # 读取半边：重新生成外部 fixture（已入库；仅在需要换向量 / 换生成器逻辑时执行）
 python tools/passkey-interop/make_external_fixture.py
@@ -29,7 +32,10 @@ echo -n 'passkey-interop-probe-2026' | keepassxc-cli show -q --all -s \
 ## 依赖（本机已实测可用）
 
 `pykeepass >= 4.2`、`cryptography >= 41`、`keepassxc-cli`（KeePassXC 官方 CLI）。
-任一缺失时脚本**显式失败**并说明缺什么，不做静默降级。
+任一缺失时脚本**显式失败**并说明缺什么，不做静默降级：缺 `keepassxc-cli` 退 **2 = 环境缺失**
+（**不得当绿**——缺了非本仓实现的对拍不构成互操作证据），摘要行只列**实际运行过**的实现，
+未运行的实现绝不进入通过口径（`ISSUE-P1-495`：此前该形态退 0 且摘要行自称含 `keepassxc-cli`，
+28 条官方 CLI 判据被静默丢弃）。
 
 ## 证据留痕
 

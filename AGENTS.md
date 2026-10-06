@@ -112,7 +112,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python tools/kdbx-corpus/generate_corpus.py --check` — `.kdbx` 语料校验
 - `python tools/passkey-interop/verify_interop.py` — **通行密钥 KPEX 互操作对拍**（规则 8 在 passkey 面的机检出口；
   先跑 `:database:` 的 `PasskeyInteropProbeTest` 产出产物；判据含 `keepassxc-cli` / `pykeepass` 双实现读数与
-  `cryptography` 独立解析 PEM 并重导出公钥，退出码 1 即失败。**改 `PasskeyData` schema / `PasskeyPkcs8Codec` /
+  `cryptography` 独立解析 PEM 并重导出公钥；退出码 0 = 通过 / 1 = 判据失败 /
+  **2 = 环境缺失（缺 `keepassxc-cli`，不得当绿；摘要行只列实际运行过的实现——`ISSUE-P1-495`）**，
+  `--selftest` 为口径反校。**改 `PasskeyData` schema / `PasskeyPkcs8Codec` /
   KPEX 字段后必跑**——`ISSUE-P2-211` 正是被它揭出的）
 - `python tools/doc/gate_readings.py` — **门禁读数单点采集**（§308 立规；清单**直接解析**
   `.github/workflows/build.yml` 的 `hygiene-gate` 段落，故与 CI 不可能漂移；任一条非 0 即退出码 1，

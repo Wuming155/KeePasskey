@@ -21,11 +21,22 @@
 ./gradlew.bat :database:testDebugUnitTest --tests "*PasskeyInteropProbeTest*"
 # 2) 权威对拍
 python tools/passkey-interop/verify_interop.py
+
+# 口径反校（不读探针产物）：PATH 无 keepassxc-cli 时必须非 0 退出、且不产出「对拍通过」摘要
+python tools/passkey-interop/verify_interop.py --selftest
 ```
 
 产物与清单默认取 `database/build/interop-probe/`（`build/` 可丢弃，脚本会用 `--probe-dir` 覆盖）。
 
-退出码：0 = 全部判据通过；1 = 任一判据失败（供 CI / 人工复核引为硬证据）。
+退出码（与 `tools/template-group-interop/verify_template_group.py` 同口径，供 CI / 人工复核引为硬证据）：
+
+- `0` = 全部判据通过；
+- `1` = 对拍不成立（判据失败 / 探针产物缺失）；
+- `2` = **环境缺失**（缺 `keepassxc-cli`：官方实现侧交叉核对不可执行，**不得当绿**——
+  缺了非本仓实现的对拍**不构成**互操作证据）。
+
+摘要行只列**实际运行过**的实现（`ISSUE-P1-495`：旧版把未运行的 `keepassxc-cli`
+也写进「全部成立」的括号，并静默丢弃 28 条官方 CLI 判据仍 `exit 0`）。
 """
 
 from __future__ import annotations
@@ -34,10 +45,12 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
 
 try:
     from cryptography.hazmat.primitives import serialization
@@ -84,8 +97,17 @@ KNOWN_KEYS = {
     "Passkey.SignCount", "Passkey.UserDisplayName", "Passkey.CreatedAt",
 } | STANDARD_FIELDS
 
+# ── 退出码（与 `tools/template-group-interop/verify_template_group.py` 同口径） ──────────────
+EXIT_OK = 0
+EXIT_FAILED = 1
+EXIT_ENV_MISSING = 2  # 环境缺失，不得当绿
+
 _failures: list[str] = []
 _checks = 0
+# 实际运行过并计入判据的实现（摘要行的**唯一**来源）——绝不把未运行的实现计入通过口径。
+_implementations: list[str] = []
+# 环境缺失标记：置真则最终退 `EXIT_ENV_MISSING`（优先于普通判据失败）。
+_environment_missing = False
 
 
 def check(condition: bool, message: str) -> None:
@@ -93,6 +115,21 @@ def check(condition: bool, message: str) -> None:
     _checks += 1
     if not condition:
         _failures.append(message)
+
+
+def note_implementation(name: str) -> None:
+    """登记一个**实际运行过**的实现（幂等；供摘要行取值）。"""
+    if name not in _implementations:
+        _implementations.append(name)
+
+
+def format_summary(checks: int, implementations: list[str]) -> str:
+    """构造通过摘要行；括号内**只**列实际运行过的实现（纯函数，便于 `--selftest` 反校）。"""
+    return f"✓ 对拍通过：{checks} 条判据全部成立（{' + '.join(implementations)}）"
+
+
+def implementations_text() -> str:
+    return " + ".join(_implementations) if _implementations else "（无）"
 
 
 def parse_show_output(text: str) -> dict[str, str]:
@@ -137,9 +174,19 @@ def derive_public_key_b64(pem_text: str) -> tuple[str, str]:
 
 
 def read_with_keepassxc_cli(db_path: pathlib.Path, password: str, entry_title: str) -> dict[str, str] | None:
-    """用官方 CLI 读条目；CLI 缺失时返回 None（调用方据此跳过交叉核对并如实记录）。"""
+    """用官方 CLI 读条目。
+
+    返回 `None` 表示本次交叉核对**不成立**——CLI 缺失或读取失败**均已记入失败清单**
+    （`ISSUE-P1-495`：旧版在此仅 `print` 一行「不视为通过」便 `return`，而 verdict 只看
+    `_failures`，28 条官方 CLI 判据遂被静默丢弃仍 `exit 0`）。
+    """
+    global _environment_missing
     executable = shutil.which("keepassxc-cli")
     if executable is None:
+        _environment_missing = True
+        _failures.append(
+            f"环境缺失：keepassxc-cli 不可用，`{entry_title}` 的官方实现侧交叉核对无法执行（不得当绿）"
+        )
         return None
     proc = subprocess.run(
         [executable, "show", "-q", "--all", "-s", str(db_path), entry_title],
@@ -149,6 +196,7 @@ def read_with_keepassxc_cli(db_path: pathlib.Path, password: str, entry_title: s
     if proc.returncode != 0:
         _failures.append(f"keepassxc-cli 读取 `{entry_title}` 失败：{proc.stderr.decode('utf-8', 'replace').strip()}")
         return None
+    note_implementation("keepassxc-cli")
     return parse_show_output(proc.stdout.decode("utf-8", "replace"))
 
 
@@ -208,6 +256,7 @@ def verify_entry(db_path: pathlib.Path, kp: PyKeePass, spec: dict, rp_id: str) -
     except Exception as exc:  # noqa: BLE001 - 解析失败即为互操作失败
         _failures.append(f"{label} cryptography 无法解析该 PKCS#8 PEM：{exc}")
         return
+    note_implementation("cryptography")  # 实际解析成功才算「运行过」
 
     expected_name = EXPECTED_KEY_TYPE.get(algorithm_id, "?")
     check(algorithm_name == expected_name, f"{label} PEM 密钥类型 {algorithm_name} ≠ 条目算法 {expected_name}")
@@ -243,7 +292,9 @@ def verify_entry(db_path: pathlib.Path, kp: PyKeePass, spec: dict, rp_id: str) -
     # 7) 双实现交叉核对：keepassxc-cli 与 pykeepass 读数必须一致
     cli_attrs = read_with_keepassxc_cli(db_path, _PASSWORD[0], title)
     if cli_attrs is None:
-        print(f"  ! keepassxc-cli 不可用或读取失败——交叉核对已跳过（如实记录，不视为通过）")
+        # 失败原因**已**记入 `_failures`（ISSUE-P1-495：不再出现「文案自称不视为通过、
+        # verdict 却仍算通过」——本分支现在必然使退出码非 0）。
+        print(f"  ! {label} keepassxc-cli 交叉核对未成立（已记入失败清单）")
         return
     for key in (K_RP, K_USERNAME, K_USER_HANDLE, K_CREDENTIAL_ID, K_FLAG_BE, K_FLAG_BS):
         check(
@@ -260,10 +311,67 @@ def verify_entry(db_path: pathlib.Path, kp: PyKeePass, spec: dict, rp_id: str) -
 _PASSWORD: list[str] = [""]
 
 
+def selftest() -> int:
+    """口径反校（`ISSUE-P1-495` AC③）：在 `PATH` 无 `keepassxc-cli` 的子进程里跑本脚本，
+    断言**退出码非 0** 且**不产出任何「对拍通过」摘要**（旧形态：退 0 且摘要行把未运行的
+    `keepassxc-cli` 计入通过口径）。
+
+    本反校刻意**不依赖** gradle 探针产物——环境缺失判定先于产物检查，故子进程用空目录即可。
+    """
+    checks: list[tuple[str, bool]] = []
+
+    # ① 摘要行只列实际运行过的实现（正 / 反两向反校纯函数）
+    without_cli = format_summary(133, ["pykeepass", "cryptography"])
+    with_cli = format_summary(161, ["pykeepass", "cryptography", "keepassxc-cli"])
+    checks.append(("摘要行不得含未运行的实现", "keepassxc-cli" not in without_cli))
+    checks.append(("摘要行须含实际运行过的实现", "keepassxc-cli" in with_cli))
+
+    # ② 子进程反校：PATH 收窄到解释器目录 ⇒ `shutil.which("keepassxc-cli")` 必不命中
+    with tempfile.TemporaryDirectory() as tmp:
+        env = dict(os.environ)
+        env["PATH"] = os.path.dirname(sys.executable)
+        proc = subprocess.run(
+            [sys.executable, str(pathlib.Path(__file__).resolve()), "--probe-dir", tmp],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            cwd=str(REPO_ROOT),
+        )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        checks.append(("PATH 无 keepassxc-cli ⇒ 退出码 2（非 0）", proc.returncode == EXIT_ENV_MISSING))
+        checks.append(("输出显式说明环境缺失且指名缺什么", "环境缺失" in output and "keepassxc-cli" in output))
+        checks.append(("不得打印「对拍通过」摘要行", "对拍通过" not in output))
+
+    for name, passed in checks:
+        print(f"  [{'ok' if passed else 'FAIL'}] {name}")
+    failed = [name for name, passed in checks if not passed]
+    print("verify_interop --selftest: " + ("FAIL" if failed else "PASS"))
+    return EXIT_FAILED if failed else EXIT_OK
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="KPEX 通行密钥产物 · 官方实现端到端对拍")
     parser.add_argument("--probe-dir", default=str(DEFAULT_PROBE_DIR), help="探针产物目录")
+    parser.add_argument("--selftest", action="store_true", help="口径反校（不读探针产物 / 不跑真实对拍）")
     args = parser.parse_args()
+
+    if args.selftest:
+        return selftest()
+
+    # ── 环境前置（ISSUE-P1-495）─────────────────────────────────────────────
+    # `keepassxc-cli` 是**非本仓**实现之一：缺它则官方实现侧判据整体不可执行，退 2（不得当绿）。
+    # 本检查先于产物检查，既让「缺 CLI」有独立语义退码，也使 `--selftest` 无需 gradle 产物
+    # 即可反校（子进程用空 `--probe-dir`）。
+    if shutil.which("keepassxc-cli") is None:
+        print(
+            "环境缺失（不得当绿）：未找到 keepassxc-cli（KeePassXC 官方 CLI）——\n"
+            "  官方实现侧交叉核对判据无法执行，本次对拍**不构成**互操作证据（AGENTS.md 规则 8）。\n"
+            "  安装 KeePassXC 后重跑；依赖清单见 tools/passkey-interop/README.md。",
+            file=sys.stderr,
+        )
+        return EXIT_ENV_MISSING
 
     probe_dir = pathlib.Path(args.probe_dir)
     db_path = probe_dir / PROBE_DB_NAME
@@ -283,6 +391,7 @@ def main() -> int:
     print(f"  pykeepass {_version('pykeepass')} / keepassxc-cli {_cli_version()}")
 
     kp = PyKeePass(str(db_path), password=manifest["password"])
+    note_implementation("pykeepass")
     print(f"pykeepass 成功解锁，条目数 {len(kp.entries)}")
 
     for spec in manifest["entries"]:
@@ -293,9 +402,10 @@ def main() -> int:
         print(f"✗ 对拍失败（{len(_failures)}/{_checks} 条判据不通过）：")
         for item in _failures:
             print(f"  - {item}")
-        return 1
-    print(f"✓ 对拍通过：{_checks} 条判据全部成立（pykeepass + cryptography + keepassxc-cli）")
-    return 0
+        print(f"  实际运行过的实现：{implementations_text()}")
+        return EXIT_ENV_MISSING if _environment_missing else EXIT_FAILED
+    print(format_summary(_checks, _implementations))
+    return EXIT_OK
 
 
 def _version(module_name: str) -> str:

@@ -41,20 +41,9 @@
 
 ---
 
-## P1 高危与核心功能问题（1 项）
+## P1 高危与核心功能问题（0 项）
 
-### ISSUE-P1-495：`verify_interop.py` 在 `keepassxc-cli` 缺失时静默丢弃 28 条官方 CLI 判据仍 exit 0
-
-- **核实时间点**：2026-10-06；**核实方式**：实读 `tools/passkey-interop/verify_interop.py:141-143`（`shutil.which("keepassxc-cli")` 未命中即 `return None`）、`:244-247`（跳过分支仅 `print` + `return`，**无** `_failures.append`）、`:292-298`（裁决只看 `_failures`，`:297` 摘要行固定含 keepassxc-cli）；对照 `:150` 显示「CLI 在场但读取失败」才记 failure——静默仅限缺失分支；实读 `README.md:32`「任一缺失时脚本**显式失败**并说明缺什么，不做静默降级」与脚本文档串 `:28`「0 = 全部判据通过」；`.github/` 全目录 grep `verify_interop|passkey-interop` **零命中**（无任何自动调用点）。
-- **背景**：本脚本是 AGENTS.md 规则 8 指定的**通行密钥互操作对拍权威机检出口**，退出码明文「供 CI / 人工复核引为硬证据」。`read_with_keepassxc_cli` 在 `shutil.which` 未命中时返回 `None`，`verify_entry` 捕获后只打印一行「交叉核对已跳过（如实记录，不视为通过）」即 `return`——**该行文案自称「不视为通过」，而 verdict 只看 `_failures`，实际仍计入通过**。后果：每条目 7 条判据（6 键比对 + 1 条 PEM）× 4 条目 = **28 条官方 CLI 判据被静默丢弃**，脚本仍打印「✓ 对拍通过：133 条判据全部成立（pykeepass + cryptography + keepassxc-cli）」并 `return 0`——摘要行把**从未运行的实现**计入通过口径。若人工在未装 KeePassXC 的机器上跑该强制门禁并引退出码 0 为硬证据入库，即产出指名含未运行实现的假权威证据，与「闸门存在 ≠ 闸门被执行」（§308 / `ISSUE-P3-305`）同型。
-  - 报告实测记录（登记方未复跑，引用原值）：本机 CLI 2.7.12 在场 → 161 条判据全绿 EXIT 0；剥 `PATH` 子进程 → 133 条 EXIT 0，4× 跳过提示、0× 双实现读数一致。
-  - **触发状态：dormant**（零错误效果产出）——全部在案运行均含 keepassxc-cli 读数（`records/通行密钥互操作对拍记录_2026-09-19.md:48-54` 及 RESOLVED_LOG §220/§268/§342/§351、PD-09:367/375），本机 CLI 在场，历史从未触发；但触发条件是「在不装 KeePassXC 的机器上人工运行」，属环境相关**可达**而非构造不可达。
-- **涉及文件**：`tools/passkey-interop/verify_interop.py`（`:141-143` / `:244-247` / `:292-298`）、`tools/passkey-interop/README.md:32`（承诺口径）。
-- **验收标准**：
-  ① CLI 缺失时**显式失败**——与同仓正确先例 `tools/template-group-interop/verify_template_group.py:15`（「2 = 环境缺失（不得当绿）」）口径对齐：记入 `_failures` 或退非 0，并使摘要行只列**实际运行过**的实现；
-  ② `README.md:32` 与文档串 `:28` 的承诺口径与实现一致（要么改实现、要么改文案，但两者须同向）；
-  ③ 补自检：在 `PATH` 无 `keepassxc-cli` 的子进程环境跑该脚本，断言**退出码非 0 且摘要行不含 keepassxc-cli**（封住「不视为通过」文案与 verdict 不符这一具体形态）；
-  ④ 门禁 9/9 PASS，`python tools/doc/gate_readings.py` 读数原样贴入批次文档 §3。
+> **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
 ## P2 中危缺陷与协议/测试缺口（7 项）
 
