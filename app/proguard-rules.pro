@@ -46,9 +46,16 @@
 # 5. OkHttp 与网络传输
 -keepattributes Signature
 -keepattributes *Annotation*
--keepclassmembers class okhttp3.internal.publicsuffix.PublicSuffixDatabase {
-    native byte[] findSuffix(java.lang.String[]);
-}
+# ISSUE-P3-507：此处原有一条
+#   -keepclassmembers class okhttp3.internal.publicsuffix.PublicSuffixDatabase {
+#       native byte[] findSuffix(java.lang.String[]); }
+# 已删除。核实（2026-10-06）：本仓实际解析的 okhttp-android 5.5.0 中
+# `PublicSuffixDatabase` **无任何 native 方法、无 `findSuffix` 成员**（解包 AAR 后
+# `javap -p` 实测 + 官方 sources grep `native|findSuffix` 零命中 + 全仓除本规则外零引用）
+# ⇒ 该规则**恒不匹配、静默 no-op**，与本文件头「据实最小保留」原则相悖。
+# 删除的零影响面：该类无反射消费方、AAR 自带 consumer 规则也不需要它，
+# `-keepclassmembers` 成员模式不匹配时既不保类也不保成员 ⇒ 对产物零影响。
+# 回归守卫：`ProguardRuleRealityTest` 逐条校验本文件**精确类名 / 成员签名**在依赖实物中存在。
 -dontwarn okhttp3.**
 -dontwarn okio.**
 

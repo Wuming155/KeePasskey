@@ -130,6 +130,64 @@ class CredentialRequestCodeWiringTest {
         }
     }
 
+    // ── 跨通道取值段：避开带必须由机检承载，而非散文承诺（ISSUE-P3-513） ──
+
+    @Test
+    fun `避开带清单必须覆盖全仓所有跨通道 requestCode 常量`() {
+        val declared = declaredAvoidBand()
+        val scanned = scanCrossChannelRequestCodeConstants()
+
+        assertTrue(
+            "避开带清单不得为空（AVOID-BAND 标记被删或解析失败）",
+            declared.isNotEmpty()
+        )
+        val missing = scanned - declared
+        assertTrue(
+            "避开带漏列以下跨通道 requestCode 常量：${missing.sorted()}——" +
+                "漏列会让 CredentialPendingIntents 的避开带 KDoc 失真（历史上 2300 曾漏列一整年）",
+            missing.isEmpty()
+        )
+        assertFalse(
+            "CM 通道自身分配基线不得进入避开带（它是本通道起点，不是要避开的对象）",
+            CM_REQUEST_CODE_BASELINE in declared
+        )
+    }
+
+    @Test
+    fun `避开带不得残留已不存在的常量值（常量删除后须同步清单）`() {
+        val declared = declaredAvoidBand()
+        val scanned = scanCrossChannelRequestCodeConstants()
+
+        val stale = declared - scanned
+        assertTrue(
+            "避开带含已删除 / 改名的常量值：${stale.sorted()}——清单与代码漂移同样是失真",
+            stale.isEmpty()
+        )
+    }
+
+    /** 解析 `CredentialPendingIntents` KDoc 中 `AVOID-BAND:` 行声明的取值集合。 */
+    private fun declaredAvoidBand(): Set<Int> {
+        val line = readSource(PENDING_INTENTS).lineSequence()
+            .firstOrNull { it.contains(AVOID_BAND_MARKER) && Regex("\\d+").containsMatchIn(it) }
+            ?: error("$PENDING_INTENTS 缺少 `$AVOID_BAND_MARKER` 声明行——避开带不得退回散文形式")
+        return Regex("\\d+").findAll(line.substringAfter(AVOID_BAND_MARKER)).map { it.value.toInt() }.toSet()
+    }
+
+    /** 全仓主源码中**除 CM 通道分配器自身基线外**的 `REQUEST_CODE_*` 常量取值。 */
+    private fun scanCrossChannelRequestCodeConstants(): Set<Int> {
+        val mainRoot = File(repositoryRoot, MAIN_SOURCE_ROOT)
+        assertTrue("主源码根目录不存在：$MAIN_SOURCE_ROOT", mainRoot.isDirectory)
+        val values = mutableSetOf<Int>()
+        mainRoot.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" && it.absolutePath != File(repositoryRoot, PENDING_INTENTS).absolutePath }
+            .forEach { file ->
+                Regex("""const\s+val\s+[A-Za-z_]*REQUEST_CODE[A-Za-z_]*\s*=\s*(\d+)""")
+                    .findAll(file.readText())
+                    .forEach { values += it.groupValues[1].toInt() }
+            }
+        return values
+    }
+
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源文件不存在（是否被重命名/移动）：$path", file.isFile)
@@ -138,6 +196,9 @@ class CredentialRequestCodeWiringTest {
 
     private companion object {
         const val PENDING_INTENTS = "app/src/main/java/com/keepasskey/app/passkey/CredentialPendingIntents.kt"
+        const val MAIN_SOURCE_ROOT = "app/src/main/java"
+        /** 避开带声明行的解析锚点（与 `CredentialPendingIntents` KDoc 中的标记同值） */
+        const val AVOID_BAND_MARKER = "AVOID-BAND:"
         const val ASSEMBLER = "app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt"
         const val CREATE_ENTRIES = "app/src/main/java/com/keepasskey/app/passkey/CredentialCreateEntries.kt"
         const val PROVIDER_SERVICE = "app/src/main/java/com/keepasskey/app/passkey/KeePasskeyCredentialProviderService.kt"

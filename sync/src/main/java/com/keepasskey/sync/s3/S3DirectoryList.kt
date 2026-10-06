@@ -146,13 +146,29 @@ internal object S3DirectoryList {
                 )
             }
             val isTruncated = textOf(root, "IsTruncated")?.equals("true", ignoreCase = true) == true
-            val nextToken = textOf(root, "NextContinuationToken")
+            val nextToken = textOf(root, "NextContinuationToken")?.takeIf { it.isNotBlank() }
             val all = (common + contents)
                 .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }, { it.name }))
+            // ISSUE-P3-510：`RemoteListPage` 的 KDoc 不变式是「truncated 为 true 时 nextCursor
+            // 非空」，而 UI（`RemoteBrowseDialog`）只看 `truncated` 就渲染「加载更多」。
+            // 合规 S3 在 IsTruncated=true 时必带 NextContinuationToken，但**端点由用户任填**——
+            // 非规范实现可能只回 IsTruncated=true 而不给 token，此时若照原样产出
+            // (truncated=true, nextCursor=null)，UI 会渲染一个**点了也无新数据**的空转按钮，
+            // 且翻页控制器在 cursor==null 时会把累积结果清回第 1 页并静默吞掉错误。
+            // ⇒ 缺 / 空 token 时降级为「未截断」并留一次告警：宁可少给「加载更多」，
+            // 也不给一个必然空转、还会回缩已得结果的入口。
+            val effectiveTruncated = isTruncated && nextToken != null
+            if (isTruncated && nextToken == null) {
+                AppLog.w(
+                    "S3DirectoryList",
+                    "S3 列举响应 IsTruncated=true 但未返回 NextContinuationToken（非规范端点）——"
+                        + "按 RemoteListPage 不变式降级为未截断，不再渲染空转的「加载更多」"
+                )
+            }
             ParsedListObjects(
                 entries = all,
-                isTruncated = isTruncated,
-                nextToken = nextToken?.takeIf { it.isNotBlank() }
+                isTruncated = effectiveTruncated,
+                nextToken = nextToken
             )
         } catch (e: Throwable) {
             AppLog.w("S3DirectoryList", "S3 目录列举响应解析失败（保守降级为失败）", e)

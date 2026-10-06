@@ -70,8 +70,21 @@ object CredentialPendingIntents {
      * 并发组装两路响应（服务直查 + 链式解锁）拿不到同一值，天然满足官方
      * 「unique request code per entry」且域覆盖整个进程生命周期。
      *
-     * 基线 `1000` 刻意避开解锁 Action 旧常量区间与自动填充通道（`100`/`2001`/`2100`/`2200`）
-     * 的取值段，便于日志与抓包中辨认。
+     * ## 避开带（取值段声明）
+     *
+     * 基线 `1000` 刻意避开其余通道既有 requestCode 常量的取值段，便于日志与抓包中辨认。
+     * 完整清单以 `AVOID-BAND:` 行承载（`CredentialRequestCodeWiringTest` 解析该行并与全仓
+     * 扫描到的 `REQUEST_CODE_*` 常量逐值比对 ⇒ **新增常量漏登即变红**，避开带不再是散文承诺）：
+     *
+     * `AVOID-BAND: 100, 2001, 2002, 2100, 2200, 2300, 2401, 3001, 3002, 3003, 3004, 3005, 3006`
+     *
+     * > **避开带 = 可读性口径，不是防覆写边界**（ISSUE-P3-513 如实声明）：本分配器
+     * > `getAndIncrement` **无上界**，进程生命周期内分配足够多次后终将跨越任何有限常量值
+     * > （自动填充的 `AutofillDatasetBuilders` 认证入口分配器同样自 `100` 无界递增）。
+     * > 真正阻止「同 requestCode + 同组件」覆写的是**目标组件 / Intent 差异**
+     * > （`PendingIntent` 匹配键 = `(requestCode, Intent.filterEquals)`）。已知唯一活的
+     * > 同组件重合点是 `PasswordSaveActivity`（CM「新建密码条目」与自动填充保存共用），
+     * > 规避手段是 Intent 差异化，不是取值段。
      */
     fun nextRequestCode(): Int = requestCodeAllocator.getAndIncrement()
 

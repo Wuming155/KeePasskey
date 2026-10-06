@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.GradleException
 
 plugins {
     alias(libs.plugins.android.application)
@@ -401,11 +402,34 @@ tasks.register<Sync>("exportMainPreviewScreenshots") {
     }
     into(previewExportsMainDir)
     doLast {
+        // ISSUE-P3-509：逐屏命中数断言（**改名即变红**）。
+        // 为什么必须有这一步：上面的 `include("**/${prefix}_*.png")` 在 **0 命中时不报错**，
+        // Sync 照样成功、`doLast` 只打印 light/dark 总数——任一白名单预览被改名 / 删除后，
+        // 该屏会静默消失（还会反过来漏进 secondary 任务的产物，二次掩盖）。
+        // 包装生成器（generate_screenshot_test_wrappers.py）只按真实预览函数名派生包装名，
+        // 与这份人工清单**仅靠字符串约定耦合**，故此处是唯一的交叉校验点。
+        val missing = mainScreenPreviewPrefixes.flatMap { prefix ->
+            listOf("light", "dark").mapNotNull { theme ->
+                val dir = previewExportsMainDir.dir(theme).asFile
+                val hit = dir.walkTopDown().any {
+                    it.isFile && it.name.startsWith(prefix) && it.extension.equals("png", ignoreCase = true)
+                }
+                if (hit) null else "$theme/$prefix"
+            }
+        }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "主页面预览导出**逐屏断言失败**：以下白名单预览在对应主题下零命中（共 ${missing.size} 项）："
+                    + " ${missing.joinToString()}。最常见原因是预览函数被改名 / 删除，导致 include 模式失配"
+                    + "（Gradle 对 0 命中不报错）。处置：同步 mainScreenPreviewPrefixes 清单与真实预览函数名，"
+                    + "改名后应同步更新清单而不是让它静默退化。"
+            )
+        }
         val light = previewExportsMainDir.dir("light").asFile.walkTopDown()
             .count { it.isFile && it.extension.equals("png", true) }
         val dark = previewExportsMainDir.dir("dark").asFile.walkTopDown()
             .count { it.isFile && it.extension.equals("png", true) }
-        logger.lifecycle("已导出 主页面: light=$light dark=$dark → ${previewExportsMainDir.asFile.absolutePath}")
+        logger.lifecycle("已导出 主页面: light=$light dark=$dark（逐屏断言 ${mainScreenPreviewPrefixes.size} × 2 全命中） → ${previewExportsMainDir.asFile.absolutePath}")
     }
 }
 
