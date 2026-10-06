@@ -1,10 +1,12 @@
 package com.keepasskey.crypto.strength
 
+import com.keepasskey.crypto.NativeFallbackLog
+
 /**
  * 口令强度判定标志位（ISSUE-P3-36）。
  *
  * ⚠️ **跨语言契约**：位值与 Rust 侧 `strength.rs` 的 `FLAG_*` 常量**必须逐位一致**，
- * 由 `PasswordStrengthNativeParityTest` 锁定。新增标志位必须两侧同步并各补一条断言。
+ * 由 `PasswordStrengthTest.原生返回的标志位与 Kotlin 常量逐位一致` 锁定。新增标志位必须两侧同步并各补一条断言。
  */
 object PasswordStrengthFlags {
     /** 无任何标志。 */
@@ -115,6 +117,8 @@ object PasswordStrengthEvaluator {
         if (NativePasswordStrength.available) {
             return NativePasswordStrength.evaluate(password)
         }
+        // ISSUE-P2-499：探活失败静默回落不可观测——回落时一次性记「已回落」事实（不含口令 / 参数）
+        NativeFallbackLog.noteFallbackOnce("口令强度")
         return PasswordStrengthFallback.evaluate(password)
     }
 
@@ -144,7 +148,10 @@ internal object PasswordStrengthFallback {
      * 常见口令表（全小写 ASCII 字节）。
      *
      * ⚠️ 与 Rust 侧 `strength.rs::COMMON_PASSWORDS` 是**跨语言重复定义**（FFI 边界无法共享数据），
-     * 两者集合成员必须保持一致，由 `PasswordStrengthNativeParityTest` 的对照用例锁定。
+     * 两者集合成员必须保持一致，由 `PasswordStrengthTest` 的集合守卫锁定——Kotlin 侧
+     * `常见口令表为已冻结的 33 条去重集合`（冻结条数与去重）与 `常见口令表每条均被原生内核判定为常见口令`
+     * （样本外漂移亦被拦截，经原生内核建立跨语言执行点）两例，加 Rust 侧
+     * `common_passwords_table_is_frozen_and_distinct`（条数与去重）三例共同闭合。
      */
     private val COMMON_PASSWORDS: List<ByteArray> = listOf(
         "123456", "password", "12345678", "qwerty", "123456789", "12345", "1234", "111111",
@@ -153,6 +160,17 @@ internal object PasswordStrengthFallback {
         "a123456", "letmein", "iloveyou", "monkey", "000000", "666666", "888888", "123123",
         "112233", "121212", "111111111"
     ).map { it.toByteArray(Charsets.US_ASCII) }
+
+    /**
+     * **测试专用**读取口（ISSUE-P3-506）：暴露降级路径的常见口令表供集合成员守卫核对，生产路径不读。
+     *
+     * 存在理由：`COMMON_PASSWORDS` 原为 `private`，使 `PasswordStrength.kt` KDoc 的「两侧集合成员
+     * 一致」承诺在全仓**无任何可执行点**；样本外漂移（如新增一条 Rust 侧没有的条目）无从拦截。
+     * 返回不可变调用方：每条为副本（`copyOf`），且保持 `ByteArray` 形态以不违反本类的
+     * 「词表以 ASCII 字节数组承载、不构造 `String`」纪律（词表是公开常量，非敏感数据）。
+     */
+    internal fun commonPasswordsForTest(): List<ByteArray> =
+        COMMON_PASSWORDS.map { it.copyOf() }
 
     fun evaluate(password: ByteArray): PasswordStrength {
         if (password.isEmpty()) {

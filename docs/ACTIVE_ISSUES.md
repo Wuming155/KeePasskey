@@ -8,7 +8,7 @@
 > **闭环纪律**：任务完成后，将该条目从本文件**整条移入** [RESOLVED\_LOG.md](RESOLVED_LOG.md)（加一行索引 + 新增批次正文），并执行 `git commit & push`。
 > **新增批次（2026-10-05）**：`ISSUE-P2-466~470` / `ISSUE-P3-474~487` 出自 [`records/软件工程质量审查记录_2026-10-05.md`](records/软件工程质量审查记录_2026-10-05.md)（五维度主源码静态审查 + 合并 / 同步 / 健康审计引擎深审）。**严重度映射**：记录标 medium（含 low/medium）→ **P2**，low → **P3**。这批条目为**纯静态审查**产出（未运行构建 / 测试 / 真机），认领时须按规则 6.1② 先复核前提（正文行号仅作核实时刻的快照）；其中涉及 `crypto/src/main/rust/**` 的原生面条目，入库前须按 AGENTS.md 测试资产纪律**四层 `connectedDebugAndroidTest` 真机实跑**（执行前按 §263 确认设备上无待保留数据或改用 AVD）。
 > **新增批次（2026-10-06）**：`ISSUE-P1-495` / `ISSUE-P2-496~502` / `ISSUE-P3-503~516` 出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)（假开关 / 接线断裂 / 读取源错误与静默降级三类，九路并行排查 + 逐条独立复核）。**严重度映射**：报告标 high → **P1**，medium → **P2**，low → **P3**。**三项登记裁决**（登记时新定，须随条目一并遵守）：
-> ① **同族去重**：报告 F12 为「原生探活失败静默回落零观测」缺陷族的唯一母条目，其子集 F03（cipher 三引擎）/ F07（强度面）/ F11（Passkey 签名面）并入 [`ISSUE-P2-499`](#issue-p2-499)，不独立立项；
+> ① **同族去重**：报告 F12 为「原生探活失败静默回落零观测」缺陷族的唯一母条目，其子集 F03（cipher 三引擎）/ F07（强度面）/ F11（Passkey 签名面）并入 `ISSUE-P2-499`，不独立立项（该合并条目已于 §454 闭环归档）；
 > ② **severity 取族内最大值**：`ISSUE-P2-499` 判 medium（母条目自身 low，子集 F03 为 medium——ChaCha20 BC 回落 ≈44× 慢、Twofish 整库数据流走纯 Java），条目内分层保留两侧论据；
 > ③ **F25 不登记**：复核判定其缺陷前提被证伪（与格式裁决者 KeePass 2.61.1 官方 C# release 行为逐行同型，批次 273 勘误②复审显式维持、写侧 D17 守卫在位），`holds=false` 依据是前提证伪而非登记表命中。
 > **触发状态口径**（报告 v3 判据 E1/E2，与本文件「只放现存问题」不冲突——masked 指**错误效果已产生或曾实际发作**，dormant 指**零错误效果、缺陷以声明侧残留 / 守卫缺口形态存在**）：masked 7 条（`P1-495` 除外，另 `P2-496~499`）应优先认领；dormant 条目为前瞻性风险，可按批连续解决。全部条目为**只读静态排查**产出，认领时须按规则 6.1② 先复核前提。
@@ -46,29 +46,10 @@
 
 > **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（3 项）
+## P2 中危缺陷与协议/测试缺口（2 项）
 
-> 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499` 为该报告 F12 母条目与其三张子集台账（F03/F07/F11）合并后的单条登记。`ISSUE-P2-498` / `ISSUE-P2-502` 已于 §451 闭环归档、`ISSUE-P2-497` 已于 §453 闭环归档。
-> **优先认领**：`P2-499` 一条属报告判定的**「已触发但被掩盖」**（masked）——错误效果已产生或曾实际发作、且被零观测机制屏蔽；`P2-500` / `P2-501` 两条为 dormant（零错误效果、前瞻性风险）。
-
-### ISSUE-P2-499：原生探活失败静默回落零观测（母条目 · 含 cipher / 强度 / Passkey 签名三面）
-
-> **本条为缺陷族唯一登记条目**：报告 F12 为母条目，F03（三个对称 cipher 引擎）/ F07（口令强度面）/ F11（Passkey 签名面）为范围子集，按同族去重裁决并入本条，不独立立项。
-> **severity 裁决**：判 **medium**（取族内最大值）。母条目自身论据为 low（回落实现功能正确、等价性由 `CipherFallbackParityTest` 等锁定）；子集 cipher 面为 medium（ChaCha20 BC 回落 ≈44× 慢、Twofish 整库数据流走纯 Java）。两条论据均保留如下。
-
-- **核实时间点**：2026-10-06；**核实方式**：grep `val available: Boolean by lazy` 于 `crypto/src/main/java` 确认**恰 7 处**（`NativeArgon2.kt:46` / `NativeAesKdf.kt:34` / `NativeAes.kt:60` / `NativeTwofish.kt:34` / `NativeChaCha20.kt:42` / `NativePasswordStrength.kt:28` / `NativePasskeySign.kt:44`）；grep `noteFallbackOnce|AppLog\.` 于同目录确认**唯一日志点**是 `NativeKdfFallbackLog.kt:27-31`，调用方仅 `AesKdfEngine.kt:35` 与 `Argon2KdfEngine.kt:85`；实读 `NativeCryptoLibrary.kt:29-36`（`by lazy` + `catch (_: Throwable) { false }`）与 `NativeTwofish.kt:34-57`（同型探活 + `:54-56` catch 吞）；实读 `PasswordStrength.kt:114-119`（`available` 真则原生、否则 `PasswordStrengthFallback`，**分支无日志**）与 `:106-107`（`nativeAvailable` 诊断位）；全仓 grep `nativeAvailable` 于 `*.kt` **仅命中定义行一处**＝零生产读者；实读 `PasskeyAssertionSigner.kt:30-34`（ES256 同型回落）；实读 `ChaCha20CipherEngine.kt:23-24` 性能 KDoc 与 `TwofishCipherEngine.kt:19-21`；**发作在案**实读 `BcProviderDeviceTest.kt:16-20`（2026-09-17 Redmi 4X 实测：`NativeTwofish.available` 探活 BC 对照抛异常被吞 ⇒ 恒 `false` ⇒ 原生 Twofish 被静默弃用）+ `docs/RESOLVED_LOG.md:183` §143 / `ISSUE-P2-92`；**前例**实读 `docs/resolved/batches/359-…md` §ISSUE-P3-392（「未接受静默降级」，AC 涉及文件仅列两个 KDF 引擎）。
-- **背景**：七个原生探活一律 `by lazy` 一次性进程缓存，`catch Throwable` 吞掉即永久 `false`、无刷新机制——首次触碰时一次瞬时失败（缺 ABI、KAT 不匹配、环境性异常）就把「原生 = 关」钉死到进程结束。其中**五个内核**（强度 / AES-CBC / Twofish / ChaCha20 / Passkey 签名）探活失败回落 JCE/BC/JVM 时**零日志零运行时观测**，而两个 KDF 引擎已在 `ISSUE-P3-392` 批次接了一次性 `AppLog`——该批次 AC 明确「**未接受静默降级**」，故其余五面构成**同政策下的真实缺口**，非设计取舍。唯一诊断位 `PasswordStrengthEvaluator.nativeAvailable` 全仓零读者，「原生已生效」在生产运行时无任何可核对表面。
-  - **触发状态：masked**（判据 E2 历史实际发作）——§143 / `P2-92` 即本机制在真机的实际发作（当时零运行时观测，仅设备侧硬断言事后揭出）；须如实限定：**该次的具体触发源（BC 抢占）已修**（`NativeTwofish.kt:102` 探活对照改用持有实例），且标准构建在参考设备上探活当前通过（§221 记真机四层全绿），故**当下并非处于失败态**——masked 指机制曾在真机触发且被掩盖，而非当前正在失败。触发状态判据 E2 成立（历史发作在案 + 造成不可见的机制至今未修：`catch (_: Throwable) { false }` 与五面零日志均在位），与 `ISSUE-P2-503` ~ `508` 类「声明侧残留但历史从未发作」的 dormant 条目不属同一形态。
-  - severity 分层：**low 面**（母条目）——回落实现功能正确（等价性由 `CipherFallbackParityTest` / `TwofishNativeParityTest` / `CbcStreamFramingTest` 及强度面跨语言契约用例锁定），影响面是性能与可诊断性；**medium 面**（cipher 子集）——ChaCha20 BC 回落 ≈44× 慢（`ChaCha20CipherEngine.kt:23-24` KDoc 自记真机 2.6~2.7 vs ≈118 MB/s）、Twofish 作用于整库数据流走纯 Java；**注**：AES 面须区分——`已知工程限界.md` §17 已登记现代机上原生 AES 慢于 JCE（+20~39ms/10MiB，取向为审计一致性），故 AES 回落近似无损，其问题仅在偏离 PD-06 唯一裁决路径且不可观测。
-  - **登记表核查**：`已知工程限界.md`（§16 只登记 RS256 恒走 BC、§15/§17 为 ChaCha20 JNI 拷贝与 AES 性能代价）、`产品裁决登记.md`（PD-06 裁定对称密码与 KDF 全部由 Rust 提供、PD-07 仅登记两套流语义等价）**均无接受项**；`ACTIVE_ISSUES.md` grep「探活|回落|392」零命中 ⇒ 不归入已知限界。
-  - **顺带核实（须在整改时一并处理）**：`PasswordStrength.kt:7` 与 `:147` 引用的守卫类 `PasswordStrengthNativeParityTest` **全仓不存在**（真实守卫是 `PasswordStrengthTest.kt:182` 的跨语言契约用例，换名存在）——即 `ISSUE-P3-506`。
-- **涉及文件**：`crypto/src/main/java/com/keepasskey/crypto/NativeCryptoLibrary.kt:29-36`、七个 `Native*.kt` 的 `available`（`NativeArgon2.kt:46-72` / `NativeAesKdf.kt:34-55` / `NativeAes.kt:60-91` / `NativeTwofish.kt:34-57` / `NativeChaCha20.kt:42-66` / `NativePasswordStrength.kt:28-44` / `NativePasskeySign.kt:44-53`）、三个 `cipher/*CipherEngine.kt`（`:50` / `:45` / `:45`）、`strength/PasswordStrength.kt:114-119`、`passkey/PasskeyAssertionSigner.kt:30-34` 与 `:57-61`、对照物 `kdf/NativeKdfFallbackLog.kt:27-32`。
-- **验收标准**：
-  ① 五个未留痕内核（强度 / AES-CBC / Twofish / ChaCha20 / Passkey 签名）的探活失败回落分支接入**一次性 `AppLog`**（复用 `NativeKdfFallbackLog` 的 `AtomicBoolean` 闸门模式，口径与 `ISSUE-P3-392` 已定裁决一致），且**日志不含 KDF 参数 / 密钥材料**；
-  ② 补 `NativeKdfFallbackLogTest` 同款一次性闸门反校（重复触发只记一次）；
-  ③ 顺带处置 `PasswordStrength.kt:7/:147` 的失效守卫指针（与 `ISSUE-P3-506` 合并同批整改）；
-  ④ **原生面改动须四层 `connectedDebugAndroidTest` 真机实跑**（`:crypto:` / `:database:` / `:sync:` / `:app:`），执行前按 §263 确认设备无待保留数据或改用 AVD，前置 §434 `check_installed_build.py --expect-symbol`，跑完 `python tools/device/check_connected_device_results.py` 断言各层 `tests > 0`（`compileDebugAndroidTestKotlin` 通过**不构成**验证证据）；
-  ⑤ 门禁 9/9 PASS，`gate_readings.py` 读数原样贴入批次文档 §3。
+> 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499`（该报告 F12 母条目与其三张子集台账 F03/F07/F11 的合并条目）已于 §454 闭环归档。`ISSUE-P2-498` / `ISSUE-P2-502` 已于 §451 闭环归档、`ISSUE-P2-497` 已于 §453 闭环归档。
+> `P2-500` / `P2-501` 两条均为 dormant（零错误效果、前瞻性风险）；本条段当前无 masked 条目。
 
 ### ISSUE-P2-500：`WebDavUploadAtomic` 409/423 兜底重试仍携带 `If` 预条件，与 KDoc / 批次 AC 承诺相反
 
@@ -97,7 +78,7 @@
   ④ 复核 S3 侧同源面并给出与 WebDAV 一致的处置；
   ⑤ 门禁 9/9 PASS。
 
-## P3 低危问题、特性接线与体验优化（14 项）
+## P3 低危问题、特性接线与体验优化（13 项）
 
 > 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)（触发状态均为 **dormant**——零错误效果被产出，缺陷以声明侧残留 / 守卫缺口 / 前瞻性风险形态存在）。按 AGENTS.md 规则 6，可按批连续解决。
 > **共性说明**：本批多数条目属「**在案声明被违反但产物零影响**」或「**守卫缺口**」两类。它们与 `P2-496` ~ `499` 的 masked 条目形态不同——后者错误效果已产生或曾实际发作，前者仅误导未来维护者或在未来条件下才发作。
@@ -127,15 +108,6 @@
   - 报告如实修正：①「静默」仅相对钉版行与门禁——翻转必经 Dependabot PR 且 `libs.versions.toml` 的 `composeBom` 行必有可评审 diff；②最可能触发形态（BOM 映射 1.5.0 stable）恰是已登记退出条件、属良性结果。
 - **涉及文件**：`app/build.gradle.kts:273-284`、`gradle/libs.versions.toml:46` / `:49` / `:103` / `:105`、`app/src/test/java/com/keepasskey/app/security/DependencyResolutionDeterminismTest.kt:33-58`。
 - **验收标准**：在 `DependencyResolutionDeterminismTest` 补一条断言——「BOM 声明的 material3 版本**不得高于** `libs.versions.toml` 登记的钉版值」，使 `toml:46` 的约束有真实执行点（当前零翻转即绿）。
-
-### ISSUE-P3-506：口令强度 KDoc 两处指向不存在的守卫类 `PasswordStrengthNativeParityTest`
-
-- **核实时间点**：2026-10-06；**核实方式**：全仓 grep `PasswordStrengthNativeParityTest` 确认仅 3 处命中——`PasswordStrength.kt:7` 与 `:147` 两处 KDoc，加 `docs/security/退役审计承接-42-威胁建模与架构评估.md:74` 的表格引用（**第三处，候选原话遗漏**）；glob `*PasswordStrength*` 确认无同名测试文件；`git log --all -S` 仅 `9eece18c`（同时新建 `PasswordStrength.kt` 与 `PasswordStrengthTest.kt`）⇒ **指针自诞生即空、非重命名漂移**；实读真实守卫 `PasswordStrengthTest.kt:182`（跨语言契约用例）与 `:203` 逐标志断言；两侧契约本体已核对一致（`PasswordStrength.kt:14-38` ↔ `strength.rs:44-60` 逐位相同；两份 `COMMON_PASSWORDS` 均 33 条逐条一致）。
-- **背景**：按名检索守卫必扑空、会误判「契约无守卫」。**且 `:147` 的失真比「指针失真」略重**：它声称锁定的「`COMMON_PASSWORDS` 集合成员一致」在全仓**没有任何等价守卫**（该降级词表是 `private`，测试无法直取；grep `COMMON_PASSWORDS` 于 `crypto/src/test` 与 `androidTest` 零命中），只有 `PasswordStrengthTest.kt:117-133/:140-151` 的**样本级**行为覆盖——当前两侧 33 条逐条一致故未成灾，但成员若在样本外漂移将无测试拦截。`:7` 的位值契约则是「真守卫换名存在」+ CI 零跳过断言（`build.yml:259`）兜底。
-  - **触发状态：dormant**——两侧契约已逐位 / 逐条核对一致，当前无任何错误效果被产出；危害是前瞻性的（未来维护者按名检索扑空而误判契约无守卫）。
-  - CI 兜底：该 job 内跳过数必须为 0，故 `Assume` 不会在 CI 上静默吞掉守卫。
-- **涉及文件**：`crypto/src/main/java/com/keepasskey/crypto/strength/PasswordStrength.kt:7` / `:147`、`docs/security/退役审计承接-42-威胁建模与架构评估.md:74`。
-- **验收标准**：三处指针统一改指真实守卫 `PasswordStrengthTest.kt:182`（或按 `ISSUE-P2-499` AC③ 顺带处置）；**并补一条集合成员一致性守卫**——两侧 `COMMON_PASSWORDS` 须可被测试读取（如提升可见性或加测试专用访问口），使 `:147` 的承诺有真实执行点。
 
 ### ISSUE-P3-507：`proguard-rules.pro` 的 OkHttp keep 规则指向不存在的方法，恒不匹配
 

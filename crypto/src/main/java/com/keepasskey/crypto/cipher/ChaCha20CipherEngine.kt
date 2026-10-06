@@ -2,6 +2,7 @@ package com.keepasskey.crypto.cipher
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.crypto.NativeFallbackLog
 import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.io.InputStream
@@ -41,8 +42,20 @@ class ChaCha20CipherEngine internal constructor(
     /** 公开无参构造：生产路径（[CipherFactory]）与设备侧用例一律使用本构造。 */
     constructor() : this(forceBcFallback = false)
 
-    /** 本次调用是否走原生：生产由 [NativeChaCha20.available] 决定，测试可经 [forceBcFallback] 强制兜底。 */
-    private val useNative: Boolean get() = !forceBcFallback && NativeChaCha20.available
+    /**
+     * 本次调用是否走原生：生产由 [NativeChaCha20.available] 决定，测试可经 [forceBcFallback] 强制兜底。
+     *
+     * 探活失败回落 BC 时在**此处**一次性登记「已回落」事实（ISSUE-P2-499；不含参数 / 密钥材料，
+     * 载荷只有内核名）；`forceBcFallback` 为测试强制通道，**不**登记（非探活失败）。刻意不放入
+     * `available` 懒加载体：该 getter 亦被诊断 / 测试读取，不得把回落事实与「探活被读取」混同。
+     */
+    private val useNative: Boolean
+        get() {
+            if (forceBcFallback) return false
+            if (NativeChaCha20.available) return true
+            NativeFallbackLog.noteFallbackOnce("ChaCha20")
+            return false
+        }
 
     init {
         ensureBouncyCastle()

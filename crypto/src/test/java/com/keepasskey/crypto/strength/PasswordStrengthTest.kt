@@ -217,4 +217,47 @@ class PasswordStrengthTest {
             assertTrue("[$pw] log10 应为非负", strength.guessesLog10 >= 0.0)
         }
     }
+
+    // ==================== 跨语言契约：集合成员一致性（ISSUE-P3-506） ====================
+
+    /**
+     * `ISSUE-P3-506`：`PasswordStrengthFallback.COMMON_PASSWORDS` 原为 `private`，使
+     * `PasswordStrength.kt` KDoc 的「两侧集合成员一致」承诺在**全仓无任何可执行点**。
+     * 本用例冻结 Kotlin 侧集合的**条数与去重**（33 条，与 `strength.rs::COMMON_PASSWORDS` 同数；
+     * Rust 侧由 `common_passwords_table_is_frozen_and_distinct` 冻结同一数字）。
+     */
+    @Test
+    fun `常见口令表为已冻结的33条去重集合`() {
+        val entries = PasswordStrengthFallback.commonPasswordsForTest()
+        assertEquals("两侧词表条数须一致（冻结基线）", 33, entries.size)
+        assertEquals(
+            "常见口令表不得含重复条目",
+            entries.size,
+            entries.map { String(it, Charsets.US_ASCII) }.toSet().size
+        )
+        for (entry in entries) {
+            val text = String(entry, Charsets.US_ASCII)
+            assertEquals("常见口令表条目应为全小写 ASCII：[$text]", text, text.lowercase())
+        }
+    }
+
+    /**
+     * `ISSUE-P3-506`：经原生内核建立**跨语言**执行点——Kotlin 侧每条常见口令都必须被 Rust 内核
+     * 判定为 `COMMON_PASSWORD`（Kotlin ⊆ Rust）；配合两侧并列的条数 / 去重冻结（|Kotlin| = |Rust| = 33）
+     * 即得两侧集合**相等**，样本外漂移（任一侧新增 / 删除 / 改写）必被其中之一拦截。
+     *
+     * 原生不可用（未构建宿主库）时按既有跨语言契约口径 `Assume` 跳过；
+     * CI `:crypto:test` 有零跳过硬断言（`build.yml`），故该执行点在 CI 必真跑。
+     */
+    @Test
+    fun `常见口令表每条均被原生内核判定为常见口令`() {
+        Assume.assumeTrue("原生内核不可用（未构建宿主库），跳过跨语言契约用例", NativePasswordStrength.available)
+        for (entry in PasswordStrengthFallback.commonPasswordsForTest()) {
+            val flags = NativePasswordStrength.evaluate(entry).flags
+            assertTrue(
+                "[${String(entry, Charsets.US_ASCII)}] 原生内核未判为常见口令，两侧词表可能已漂移",
+                flags and PasswordStrengthFlags.COMMON_PASSWORD != 0
+            )
+        }
+    }
 }

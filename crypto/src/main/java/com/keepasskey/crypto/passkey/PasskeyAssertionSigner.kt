@@ -1,5 +1,6 @@
 package com.keepasskey.crypto.passkey
 
+import com.keepasskey.crypto.NativeFallbackLog
 import org.bouncycastle.crypto.digests.SHA256Digest
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.RSAKeyParameters
@@ -31,6 +32,11 @@ internal object PasskeyAssertionSigner {
             val native = NativePasskeySign.es256Sign(privateKeyBytes, dataToSign)
             if (native != null) return native
         }
+        // ISSUE-P2-499：仅**探活失败**回落 BC 时一次性登记（不含密钥 / 报文）；「非法标量回落 BC」
+        // 系注释声明的有意设计（原生返回 null），不属探活失败，不记本条日志。
+        if (!NativePasskeySign.available) {
+            NativeFallbackLog.noteFallbackOnce("Passkey 签名")
+        }
         return bcSignEs256(privateKeyBytes, dataToSign)
     }
 
@@ -57,6 +63,10 @@ internal object PasskeyAssertionSigner {
         if (NativePasskeySign.available && privateKeyBytes.size == NativePasskeySign.ED25519_SEED_LENGTH) {
             val native = NativePasskeySign.ed25519Sign(privateKeyBytes, dataToSign)
             if (native != null) return native
+        }
+        // ISSUE-P2-499：同 ES256——仅探活失败回落时一次性登记（不含密钥 / 报文）
+        if (!NativePasskeySign.available) {
+            NativeFallbackLog.noteFallbackOnce("Passkey 签名")
         }
         return bcSignEd25519(privateKeyBytes, dataToSign)
     }

@@ -2,6 +2,7 @@ package com.keepasskey.crypto.cipher
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.crypto.NativeFallbackLog
 import com.keepasskey.crypto.exception.CryptoException
 import java.io.InputStream
 import java.io.OutputStream
@@ -46,8 +47,20 @@ class AesCipherEngine internal constructor(
     override val name: String = "AES-256 (CBC)"
     override val ivLength: Int = KdbxConstants.Cipher.BLOCK_CIPHER_IV_LENGTH
 
-    /** 本次调用是否走原生：生产由 [NativeAes.available] 决定，测试可经 [forceJceFallback] 强制兜底。 */
-    private val useNative: Boolean get() = !forceJceFallback && NativeAes.available
+    /**
+     * 本次调用是否走原生：生产由 [NativeAes.available] 决定，测试可经 [forceJceFallback] 强制兜底。
+     *
+     * 探活失败回落 JCE 时在**此处**一次性登记「已回落」事实（ISSUE-P2-499；不含 KDF 参数 / 密钥材料，
+     * 载荷只有内核名）；`forceJceFallback` 为测试强制通道，**不**登记（非探活失败）。刻意不放入
+     * `available` 懒加载体：该 getter 亦被诊断 / 测试读取，不得把回落事实与「探活被读取」混同。
+     */
+    private val useNative: Boolean
+        get() {
+            if (forceJceFallback) return false
+            if (NativeAes.available) return true
+            NativeFallbackLog.noteFallbackOnce("AES-CBC")
+            return false
+        }
 
     /**
      * 密钥长度闸门（**四条入口、两条路径同口径**）：只接受 AES-256 的 [NativeAes.KEY_LENGTH]。

@@ -2,6 +2,7 @@ package com.keepasskey.crypto.kdf
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.crypto.NativeFallbackLog
 import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.crypto.generators.Argon2BytesGenerator
 import org.bouncycastle.crypto.params.Argon2Parameters
@@ -82,7 +83,7 @@ class Argon2KdfEngine(
         // ISSUE-P3-392：探活失败静默回落不可观测——回落时一次性记「已回落」事实。
         // 版本不支持 / AD 超限 / 参数越界属**有意**走 JVM（非探活失败），不记本条日志。
         if (!NativeArgon2.available) {
-            NativeKdfFallbackLog.noteFallbackOnce("Argon2")
+            NativeFallbackLog.noteFallbackOnce("Argon2")
         }
 
         return transformJvm(compositeKey, argonParams, memoryKib, nativeIterations)

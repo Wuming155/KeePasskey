@@ -2,6 +2,7 @@ package com.keepasskey.crypto.kdf
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.crypto.NativeFallbackLog
 import com.keepasskey.crypto.exception.CryptoException
 
 /**
@@ -32,7 +33,7 @@ class AesKdfEngine : KdfEngine {
             return NativeAesKdf.derive(compositeKey, aesParams.seed, aesParams.rounds)
         }
         // ISSUE-P3-392：探活失败静默回落不可观测——回落时一次性记「已回落」事实（不含参数）
-        NativeKdfFallbackLog.noteFallbackOnce("AES-KDF")
+        NativeFallbackLog.noteFallbackOnce("AES-KDF")
         return AesKdfJce.transform(compositeKey, aesParams.seed, aesParams.rounds)
     }
 }

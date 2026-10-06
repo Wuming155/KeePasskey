@@ -112,6 +112,27 @@ fn common_password_flags_exact_and_stem() {
     assert_eq!(estimate(b"tR7#kL9@mQ2!xZ4&vB6*").flags & FLAG_COMMON_PASSWORD, 0);
 }
 
+/// ISSUE-P3-506：两侧 `COMMON_PASSWORDS` 集合成员一致性守卫的 **Rust 半边**。
+///
+/// Kotlin 侧 `PasswordStrengthTest` 断言同一冻结条数与去重，并经原生内核逐条核对
+/// （每条 Kotlin 条目都被本内核判为 `COMMON_PASSWORD` ⇒ Kotlin ⊆ Rust）；
+/// 本用例冻结 Rust 侧的**条数与去重**（|Rust| = 33）。两侧合取即得集合**相等**——
+/// 任一侧新增 / 删除 / 改写条目（含样本外漂移）必被其中之一拦截。
+#[test]
+fn common_passwords_table_is_frozen_and_distinct() {
+    // 冻结条数：与 Kotlin 侧 `PasswordStrengthTest` 的 33 同值（任一漂移即两侧之一报红）
+    assert_eq!(COMMON_PASSWORDS.len(), 33, "常见口令表条数已偏离冻结基线");
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in COMMON_PASSWORDS {
+        assert!(seen.insert(*entry), "常见口令表含重复条目：[{entry}]");
+        // 全小写 ASCII（数字亦满足 `to_ascii_lowercase() == 自身`，与 Kotlin 侧同纪律）
+        assert!(
+            entry.bytes().all(|b| b.is_ascii() && b.to_ascii_lowercase() == b),
+            "常见口令表条目应为全小写 ASCII：[{entry}]"
+        );
+    }
+}
+
 #[test]
 fn too_short_flag() {
     assert_ne!(estimate(b"aB3$").flags & FLAG_TOO_SHORT, 0);
