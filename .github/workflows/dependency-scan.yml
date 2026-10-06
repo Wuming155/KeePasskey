@@ -87,13 +87,14 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           set -euo pipefail
-          args=()
-          if [[ -n "${NVD_API_KEY:-}" ]]; then
-            args+=("-Dorg.owasp.dependencycheck.nvd.api.key=${NVD_API_KEY}")
-          fi
+          # NVD_API_KEY 只经**环境变量**这一个通道传入（唯一事实源 =
+          # .github/dependency-check.init.gradle.kts 的 nvd{} 块，其只调 System.getenv）。
+          # 历史残留（ISSUE-P3-508）：此处曾额外拼 `-Dorg.owasp.dependencycheck.nvd.api.key=...`；
+          # 该属性名在 13.0.0 已确证不被消费（插件 jar 全量字符串扫描零命中），是彻底的死接线，
+          # 且把 secret 放上命令行（进程表 / 命令回显面，日志掩码不覆盖本地复现场景）。
+          # ⇒ 删除而非修复：env 通道恒先兜住，且不得再把 NVD_API_KEY 放上命令行。
           ./gradlew --no-daemon dependencyCheckAggregate \
             -I .github/dependency-check.init.gradle.kts \
-            "${args[@]}" \
             --console=plain
 
       # =====================================================================================

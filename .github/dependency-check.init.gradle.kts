@@ -56,9 +56,12 @@ allprojects {
         // 背景：13.0.0 在无 Key 时 NVD API 匿名拉取必然抛 NvdApiException
         // ("Invalid API Key, length of 0")，failOnError 不覆盖该阶段；
         // autoUpdate=false 又会因空库抛 NoDataException——故必须有数据源兜底。
-        // 注意：不使用 workflow 的 -Dorg.owasp.dependencycheck.nvd.api.key 系统
-        // 属性传参（该属性名在 13.0.0 新 Property API 下是否生效未验证），统一以
-        // 环境变量为唯一事实源。
+        // 事实源口径（ISSUE-P3-508 定版）：**环境变量是唯一**传参通道，本块只读
+        // System.getenv("NVD_API_KEY")。workflow 侧曾并行拼
+        // `-Dorg.owasp.dependencycheck.nvd.api.key=...`，该属性名在 13.0.0 已确证
+        // 不被消费（插件 jar 全量 class 字符串扫描：全串与 `api.key` 片段均零命中，
+        // 动态拼接同样排除），属死接线且把 secret 放上命令行 ⇒ 已于 §456 删除，
+        // 本注释同步去掉「是否生效未验证」的悬置表述，避免后人误以为仍有待验证通道。
         nvd {
             val envKey = System.getenv("NVD_API_KEY")
             if (!envKey.isNullOrBlank()) {

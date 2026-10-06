@@ -284,12 +284,16 @@ jobs:
           if skipped != 0:
               print(f"::error::原生用例被跳过 {skipped} 例；本 job 已装 cargo 与 4 ABI 产物，不得跳过"); sys.exit(1)
           PY
-          # 2) 导出符号核对：JNI 定长契约要求每个 ABI 的 .so 导出**恰好 10 个**
-          #    Java_com_keepasskey 符号（Argon2 / AES-KDF / Twofish ×2 / 口令强度 5 个，
-          #    加 ISSUE-P3-153 §145/§146 的 ChaCha20 / Passkey ES256 / Passkey Ed25519，
-          #    加 §147 的 AES-256-CBC ×2）。
-          #    2026-09-19 ISSUE-P3-187 追加直扣探针后为 11 个（初始 10 个为 2026-09-17 实测），
-          #    即下方 expected 清单——按 §73 立规「期望值必须实测而非引用」，该清单为实测输出。
+          # 2) 导出符号核对：JNI 定长契约要求每个 ABI 的 .so 导出集**逐名等于**下方
+          #    expected 清单——**该清单是唯一事实源，本注释不写死条数**。
+          #    为什么散文不得承载计数（ISSUE-P3-503）：历史上此处写死「10 个」，§145/§146/
+          #    §147（AES-CBC ×2）、§187（ChaCha20 Direct）、§198（AES Direct ×2）逐次追加符号
+          #    时只改清单不改散文 ⇒ 散文失真为「11 个」而实为 13 项，且穿越多次改动未被察觉。
+          #    危害是双向的：按散文把清单「修正」回写死值反而会令真闸门变红。
+          #    清单族谱（仅供溯源，不作为计数依据）：Argon2 / AES-KDF / Twofish ×2 /
+          #    口令强度 5 项基线 → + ChaCha20 / Passkey ES256 / Passkey Ed25519（§145/§146）
+          #    → + AES-256-CBC ×2（§147）→ + ChaCha20 Direct（§187 探针，§198 起生产化）
+          #    → + AES Direct ×2（§198）。按 §73 立规「期望值必须实测而非引用」，清单为实测输出。
           #    **逐名核对**（而非只比数量）：「数量对而符号错」（如误删一个 `#[no_mangle]` 又
           #    误加另一个）只有逐名核对能拦住。
           nm="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
