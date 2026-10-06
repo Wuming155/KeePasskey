@@ -17,6 +17,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -299,6 +300,36 @@ class WebDavSyncScenarioTest {
             state.moveLog.any { it.contains("MOVE") } && state.files.containsKey("/vault.kdbx")
         )
         state.failMoveOnExistingTarget409.set(false)
+    }
+
+    @Test
+    fun `场景3 MOVE覆盖已有目标409兜底重试且带非空预期ETag时重试不带If预条件`() = runTest {
+        // ISSUE-P2-500 负向样本：既有 409 兜底用例（上方）**未传 expectedEtag** ⇒ 无 `If` 头，
+        // 恰好绕开缺陷组合。本条以**非空 expectedEtag** 命中真实缺陷面：兜底先 DELETE 目标、
+        // 再重试——重试若仍携带 `If`（目标已不存在，预条件恒失败）会 412，兜底退化为「先删目标 → 必败」。
+        // 判据同时看**请求头**（重试 MOVE 不带 If）与**结果码**（重试成功）。
+        startQueued()
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"tmp-1\"")) // PUT 临时文件
+        server.enqueue(MockResponse().setResponseCode(409).setBody("destination exists"))   // MOVE 首试 409
+        server.enqueue(MockResponse().setResponseCode(204))                                 // DELETE 目标
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"final-1\"")) // MOVE 兜底重试
+
+        val result = provider().uploadAtomic("vault.kdbx", "v1".toByteArray(), expectedEtag = "base-etag")
+        assertTrue("409 兜底重试必须成功: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals("final-1", result.getOrThrow())
+
+        val recorded = mutableListOf<okhttp3.mockwebserver.RecordedRequest>()
+        repeat(server.requestCount) { recorded += server.takeRequest() }
+        val moves = recorded.filter { it.method == "MOVE" }
+        assertEquals("应恰有两次 MOVE（首试 + 409 兜底重试）", 2, moves.size)
+        assertNotNull("首试 MOVE 必须携带 If 预条件（expectedEtag 非空）", moves[0].getHeader("If"))
+        assertNull(
+            "409 兜底重试不得携带 If 预条件（ISSUE-P2-500：目标已被 DELETE，预条件恒失败）",
+            moves[1].getHeader("If")
+        )
+        assertEquals("兜底重试仍须保持 Overwrite: T", "T", moves[1].getHeader("Overwrite"))
+        val delete = recorded.first { it.method == "DELETE" }
+        assertEquals("DELETE 必须针对目标而非临时文件", "/vault.kdbx", delete.path)
     }
 
     @Test

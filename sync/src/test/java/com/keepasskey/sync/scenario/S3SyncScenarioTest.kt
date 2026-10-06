@@ -100,17 +100,24 @@ class S3SyncScenarioTest {
     }
 
     @Test
-    fun `场景1 一端编辑一端删除 条件写412转ConflictError`() = runTest {
+    fun `场景1 一端编辑一端删除 条件写412后元数据探测404不折空为冲突`() = runTest {
         startQueued()
         // 远端对象已被他端删除：HEAD 404 -> PUT If-Match 对已删除对象判 false -> 412
         // -> 412 后探测远端元数据再次 HEAD 404
+        // ISSUE-P2-501：探测**失败**（Result.Failure）不得折成空 etag 的 ConflictError——
+        // 401/403/5xx 等瞬时探测失败会被折空后沿 commitLocal 冲突分支剥除乐观锁、静默覆盖他端；
+        // 「远端已删」这一 404 同样走 fail-closed（如实上抛 FileNotFound，引擎归 RemoteUnreachable）。
+        // 不变量＝绝不静默覆盖、绝不伪造带空 etag 的冲突。
         server.enqueue(MockResponse().setResponseCode(404))
         server.enqueue(MockResponse().setResponseCode(412))
         server.enqueue(MockResponse().setResponseCode(404))
 
         val result = provider().upload("vault.kdbx", "local-edit".toByteArray(), expectedEtag = "base-etag")
-        assertTrue("编辑对删除必须以冲突暴露", result.isFailure)
-        assertTrue(result.exceptionOrNull() is SyncException.ConflictError)
+        assertTrue("编辑对删除必须如实失败而非静默覆盖", result.isFailure)
+        assertTrue(
+            "412 后元数据探测失败须如实上抛（非空 etag 冲突）: ${result.exceptionOrNull()}",
+            result.exceptionOrNull() is SyncException.FileNotFound
+        )
         assertEquals("请求序：HEAD/PUT/HEAD", 3, server.requestCount)
     }
 

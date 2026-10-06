@@ -53,6 +53,11 @@ class StatefulDavDispatcher : Dispatcher() {
     val failMoveOnExistingTarget409 = AtomicBoolean(false)
     /** 下一次 GET 返回 500（模拟服务端错误） */
     val failNextGet = AtomicBoolean(false)
+    /**
+     * ISSUE-P2-501：所有 PROPFIND 返回 500（模拟 MOVE 412 后元数据重探**持续失败**——
+     * 验证客户端 fail-closed 上抛探测失败、不以空 etag 折空进入无锁合并上传）。
+     */
+    val failAllPropfind = AtomicBoolean(false)
 
     private val counter = AtomicInteger(0)
 
@@ -147,7 +152,9 @@ class StatefulDavDispatcher : Dispatcher() {
                 }
             }
             "PROPFIND" -> {
-                if (path == "/") {
+                if (failAllPropfind.get()) {
+                    MockResponse().setResponseCode(500).setBody("propfind failed")
+                } else if (path == "/") {
                     val rootEtag = etags[path] ?: "root-etag"
                     MockResponse().setResponseCode(207)
                         .setBody(propfindBody("\"$rootEtag\"", 0L, isCollection = true))

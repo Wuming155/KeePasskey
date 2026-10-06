@@ -46,37 +46,9 @@
 
 > **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（2 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-> 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499`（该报告 F12 母条目与其三张子集台账 F03/F07/F11 的合并条目）已于 §454 闭环归档。`ISSUE-P2-498` / `ISSUE-P2-502` 已于 §451 闭环归档、`ISSUE-P2-497` 已于 §453 闭环归档。
-> `P2-500` / `P2-501` 两条均为 dormant（零错误效果、前瞻性风险）；本条段当前无 masked 条目。
-
-### ISSUE-P2-500：`WebDavUploadAtomic` 409/423 兜底重试仍携带 `If` 预条件，与 KDoc / 批次 AC 承诺相反
-
-- **核实时间点**：2026-10-06；**核实方式**：实读 `WebDavUploadAtomic.kt:47`（`fun createMoveRequest(withPrecondition: Boolean = true)`）、`:53-55`（`if (withPrecondition && !expectedEtag.isNullOrBlank())` 才发 `If` 头）、`:56-58`（else 分支仅发 `Overwrite`）、`:70`（**唯一调用点** `execute(...) { createMoveRequest() }`，用默认参 ⇒ `withPrecondition=true`）、`:91-94`（`attempt == 0` 时 `delete(remotePath)` 后 `continue`）、`:72-81`（412 → `ConflictError` → `:104-107` 抛出）；全仓 grep `withPrecondition` 仅 `:47` 形参与 `:53` 条件两处，**无人显式传 false**；实读矛盾 KDoc `WebDavSyncProvider.kt:322-323` 与 `WebDavMoveOverwritePolicy.kt:13`，对照批次 `359` AC（`docs/resolved/batches/359-…md:22/98`「DELETE 目标（404 容忍）→ **无预条件** + `Overwrite:T` 单次重试」）；实读仓内 mock 语义 `StatefulMockServers.kt:180-184`（`parseIfEtag` 不匹配即 412）与 `:200`（DELETE 移除 etag）；实读唯一走兜底的测试 `WebDavSyncScenarioTest.kt:288`（**未传 `expectedEtag`** ⇒ 无 `If` 头，恰好绕开缺陷组合）；`git show 844fe715:…` 确认缺陷自 `ISSUE-P2-381` 落地即存在，而该提交信息自称「DELETE 目标后无预条件重试」。
-- **背景**：409 / 423 兜底删掉远端目标后的重试**仍带 `If` 预条件**——在按 RFC 4918 评估 `If` 的服务器上必 412 转 `ConflictError`，兜底退化为「先删远端目标 → 必败」。终态**比不兜底更差**（不兜底是 409 原样报错、远端完好），且报错文案「远端已被其他人修改」与事实（客户端自删）不符。常规提交路径传非空 etag（`SyncEngine.kt:312` / `:371` / `:486`），下轮可经 404 自愈（`:209-219`）。
-  - **触发状态：dormant**——该缺陷路径（非空 expectedEtag + 409/423 + 重试）在仓内从未执行过：`已知工程限界.md` §28 实测矩阵 mod_dav / nginx 均不产生 MOVE 覆盖 409/423（nginx 对 MOVE 的 `If` 整体忽略，带 `If` 的重试在该类服务器反而照常成功），唯一走兜底的测试因未传 `expectedEtag` 绕开。
-  - **未核实项（整改时须补）**：「严格评估 `If` 的真实服务器」无实证样本（§28 三类未测样本 Nextcloud / IIS / S3 同样未覆盖该组合）——「重试必 412」系读 mock 语义 + RFC 4918 推导，**非执行结果**。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/webdav/WebDavUploadAtomic.kt:47-70`、`WebDavSyncProvider.kt:322-323`、`WebDavMoveOverwritePolicy.kt:13`、`sync/src/test/.../WebDavSyncScenarioTest.kt:288`。
-- **验收标准**：
-  ① 重 attempt 显式传 `createMoveRequest(withPrecondition = false)`，使实现兑现 KDoc / 批次 AC 承诺；
-  ② 补负向样本（MockWebServer，仿 `StatefulMockServers.kt`）：`expectedEtag` 非空 + 首次 409 + 断言**重试请求头不含 `If`**（判据须同时看请求头与结果码——静默降级的结果码常是「成功」）；
-  ③ 同步修正 `WebDavSyncProvider.kt:322-323` 与 `WebDavMoveOverwritePolicy.kt:13` 的 KDoc 口径（若二者已正确则只改实现）；
-  ④ `sync/src/androidTest/**` 有改动则真机实跑 + `check_connected_device_results.py`；门禁 9/9 PASS。
-
-### ISSUE-P2-501：WebDAV 合并链上 MOVE 412 后元数据重探瞬时失败会剥除乐观锁，静默覆盖他端写入
-
-- **核实时间点**：2026-10-06；**核实方式**：实读 `WebDavUploadAtomic.kt:73-75`（`val currentMeta = getMetadata(remotePath).getOrNull()` / `remoteEtag = currentMeta?.etag.orEmpty()`，**探测失败 ⇒ 空串**）、`:40-45`（`overwriteFlag` 判定）与 `:53-58`（else 分支无 `If` 头）；实读 `SyncEngine.kt:403`（`ConflictNeedsMerge(remoteBytes, ex.remoteEtag)` **无回填**）对照 `:330/:340`（`uploadEx.remoteEtag.ifEmpty { remoteEtag }` **有回填**）——同文件两种口径；实读 `SyncConflictAutoMerge.kt:23-24`（`cleanEtag(conflictMomentEtag).ifEmpty { null }`）与 `:131`；实读 `SyncEngine.kt:486`（`expectedEtag?.takeIf { it.isNotBlank() }`）与 `:466-470` KDoc（「用当前值会通过校验并静默覆盖他端的更新……禁止在本方法内回退重探充当预条件」）；对照批次 `272` AC①（空白回退前提是「无 ETag 服务器」）；实读 `WebDavSyncProvider.kt:183-185`（无 ETag 服务器返回成功 + 空 etag，与探测失败**同折空**）。
-- **背景**：MOVE 412 后的元数据重探一旦**瞬时失败**，`ConflictError.remoteEtag` 即被折算为空串，经 commitLocal 冲突分支（无回填）原样流入合并上传，被 `conflictUploadExpectedEtag` 折为 `null`，最终以**无 `If` 预条件**的 `MOVE(Overwrite:T)` 覆盖远端——在支持 ETag 的服务器上，仅因一次探测抖动就剥除合并窗口（含一次 KDF 级全库序列化）的乐观锁，他端窗口内写入被静默覆盖。空串把「无 ETag 服务器」与「探测失败」两种成因混为同一口径，而后者场景下**基线本可得**（被合并的远端内容刚下载成功）。
-  - **触发状态：dormant**——非按构造必经：需 MOVE 412 后 `PROPFIND` 连同 `executeTransientRetryable` 内部重试一起失败（单次抖动被吸收），随后 commitLocal 下载与存在性探测又成功（后者失败则 `overwriteFlag="F"` 意外 fail-closed），且合并窗口内他端再写一次；全仓 grep 无 `ConflictError(remoteEtag = "")` 测试样本（`SyncCoordinatorTest.kt:472` 只锁定 ETag 可得时的透传）⇒ **该形态零测试覆盖、无触发留痕**。
-  - **报告已修正候选的一处失真**：「仅 WebDAV 受累」不准确——`S3SyncProvider` 未覆写 `uploadAtomic`（走接口缺省），空期望合并上传会 HEAD 自探当前值并 `If-Match` 之，即 `SyncEngine.kt:466` 点名的「重探当前值 ⇒ 静默覆盖」形态，合并窗口锁同样被剥；S3 残余暴露更小（探测失败 fail-closed、绝不裸 PUT），但结论应改为「**两家同源受累，WebDAV 为最重形态**」。
-- **涉及文件**：`sync/src/main/java/com/keepasskey/sync/webdav/WebDavUploadAtomic.kt:73-75`、`sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt:403`（对照 `:330/:340`）与 `:466-470`、app 侧 `SyncCycleCommitPaths.kt:147` / `SyncConflictAutoMerge.kt:23-24/:131`。
-- **验收标准**：
-  ① 空串回退**只允许**在「无 ETag 服务器」成立时生效——探测失败（`getMetadata` 为 `Failure`）须与「成功但 etag 为空」区分，不得同折 null；
-  ② commitLocal 冲突分支补齐与 openRemote 一致的 `ifEmpty` 回填口径（先按 `SyncEngine.kt:466-470` KDoc 判定该回填是否与 `ISSUE-P1-275` AC① 冲突——若冲突，改在 `WebDavUploadAtomic` 侧让探测失败**显式失败**而非折空）；
-  ③ 补 MockWebServer 负向样本：412 后 `PROPFIND` 持续失败，断言合并上传**携带 `If` 头**；
-  ④ 复核 S3 侧同源面并给出与 WebDAV 一致的处置；
-  ⑤ 门禁 9/9 PASS。
+> **暂无开放项**（`ISSUE-P2-500` / `ISSUE-P2-501` 已于 §455 闭环归档；本批 F12 族 `ISSUE-P2-498` / `499` / `502` 亦已分别于 §451 / §454 / §451 闭环，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
 ## P3 低危问题、特性接线与体验优化（13 项）
 

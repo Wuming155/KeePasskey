@@ -343,9 +343,16 @@ class S3SyncProvider(
                 consume = { response ->
                     when {
                         response.code == 412 -> {
-                            val currentMeta = getMetadata(remotePath).getOrNull()
+                            // ISSUE-P2-501：元数据重探**失败**（Result.Failure）≠「无 ETag 对象」。
+                            // 折成空串会让 `remoteEtag=""` 沿 commitLocal 冲突分支（无回填）流入
+                            // 合并上传、被折 null ⇒ 无条件覆写，剥除合并窗口乐观锁并静默覆盖他端写入。
+                            // fail-closed：如实上抛探测失败，上层归 RemoteUnreachable（本地缓存已保留）。
+                            val metaResult = getMetadata(remotePath)
+                            val currentMeta = metaResult.getOrNull()
+                                ?: throw (metaResult.exceptionOrNull()
+                                    ?: SyncException.NetworkError("S3 412 后远端元数据重探失败"))
                             throw SyncException.ConflictError(
-                                remoteEtag = currentMeta?.etag.orEmpty(),
+                                remoteEtag = currentMeta.etag,
                                 localExpectedEtag = expectedEtag.orEmpty(),
                                 message = "S3 对象并发创建冲突或已被其他人修改 (HTTP 412 Precondition Failed)"
                             )
