@@ -12,6 +12,7 @@
 > ② **severity 取族内最大值**：`ISSUE-P2-499` 判 medium（母条目自身 low，子集 F03 为 medium——ChaCha20 BC 回落 ≈44× 慢、Twofish 整库数据流走纯 Java），条目内分层保留两侧论据；
 > ③ **F25 不登记**：复核判定其缺陷前提被证伪（与格式裁决者 KeePass 2.61.1 官方 C# release 行为逐行同型，批次 273 勘误②复审显式维持、写侧 D17 守卫在位），`holds=false` 依据是前提证伪而非登记表命中。
 > **触发状态口径**（报告 v3 判据 E1/E2，与本文件「只放现存问题」不冲突——masked 指**错误效果已产生或曾实际发作**，dormant 指**零错误效果、缺陷以声明侧残留 / 守卫缺口形态存在**）：masked 7 条（`P1-495` 除外，另 `P2-496~499`）应优先认领；dormant 条目为前瞻性风险，可按批连续解决。全部条目为**只读静态排查**产出，认领时须按规则 6.1② 先复核前提。
+> **新增条目（2026-10-06 真机走查）**：`ISSUE-P2-517` 出自 `ISSUE-P1-495` 收工时的真机（MIUI / `M332BF` / Android 17）五层走查——`:crypto:` 37/37、`:database:` 18/18、`:sync:` 25/25 全绿；`:core:` 4 例中 1 例**确定性假红**（本条目）；`:app:` 51 例中 3 例失败属已登记的 `ISSUE-P2-492` 厂商冻结面（读数与未定性项见 [`architecture/实现约定与验证现状.md`](architecture/实现约定与验证现状.md)）。
 
 ---
 
@@ -45,9 +46,10 @@
 
 > **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（7 项）
+## P2 中危缺陷与协议/测试缺口（8 项）
 
 > 本批 6 条出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499` 为该报告 F12 母条目与其三张子集台账（F03/F07/F11）合并后的单条登记。
+> 另有 `ISSUE-P2-517` **不属该报告**，出自 2026-10-06 `ISSUE-P1-495` 收工时的真机五层走查读数（见本文件末条）。
 > **优先认领**：`P2-496` ~ `499` 四条属报告判定的**「已触发但被掩盖」**（masked）——错误效果已产生或曾实际发作、且被零观测机制屏蔽；其余三条为 dormant（零错误效果、前瞻性风险）。
 
 ### ISSUE-P2-496：回前台 / 网络恢复远端探测通道整条空转（自败节流 + 提示位零消费者）
@@ -146,6 +148,21 @@
   ① 二选一并使代码与注释同向——**接线**（`toolchain: ${{ env.RUST_TOOLCHAIN }}` 替换 3 处字面量）或**承认字面量为唯一事实源**（删 env 与 `:18` / `:236` 的失真注释）；本仓 `dependency-scan.yml:19-20` 已有「此处不复述条目数」的正确先例可仿；
   ② 若保留 env，则把 `:240-245` 的打印步骤升格为**断言**（`rustc --version | grep -q "$RUST_TOOLCHAIN"`），使漂移能变红；
   ③ 门禁 9/9 PASS。
+
+### ISSUE-P2-517：`AppLogDeviceTest` 把「ROM 保留 v 级 logcat」当平台不变式——丢弃 v 级的真机上确定性假红
+
+- **核实时间点**：2026-10-06；**核实方式**：真机 `a7eb933d`（M332BF / Android 17 / MIUI）跑 `:core:connectedDebugAndroidTest` **2/2 次**均得 `tests=4 failures=1`，肇事者恒为 `AppLogDeviceTest#debugEnabled 为 true 时 v 级别真实落 logcat`（`java.lang.AssertionError: debug 开启时 v 级别必须输出（标记行未出现）`，`AppLogDeviceTest.kt:93`）；**受控探针（与本应用无关）**逐级写入并回读：`adb shell "log -t P1495Probe -p <lvl> probe-<lvl>-level"` → `adb shell "logcat -d -s P1495Probe:v | grep -c probe-<lvl>-level"` ⇒ **v = 0，d / i / w / e 各 = 1**；`getprop persist.log.tag` 与 `log.tag.P1495Probe` 均**空**（无逐 tag 覆盖）。同批其余层读数：`:crypto:` 37/37、`:database:` 18/18、`:sync:` 25/25 全绿。
+- **背景**：用例（`AppLogDeviceTest.kt:87-96`）断言「`debugEnabled = true` 时 `AppLog.v` 必须真实落 logcat」，其 KDoc 亦自述覆盖「v/d 的 `debugEnabled` 门控（**开 → 落**）」。但「v 级是否被保留」是 **ROM 的 logd 配置**（verbose 可被平台整体丢弃），**不是** Android 的契约不变式——受控探针已证本机在**无关本应用**的 shell 写入路径上同样丢弃 v 级 ⇒ 该断言把平台能力当产品行为，属**测试有效性缺口**。
+  - **产品侧不成立（须一并写明，防误读）**：`AppLog.v` 实现为 `if (debugEnabled) safe { Log.v(tag, message) }`（`AppLog.kt:29-31`），是**正确调用平台 API**，本条**不得**读作「日志门控失效」或「AppLog 缺陷」。
+  - **触发状态：已实际发作**（确定性 2/2，非偶发）——后果是 `:core:` 层在此类设备上**永远无法取得全绿读数**，而该层恰是「`AppLog` 平台行为只有真机可证」的唯一出口（AGENTS.md §5 命令表）；长期假红的直接代价是**训练维护者忽略该层的红**（与 `ISSUE-P3-305`「闸门存在 ≠ 闸门被执行」同族的信噪比问题）。
+  - 同类先例：`ISSUE-P2-490`（设备侧判据把「峰值下界 `2D`」当「实际峰值」，跨堆界翻转）已按「设备侧判据前提缺陷」定 P2，本条目同理。
+  - 登记表核查：`已知工程限界.md` / `产品裁决登记.md` 两表 grep `logcat|v 级|verbose` **零命中** ⇒ 不属已接受项；`docs/architecture/实现约定与验证现状.md` 的厂商冻结面段落（`ISSUE-P2-492` 收口）只覆盖 `:app:` 层**整层冻结**，不覆盖本条的**单条断言级**前提失配。
+- **涉及文件**：`core/src/androidTest/java/com/keepasskey/core/log/AppLogDeviceTest.kt`（`:18-21` KDoc 覆盖声明 / `:43-46` `dumpLogcat` / `:87-96` 肇事用例）。
+- **验收标准**：
+  ① 用例**前提自探**：先判定「本机是否保留 v 级」（本批受控探针即可复用），不保留时**不得**把平台行为判作产品缺陷；优先按 `ISSUE-P2-494`「用例内自备」先例做到**在本类真机上真实通过**——可行落点示例：把**可观测通道由 `v` 改为 `d`**（本机实测 d 保留 = 1：`debugEnabled=true` ⇒ `AppLog.d` 落盘、`false` ⇒ 不落，门控在真实平台上仍可证），并把「v 级是否被平台保留」降为**读数**（打印）而非断言；
+  ② `debugEnabled = false` 的负向判据须标注「在丢弃 v 级的平台上**恒真、无鉴别力**」，避免以噪声充当覆盖；
+  ③ 真机复跑 `:core:connectedDebugAndroidTest` 得 `failures = 0`（须记录设备 / ROM，作为本条闭环证据）**且** `python tools/device/check_connected_device_results.py` 断言 `tests > 0`；
+  ④ 门禁 9/9 PASS。
 
 ## P3 低危问题、特性接线与体验优化（14 项）
 
