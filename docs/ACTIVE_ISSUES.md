@@ -156,6 +156,7 @@
   - **产品侧不成立（须一并写明，防误读）**：`AppLog.v` 实现为 `if (debugEnabled) safe { Log.v(tag, message) }`（`AppLog.kt:29-31`），是**正确调用平台 API**，本条**不得**读作「日志门控失效」或「AppLog 缺陷」。
   - **触发状态：已实际发作**（确定性 2/2，非偶发）——后果是 `:core:` 层在此类设备上**永远无法取得全绿读数**，而该层恰是「`AppLog` 平台行为只有真机可证」的唯一出口（AGENTS.md §5 命令表）；长期假红的直接代价是**训练维护者忽略该层的红**（与 `ISSUE-P3-305`「闸门存在 ≠ 闸门被执行」同族的信噪比问题）。
   - 同类先例：`ISSUE-P2-490`（设备侧判据把「峰值下界 `2D`」当「实际峰值」，跨堆界翻转）已按「设备侧判据前提缺陷」定 P2，本条目同理。
+  - **非 MIUI 反证（同日 2026-10-06）**：同一用例在 LineageOS 真机 `1c859bcc7d24`（Redmi 4X / Android 17 / `lineage_Mi8937_4_19`）上 **4/4 通过**（`:core:` `failures = errors = skipped = 0`，同批五层合计 152 例全绿）⇒ 排除「用例逻辑写错」与「产品缺陷」两种解释，坐实为**平台侧前提失配**（该 ROM 丢弃 v 级）。
   - 登记表核查：`已知工程限界.md` / `产品裁决登记.md` 两表 grep `logcat|v 级|verbose` **零命中** ⇒ 不属已接受项；`docs/architecture/实现约定与验证现状.md` 的厂商冻结面段落（`ISSUE-P2-492` 收口）只覆盖 `:app:` 层**整层冻结**，不覆盖本条的**单条断言级**前提失配。
 - **涉及文件**：`core/src/androidTest/java/com/keepasskey/core/log/AppLogDeviceTest.kt`（`:18-21` KDoc 覆盖声明 / `:43-46` `dumpLogcat` / `:87-96` 肇事用例）。
 - **验收标准**：
