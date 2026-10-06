@@ -407,22 +407,29 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
 }
 
 // ============================================================================
-// 4b) ChaCha20 直扣（DirectByteBuffer 零拷贝探针，ISSUE-P3-187 AC②）
+// 4b) ChaCha20 直扣（DirectByteBuffer 零拷贝；§187 探针原型 → §198 起为**生产热路径**）
 // ============================================================================
 
-/// ChaCha20 直扣（零拷贝**探针**，`ISSUE-P3-187` AC②）：入参 `data` 为 **direct**
-/// `java.nio.ByteBuffer`，经 `GetDirectBufferAddress` 就地变换——无 `convert_byte_array`
-/// 拷贝、无输出 `new_byte_array`、无入参零化副本。
+/// ChaCha20 直扣（DirectByteBuffer 就地变换，`ISSUE-P3-187` AC② 立、**`ISSUE-P3-198`
+/// 起为生产路径**）：入参 `data` 为 **direct** `java.nio.ByteBuffer`，经
+/// `GetDirectBufferAddress` 就地变换——无 `convert_byte_array` 拷贝、无输出
+/// `new_byte_array`、无入参零化副本。
 ///
 /// 返回处理字节数（`jint`）；失败（非 direct 缓冲 / 参数非法 / panic）返回 `-1`。
 ///
+/// **生产路径口径（`ISSUE-P3-504` 更正，此前本处误写为「非生产路径 / 仅供探针」）**：
+/// 采用 ChaCha20 加密的 KDBX 库，其整库加解密流每 ≤64KB 块都**必经本函数**
+/// （`CipherFactory` → `KdbxFile` → `ChaCha20CipherEngine.refill` → `NativeChaCha20`，
+/// 另见 `NativeChaCha20.kt` KDoc）。限定：**AES / Twofish 加密的库不经此函数**。
+/// ⇒ 任何改动本函数签名 / 擦除责任 / 直扣语义的动作都是**改生产主路径**，不是改探针。
+///
 /// 与既有 `applyKeystream` 的契约差异（评估结论逐条写明，见评估文档）：
 /// 1. **擦除责任上移**：本函数不做 `Zeroizing`——缓冲是调用方拥有的堆外内存，
-///    变换后是否归零由调用方裁定（探针在断言与现状路径一致后随堆外段一并释放）；
+///    变换后是否归零由调用方裁定（生产侧随堆外段一并释放并清零，探针侧同）；
 /// 2. **无返回副本**：结果就地写在 direct buffer 内（调用方按 `capacity`/`position` 读取）；
 /// 3. **临界区纪律**：不走 `GetPrimitiveArrayCritical`（无 GC 钉住窗口）——
 ///    direct buffer 地址稳定，裸指针生命周期由 JNI 引用与本次调用界定；
-/// 4. **非生产路径**：仅供 AC② 的真机对比探针调用；生产 `ChaCha20CipherEngine` 不经此函数。
+/// 4. **调用方范围**：生产 `ChaCha20CipherEngine`（ChaCha20 加密的库）+ AC② 真机对比探针。
 #[no_mangle]
 pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKeystreamDirect<'local>(
     env: JNIEnv<'local>,

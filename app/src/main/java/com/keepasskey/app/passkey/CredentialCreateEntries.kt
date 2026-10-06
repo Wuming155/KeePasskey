@@ -57,6 +57,12 @@ internal object CredentialCreateEntries {
             putExtra(PasskeyCreateActivity.EXTRA_USER_NAME, fields.userName)
             putExtra(PasskeyCreateActivity.EXTRA_USER_DISPLAY_NAME, fields.userDisplayName)
             putExtra(PasskeyCreateActivity.EXTRA_CHALLENGE, fields.challenge)
+            // ISSUE-P3-511：本 extra 是**有意的无读取点写入**——ISSUE-P2-199 起 origin
+            // 一律由本次系统背书的 CallingAppInfo 现场重新派生（见 PasskeyCreateActivity
+            // 的 EXTRA_ORIGIN KDoc），读取点已按 fail-closed 设计删除，故此处写入不再被消费。
+            // 保留写入的三个理由：① 与断言侧匹配键常量同值对齐（PendingIntent 匹配键口径）；
+            // ② 兼容既有设备侧用例（PendingIntentMatchKeyDeviceTest）；③ 抓包 / 日志中可辨认
+            // 组装期 origin。**禁止**据此复活读取点：复用陈旧 origin 曾导致 DAL 门控整段跳过。
             putExtra(PasskeyCreateActivity.EXTRA_ORIGIN, callingOrigin)
         }
         // ISSUE-P1-10：不记录 rpId / 账号标签（会暴露用户注册的站点域）

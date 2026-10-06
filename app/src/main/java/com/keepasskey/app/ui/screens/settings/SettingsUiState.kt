@@ -247,7 +247,10 @@ data class SettingsUiState(
     val debugLogEnabled: Boolean = false, // KP2A: 启用调试日志
     val debugLogLines: List<String> = emptyList(), // KP2A: 进程内真实调试日志环形缓冲快照
     val verboseSyncLog: Boolean = false, // KP2A: 详细同步与网络日志
-    val debugLogRecordsCount: Int = 128,
+    // ISSUE-P3-512（照 ISSUE-P3-126③ 先例）：此处原有 `debugLogRecordsCount: Int = 128`
+    // 字段——自引入起**全仓零消费方**（projection 不产、UI 不读，恒走默认值），属死状态字段。
+    // 删除而非保留：它与「调试日志上限」这类真实配置极易混淆，留着只会误导后续维护者
+    // 以为改它能生效。真实呈现面走 `debugLogLines` / `debugLogEnabled`。
 
     // 9. 关于与系统信息 (About & Info)
     // ISSUE-P2-498：默认值即取自 BuildConfig（[AppVersionInfo] 单一真相源）——投影链与首帧
