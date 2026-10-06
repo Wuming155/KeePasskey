@@ -46,23 +46,10 @@
 
 > **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（5 项）
+## P2 中危缺陷与协议/测试缺口（4 项）
 
 > 本批出自 [`records/三类隐蔽性故障排查报告_2026-10-06.md`](records/三类隐蔽性故障排查报告_2026-10-06.md)；`ISSUE-P2-499` 为该报告 F12 母条目与其三张子集台账（F03/F07/F11）合并后的单条登记。`ISSUE-P2-498` / `ISSUE-P2-502` 已于 §451 闭环归档。
-> **优先认领**：`P2-496` ~ `499` 四条属报告判定的**「已触发但被掩盖」**（masked）——错误效果已产生或曾实际发作、且被零观测机制屏蔽；其余三条为 dormant（零错误效果、前瞻性风险）。
-
-### ISSUE-P2-496：回前台 / 网络恢复远端探测通道整条空转（自败节流 + 提示位零消费者）
-
-- **核实时间点**：2026-10-06；**核实方式**：实读 `ResumeSyncProbeCoordinator.kt:71-86`（`:81` **先**写 `_lastProbeAtMillis` → `:82` 才调 `probeRemote`）、`:102-108` / `:115-121` / `:127-133`（三处 `classify(lastProbeAtMillis = _lastProbeAtMillis.value)` 传的都是刚写入值）、`ResumeSyncProbePolicy.kt:16`（`MIN_PROBE_INTERVAL_MILLIS = 30_000L`）与 `:66-68`（`classify` 内 `shouldProbe` 恒假 → `Skipped`）、`:139-147`（`Skipped -> ""`）；全仓 grep `ResumeSyncProbeCoordinator` 仅 4 处（`MainApplication.kt:81/:148` 仅 `runCatching { initialize() }`、`AutoLockManager.kt:75` KDoc、`SyncCoordinator.kt:221` 注释），`notice` / `lastOutcome` / `clearNotice` **零订阅者**；`strings.xml:799-801` 三键仅被协调器 `:141/:143/:145` 自引＝死资源；实读 `SettingsRepository.kt:55` 与 `RealSettingsRepository.kt:106` 确认开关**默认 true**、呈现于 `SecuritySettingsScreen.kt:239`。
-- **背景**：`maybeProbe` 在通过 30s 节流检查后**立即把时间戳刷新为当前时刻**，随后的 `probeRemote` 才拿这个刚写入的值去过同一道节流 ⇒ `shouldProbe` 恒判假 ⇒ 生产接线下 `Unchanged` / `RemoteChanged` 构造性不可达，只能产出 `Skipped`（`describeOutcome` 返回空串）。叠加第二重吞没：`notice` / `lastOutcome` 全仓无任何读取者 ⇒ 连 `Failed` 文案也永不浮出。用户侧观感是**设置页开关打开、回前台无任何反应、无任何错误提示**，而真实同步与 `SyncCoordinator.lastOutcome → SyncFailureNotifier` 告警通道不受影响（探测按设计只提示不写路径），故无数据 / 安全后果。
-  - **触发状态：masked**（判据 E1 现行错误产出）——`MainApplication:148` 无条件 `initialize()`、开关默认 true、回前台挂点齐全，凡已配置云同步且解锁的会话每次回前台 / 网络恢复必触发探测，结果被双重确定性吞没，**吞没机制现下正在工作**。旁证：§361 提交（`07fd019c`）自留「五条 UI 真机行为未核对」。
-  - 报告已核实并修正候选的两处失真：候选所称「恒报 `strings.xml:800` 一致」**不成立**（该字符串永不渲染）；引擎无 ETag 回退实际位于 `sync/.../SyncEngineSupport.kt:36-38`，非候选所指的独立文件 `RemoteConsistencyProbe.kt`。
-- **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/ResumeSyncProbeCoordinator.kt`、`ResumeSyncProbePolicy.kt`、`app/src/main/res/values/strings.xml:799-801`。
-- **验收标准**：
-  ① 节流判据改在**写入时间戳之前**求值，或改由 `probeRemote` 持入本次探测的 `startedAt` 快照，使 `classify` 不再消费被自己刷新的值；
-  ② `notice` / `lastOutcome` **接入真实消费者**（设置页或同步页展示探测结论），或按 PD-39/PD-40 口径连同死字符串资源一并移除——**不得保留「开关可拨、结论永不呈现」的形态**；
-  ③ 补协调器级测试（现仅 `HostPolicyBatchTest.kt:130-134` 以 `classify(true, false, null, ...)` 盖纯函数，`null` 基线使节流必过、恰绕开本缺陷）；宿主可注入时钟断言「两次间隔 < 30s 的回前台 → 第二次产出 `Unchanged` 而非 `Skipped`」；
-  ④ 真机走查前按 §434 跑 `check_installed_build.py --expect-symbol`，门禁 9/9 PASS。
+> **优先认领**：`P2-497` / `P2-499` 两条属报告判定的**「已触发但被掩盖」**（masked）——错误效果已产生或曾实际发作、且被零观测机制屏蔽；`P2-500` / `P2-501` 两条为 dormant（零错误效果、前瞻性风险）。
 
 ### ISSUE-P2-497：云同步页「离线缓存」开关为零行为消费方死开关
 

@@ -29,7 +29,9 @@ import javax.inject.Singleton
  * - 策略层 [ResumeSyncProbePolicy] 已落（开关 + 30s 节流 + 锁定态跳过）；
  * - 本类负责挂点：进程回前台（`AutoLockManager.onStart`）与网络恢复回调，**不直接 syncNow**；
  * - 探测结果只作提示，写路径仍归用户显式同步（与解锁后自动同步避免双写）；
- * - 周期 WorkManager 默认关闭的现状不变。
+ * - 周期 WorkManager 默认关闭的现状不变；
+ * - ISSUE-P2-496：节流基线在探测**前**快照（[ResumeSyncProbePolicy.planProbe]），时间戳探测
+ *   **后**才回写；结论文案经 [notice] 供给设置页状态行（不再有零消费者成员）。
  */
 @Singleton
 class ResumeSyncProbeCoordinator @Inject constructor(
@@ -44,9 +46,12 @@ class ResumeSyncProbeCoordinator @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _lastProbeAtMillis = MutableStateFlow<Long?>(null)
-    private val _lastOutcome = MutableStateFlow<ResumeSyncProbePolicy.ProbeOutcome?>(null)
-    val lastOutcome: StateFlow<ResumeSyncProbePolicy.ProbeOutcome?> = _lastOutcome.asStateFlow()
 
+    /**
+     * ISSUE-P2-496：最近一次探测的**结论文案**（已本地化）；null = 无可呈现结论
+     * （开关关闭 / 未配置同步 / 尚未探测）。由设置页「回前台探测」开关下方状态行消费——
+     * 修复「开关可拨、结论永不呈现」（`Skipped` 不再写入空串，改为 null 不呈现）。
+     */
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
@@ -72,22 +77,30 @@ class ResumeSyncProbeCoordinator @Inject constructor(
         scope.launch {
             val settings = settingsRepository.getSettings().first()
             val isLocked = autoLockManager.isLocked.value
-            val should = ResumeSyncProbePolicy.shouldProbe(
+            // ISSUE-P2-496：先取**探测前**基线快照，节流判据与 classify 基线同源于它。
+            val plan = ResumeSyncProbePolicy.planProbe(
                 probeEnabled = settings.syncProbeOnResumeEnabled,
                 isLocked = isLocked,
                 lastProbeAtMillis = _lastProbeAtMillis.value
             )
-            if (!should) return@launch
+            if (!plan.shouldProbe) return@launch
+            val outcome = probeRemote(
+                probeEnabled = settings.syncProbeOnResumeEnabled,
+                isLocked = isLocked,
+                classifyBaselineMillis = plan.classifyBaselineMillis
+            )
+            // ISSUE-P2-496：时间戳在探测**完成后**才回写——探测内的 classify 复核用的是旧基线，
+            // 不再消费「本次刚刷新」的值（原实现先写时间戳再探测 ⇒ 自败节流）。
             _lastProbeAtMillis.value = System.currentTimeMillis()
-            val outcome = probeRemote(settings.syncProbeOnResumeEnabled, isLocked)
-            _lastOutcome.value = outcome
-            _notice.value = describeOutcome(outcome)
+            _notice.value = describeOutcome(outcome).takeIf { it.isNotEmpty() }
         }
     }
 
     private suspend fun probeRemote(
         probeEnabled: Boolean,
-        isLocked: Boolean
+        isLocked: Boolean,
+        /** 探测前基线（见 [ResumeSyncProbePolicy.planProbe]）；三处 classify 一律消费它 */
+        classifyBaselineMillis: Long?
     ): ResumeSyncProbePolicy.ProbeOutcome = withContext(Dispatchers.IO) {
         try {
             if (!syncCoordinator.isSyncConfigured()) {
@@ -102,7 +115,7 @@ class ResumeSyncProbeCoordinator @Inject constructor(
                 return@withContext ResumeSyncProbePolicy.classify(
                     probeEnabled = probeEnabled,
                     isLocked = isLocked,
-                    lastProbeAtMillis = _lastProbeAtMillis.value,
+                    lastProbeAtMillis = classifyBaselineMillis,
                     hasRemote = false,
                     remoteChanged = false
                 )
@@ -115,7 +128,7 @@ class ResumeSyncProbeCoordinator @Inject constructor(
                 return@withContext ResumeSyncProbePolicy.classify(
                     probeEnabled = probeEnabled,
                     isLocked = isLocked,
-                    lastProbeAtMillis = _lastProbeAtMillis.value,
+                    lastProbeAtMillis = classifyBaselineMillis,
                     hasRemote = true,
                     remoteChanged = false
                 )
@@ -127,7 +140,7 @@ class ResumeSyncProbeCoordinator @Inject constructor(
             ResumeSyncProbePolicy.classify(
                 probeEnabled = probeEnabled,
                 isLocked = isLocked,
-                lastProbeAtMillis = _lastProbeAtMillis.value,
+                lastProbeAtMillis = classifyBaselineMillis,
                 hasRemote = true,
                 remoteChanged = remoteChanged
             )
@@ -144,10 +157,6 @@ class ResumeSyncProbeCoordinator @Inject constructor(
         is ResumeSyncProbePolicy.ProbeOutcome.Failed ->
             strings.get(com.keepasskey.app.R.string.sync_probe_failed, outcome.reason)
         ResumeSyncProbePolicy.ProbeOutcome.Skipped -> ""
-    }
-
-    fun clearNotice() {
-        _notice.value = null
     }
 
     private fun registerNetworkCallback() {

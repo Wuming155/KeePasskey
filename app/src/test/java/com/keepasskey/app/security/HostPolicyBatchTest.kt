@@ -143,4 +143,49 @@ class HostPolicyBatchTest {
                     is ResumeSyncProbePolicy.ProbeOutcome.Skipped
         )
     }
+
+    /**
+     * ISSUE-P2-496 主判据：节流已过（now = baseline + 30s）时，[ResumeSyncProbePolicy.planProbe]
+     * 返回的 classify 基线必须是**探测前** baseline，而非当下 now。
+     *
+     * 判别力：若 planProbe 误把「本次刷新的 now」当基线（缺陷排序），
+     * `classifyBaselineMillis == baseline` 立刻失败；且以 now 为基线分类会退化为 [Skipped]。
+     */
+    @Test
+    fun `ISSUE-P2-496 探测计划基线取探测前值而非当下`() {
+        val baseline = 1_000_000L
+        val now = baseline + ResumeSyncProbePolicy.MIN_PROBE_INTERVAL_MILLIS
+        val plan = ResumeSyncProbePolicy.planProbe(
+            probeEnabled = true,
+            isLocked = false,
+            lastProbeAtMillis = baseline,
+            nowMillis = now
+        )
+        assertTrue(plan.shouldProbe)
+        // 基线必须是探测前的 baseline（不是 now）
+        assertTrue(plan.classifyBaselineMillis == baseline)
+        // 以该基线分类 ⇒ 真实结论 Unchanged（自败节流下会退化成 Skipped）
+        assertTrue(
+            ResumeSyncProbePolicy.classify(
+                true, false, plan.classifyBaselineMillis,
+                hasRemote = true, remoteChanged = false, nowMillis = now
+            ) is ResumeSyncProbePolicy.ProbeOutcome.Unchanged
+        )
+    }
+
+    /**
+     * ISSUE-P2-496 回归形态锁定：把「刚刷新的 now」当上次探测时刻再复核节流 ⇒ 恒 [Skipped]。
+     * 这条即缺陷的成因形态，防其经任何路径复活。
+     */
+    @Test
+    fun `ISSUE-P2-496 回归形态：以当下为基线必判 Skipped`() {
+        val baseline = 1_000_000L
+        val now = baseline + ResumeSyncProbePolicy.MIN_PROBE_INTERVAL_MILLIS
+        assertTrue(
+            ResumeSyncProbePolicy.classify(
+                true, false, lastProbeAtMillis = now,
+                hasRemote = true, remoteChanged = false, nowMillis = now
+            ) is ResumeSyncProbePolicy.ProbeOutcome.Skipped
+        )
+    }
 }

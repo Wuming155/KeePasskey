@@ -79,7 +79,8 @@ class SettingsViewModel @Inject constructor(
     private val biometricCredentialStorage: BiometricCredentialStorage? = null,
     // ISSUE-P2-378：外部修改漂移协调器（null 仅纯 JVM 单测；生产 Hilt 注入 @Singleton）
     private val vaultFileDriftCoordinator: com.keepasskey.app.security.VaultFileDriftCoordinator? = null,
-    private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null
+    private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
+    private val resumeSyncProbeCoordinator: com.keepasskey.app.sync.ResumeSyncProbeCoordinator? = null
 ) : ViewModel() {
 
     companion object {
@@ -180,8 +181,7 @@ class SettingsViewModel @Inject constructor(
     )
 
     /**
-     * ISSUE-P2-65：会话锁定 / 关闭时擦除同步凭据的明文预填通道
-     * （WebDAV 口令 / S3 SecretKey / AccessKey 均为 CharArray 借用副本，锁定后不得继续驻留）。
+     * ISSUE-P2-65：会话锁定 / 关闭时擦除同步凭据的明文预填通道（WebDAV 口令 / S3 SecretKey / AccessKey 均为 CharArray 借用副本，锁定后不得继续驻留）。
      */
     private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
         syncController.clearWebDavPasswordPrefill()
@@ -213,8 +213,7 @@ class SettingsViewModel @Inject constructor(
         scope = viewModelScope
     )
 
-    // ISSUE-P2-379 / P2-378 / P3-381 / P3-382 / P3-385：新增门面与外部修改待决状态
-    // （声明在 preferences 之后，避免属性初始化顺序 NPE）
+    // ISSUE-P2-379 / P2-378 / P3-381 / P3-382 / P3-385：新增门面与外部修改待决状态（声明在 preferences 之后，避免属性初始化顺序 NPE）
     private val issueWiring = SettingsIssueWiring(
         vaultRepository = vaultRepository,
         vaultFileDriftCoordinator = vaultFileDriftCoordinator,
@@ -271,7 +270,8 @@ class SettingsViewModel @Inject constructor(
             // ISSUE-P3-20：子库已挂载计数（替代原先硬编码的 0）
             childDatabaseCount = childDatabaseController.countFlow,
             // ISSUE-P2-354 AC③：更换主密钥任务态（busy + 结果反馈）
-            masterKeyChangeState = masterKeyChange.state
+            masterKeyChangeState = masterKeyChange.state,
+            syncProbeNotice = resumeSyncProbeCoordinator?.notice ?: kotlinx.coroutines.flow.MutableStateFlow(null)
         ),
         strings = strings
     )

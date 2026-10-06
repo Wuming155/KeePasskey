@@ -157,6 +157,10 @@ data class SettingsUiState(
     val autoLockForegroundTimeoutSeconds: Int = 300,
     // ISSUE-P3-381：回前台远端探测
     val syncProbeOnResumeEnabled: Boolean = true,
+    // ISSUE-P2-496：最近一次回前台探测结论文案（已本地化）；null = 无可呈现结论。
+    // 唯一生产写入方 = ResumeSyncProbeCoordinator.notice（修复「开关可拨、结论永不呈现」）；
+    // 同步页「回前台探测」开关下方常驻状态行消费，非一次性 Snackbar。
+    val syncProbeNotice: String? = null,
     val flagSecureEnabled: Boolean = true,
     val autoClearClipboard: Boolean = true,
     val autoLockTimeoutSeconds: Int = 0, // 0 = 立即, 30, 60, 300, 900, -1 = 永不

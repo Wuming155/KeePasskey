@@ -37,6 +37,37 @@ object ResumeSyncProbePolicy {
         return nowMillis - last >= MIN_PROBE_INTERVAL_MILLIS
     }
 
+    /**
+     * 单次探测的**编排计划**（ISSUE-P2-496）。
+     *
+     * @param shouldProbe 本次是否应发起探测
+     * @param classifyBaselineMillis 供 [classify] 使用的**探测前**基线时间戳；不应探测时为 null。
+     *   必须是调用时传入的 [lastProbeAtMillis] 快照，**绝不**是 [nowMillis]——否则 [classify]
+     *   内的节流复核会把「本次探测刚刷新的时刻」当成「上次探测」⇒ `nowMillis - last < 30s`
+     *   ⇒ 恒判 [ProbeOutcome.Skipped]（自败节流）。
+     */
+    data class ProbePlan(val shouldProbe: Boolean, val classifyBaselineMillis: Long?)
+
+    /**
+     * 计算单次探测计划：是否探测 + 供 [classify] 使用的**探测前**基线快照。
+     *
+     * 关键契约（ISSUE-P2-496 根因）：[ProbePlan.classifyBaselineMillis] 恒等于本次传入的
+     * [lastProbeAtMillis]（探测前基线）。节流时间戳由协调器在探测**完成后**才回写，
+     * 探测期间 [classify] 复核的始终是旧基线。
+     */
+    fun planProbe(
+        probeEnabled: Boolean,
+        isLocked: Boolean,
+        lastProbeAtMillis: Long?,
+        nowMillis: Long = System.currentTimeMillis()
+    ): ProbePlan {
+        val should = shouldProbe(probeEnabled, isLocked, lastProbeAtMillis, nowMillis)
+        return ProbePlan(
+            shouldProbe = should,
+            classifyBaselineMillis = if (should) lastProbeAtMillis else null
+        )
+    }
+
     /** 探测结果语义 */
     sealed class ProbeOutcome {
         /** 远端有变化，提示用户手动同步或触发既有 syncNow 入口 */

@@ -40,7 +40,9 @@ internal data class SettingsUiStateFlows(
     val debugLogLines: Flow<List<String>>,
     val childDatabaseCount: Flow<Int>,
     // ISSUE-P2-354 AC③：更换主密钥任务态（busy + 结果反馈，活在 ViewModel 不随组合销毁）
-    val masterKeyChangeState: Flow<MasterKeyChangeTaskState>
+    val masterKeyChangeState: Flow<MasterKeyChangeTaskState>,
+    // ISSUE-P2-496：回前台远端探测结论（null = 无可呈现结论；唯一真相源为探测协调器）
+    val syncProbeNotice: Flow<String?>
 )
 
 internal fun settingsUiStateFlow(
@@ -59,15 +61,19 @@ internal fun settingsUiStateFlow(
         combine(flows.extendedSettings, flows.debugLogLines) { ext, logs ->
             Pair(ext, logs)
         },
-        combine(flows.childDatabaseCount, flows.masterKeyChangeState) { mounted, masterKey ->
-            Pair(mounted, masterKey)
+        combine(
+            flows.childDatabaseCount,
+            flows.masterKeyChangeState,
+            flows.syncProbeNotice
+        ) { mounted, masterKey, notice ->
+            Triple(mounted, masterKey, notice)
         }
     ) { settingsExtra, taskExtra ->
         Pair(settingsExtra, taskExtra)
     }
 ) { settings, sync, health, (db, biometricToggle), (settingsExtra, taskExtra) ->
     val (extState, logs) = settingsExtra
-    val (mounted, masterKeyTask) = taskExtra
+    val (mounted, masterKeyTask, probeNotice) = taskExtra
     buildSettingsUiState(
         userSettings = settings,
         syncState = sync,
@@ -78,6 +84,7 @@ internal fun settingsUiStateFlow(
         debugLogLines = logs,
         mountedChildDatabases = mounted,
         masterKeyTask = masterKeyTask,
+        syncProbeNotice = probeNotice,
         strings = strings
     )
 }.stateIn(
@@ -101,6 +108,8 @@ internal fun buildSettingsUiState(
     mountedChildDatabases: Int,
     // ISSUE-P2-354 AC③：更换主密钥任务态（默认值便于既有直调用点不受影响）
     masterKeyTask: MasterKeyChangeTaskState = MasterKeyChangeTaskState(),
+    // ISSUE-P2-496：回前台远端探测结论（默认值便于既有直调用点不受影响）
+    syncProbeNotice: String? = null,
     strings: StringsProvider
 ): SettingsUiState = SettingsUiState(
     // 1. 密码库与加密设置
@@ -191,6 +200,8 @@ internal fun buildSettingsUiState(
     autoLockForegroundTimeoutSeconds = userSettings.autoLockForegroundTimeoutSeconds,
     // ISSUE-P3-381：回前台远端探测开关
     syncProbeOnResumeEnabled = userSettings.syncProbeOnResumeEnabled,
+    // ISSUE-P2-496：回前台远端探测结论（唯一真相源为探测协调器 notice 流）
+    syncProbeNotice = syncProbeNotice,
     // ISSUE-P3-362：回显与行为同源——原读 secState 内存流（初值 0 且无播种，冷启动显示「立即」
     // 而行为侧生效仓库持久化值），现直读 userSettings 单一真相源
     autoLockTimeoutSeconds = userSettings.autoLockTimeoutSeconds,

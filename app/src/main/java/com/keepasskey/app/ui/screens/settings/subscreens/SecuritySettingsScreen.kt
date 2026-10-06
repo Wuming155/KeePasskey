@@ -240,6 +240,19 @@ fun SecuritySettingsScreen(
                             onCheckedChange = onSyncProbeOnResumeToggle
                         )
 
+                        // ISSUE-P2-496 AC②：最近一次探测结论常驻状态行（开关可拨、结论必呈现）。
+                        // 仅在开关开启且确有结论时渲染——开关关闭即隐藏历史残留（无 clearNotice 路径）。
+                        if (uiState.syncProbeOnResumeEnabled) {
+                            uiState.syncProbeNotice?.let { notice ->
+                                Text(
+                                    text = notice,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp)
+                                )
+                            }
+                        }
+
                         SecurityChoiceChips(
                             title = stringResource(R.string.sec_autolock_time_title),
                             description = stringResource(R.string.sec_autolock_dialog_desc),
@@ -419,6 +432,8 @@ internal fun SecuritySettingsScreenPreview() {
                 autoLockBackground = true,
                 autoLockForegroundEnabled = true,
                 syncProbeOnResumeEnabled = true,
+                // ISSUE-P2-496：探测结论状态行（预览取其典型「一致」态；文案与 sync_probe_unchanged 同源观感）
+                syncProbeNotice = "云端密码库与上次同步一致",
                 flagSecureEnabled = true,
                 autoClearClipboard = true,
                 unlockThrottleEnabled = true,
