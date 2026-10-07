@@ -34,6 +34,11 @@ import javax.inject.Singleton
  * 通知内容（验收标准 4）：标题与正文均为固定通用文案，不含条目名、用户名、密码、库文件名等
  * 任何用户数据；`VISIBILITY_SECRET` 保证锁屏不展示内容。
  *
+ * 自动锁定倒计时（ISSUE-P3-225，起点：`docs/resolved/batches/229-*.md`）：存在自动锁定截止点时
+ * 由系统 `Chronometer` 原生渲染秒级递减（零轮询）。**到期撤销自 `ISSUE-P3-528` 起交给系统侧**
+ * （`setTimeoutAfter`）——系统秒表越过零点**不会停在 0**（会继续显示 `-0:01`…），而进程被系统回收后
+ * 本应用已无力撤销；口径与两态重投规则见 [NotificationGate.autoLockCountdownTimeoutMs]。
+ *
  * 快捷动作（ISSUE-P3-440，安全裁决见 `docs/architecture/产品裁决登记.md` `PD-69`）：
  * - 「立即锁定」（ISSUE-P3-386）恒有；
  * - 「复制用户名 / 复制验证码」**仅在存在「最近查看条目」时**挂出（[UnlockedNotificationEntryTracker]）——
@@ -66,6 +71,12 @@ class UnlockedNotificationController @Inject constructor(
 
     /** 上一次已发布通知关联的「最近查看条目」（ISSUE-P3-440：动作集的唯一变量） */
     private var lastRecentEntryId: String? = null
+
+    /**
+     * 上一次已发布的通知是否为**倒计时态**（系统侧随之排定了一个 timeout 闹钟）。
+     * ISSUE-P3-528：决定重投前是否必须先撤销一次（[NotificationGate.mustClearSystemTimeoutOnRepost]）。
+     */
+    private var lastPostedCountdown = false
 
     /** 上一次求得的「目标状态」，仅在变化时记录诊断日志（避免轮询刷屏） */
     private var lastDesired: Boolean? = null
@@ -138,16 +149,6 @@ class UnlockedNotificationController @Inject constructor(
     }
 
     private fun post(deadline: Long?, recentEntryId: String?) {
-        // §431：动作必须经 `setShowActionsInCompactView()` 落到**收起行的按钮位**——MediaStyle 的展开视图
-        // 是媒体版式、**不渲染普通动作行**，故上一版出现「点开箭头却看不到动作」（§430 装机回执）。
-        // 这些按钮位需要图标，本批补三个单色动作图标（顺序与下方 addAction 一一对应）。
-        val actionIcons = intArrayOf(
-            R.drawable.ic_notif_lock,
-            R.drawable.ic_notif_account,
-            R.drawable.ic_notif_totp
-        )
-        // 动作数：立即锁定恒在；复制两项仅在「最近查看过条目」时追加
-        var actionCount = 1
         val builder = NotificationCompat.Builder(
             context,
             NotificationChannelSpec.UNLOCKED_STATUS.channelId
@@ -164,42 +165,28 @@ class UnlockedNotificationController @Inject constructor(
             // 该标志会把通知推向 OEM 的「静默」分类，而 MIUI/HyperOS 对静默通知在折叠态
             // 不渲染动作按钮（须长按）——正是 §426 走查反馈的现象。
             .setOnlyAlertOnce(true)
-            // ISSUE-P3-386：常驻通知「立即锁定」快捷动作——与自动锁同收口，
-            // 触发后会话锁定 → 本控制器观察 state 变化自动 cancel 撤销通知
-            .addAction(
-                NotificationCompat.Action.Builder(
-                    IconCompat.createWithResource(context, actionIcons[0]),
-                    context.getString(R.string.notification_unlocked_lock_now),
-                    NotificationIntents.lockVaultNow(context)
-                ).build()
-            )
 
-        // ISSUE-P3-440：复制快捷动作（`PD-69` 裁决的字段子集：用户名 / TOTP；密码与受保护字段不上通知面）。
-        // 仅在「最近查看过某个条目」时挂出（`NotificationGate.shouldShowUnlockedCopyActions`）——
-        // 动作必须有作用对象，否则就是点了没反应的假入口。动作文案为固定通用文案，不含条目名 / 值。
-        if (NotificationGate.shouldShowUnlockedCopyActions(recentEntryId)) {
-            actionCount = 3
-            builder.addAction(
-                NotificationCompat.Action.Builder(
-                    IconCompat.createWithResource(context, actionIcons[1]),
-                    context.getString(R.string.notification_unlocked_copy_username),
-                    NotificationIntents.copyUsernameFromNotification(context)
-                ).build()
-            ).addAction(
-                NotificationCompat.Action.Builder(
-                    IconCompat.createWithResource(context, actionIcons[2]),
-                    context.getString(R.string.notification_unlocked_copy_totp),
-                    NotificationIntents.copyTotpFromNotification(context)
-                ).build()
-            )
-        }
+        val actionCount = addUnlockedActions(builder, recentEntryId)
 
         val now = System.currentTimeMillis()
-        val contentText = if (deadline != null && deadline > now) {
-            builder.setWhen(deadline)
+        // ISSUE-P3-528：倒计时的「到期撤销」交系统侧——Chronometer 越过零点会显示负数（AOSP 走
+        // `negative_duration`），而进程被回收后本应用已无力撤销。0 = 非倒计时态，必须不设 timeout
+        // （`setTimeoutAfter(0)` 等于立刻撤销，会瞬间吞掉常驻通知）。
+        val countdownTimeoutMs = NotificationGate.autoLockCountdownTimeoutMs(deadline, now)
+        val countingDown = countdownTimeoutMs > 0L
+        // 上一版是倒计时态、本次不再是 ⇒ 先撤销一次再重投：NMS 只在通知被**撤销**时取消已排定的
+        // timeout 闹钟，重投同键通知不会撤销它，而旧闹钟到点会按 key 撤掉「当前这条」（表现为已回到
+        // 前台的常驻通知在原截止时刻无声消失）。详见 NotificationGate.mustClearSystemTimeoutOnRepost。
+        if (posted && NotificationGate.mustClearSystemTimeoutOnRepost(lastPostedCountdown, countingDown)) {
+            removePosted()
+        }
+        val contentText = if (countingDown) {
+            // countingDown ⇒ deadline 非空且在未来，且 now + 剩余 == deadline（同一取值口径）
+            builder.setWhen(now + countdownTimeoutMs)
                 .setShowWhen(true)
                 .setUsesChronometer(true)
                 .setChronometerCountDown(true)
+                .setTimeoutAfter(countdownTimeoutMs)
             context.getString(R.string.notification_unlocked_text)
         } else {
             builder.setShowWhen(false).setUsesChronometer(false)
@@ -220,6 +207,7 @@ class UnlockedNotificationController @Inject constructor(
             NotificationManagerCompat.from(context)
                 .notify(NotificationChannels.ID_UNLOCKED_STATUS, notification)
             posted = true
+            lastPostedCountdown = countingDown
             lastRecentEntryId = recentEntryId
         } catch (t: SecurityException) {
             // 权限在运行期被回收（用户在系统设置中关闭通知）：静默降级，绝不崩溃
@@ -228,18 +216,81 @@ class UnlockedNotificationController @Inject constructor(
         }
     }
 
-    private fun cancel() {
+    /**
+     * 挂上常驻通知的动作集，返回动作个数（供 `setShowActionsInCompactView()` 落**收起行按钮位**）。
+     * 「立即锁定」恒在；复制两项仅在存在「最近查看条目」时追加。
+     *
+     * ISSUE-P3-528：自 [post] 结构性拆出（原函数触及 100 行规模门禁）——送进 builder 的动作与顺序
+     * **零变化**。
+     */
+    private fun addUnlockedActions(builder: NotificationCompat.Builder, recentEntryId: String?): Int {
+        // §431：动作必须经 `setShowActionsInCompactView()` 落到**收起行的按钮位**——MediaStyle 的展开视图
+        // 是媒体版式、**不渲染普通动作行**，故上一版出现「点开箭头却看不到动作」（§430 装机回执）。
+        // 这些按钮位需要图标，本批补三个单色动作图标（顺序与下方 addAction 一一对应）。
+        val actionIcons = intArrayOf(
+            R.drawable.ic_notif_lock,
+            R.drawable.ic_notif_account,
+            R.drawable.ic_notif_totp
+        )
+        // ISSUE-P3-386：常驻通知「立即锁定」快捷动作——与自动锁同收口，
+        // 触发后会话锁定 → 本控制器观察 state 变化自动 cancel 撤销通知
+        builder.addAction(
+            NotificationCompat.Action.Builder(
+                IconCompat.createWithResource(context, actionIcons[0]),
+                context.getString(R.string.notification_unlocked_lock_now),
+                NotificationIntents.lockVaultNow(context)
+            ).build()
+        )
+        // 动作数：立即锁定恒在
+        var actionCount = 1
+        // ISSUE-P3-440：复制快捷动作（`PD-69` 裁决的字段子集：用户名 / TOTP；密码与受保护字段不上通知面）。
+        // 仅在「最近查看过某个条目」时挂出（`NotificationGate.shouldShowUnlockedCopyActions`）——
+        // 动作必须有作用对象，否则就是点了没反应的假入口。动作文案为固定通用文案，不含条目名 / 值。
+        if (NotificationGate.shouldShowUnlockedCopyActions(recentEntryId)) {
+            actionCount = 3
+            builder.addAction(
+                NotificationCompat.Action.Builder(
+                    IconCompat.createWithResource(context, actionIcons[1]),
+                    context.getString(R.string.notification_unlocked_copy_username),
+                    NotificationIntents.copyUsernameFromNotification(context)
+                ).build()
+            ).addAction(
+                NotificationCompat.Action.Builder(
+                    IconCompat.createWithResource(context, actionIcons[2]),
+                    context.getString(R.string.notification_unlocked_copy_totp),
+                    NotificationIntents.copyTotpFromNotification(context)
+                ).build()
+            )
+        }
+        return actionCount
+    }
+
+    /**
+     * 撤销系统侧已投递的通知并复位**投递簿记**（`posted` / `lastPostedCountdown`）；
+     * **不触碰**「最近查看条目」登记——这是与 [cancel] 的唯一差别。
+     *
+     * ISSUE-P3-528：本方法被「倒计时态 → 非倒计时态」的重投路径复用——撤销动作本身即令
+     * `NotificationManagerService` 取消该系统 timeout 闹钟（`cancelScheduledTimeoutLocked()` 的唯一
+     * 调用点在 `cancelNotificationLocked()` 内），故重投前必须先走一次；而这条路径并不代表
+     * 「最近查看条目」失效，登记与复制动作必须原样保留。
+     */
+    private fun removePosted() {
         posted = false
-        lastDeadline = null
-        // ISSUE-P3-440 AC②：锁库 / 关闭库 / 偏好关闭即撤销动作——连带清除「最近查看条目」，
-        // 使下次解锁不会挂出上一个会话的条目动作（`PD-69` ② 存活口径）。
-        lastRecentEntryId = null
-        entryTracker.clear()
+        lastPostedCountdown = false
         try {
             NotificationManagerCompat.from(context).cancel(NotificationChannels.ID_UNLOCKED_STATUS)
         } catch (t: SecurityException) {
             AppLog.w(TAG, "已解锁常驻通知撤销被系统拒绝，静默忽略", t)
         }
+    }
+
+    private fun cancel() {
+        removePosted()
+        lastDeadline = null
+        // ISSUE-P3-440 AC②：锁库 / 关闭库 / 偏好关闭即撤销动作——连带清除「最近查看条目」，
+        // 使下次解锁不会挂出上一个会话的条目动作（`PD-69` ② 存活口径）。
+        lastRecentEntryId = null
+        entryTracker.clear()
     }
 
     private companion object {

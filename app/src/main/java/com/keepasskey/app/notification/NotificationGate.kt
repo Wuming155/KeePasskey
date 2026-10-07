@@ -91,6 +91,45 @@ object NotificationGate {
     ): Boolean = !permissionGranted && !alreadyAsked && !showRationale
 
     /**
+     * `ISSUE-P3-528`：已解锁常驻通知的「自动锁定倒计时」应交由系统自动撤销的时长（毫秒）；
+     * `0` 表示**不设** timeout（非倒计时态）。
+     *
+     * 缘起：倒计时由系统 `Chronometer` 渲染，而它越过零点后**不停在 0**——AOSP
+     * `widget/Chronometer.java` 的 `updateText()` 对负秒取绝对值后加负号（`R.string.negative_duration`），
+     * 即继续显示 `-0:01`、`-0:02`…。而撤销只能在**进程存活**时由本应用完成：进程被系统回收后
+     * 到点重投空闲文案的 `delay()` 任务随之消失，通知留在通知栏、`when` 已成过去时刻 ⇒ 负数一直累积
+     * 到下次冷启动。
+     *
+     * 故把「到期撤销」交给系统侧：`Notification.Builder.setTimeoutAfter()` 由
+     * `NotificationManagerService.scheduleTimeoutLocked()`（AOSP master，2026-10-07 核实）直接排定一个
+     * `ELAPSED_REALTIME_WAKEUP` 精确闹钟，**与本应用进程无关**；到点撤销的排除位只有
+     * `FLAG_FOREGROUND_SERVICE | FLAG_USER_INITIATED_JOB`，本通知两者皆非 ⇒ 生效。
+     * 闹钟由 system_server 自行排定，**不需要**应用持有 `SCHEDULE_EXACT_ALARM`。
+     *
+     * 口径：`0` 必须不设 timeout——`setTimeoutAfter(0)` 等价「立刻撤销」，会瞬间吞掉常驻通知
+     * （同 [totpRemainingSeconds] 已立的教训）；已过期（`deadline <= now`）同样按非倒计时态处置，
+     * 与 `UnlockedNotificationController.post()` 的 Chronometer 闸门同判据。
+     */
+    fun autoLockCountdownTimeoutMs(deadlineMillis: Long?, nowMillis: Long): Long =
+        if (deadlineMillis != null && deadlineMillis > nowMillis) deadlineMillis - nowMillis else 0L
+
+    /**
+     * `ISSUE-P3-528`：重投常驻通知前是否**必须先撤销一次**系统侧通知。
+     *
+     * 条件＝上一版是倒计时态（系统侧已按通知 key 排定 timeout 闹钟）、本次不再是。
+     * 必要性：`NotificationManagerService` 只在通知被**撤销**时取消已排定的闹钟
+     * （`cancelScheduledTimeoutLocked()` 的唯一调用点在 `cancelNotificationLocked()` 内）——
+     * 重投同键通知**不会**撤销旧闹钟，旧闹钟到点会按 key 找到「当前这条」并把它撤掉。
+     * 缺了这一步，表现是「已回到前台（或已把超时改成永不）的常驻通知在原截止时刻无声消失」，
+     * 且要等下一次状态变化才回来。
+     *
+     * 反向（倒计时 → 倒计时）不需要撤销：同 key 的 timeout 只重排该闹钟（同一 PendingIntent
+     * 再次 `setExactAndAllowWhileIdle` 即替换旧触发器），不会留下第二条。
+     */
+    fun mustClearSystemTimeoutOnRepost(previousWasCountdown: Boolean, nextIsCountdown: Boolean): Boolean =
+        previousWasCountdown && !nextIsCountdown
+
+    /**
      * 验证码剩余有效秒数（纯函数，`nowMillis` 由调用方注入，便于单测断言时间边界）。
      *
      * RFC 6238 时间步语义：`elapsed = unixSeconds % period`，剩余 `period - elapsed`；

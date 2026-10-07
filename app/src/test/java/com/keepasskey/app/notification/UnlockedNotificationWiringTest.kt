@@ -131,6 +131,29 @@ class UnlockedNotificationWiringTest {
         )
     }
 
+    /**
+     * ISSUE-P3-528：系统 Chronometer **越过零点不会停在 0**（AOSP 走 `negative_duration`，继续显示
+     * `-0:01`…），而撤销只能在**进程存活**时由本应用完成 ⇒ 到期撤销必须交给系统侧。
+     * 附带约束：NMS 只在通知被**撤销**时取消已排定的 timeout 闹钟（`cancelScheduledTimeoutLocked()`
+     * 唯一调用点在 `cancelNotificationLocked()` 内），故「倒计时态 → 非倒计时态」重投前必须先撤销一次。
+     */
+    @Test
+    fun `倒计时到期由系统侧撤销且重投前先撤销`() {
+        assertTrue(
+            "倒计时态必须交系统侧撤销（进程被回收后本应用无力撤销，秒表会越过零点显示负数）",
+            code.contains("setTimeoutAfter(")
+        )
+        assertTrue(
+            "应交给系统的时长必须取纯决策层（0 = 非倒计时态即不设 timeout，`setTimeoutAfter(0)` 等于立刻撤销）",
+            code.contains("NotificationGate.autoLockCountdownTimeoutMs(")
+        )
+        assertTrue(
+            "倒计时态转非倒计时态重投前必须**真的**先撤销（只断言决策函数在场会放过「咨询了却没执行」的形态）",
+            Regex("mustClearSystemTimeoutOnRepost\\([^)]*\\)\\s*\\)\\s*\\{\\s*removePosted\\(\\)")
+                .containsMatchIn(code)
+        )
+    }
+
     /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)

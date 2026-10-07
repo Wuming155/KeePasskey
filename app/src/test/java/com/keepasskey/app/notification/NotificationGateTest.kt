@@ -218,6 +218,46 @@ class NotificationGateTest {
         )
     }
 
+    // ===== 常驻通知自动锁定倒计时（ISSUE-P3-528：越过零点显示负数）=====
+
+    @Test
+    fun `倒计时态交给系统的撤销时长等于剩余毫秒`() {
+        assertEquals(
+            60_000L,
+            NotificationGate.autoLockCountdownTimeoutMs(deadlineMillis = 60_000L, nowMillis = 0L)
+        )
+        assertEquals(
+            1L,
+            NotificationGate.autoLockCountdownTimeoutMs(deadlineMillis = 60_000L, nowMillis = 59_999L)
+        )
+    }
+
+    @Test
+    fun `无截止点时不设 timeout`() {
+        assertEquals(0L, NotificationGate.autoLockCountdownTimeoutMs(deadlineMillis = null, nowMillis = 0L))
+    }
+
+    @Test
+    fun `截止点已过或等于当前时刻时按非倒计时态处置`() {
+        // deadline <= now 一律返回 0：既与 Chronometer 闸门同判据，也避免 setTimeoutAfter(0) 立刻吞掉通知
+        assertEquals(0L, NotificationGate.autoLockCountdownTimeoutMs(deadlineMillis = 1_000L, nowMillis = 1_000L))
+        assertEquals(0L, NotificationGate.autoLockCountdownTimeoutMs(deadlineMillis = 999L, nowMillis = 1_000L))
+    }
+
+    @Test
+    fun `倒计时态转非倒计时态必须重投前先撤销`() {
+        assertTrue(NotificationGate.mustClearSystemTimeoutOnRepost(previousWasCountdown = true, nextIsCountdown = false))
+    }
+
+    @Test
+    fun `倒计时态延续或始终非倒计时态均无需撤销`() {
+        // 倒计时 → 倒计时：同 key 的 timeout 只重排同一个闹钟，不留第二条
+        assertFalse(NotificationGate.mustClearSystemTimeoutOnRepost(previousWasCountdown = true, nextIsCountdown = true))
+        assertFalse(NotificationGate.mustClearSystemTimeoutOnRepost(previousWasCountdown = false, nextIsCountdown = false))
+        // 非倒计时 → 倒计时：此前没有闹钟可撤，新投本身会排定一个
+        assertFalse(NotificationGate.mustClearSystemTimeoutOnRepost(previousWasCountdown = false, nextIsCountdown = true))
+    }
+
     // ===== 验证码剩余秒数（通知正文取值，纯函数时间边界）=====
 
     @Test
