@@ -296,6 +296,11 @@ Monica 的「动效降级开关」（低端机 / ROM 兼容性）是本仓没有
 > **整条闭环**——440 的前置安全复核落 `PD-69`（字段子集收窄为「用户名 + TOTP」，密码主动放弃）、
 > 444 AC④ 的界面缩放口径落 `PD-70`（不建独立缩放偏好）。表内三行「处置」列的「已登记」为该日快照，
 > 现状以本条为准。
+>
+> **2026-10-07 更新（后续回写）**：G14 的「设置页搜索」子项在 §425 落地后经 §427 **整条作废移除**
+> （用户走查裁决落 [`../architecture/产品裁决登记.md`](../architecture/产品裁决登记.md) `PD-73`，删 `SettingsSearch.kt` 等，
+> 分组顺序、行顺序、图标与文案资源逐项不变）；G14 其余子项（界面缩放 / 等宽开关）维持 `ISSUE-P3-444` 口径。
+> 见 [`../resolved/batches/427-设置页搜索移除与通知动作可达回执批次.md`](../resolved/batches/427-设置页搜索移除与通知动作可达回执批次.md)。
 
 | 编号 | 维度 | 问题描述 | 对比依据（代码直读） | 改进建议 | 预期效果 | 优先级 | 处置 |
 |---|---|---|---|---|---|---|---|
@@ -312,7 +317,7 @@ Monica 的「动效降级开关」（低端机 / ROM 兼容性）是本仓没有
 | G11 | 操作体验·引导 | 无 onboarding / 内嵌帮助 | KeePassDX taptargetview 覆盖 5 个 Activity 场景（`education/`）；Kp2a ⓘ 短帮助 + **6 套可关闭提示条**（`group.xml:39-347`）——提示条形态最轻 | 优先「设置项旁 ⓘ」与「可关闭提示条」轻形态 | 首用理解成本下降 | 低 | **已登记 `ISSUE-P3-445`**（限轻形态，不做全屏 onboarding） |
 | G12 | 操作体验·手势 | 列表无滑动快捷操作 | **Monica 自研 `SwipeActions`（左滑删/右滑选，50% 阈值弹簧回弹，8 个列表页使用，`SwipeActions.kt:22-42`）**——修正首版「无先例」结论 | 若裁决引入：右滑快捷复制（用户名/密码）比左滑删除更贴密码库安全语义 | 高频操作少一步 | 中低 | **不跟进（PD-63，2026-10-02 用户裁决）** |
 | G13 | UI 设计·导航 | 底栏 Tab 顺序不可调（仅验证器/生成器可隐藏） | Monica `bottomNavOrder` + `bottomNavVisibility` 用户可配（`SimpleMainScreen.kt:909-920`），单 Tab 自动隐藏底栏（`:922`） | 在既有「隐藏 Tab」设置上追加排序（数据结构相近） | 高频页可前置 | 中低 | **已登记 `ISSUE-P3-443`** |
-| G14 | UI 设计·排版偏好 | 无界面缩放/字号偏好、无等宽字体开关、设置页无搜索 | Monica `InterfaceScaleSettingsItem` + BottomSheet（`SettingsScreen.kt:747-752`）与 `SettingsSearchField`（`SettingsSearchSupport.kt:23`）；KeePassDX 等宽开关默认开（`donottranslate.xml:230-231`） | 「界面偏好」一组：界面缩放（或跟随系统字体缩放自检）+ 等宽开关 + 设置页搜索 | 可达性与个性化 | 中低 | **已登记 `ISSUE-P3-444`** |
+| G14 | UI 设计·排版偏好 | 无界面缩放/字号偏好、无等宽字体开关、设置页无搜索 | Monica `InterfaceScaleSettingsItem` + BottomSheet（`SettingsScreen.kt:747-752`）与 `SettingsSearchField`（`SettingsSearchSupport.kt:23`）；KeePassDX 等宽开关默认开（`donottranslate.xml:230-231`） | 「界面偏好」一组：界面缩放（或跟随系统字体缩放自检）+ 等宽开关 + 设置页搜索 | 可达性与个性化 | 中低 | **已登记 `ISSUE-P3-444`**（其中「设置页搜索」子项后经 §427 / `PD-73` 裁决**作废移除**，2026-10-07 回写；其余子项维持） |
 | — | UI 设计·动效 | 动效降级开关（低端机/ROM 兼容保险丝） | Monica `LocalReduceAnimations`（`ui/LocalSharedTransition.kt:10-18`，为 HyperOS 2 / Android 15 卡顿设） | 并入 G14「界面偏好」组一并裁决 | 低端机可用性 | 低 | **已登记（并入 `ISSUE-P3-444`）** |
 | — | UI 设计·响应式 | 宽屏双栏 ListDetail | — | — | — | — | **不跟进**（PD-43；Monica 同为「宽屏换 Rail」，形态共识） |
 | — | UI 设计·动效 | 列表→详情共享元素过渡 | Monica `sharedBounds` 11 处先例 | — | — | — | **不跟进**（PD-29） |

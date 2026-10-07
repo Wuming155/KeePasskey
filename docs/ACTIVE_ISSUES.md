@@ -79,7 +79,7 @@
 - **涉及文件**：app 解锁链（`UnlockViewModel` / `SessionOpener` / `MasterPasswordUnlockSession` / `KdbxErrorTexts`）、`database`（如需暴露备份定位）、`strings.xml`（中英）。
 - **验收标准**：① 解锁失败且错误分类属「文件损坏 / 格式错误」（**非**凭据错误）且 `.bak` 存在时，向用户提供「从 .bak 恢复」入口，并明确告知其内容为上次成功保存的版本；② 恢复动作须用户显式确认，以原子方式（临时文件 + rename）用 `.bak` 覆盖主文件，`.bak` 自身保留；③ 凭据错误（主密码 / 密钥文件不匹配）不得出现该入口，防误覆盖；④ 宿主用例锁定错误分类判据与恢复复制语义；⑤ 若裁决不做，回写限界表而非留空。
 
-## P3 低危问题、特性接线与体验优化（9 项）
+## P3 低危问题、特性接线与体验优化（6 项）
 
 ### ISSUE-P3-517：@Preview 反向态覆盖缺口——缺反向态预览 5 处、完全无预览 8 处（两态齐 14/27=51.9%）
 
@@ -88,33 +88,12 @@
 - **涉及文件**：上列组件所在文件（`app/src/main/java/com/keepasskey/app/ui/**`）。
 - **验收标准**：① 逐条补反向态 / 补预览（或逐条给出豁免理由并登记）；② 复跑 `check_preview_state_coverage.py` 读数回写批次文档，两态齐比率只升不降；③ 重生包装后 `:app:compileDebugScreenshotTestKotlin --rerun` 通过。
 
-### ISSUE-P3-518：tools/local-sync/README.md 场景 10「契约无 LIST 操作」与当前契约存在措辞漂移
-
-- **核实时间点**：2026-10-07；**核实方式**：实读 `SyncProvider.kt:41-48`（listRemoteDirectory 契约，默认 501）、`WebDavDirectoryList.kt:45`（Depth:1 PROPFIND）、`S3DirectoryList.kt:45-52`（ListObjectsV2）、生产调用方 `RemoteBrowseController.kt:169/:173`。
-- **背景**：引擎主循环确无目录枚举（KDBX 单文件模型），但 Provider 契约确有分页 LIST 且被远端浏览 UI 消费；README 场景 10 的「契约无 LIST 操作」未限定到引擎面，会误导读者以为契约层无此操作。
-- **涉及文件**：`tools/local-sync/README.md`。
-- **验收标准**：表述限定为「同步引擎主循环无 LIST；契约层有 `listRemoteDirectory`（WebDAV PROPFIND / S3 ListObjectsV2），生产调用方为远端浏览 UI」；改后 `check_md_links.py` 通过。
-
 ### ISSUE-P3-519：预览走查两处观感/冗余项（非功能缺陷，低成本清理）
 
 - **核实时间点**：2026-10-07；**核实方式**：`export-preview-main.bat` 导出 40 张逐张 Read 目检 + 主会话复核截图（`preview-exports/main/light/ThemeSettingsScreenPreviewScreenshotExport_外观设置页 - 浅色_c88978fe_0.png` 孤字行属实；`WebDavSyncScreen.kt:90-103` 别名预览与 `CloudSyncScreen` 同传默认 `SettingsUiState()` 逐像素相同属实）。
 - **背景**：① `strings.xml:1008` `theme_mode_light_sub`「明亮清爽，适合日间」在模式卡片宽度下换行后第二行只剩一个「间」字（亮暗同现）；② `WebDavSyncScreenPreview` 经别名函数渲染与「云端同步设置页」预览完全重复，且别名函数本身有生产调用（`KeePasskeySettingsNavGraphRoutes.kt:133`）不可删。
 - **涉及文件**：`strings.xml:1008`（中英对称性核对）；`WebDavSyncScreen.kt`（删冗余预览函数）；`app/build.gradle.kts` `mainScreenPreviewPrefixes`（同步摘除 `WebDavSyncScreenPreviewScreenshotExport`，防逐屏命中断言红）。
 - **验收标准**：① 文案调整后复跑导出目检无孤字行；② 冗余预览删除后包装重生 + `:app:compileDebugScreenshotTestKotlin --rerun` 通过、导出任务逐屏断言仍绿；③ 改过 UI 后跑 `check_box_slot_children.py`。
-
-### ISSUE-P3-520：已知工程限界表 §5 重放裁决点行号快照漂移（2026-09-21 快照 → 现查已漂移）
-
-- **核实时间点**：2026-10-07；**核实方式**：`grep -n "isReplay(" sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt` 五处命中 `:180` / `:249` / `:300` / `:325` / `:397`；限界表 §5 记 `:166` / `:228` / `:275` / `:300` / `:368`（2026-09-21 快照），条数一致、行号漂移。
-- **背景**：行号快照按条目维护规则 3 本属「核实时刻的快照」，但该表行号已被后续批次引用为定位依据，漂移不修正会误导认领者。
-- **涉及文件**：`docs/architecture/已知工程限界.md` §5、`docs/records/限界表证据与实测数据汇录.md` 附二（按格式补更正留痕）。
-- **验收标准**：① §5 行号更新为现查值并注日期；② 附二按既有格式补「§5 · 2026-10-07 更正」留痕；③ `check_md_links.py` 通过。
-
-### ISSUE-P3-521：竞品对比报告 §5-G14 处置列未回写「设置页搜索」子项被 §427/PD-73 作废的后续
-
-- **核实时间点**：2026-10-07；**核实方式**：实读报告 §5 G14 行（处置列「已登记 `ISSUE-P3-444`」）与 §294 行更新块（止于 2026-10-03）；对照 `docs/RESOLVED_LOG.md` §427（删 `SettingsSearch.kt` 等，tests -5）与 `产品裁决登记.md` PD-73（仅针对设置页）。
-- **背景**：P3-444 的「设置页搜索」子项在 §425 落地后又被 §427 整条作废移除（用户走查裁决落 PD-73），报告的登记结果块与 G14 处置列均未回写此后续，读者会据旧状态误判该子项仍存在。
-- **涉及文件**：`docs/references/UI与操作体验的竞品对比报告.md`（G14 处置列 + 更新块）。
-- **验收标准**：① G14 处置列注明「设置页搜索」子项经 §427/PD-73 作废移除、其余子项维持；② 更新块补一条带日期的闭环回执；③ `check_md_links.py` 通过。
 
 ### ISSUE-P3-522：PasskeyPrf KDoc「与 KeePassDX 逐字节一致」为无出处声明——须升级为带引用的核实结论
 

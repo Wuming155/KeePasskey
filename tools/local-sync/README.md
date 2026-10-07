@@ -98,7 +98,7 @@ Mock 层为确定性单测（随 CI 常跑），LIVE 层需启动本地服务（
 | 7 | 深层嵌套与路径归一 | 端点尾斜杠×路径前导斜杠四种组合归一 + 深层 MOVE 保结构；S3 嵌套键 | S3 嵌套中文键 | — |
 | 8 | 并发上传不同版本 | 并入场景 1 同基线竞态；S3 首传竞态结果有界（成败仅限 ConflictError，内容完整不混合） | `LIVE MinIO 同基线并发条件写` | — |
 | 9 | 后端不可用降级 | 连接拒绝 / 连接超时 / HTTPS 对明文服务器握手失败 | 全链路在真实服务下通过 | 引擎层降级用缓存（SyncEngineTest） |
-| 10 | 大目录分页 | **N/A**：`SyncProvider` 契约无 LIST 操作（KDBX 单文件同步模型，无目录枚举需求）；可行部分以 PROPFIND 多 response 解析健壮性覆盖 | — | — |
+| 10 | 大目录分页 | **N/A**（引擎面）：同步**引擎主循环**无 LIST 操作（KDBX 单文件同步模型，无目录枚举需求）；契约层有 `listRemoteDirectory` 分页（WebDAV PROPFIND Depth:1 / S3 ListObjectsV2），生产调用方为 app 层远端浏览 UI（`RemoteBrowseController`）；可行部分以 PROPFIND 多 response 解析健壮性覆盖 | — | — |
 
 **分段上传/断点续传（场景 2 一部分）同样 N/A**：`SyncProvider` 契约为整文件上传
 （`upload/uploadAtomic`），未实现分块协议。KDBX 库文件体积通常远低于分块阈值，
