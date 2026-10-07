@@ -94,6 +94,13 @@ data class ScanResult(
  * 纯算法实现，按 **autofillHints > inputType/htmlName > 邻近 label** 的信号强度识别
  * 用户名与密码输入框，并排除搜索框与验证码/评论等非凭据字段。
  * 多语言登录词表覆盖中/英/法/西/俄/乌常见界面文案。
+ *
+ * ISSUE-P3-529：账号侧新增**数字类兜底档**（`TYPE_CLASS_NUMBER` 普通变体 ⇒ 账号候选，`LOW`），
+ * 并在选择账号目标时施加**登录上下文门**「该档单独成立时须同表单存在密码目标才保留」——
+ * 口径吸收自 Monica `EnhancedAutofillStructureParserV2`（数字类 ⇒ `USERNAME`，
+ * `AutofillDetectionPolicy.genericNumberFallbackAccuracy()`＝`LOW`）+ `shouldKeepTarget`
+ * （账号类「精度 ≥ MEDIUM 或存在密码目标」须保留），见
+ * `docs/references/自动填充关联记忆与字段识别的参考项目对照.md` §3.2。
  */
 object AutofillFieldScanner {
 
@@ -110,6 +117,7 @@ object AutofillFieldScanner {
     private const val TYPE_TEXT_VARIATION_WEB_PASSWORD = 0x000000e0
     private const val TYPE_TEXT_VARIATION_EMAIL_ADDRESS = 0x00000020
     private const val TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS = 0x000000d0
+    private const val TYPE_NUMBER_VARIATION_NORMAL = 0x00000000
     private const val TYPE_NUMBER_VARIATION_PASSWORD = 0x00000010
 
     /**
@@ -179,13 +187,31 @@ object AutofillFieldScanner {
 
             val usernameConfidence = usernameSignal(node)
             if (usernameConfidence != FieldConfidence.NONE) {
-                usernameCandidates.add(Candidate(node.id, rank(usernameConfidence, node.isFocused)))
+                usernameCandidates.add(
+                    Candidate(
+                        id = node.id,
+                        score = rank(usernameConfidence, node.isFocused),
+                        numericFallback = isNumericOnlyUsernameSource(node)
+                    )
+                )
             }
         }
 
-        val bestUsername = usernameCandidates.maxByOrNull { it.score }
+        // ISSUE-P3-529：账号择优次序＝「有文本信号者优先于数字类兜底档」，同档内按既有 rank 降序
+        // （原实现直接 maxByOrNull(score)，会让同为 LOW 的数字类框在条序靠前时**抢占**真正的账号框）
+        val bestAnyUsername = usernameCandidates.maxWithOrNull(
+            compareBy<Candidate> { if (it.numericFallback) 0 else 1 }.thenBy { it.score }
+        )
         val bestPassword = passwordCandidates.maxByOrNull { it.score }
         val bestOtp = otpCandidates.maxByOrNull { it.score }
+        // ISSUE-P3-529 登录上下文门：数字类兜底档**单独**成立时须有密码目标才保留
+        // （对齐 Monica `shouldKeepTarget`：账号类「精度 ≥ MEDIUM 或存在密码目标」）——
+        // 否则纯数字的数量 / 金额 / 搜索框会被当成账号目标
+        val bestUsername = if (bestAnyUsername?.numericFallback == true) {
+            bestAnyUsername.takeIf { bestPassword != null }
+        } else {
+            bestAnyUsername
+        }
 
         return ScanResult(
             usernameId = bestUsername?.id,
@@ -227,14 +253,43 @@ object AutofillFieldScanner {
         else -> FieldConfidence.NONE
     }
 
-    /** 账号信号强度：hint > inputType/htmlName > label */
+    /** 账号信号强度：hint > inputType/htmlName > label > 数字类兜底（ISSUE-P3-529 新增末档） */
     private fun usernameSignal(node: ScanNode): FieldConfidence = when {
         node.autofillHints.any { isUsernameHint(it) } -> FieldConfidence.HIGH
         isAccountInputType(node.inputType) -> FieldConfidence.MEDIUM
         isUsernameHtmlName(node.htmlName) -> FieldConfidence.MEDIUM
         isUsernameLabel(node.label) -> FieldConfidence.LOW
+        isNumericAccountInputType(node.inputType) -> FieldConfidence.LOW
         else -> FieldConfidence.NONE
     }
+
+    /**
+     * ISSUE-P3-529：数字类账号框信号（`TYPE_CLASS_NUMBER` + **普通**变体）。
+     *
+     * 对象是「QQ 号 / 工号 / 学号 / 会员号」这类**纯数字账号栏**（中文应用常见）：
+     * 提示文案不含任何账号术语、`idEntry` 也无 `user/login/account` 词根，唯一可用的结构信号
+     * 就是数字类输入类型。精度取 `LOW`（最弱档，对齐 Monica
+     * `AutofillDetectionPolicy.genericNumberFallbackAccuracy()`）；是否保留另由
+     * [scan] 的**登录上下文门**裁决（须同表单存在密码目标）。
+     *
+     * `TYPE_NUMBER_VARIATION_PASSWORD` 变体不走本档——它由 [passwordSignal] 按密码处理。
+     */
+    fun isNumericAccountInputType(inputType: Int): Boolean {
+        val clazz = inputType and TYPE_MASK_CLASS
+        val variation = inputType and TYPE_MASK_VARIATION
+        return clazz == TYPE_CLASS_NUMBER && variation == TYPE_NUMBER_VARIATION_NORMAL
+    }
+
+    /**
+     * 该节点是否**仅因**数字类兜底档成为账号候选（更高档的文本信号一概未命中）。
+     * 用于 [scan] 的登录上下文门与账号择优次序——更高档命中时本档不参与标记。
+     */
+    private fun isNumericOnlyUsernameSource(node: ScanNode): Boolean =
+        isNumericAccountInputType(node.inputType) &&
+            !isAccountInputType(node.inputType) &&
+            !isUsernameHtmlName(node.htmlName) &&
+            !isUsernameLabel(node.label) &&
+            node.autofillHints.none { isUsernameHint(it) }
 
     private fun rank(confidence: FieldConfidence, isFocused: Boolean): Int =
         confidence.score * 10 + if (isFocused) 1 else 0
@@ -329,5 +384,10 @@ object AutofillFieldScanner {
         return AutofillFieldLexicon.tokensOf(haystack).any { it in AutofillFieldLexicon.NON_CREDENTIAL_TOKEN_TERMS }
     }
 
-    private data class Candidate(val id: String, val score: Int)
+    private data class Candidate(
+        val id: String,
+        val score: Int,
+        /** ISSUE-P3-529：是否仅由「数字类兜底档」成立（登录上下文门与择优次序用） */
+        val numericFallback: Boolean = false
+    )
 }

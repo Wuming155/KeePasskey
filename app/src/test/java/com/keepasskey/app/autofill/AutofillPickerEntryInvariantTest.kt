@@ -1,5 +1,6 @@
 package com.keepasskey.app.autofill
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -25,6 +26,7 @@ class AutofillPickerEntryInvariantTest {
 
     private val service = readSource(SERVICE)
     private val builders = readSource(BUILDERS)
+    private val candidates = readSource(CANDIDATES)
 
     @Test
     fun `选择器入口必须无条件挂入`() {
@@ -67,13 +69,34 @@ class AutofillPickerEntryInvariantTest {
     @Test
     fun `自动候选仍须经严格匹配与绑定门控`() {
         // 与上一条互补：放宽的只有「手动指认」这一条路，自动候选一条都没放宽
+        // ISSUE-P3-528：候选集解析已自 BUILDERS 拆至 CANDIDATES（行数闸门），判据随搬运更新被读文件
         assertTrue(
             "自动候选必须经 AutofillCandidateRanker 严格匹配",
-            builders.contains("AutofillCandidateRanker.rank(")
+            candidates.contains("AutofillCandidateRanker.rank(")
         )
         assertTrue(
             "android:// 维度必须经包名 + 签名绑定门控",
-            builders.contains("AndroidPackageBindingPolicy.isPackageDimensionAuthorized(")
+            candidates.contains("AndroidPackageBindingPolicy.isPackageDimensionAuthorized(")
+        )
+    }
+
+    @Test
+    fun `非匹配准入只有关联记忆一条且键含签名`() {
+        // ISSUE-P3-528 立规：本批新增的关联记忆档是**唯一**不经匹配的准入来源，
+        // 故此处把「其唯一性 + 键含签名摘要 + 记忆条目仍走强制确认」三条固化为不变量，
+        // 防止日后被扩成第二条旁路（那正是 P2-46 绑定门被绕过的形态）。
+        assertEquals(
+            "非匹配准入来源只允许一处（多一处即意味着又开了一条旁路）",
+            1,
+            Regex("""autofillCallerEntryMemory\.recall\(""").findAll(candidates).count()
+        )
+        assertTrue(
+            "记忆召回必须以调用方签名摘要集合为键（换签名即不命中）",
+            candidates.contains("autofillCallerEntryMemory.recall(callingPkg, callerCertDigests)")
+        )
+        assertTrue(
+            "记忆档不得豁免二次确认：数据集装配仍须走 attachConfirmationAuth",
+            builders.contains("attachConfirmationAuth(")
         )
     }
 
@@ -86,6 +109,9 @@ class AutofillPickerEntryInvariantTest {
     private companion object {
         const val SERVICE = "app/src/main/java/com/keepasskey/app/autofill/KeePasskeyAutofillService.kt"
         const val BUILDERS = "app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt"
+
+        /** ISSUE-P3-528：候选集解析（严格匹配 + 包名维度绑定门控 + 关联记忆召回）所在文件 */
+        const val CANDIDATES = "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt"
 
         val repositoryRoot: File by lazy {
             var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile

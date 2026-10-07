@@ -404,4 +404,97 @@ class AutofillCandidateRankerTest {
 
         assertTrue("纯信号词不构成入选条件", ranked.isEmpty())
     }
+
+    // ── ISSUE-P3-528：调用方关联记忆档（唯一一条不依赖匹配的准入来源） ──────────────
+
+    @Test
+    fun `关联记忆命中条目不经匹配即入选`() {
+        // 纯 App 场景：条目无 android:// 绑定、无 webDomain ⇒ 严格匹配恒不命中
+        val remembered = entry(hexIdOf(7), "", title = "QQ")
+        val unrelated = entry(hexIdOf(8), "https://other.example.org")
+
+        val ranked = AutofillCandidateRanker.rank(
+            entries = listOf(unrelated, remembered),
+            callingPackage = "com.tencent.mobileqq",
+            webDomain = null,
+            packageDimensionAuthorized = false,
+            rememberedEntryId = remembered.id.toHexString()
+        )
+
+        assertEquals(1, ranked.size)
+        assertEquals(remembered.id.toHexString(), ranked.first().entry.id.toHexString())
+        assertEquals(150, ranked.first().score)
+        assertTrue(
+            AutofillCandidateRanker.MatchReason.REMEMBERED_CALLER_ENTRY in ranked.first().reasons
+        )
+    }
+
+    @Test
+    fun `关联记忆命中置于严格匹配候选之前`() {
+        val exact = entry(hexIdOf(1), "https://github.com")
+        val remembered = entry(hexIdOf(2), "https://other.example.org")
+
+        val ranked = AutofillCandidateRanker.rank(
+            entries = listOf(exact, remembered),
+            callingPackage = "",
+            webDomain = "github.com",
+            packageDimensionAuthorized = false,
+            rememberedEntryId = remembered.id.toHexString()
+        )
+
+        assertEquals(2, ranked.size)
+        assertEquals(remembered.id.toHexString(), ranked.first().entry.id.toHexString())
+        assertTrue(AutofillCandidateRanker.MatchReason.EXACT_DOMAIN in ranked[1].reasons)
+    }
+
+    @Test
+    fun `传 null 时关联记忆对结果零影响`() {
+        val unrelated = entry(hexIdOf(1), "https://other.example.org")
+
+        val ranked = AutofillCandidateRanker.rank(
+            entries = listOf(unrelated),
+            callingPackage = "com.example.app",
+            webDomain = null,
+            packageDimensionAuthorized = true,
+            rememberedEntryId = null
+        )
+
+        assertTrue("记忆未命中不得放宽任何匹配条件", ranked.isEmpty())
+    }
+
+    @Test
+    fun `关联记忆命中的已过期条目仍被排除`() {
+        val expired = KdbxEntry(
+            id = KdbxUuid.fromHexString(hexIdOf(3)),
+            fields = mapOf(KdbxConstants.Fields.URL to ProtectedString("", isProtected = false)),
+            times = KdbxTimes(expires = true, expiryTime = Instant.parse("2020-01-01T00:00:00Z"))
+        )
+
+        val ranked = AutofillCandidateRanker.rank(
+            entries = listOf(expired),
+            callingPackage = "com.example.app",
+            webDomain = null,
+            packageDimensionAuthorized = false,
+            rememberedEntryId = expired.id.toHexString()
+        )
+
+        assertTrue(ranked.isEmpty())
+    }
+
+    @Test
+    fun `关联记忆命中不被候选上限截断`() {
+        val strictEntries = (1..9).map { entry(hexIdOf(it), "https://github.com") }
+        val remembered = entry(hexIdOf(20), "https://other.example.org")
+
+        val ranked = AutofillCandidateRanker.rank(
+            entries = strictEntries + remembered,
+            callingPackage = "",
+            webDomain = "github.com",
+            packageDimensionAuthorized = false,
+            rememberedEntryId = remembered.id.toHexString()
+        )
+
+        assertEquals(AutofillCandidateRanker.DEFAULT_LIMIT, ranked.size)
+        assertEquals(remembered.id.toHexString(), ranked.first().entry.id.toHexString())
+    }
 }

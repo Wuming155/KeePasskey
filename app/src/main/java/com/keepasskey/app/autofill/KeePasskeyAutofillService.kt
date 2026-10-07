@@ -65,6 +65,12 @@ class KeePasskeyAutofillService : AutofillService() {
     @Inject
     lateinit var autofillLastFilledStore: AutofillLastFilledStore
 
+    // ISSUE-P3-528：调用方「包名 + 签名摘要」维度的关联记忆（Monica 互动记忆机制吸收）——
+    // 命中即成为候选并置首（准入依据＝用户此前在该调用方上已发生的**显式交付**，非模糊匹配）；
+    // 记忆条目仍挂强制二次确认，未授权调用方不受影响（键含签名摘要，见 AutofillCallerEntryMemory）
+    @Inject
+    lateinit var autofillCallerEntryMemory: AutofillCallerEntryMemory
+
     // ISSUE-P3-42：会话授权宽限开关（默认关闭；关闭时根本不查询授权存储）
     @Inject
     lateinit var settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore

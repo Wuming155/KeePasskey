@@ -105,7 +105,12 @@ class AndroidPackageBindingWiringTest {
 
     @Test
     fun `排序器调用点必须传入授权判定结果`() {
-        val source = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt")
+        // ISSUE-P3-528：候选集解析（含本判定的消费点）已自 AutofillDatasetBuilders.kt
+        // 按职责拆至 AutofillUnlockedCandidates.kt（原文件随本批越入 tier1 行数闸门）——
+        // 判据一字未改，只随搬运更新被读文件
+        val source = readSource(
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt"
+        )
 
         assertTrue(
             "候选排序必须按 AndroidPackageBindingPolicy 的判定结果给出包名维度授权",

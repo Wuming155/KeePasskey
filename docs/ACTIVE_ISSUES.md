@@ -64,7 +64,7 @@
 - **依赖**：`ISSUE-P2-528`（§467）已闭环——它解释了「云端那份为何与新口令不一致」这一成因；本条是其**出口面**的补齐。
 - **裁决口径（代理裁决，可逆）**：**不做**「冲突时自动另存副本」的自动策略（会堆积副本且语义模糊），只把「保留副本」挂在上述**人为破坏性取舍**处。
 
-## P3 低危问题、特性接线与体验优化（3 项）
+## P3 低危问题、特性接线与体验优化（2 项）
 
 > **新增（2026-10-07，用户真机反馈）**：`ISSUE-P3-528` / `ISSUE-P3-529` 出自用户 2026-10-07 的 QQ 登录
 > 填充实测截图（Android 自动填充通道，非 CM）。两条均为**只读静态核对 + 截图**产出：**未在设备上
@@ -81,119 +81,13 @@
 > **`ISSUE-P2-529`**（库文件级「保留副本」出口），与本条目的 `ISSUE-P3-528` / `ISSUE-P3-529`**仅为数字相同、
 > 主题无关**（跨严重度同数字在本仓既有先例，如 `P2-518` 与 `P3-518`）。**另：§467 批次号已被该并行线占用，
 > 本两条归档时须顺延取 §468 及以后**。
-
-### ISSUE-P3-528：自动填充「手动选择器」不写回应用关联——纯 App 场景每次都要手动重选（缺「记住」闭环）
-
-- **核实时间点**：2026-10-07；**核实方式**：用户真机截图 2 张 + 逐行核对填充候选链与选择器交付链
-  （截图：`Screenshot_2026-10-07-22-01-14-391_com.tencent.m.jpg` / `Screenshot_2026-10-07-22-01-17-394_com.tencent.m.jpg`，
-  应用 `com.tencent.mobileqq` 登录页）。
-- **背景 / 实测现象**：QQ 登录页点账号框与密码框都会弹出填充菜单，但菜单里**只有**「搜索全部条目…／
-  手动选择要填充的凭据」一项 —— 即**本批自动候选数为 0**（`buildPickerDataset` 是响应里唯一的数据集）。
-  用户选中条目后，密码能填进去；**但这条凭据与 QQ 的关联没有被记录**，下次仍需重新搜索手选。
-  用户原话：「哪怕你选中了密码并直接输入进去，软件也不会记录匹配的软件」。
-- **代码链路（三条独立事实，共同构成「关联永不落地」）**：
-  1. **候选准入**（`app/.../autofill/AutofillCandidateRanker.kt:199-203`）：纯 App 表单无 `webDomain`，
-     只能走包名维度；包名维度要求「调用方已完成包名+签名首次绑定」**且**条目 url 自身是
-     `android://<包名>`（`app/.../passkey/DomainMatcher.kt:210-215` `isAndroidPackageMatch` 只认该字面形态）
-     ⇒ 没有任何 `android://` 绑定的既有条目（导入库 / 手建 / 其它管理器迁入）**恒不入选**。
-  2. **选中后的写入面**（`app/.../autofill/AutofillPickerActivity.kt:365-376`）：用户手选条目时只写
-     `AutofillCallerTrustStore`（包名 + 签名摘要信任），**不触碰条目 URL**；全仓 `AutofillPackageNames.boundUrl(`
-     的消费点只有编辑页应用选择器（`ui/screens/edit/EntryEditUrlField.kt:92`）与 CM 保存链
-     （`data/repository/VaultEntryWriteCoordinator.kt:366,369`、`PasskeyEntryCoordinator.kt:377`），
-     `autofill/` 内**零命中** ⇒ 写完信任后条目 url 依旧不匹配，下次请求仍是 0 候选。
-  3. **保存通道也不补关联**（`data/repository/VaultEntryWriteCoordinator.kt:283-334`）：`saveAutofillCredential`
-     命中既有条目且账密未变时**幂等早退**（`:306-308` 直接 `return KdbxResult.Success(Unit)`），
-     既不新建也不补齐 URL。
-- **对照先例（已定向取证，见 [`references/自动填充关联记忆与字段识别的参考项目对照.md`](references/自动填充关联记忆与字段识别的参考项目对照.md)）**：
-  1. **Kp2a 就在自动填充流里做这件事**：其自动填充选择器走的任务类即 `SearchUrlTask`
-     （`services/Kp2aAutofill/ChooseForAutofillActivity.cs:83`），该任务重写 `CompleteOnCreateEntryActivity`
-     （`app/AppTask.cs:494-538`）弹「Remember search text?」（`Resources/values/strings.xml:368-369`），
-     确认后把搜索词写进条目 URL —— 纯 App 的搜索词即 `androidapp://<包名>`
-     （`services/AutofillBase/AutofillServiceBase.cs:235`）⇒ **写回的就是应用关联**；
-     三个前置否决＝库只读 / 搜索词为空 / 该条目已能被搜索词命中（`AppTask.cs:499-503`）。
-  2. **本仓应用内搜索侧已实现同形闭环**（`ISSUE-P3-442`：`ui/screens/vault/VaultSearchWriteBackCoordinator.kt`
-     + `SearchWriteBackPolicy.kt` + 字符串 `search_write_back_*`，只改 `URL` 一个字段、`{REF}` 拒绝写回、
-     只读/回收站一票否决）。
-  3. Monica 的写法**不询问**，而是条目菜单并列「填充」/「填充并保存 URI」两个显式动作
-     （`autofill_ng/AutofillPickerActivityV2.kt:1776-1777`、`ui/InlinePasswordDetailContent.kt:36-37,195-204`）；
-     本仓取 **Kp2a 式询问**——与应用内搜索侧口径一致，避免同一产品里两种写回交互并存。
-  ⇒ 缺的只是**自动填充侧**的接线（两条通道能力不对称）；但判定内核**不可直接照搬**：
-  `SearchWriteBackPolicy.isUrlTerm` 只认域名形态，`android://<包名>` 恒为 false，形态口径须另立一档。
-- **附带发现（本仓自查，如实登记、本条不改）**：`AutofillCandidateRanker.scoreEntry` 在 `score <= 0` 时
-  `return null`，而 `APP_TITLE_MATCH`（95）加成位于其后 ⇒ 「纯 App + 调用方未绑定」场景下该维度**不可达**
-  （§352 吸收的应用名维度，在它本该服务的场景里失效，当前仅剩「包名维度已授权时的排序」价值）。
-- **明确不在本条范围（改的是准入面，须另立条目 + 重开 `ISSUE-P2-46` 口径后方可做）**：Monica 的
-  `EXACT_APP_TITLE 95` / `PACKAGE_TOKEN_TITLE 70` 是**准入**档（`BitwardenLikeAutofillMatcherNg.kt:203-262`），
-  以及其「互动记忆可直接作为零命中来源」（`MonicaAutofillServiceNg.kt:836-877` `resolveLastFilledEntry`）——
-  两者都会让**未完成包名+签名首次绑定**的调用方拿到候选，与本仓 §352 已锁定的「应用名仅排序 + 纯标题相似不得入选」
-  及 P2-46 绑定门冲突，故**不在本条目**内实施。
-- **涉及文件（预估）**：`app/.../autofill/AutofillPickerActivity.kt`（提示与写回入口）、
-  新增判定内核（形态口径与 `SearchWriteBackPolicy` 分离：本次要写的是 `android://<包名>`，
-  是非域名形态）、`data/repository/VaultRepository`（已有 `updateEntryUrl` 通道，复用不新开写口）、
-  `res/values/strings.xml` + `values-en/strings.xml`（成对文案）。
-- **验收标准**：
-  ① 用户在手动选择器内选中条目后，应用**询问是否把该调用方关联写入该条目**，**显式同意才写**：
-     纯 App 写 `android://<调用方包名>`，浏览器场景写**归属校验后**的域（`resolveUsableWebDomain` 的产出，
-     **不得**用表单自报的原始 webDomain）；
-  ② 写入后**后续**填充请求中该条目成为自动候选（无需再手选）；用户拒绝时**不得**改动条目（含拒绝在
-     会话内不被持久化为永久拒绝）；
-  ③ fail-closed 边界（与 `SearchWriteBackPolicy.shouldOffer` 的四条否决**同形**：只读 / 回收站 / `{REF}` /
-     已覆盖）：只读会话 / 回收站内 / url 含 `{REF:…}` 一律不写；包名非法（`AutofillPackageNames.normalize`
-     为 null）或签名摘要不可读时**不产生**降级写入；写回只改 `URL` 一个字段（复用 `updateEntryUrl`），
-     `Override URL` 与自定义字段零触碰；
-  ④ 新增判定内核配 JVM 正/反两态用例；`.\gradlew.bat test` 全绿 **且** `python tools/doc/gate_readings.py`
-     全 PASS，读数块原样入批次文档；真机走查按 §434 先跑 `python tools/device/check_installed_build.py
-     --expect-symbol <本批新增符号>`。
-
-### ISSUE-P3-529：纯 App 登录表单「账号框」识别覆盖不足——QQ 号类中文提示 + 数字类 inputType，致只填密码不填账号
-
-- **核实时间点**：2026-10-07；**核实方式**：用户真机截图 2 张（QQ 登录页提示文案「输入QQ号」/「输入QQ密码」，
-  点账号框弹**数字键盘**）+ 逐行核对识别链 + **词表现查比对**（`AutofillFieldLexicon` 逐项 contains/token 比对）。
-- **背景 / 实测现象**：QQ 登录页点账号框弹出填充菜单后选中条目，**只有密码框被填入，账号框留空**
-  （用户原话：「最后也只能填充密码，不能账号和密码一起填充」）。同页在**点密码框**时同样只填密码。
-- **代码链路（三处可独立成立的覆盖缺口，叠加后账号框既不被识别也不被兜底合成）**：
-  1. **中文提示词表无「号」类泛化项**（`app/.../autofill/AutofillFieldLexicon.kt:10-20`）：
-     `USERNAME_SUBSTRING_TERMS` 有「手机号 / 手机号码 / 电话号码 / 账号 / 登录名…」但**没有** QQ 号这类
-     「<名称>+号」形态；且 `TOKEN_SPLIT_REGEX` 把 CJK 视作 `\p{L}`，提示「输入QQ号」整串是**一个 token**，
-     `USERNAME_TOKEN_TERMS` 亦不命中 ⇒ 两侧均不识别。
-  2. **数字类 inputType 不算账号类**（`app/.../autofill/AutofillFieldScanner.kt:259-266`）：
-     `isAccountInputType` 只认 `TYPE_CLASS_PHONE` 与邮箱变体；`TYPE_CLASS_NUMBER`（截图数字键盘所对应的类）
-     返回 false。
-  3. **兜底合成对数字类字段不生效**（`app/.../autofill/AutofillFieldFallback.kt:97-137`，闸门在 `:132-137`
-     `isSynthesizableInput`）：该兜底本意是「识别到密码框但缺账号框时，把聚焦字段合成为账号目标」，
-     但其输入类型闸门只放行「未知（0）/ 纯文本 / 账号类」，`TYPE_CLASS_NUMBER` 被判 false ⇒ 有密码框
-     也合不出账号框。
-  ⇒ 三条叠加后 `usernameId == null`，交付数据集只含密码（`buildAuthenticationResultDataset` 只写非空字段，
-  `app/.../autofill/AutofillAuthResultDelivery.kt:70-84`）⇒ 与截图现象一致。
-  **具体哪一处是 QQ 的触发点未定性**（需结构树 dump；三处均为**可独立成立**的覆盖缺口，故本条不押注单点）。
-- **为何不是「已接受限界」**：数字类账号框（QQ 号 / 工号 / 学号 / 会员号）在中文应用里常见，且
-  `docs/architecture/已知工程限界.md` 与 `产品裁决登记.md` 均无该形态的登记；这是**覆盖缺口**而非取舍。
-- **对照先例（已定向取证，见 [`references/自动填充关联记忆与字段识别的参考项目对照.md`](references/自动填充关联记忆与字段识别的参考项目对照.md) §3.2）**：Monica 对同一形态有**专门实现**——
-  `TYPE_CLASS_NUMBER` + `TYPE_NUMBER_VARIATION_NORMAL` 直接产出账号候选
-  （`EnhancedAutofillStructureParserV2.kt:1702-1718`），精度 `LOW`
-  （`AutofillDetectionPolicy.kt:74` `genericNumberFallbackAccuracy()`），
-  **保留门槛＝「表单存在密码目标」**（`:96-102` `shouldKeepTarget`：账号类「精度 ≥ MEDIUM **或** 有密码目标」）；
-  可见性另有一道更严的门（`:104-115`：账号类须 ≥ MEDIUM）⇒ 数字兜底**不会**让隐藏框被误收。
-  其注释两次点名 QQ（`:1648`「QQ 搜索框误弹修复」、`:1857`「无 password 术语的 QQ 搜索框不受影响」）
-  ⇒ 该兜底是**带登录上下文门**的，不是无条件放宽。上游出处为其自述对齐的 Bitwarden
-  （`updateForMissingPasswordFields`、「有 Login 字段就 Fillable」）。**Kp2a 侧本次取证未命中**同形兜底
-  （未命中声明见对照文档 §5，不得读作「Kp2a 没有该能力」）。
-- **验收标准**：
-  ① 纯 App（无 `webDomain`）登录表单中「数字类账号框 + 密码框」被识别为账号 / 密码目标，填充时**账密同时写入**；
-  ② **不得放宽**既有排除口径：搜索框 / 非凭据字段 / OTP 框仍排除，不可见账号框仍不参与，
-     `importantForAutofill=no` 仍尊重，`FieldConfidence` 档位与「多候选择优」语义不变；
-  ③ 整改口径取 **Monica 式**（对照文档 §4 第 6 行）：在**首轮**字段识别加「`TYPE_CLASS_NUMBER`（普通数字变体）
-     ⇒ 账号候选（`FieldConfidence.LOW`）」一档，并在目标解析处施加**「表单存在密码目标才保留」**门
-     （对齐 `shouldKeepTarget`）；可见性口径不动（账号类不可见仍须较高中等精度才准入）。
-     **不**采用泛化「号」子串（Monica 亦为枚举「工号 / 学号 / 职工号 / 员工编号」，泛化会在「订单号 / 工单号」
-     上误伤）；**不**以 `AutofillFieldFallback.isSynthesizableInput` 为主修（该兜底只覆盖「单字段聚焦」形态，
-     覆盖不到两个框都不聚焦的场景，可作为次要不变量同步维护）；
-  ④ 反例用例必配（三条，锁定不得回归）：① 无密码框的表单里纯数字框（数量 / 金额 / 搜索）**不得**入选账号目标；
-     ② 页面显式声明 OTP 的框仍排除；③ 无 password 术语的搜索框（Monica 踩过的「QQ 搜索框」形态）仍排除；
-  ⑤ **真机取证先行**：先在设备上 dump 该表单结构树（`hint` / `idEntry` / `inputType` / `importantForAutofill`
-     四项读数）并在批次文档留痕，再据实测形态定点整改；`*/src/androidTest/**` 的新增或修改用例必须真机实跑
-     （测试资产纪律②）；
-  ⑥ `.\gradlew.bat test` 全绿 **且** `python tools/doc/gate_readings.py` 全 PASS，读数块原样入批次文档。
+>
+> **闭环（2026-10-07，§468）**：`ISSUE-P3-528` / `ISSUE-P3-529` 两条已整改归档 —— 见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md) 与
+> [`resolved/batches/468-自动填充关联记忆与数字类账号框识别批次.md`](resolved/batches/468-自动填充关联记忆与数字类账号框识别批次.md)。
+> **机制侧已闭环**：`ISSUE-P3-529`＝首轮识别新增「数字类（`TYPE_CLASS_NUMBER` 普通变体）⇒ 账号候选 `LOW`」，
+> 并以「数字兜底档单独成立时须存在密码目标」为登录上下文门（Monica 口径）；`ISSUE-P3-528`＝调用方关联记忆
+> （键＝包名 + 签名摘要，Monica 互动记忆机制，用户 2026-10-07 裁决取此档）；两者合计新增 26 例用例。
+> **真机端未实测**（无可用设备）⇒ 残项转为下方 `ISSUE-P3-532`，**不得**据 §468 读作「QQ 已实测通过」。
 
 > **新增（2026-10-07，用户真机反馈）**：`ISSUE-P3-531` 是 `ISSUE-P3-530`（用户反馈「密码库锁定倒计时会
 > 出现负数」，经 `AskUserQuestion` 追问确认出现在**通知栏常驻通知**）整改后的**待办收尾**——整改本身
@@ -223,3 +117,24 @@
   （由「重投前先撤销」保证）。
 - **如实声明**：`uiautomator dump` 对带秒级倒计时的通知恒报 `could not get idle state`
   （`PD-71` 已记）⇒ 判据取 `dumpsys alarm` / `dumpsys notification` 的**结构读数**，不依赖无障碍树文本。
+
+### ISSUE-P3-532：QQ 登录页自动填充真机走查（`ISSUE-P3-528` / `ISSUE-P3-529` 的端到端残项）
+
+- **核实时间点**：2026-10-07；**核实方式**：§468 收工时的**如实声明**——两条现象的**机制侧**已闭环并经 JVM
+  用例锁定，但**真机端未实测**：本机在连设备为 Redmi 4X / LineageOS 且未安装 QQ；截图来源那台手机
+  （Xiaomi）未连 adb。
+- **待验清单（三条，逐条要真机读数）**：
+  ① `ISSUE-P3-529` AC⑤——dump QQ 登录页结构树（`hint` / `idEntry` / `inputType` / `importantForAutofill`
+     四项），确认「输入QQ号」框的 `inputType` 确为数字类、且本批数字类兜底档确实将其纳入账号目标；
+  ② 「账密同时填入」端到端——选择器选中条目后 QQ 号框与密码框**同时**被填（§468 前只填密码）；
+  ③ `ISSUE-P3-528` 的「下次直接出候选」——首次手选并交付后，**下一次**触发填充时该条目直接出现在候选菜单
+     （无需再搜索手选），即关联记忆在真机链路上的可见效果。
+- **执行前置**：按 §434 先跑 `python tools/device/check_installed_build.py --expect-symbol <§468 新增符号>`；
+  按 §263 确认设备上无待保留数据或改用 AVD；若以 debug 包走查，注意设备上 release 包（`com.keepasskey`）
+  与之并存时**不得**覆盖安装（`com.keepasskey.debug` 为独立 applicationId，把系统自动填充服务切到 debug 包即可）。
+- **验收标准**：① 三条读数均落批次文档（结构树实测 + 填充可见结果 + 记忆命中日志
+  `调用方关联记忆命中，本条候选含该条目`）；② 任一条件不成立即**按新缺陷另立条目**并在批次文档写明实测形态，
+  **不得**就地改写 §468 的结论；③ 走查通过后本条目整条闭环归档。
+- **不得外推**：本条目是**验证**任务，**不授权**为通过验证而放宽任何匹配 / 准入口径；记忆档仍须
+  「键＝包名 + 签名摘要」，且不得成为绕过 `ISSUE-P2-46` 的第二条旁路
+  （唯一性已由 `AutofillPickerEntryInvariantTest` 的专用用例钉住）。

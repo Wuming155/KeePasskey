@@ -247,11 +247,29 @@ class AlgoHotPathGuardsTest {
 
     @Test
     fun `自动填充请求内的重复读取必须收敛`() {
-        val builders = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt")
+        // ISSUE-P3-528：候选集解析（含归属解析与包名维度绑定校验的共用点）已自
+        // AutofillDatasetBuilders.kt 拆至 AutofillUnlockedCandidates.kt；判据不变，随搬运更新被读文件
+        val candidates =
+            stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt")
         assertEquals(
             "调用方证书摘要只允许读一次（归属解析与包名维度绑定校验共用同一份快照）",
             1,
-            Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(builders).count()
+            Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(candidates).count()
+        )
+        // ISSUE-P3-528：选择器路径同样「一次读取、多处共用」（首次绑定写入 + 交付点关联记忆写入）
+        val picker = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt")
+        assertEquals(
+            "选择器内调用方证书摘要只允许读一次（首次绑定与关联记忆共用同一份快照）",
+            1,
+            Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(picker).count()
+        )
+        // ISSUE-P3-528：确认页复用归属快照（`callerAttribution.certSha256Hex`），不得再读一次
+        val confirm =
+            stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt")
+        assertEquals(
+            "确认页必须复用归属快照中的主摘要，不得重复读取调用方证书摘要",
+            0,
+            Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(confirm).count()
         )
         val resolver = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillOriginResolver.kt")
         assertTrue(

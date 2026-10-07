@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.core.log.AppLog
 
 /**
@@ -37,3 +38,28 @@ fun resolveAutofillPickerRequester(
 }
 
 private const val TAG = "AutofillPicker"
+
+/**
+ * 选择器路径的**会话授权宽限上下文**解析（`ISSUE-P3-185`，自 `AutofillPickerActivity`
+ * 抽出以控其分档）。
+ *
+ * 与数据集路径同口径：域经 [AutofillOriginResolver.resolveUsableWebDomain] 归属校验
+ * （与确认页写入 `EXTRA_GRANT_DOMAIN`、数据集查询所用域同源），不可归属 → 归一化为 null
+ * → 授权存储自身既不写入也不命中（fail-closed，见 [AutofillSessionGrantStore]）。
+ * 开关关闭 / 包名缺失时返回 null（不做归属校验的网络开销，行为与既有一致）。
+ */
+internal suspend fun resolveAutofillPickerGrantContext(
+    intent: Intent,
+    settingsStore: ExtendedSettingsStore,
+    autofillOriginResolver: AutofillOriginResolver
+): AutofillGrantContext? {
+    if (!settingsStore.isAutofillSessionGrantEnabled()) return null
+    val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE)
+        ?.takeIf { it.isNotBlank() }
+        ?: return null
+    val verifiedDomain = autofillOriginResolver.resolveUsableWebDomain(
+        callingPackage,
+        intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
+    )
+    return AutofillGrantContext(callingPackage, verifiedDomain)
+}

@@ -260,4 +260,120 @@ class AutofillFieldScannerTest {
         assertNull(result.usernameId)
         assertNull(result.passwordId)
     }
+
+    // ── ISSUE-P3-529：数字类账号框兜底档（QQ 号形态）与登录上下文门 ──────────────
+
+    @Test
+    fun `数字类账号框与密码框同现时被识别为账号目标`() {
+        // QQ 登录页形态：提示文案无账号术语（「输入QQ号」不在词表内）、数字类输入框、无 htmlName
+        val nodes = listOf(
+            ScanNode(id = "qq_uin", inputType = 0x00000002, label = "输入QQ号", packageName = "com.tencent.mobileqq"),
+            ScanNode(id = "qq_pwd", inputType = 0x00000081, label = "输入QQ密码", packageName = "com.tencent.mobileqq")
+        )
+
+        val result = AutofillFieldScanner.scan(nodes)
+
+        assertEquals("qq_uin", result.usernameId)
+        assertEquals("qq_pwd", result.passwordId)
+        assertEquals(FieldConfidence.LOW, result.usernameConfidence)
+        assertTrue("有密码目标 ⇒ 不判为纯密码登录", !result.isPasswordOnlyLogin)
+    }
+
+    @Test
+    fun `无密码框时数字类框不得成为账号目标`() {
+        // 纯数字表单（数量 / 金额 / 搜索）不得因兜底档被当成账号目标
+        val nodes = listOf(
+            ScanNode(id = "amount", inputType = 0x00000002, label = "请输入数量", packageName = "com.example.shop")
+        )
+
+        val result = AutofillFieldScanner.scan(nodes)
+
+        assertNull(result.usernameId)
+        assertNull(result.passwordId)
+    }
+
+    @Test
+    fun `数字类框不得抢占有文本信号的账号框`() {
+        // 同为 LOW（label 文本 10 分 vs 数字兜底 10 分）时须优先文本信号，即便数字框在条序靠前
+        val nodes = listOf(
+            ScanNode(id = "numeric_first", inputType = 0x00000002, label = "数量", packageName = "app"),
+            ScanNode(id = "labeled_user", inputType = 1, label = "用户名", packageName = "app"),
+            ScanNode(id = "pwd", inputType = 0x00000081, packageName = "app")
+        )
+
+        val result = AutofillFieldScanner.scan(nodes)
+
+        assertEquals("labeled_user", result.usernameId)
+        assertEquals(FieldConfidence.LOW, result.usernameConfidence)
+    }
+
+    @Test
+    fun `数字类框聚焦加成也不得抢占非聚焦的文本账号框`() {
+        val nodes = listOf(
+            ScanNode(id = "numeric_focused", inputType = 0x00000002, isFocused = true, packageName = "app"),
+            ScanNode(id = "labeled_user", inputType = 1, label = "用户名", packageName = "app"),
+            ScanNode(id = "pwd", inputType = 0x00000081, packageName = "app")
+        )
+
+        assertEquals("labeled_user", AutofillFieldScanner.scan(nodes).usernameId)
+    }
+
+    @Test
+    fun `数字类密码变体仍按密码处理`() {
+        // TYPE_CLASS_NUMBER | TYPE_NUMBER_VARIATION_PASSWORD（0x12）：走密码通道，不落入账号兜底档
+        val nodes = listOf(ScanNode(id = "pin", inputType = 0x00000012, packageName = "app"))
+
+        val result = AutofillFieldScanner.scan(nodes)
+
+        assertEquals("pin", result.passwordId)
+        assertNull(result.usernameId)
+    }
+
+    @Test
+    fun `显式声明的 OTP 数字框优先于账号兜底档`() {
+        val nodes = listOf(
+            ScanNode(id = "otp", autofillHints = listOf("smsOtpCode"), inputType = 0x00000002, packageName = "app"),
+            ScanNode(id = "pwd", inputType = 0x00000081, packageName = "app")
+        )
+
+        val result = AutofillFieldScanner.scan(nodes)
+
+        assertEquals("otp", result.otpId)
+        assertNull(result.usernameId)
+    }
+
+    @Test
+    fun `数字类搜索框仍按搜索排除`() {
+        val nodes = listOf(
+            ScanNode(id = "search", inputType = 0x00000002, label = "搜索", packageName = "app"),
+            ScanNode(id = "pwd", inputType = 0x00000081, packageName = "app")
+        )
+
+        assertNull(AutofillFieldScanner.scan(nodes).usernameId)
+    }
+
+    @Test
+    fun `数字类框不可见时不参与账号识别`() {
+        val nodes = listOf(
+            ScanNode(id = "hidden_numeric", inputType = 0x00000002, isVisible = false, packageName = "app"),
+            ScanNode(id = "pwd", inputType = 0x00000081, packageName = "app")
+        )
+
+        assertNull(AutofillFieldScanner.scan(nodes).usernameId)
+    }
+
+    @Test
+    fun `页面禁止填充时数字类框按尊重口径跳过`() {
+        val nodes = listOf(
+            ScanNode(id = "numeric", inputType = 0x00000002, importantForAutofill = false, packageName = "app"),
+            ScanNode(id = "pwd", inputType = 0x00000081, packageName = "app")
+        )
+
+        assertNull(AutofillFieldScanner.scan(nodes, respectImportantForAutofill = true).usernameId)
+        // overrideNoAutofill（不尊重页面标记）时既有的密码通道仍放行，数字类账号框亦随之参与
+        assertEquals(
+            "numeric",
+            AutofillFieldScanner.scan(nodes, respectImportantForAutofill = false).usernameId
+        )
+    }
 }

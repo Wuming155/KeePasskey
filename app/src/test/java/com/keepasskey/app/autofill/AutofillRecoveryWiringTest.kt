@@ -104,7 +104,9 @@ class AutofillRecoveryWiringTest {
 
     @Test
     fun `两处打分调用点都下传调用方应用名`() {
-        val buildersSource = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt")
+        // ISSUE-P3-528：服务端装配处的调用点已自 AutofillDatasetBuilders.kt 拆至
+        // AutofillUnlockedCandidates.kt（行数闸门）；判据不变，只更新被读文件
+        val buildersSource = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt")
         val unlockSource = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockActivity.kt")
         assertTrue("服务端装配未下传应用名", buildersSource.contains("callingAppLabel = callerAppLabelOrNull("))
         assertTrue("解锁路由未下传应用名", unlockSource.contains("callingAppLabel = callerAppLabelOrNull("))

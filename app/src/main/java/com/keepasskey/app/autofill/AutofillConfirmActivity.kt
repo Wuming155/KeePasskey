@@ -93,6 +93,10 @@ class AutofillConfirmActivity : FragmentActivity() {
     @Inject
     lateinit var autofillLastFilledStore: AutofillLastFilledStore
 
+    // ISSUE-P3-528：调用方关联记忆（键＝包名 + 签名摘要）写入点——数据集路径的真实交付点是本页
+    @Inject
+    lateinit var autofillCallerEntryMemory: AutofillCallerEntryMemory
+
     // ISSUE-P2-384：认证回传前复检字段级屏蔽（与选择器同源策略）
     @Inject
     lateinit var autofillFieldBlocklistStore: AutofillFieldBlocklistStore
@@ -105,6 +109,12 @@ class AutofillConfirmActivity : FragmentActivity() {
     private val pickerViewModel: AutofillPickerViewModel by viewModels()
 
     private var completed = false
+
+    /**
+     * ISSUE-P1-24 AC① / ISSUE-P3-528：本次确认的调用方归属快照——关联记忆写入复用其主摘要，
+     * 不在交付点二次读取调用方证书摘要（每次读取含一次 `getPackageInfo` + 逐签名者 SHA-256）。
+     */
+    private var callerAttribution: AutofillCallerAttribution? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,6 +136,8 @@ class AutofillConfirmActivity : FragmentActivity() {
             val callerAttribution = resolveAutofillConfirmCallerAttribution(
                 intent, autofillOriginResolver, callerTrustStore
             )
+            // ISSUE-P3-528：留存归属快照供交付点复用（关联记忆写入不再二次读取摘要）
+            this@AutofillConfirmActivity.callerAttribution = callerAttribution
             val subtitle = buildString {
                 append(localizedContext.getString(R.string.fill_confirm_biometric_subtitle, credentialTitle))
                 // 已授权目标走系统认证弹窗时无法渲染归属块，把不可伪造锚点（包名）并入副标题
@@ -211,8 +223,13 @@ class AutofillConfirmActivity : FragmentActivity() {
         }
         // ISSUE-P3-39：记录本次确认填充的条目，供下次同站点/应用填充时置顶
         // （仅影响候选排序，不改变任何匹配与放行判定）
-        intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() }
-            ?.let { autofillLastFilledStore.record(it) }
+        intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() }?.let { entryId ->
+            autofillLastFilledStore.record(entryId)
+            // ISSUE-P3-528：同点写入关联记忆（键＝包名 + 签名摘要；摘要取自归属快照，快照缺失即不写）
+            callerAttribution?.let {
+                autofillCallerEntryMemory.remember(it.packageName, it.certSha256Hex, entryId)
+            }
+        }
 
         // ISSUE-P3-42：开启会话授权宽限时，记录本次确认的「包名 + 域」，
         // 使 30 秒内对同一站点/应用的重复填充免二次确认（库锁定态不适用）。

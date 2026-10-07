@@ -14,6 +14,13 @@ import com.keepasskey.core.model.PasskeyData
  *   入选项必须先通过既有的严格匹配（[DomainMatcher.isDomainMatch] / [DomainMatcher.isAndroidPackageMatch]，
  *   无任何 title/notes 启发式）。`webDomain` 的归属校验由调用方（[AutofillOriginResolver]）负责，
  *   进入本类时已被判定为可用；
+ * - **唯一例外且是刻意例外**（ISSUE-P3-528）：`rememberedEntryId` 命中的条目不经匹配即入选。
+ *   其准入依据**不是**任何形式的模糊匹配，而是「用户在**同一调用方**（包名 + 签名摘要）上
+ *   此前已显式选中并交付过这一条」这一既成事实——该授权强度不低于 `android://` 首次绑定
+ *   （`ISSUE-P2-46`），且不构成对未授权调用方的放行：记忆键含签名摘要，换签名 / 重打包不命中，
+ *   包名非法一律 null（见 [AutofillCallerEntryMemory]）。记忆条目进入候选后**仍挂强制二次确认**，
+ *   用户仍看到调用方归属。**不得**在此基础上再引入 title / 应用名一类的准入档（那会绕过
+ *   `ISSUE-P2-46`，见 `docs/references/自动填充关联记忆与字段识别的参考项目对照.md` §4 第 5 行）。
  * - **包名维度另受 ISSUE-P2-46 门控**：`android://` 绑定只有在调用方完成「包名 + 签名摘要」首次绑定后
  *   才参与放行（判定由调用方经 `packageDimensionAuthorized` 显式传入，见 [rank]）；
  * - 打分仅用于「同一批已匹配候选」的排序，分数高低不改变「是否可填充」这一事实。
@@ -62,7 +69,17 @@ object AutofillCandidateRanker {
         APP_TITLE_MATCH,
 
         /** Wi-Fi 设置上下文加成（条目携带 Wi-Fi 信号词；仅排序加成；ISSUE-P3-373 AC①） */
-        WIFI_CONTEXT_MATCH
+        WIFI_CONTEXT_MATCH,
+
+        /**
+         * `ISSUE-P3-528`：调用方关联记忆命中（Monica `resolveLastFilledEntry` 吸收，
+         * 键＝包名 + 签名摘要，见 [AutofillCallerEntryMemory]）。
+         *
+         * **本档的准入依据不是匹配**，而是「用户此前在该调用方上**显式选中并交付过**这一条」这一
+         * 已发生的事实（记忆由选择器 / 确认页在交付成功后写入）。它不受
+         * `webDomain` / `android://` 绑定是否存在约束，故纯 App 场景首次手选后即可持续命中。
+         */
+        REMEMBERED_CALLER_ENTRY
     }
 
     data class Ranked(
@@ -90,6 +107,12 @@ object AutofillCandidateRanker {
     private const val SCORE_WIFI_CONTEXT_BOOST = 70
 
     /**
+     * 调用方关联记忆档（ISSUE-P3-528）：**高于全部匹配档**，使命中条目置于首位。
+     * 该档不参与匹配判定（准入依据见 [MatchReason.REMEMBERED_CALLER_ENTRY]）。
+     */
+    private const val SCORE_REMEMBERED_CALLER_ENTRY = 150
+
+    /**
      * 对候选条目执行「匹配判定 + 打分 + 排序 + 截断」。
      *
      * @param entries 库内全部条目（Core 层直出）
@@ -108,6 +131,10 @@ object AutofillCandidateRanker {
      * @param wifiContext ISSUE-P3-373 AC①：调用方是否为 Wi-Fi 设置类应用
      *   （[WifiFillBoostPolicy.isWifiSettingsPackage]）；true 时对携带 Wi-Fi 信号词的条目
      *   给排序加成，同样**只改排序不改准入**
+     * @param rememberedEntryId ISSUE-P3-528：调用方关联记忆命中的条目标识（hex）。
+     *   **唯一一条不依赖匹配的准入来源**——依据是用户在该调用方上的既有显式交付
+     *   （记忆键含包名 + 签名摘要，见 [AutofillCallerEntryMemory]）；传入时该条目恒成为候选并置首位，
+     *   但仍受「已过期条目排除」约束。传 null（未命中）时本参数对结果零影响。
      * @return 按优先级降序排列的候选，长度 ≤ [limit]
      */
     fun rank(
@@ -118,7 +145,8 @@ object AutofillCandidateRanker {
         lastFilledEntryId: String? = null,
         limit: Int = DEFAULT_LIMIT,
         callingAppLabel: String? = null,
-        wifiContext: Boolean = false
+        wifiContext: Boolean = false,
+        rememberedEntryId: String? = null
     ): List<Ranked> {
         if (entries.isEmpty()) return emptyList()
 
@@ -126,8 +154,23 @@ object AutofillCandidateRanker {
             ?.let { DomainMatcher.extractDomain(it) }
             ?.takeIf { it.isNotEmpty() }
 
-        val scored = entries.mapNotNull {
-            scoreEntry(it, callingPackage, normalizedDomain, packageDimensionAuthorized, callingAppLabel, wifiContext)
+        val scored = entries.mapNotNull { entry ->
+            if (rememberedEntryId != null &&
+                entry.id.toHexString().equals(rememberedEntryId, ignoreCase = true)
+            ) {
+                // 记忆命中：不参与匹配判定（准入依据是用户已发生的显式交付），但仍排除已过期条目
+                if (isEntryExpired(entry)) null
+                else Ranked(
+                    entry = entry,
+                    score = SCORE_REMEMBERED_CALLER_ENTRY,
+                    reasons = setOf(MatchReason.REMEMBERED_CALLER_ENTRY)
+                )
+            } else {
+                scoreEntry(
+                    entry, callingPackage, normalizedDomain, packageDimensionAuthorized,
+                    callingAppLabel, wifiContext
+                )
+            }
         }
         if (scored.isEmpty()) return emptyList()
 
