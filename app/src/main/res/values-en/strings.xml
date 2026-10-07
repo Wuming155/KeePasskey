@@ -917,6 +917,11 @@
     <string name="err_unknown">Unknown error</string>
     <string name="err_open_create_failed">Failed to create the database</string>
     <string name="err_open_unlock_failed">Failed to unlock the database</string>
+    <!-- ISSUE-P2-521: corrupted-file classification (distinct from credential errors) -->
+    <string name="err_open_corrupt_file">The database file is corrupted or unreadable. If an automatic backup exists, you can restore from it</string>
+    <string name="unlock_restore_action">Restore from backup</string>
+    <string name="unlock_restore_success">Restored from the last successfully saved backup. Enter your master password again to unlock.</string>
+    <string name="unlock_restore_failed">Failed to restore from backup; the backup file is still in place</string>
     <string name="err_save_read_only">Database is open in read-only mode; cannot save</string>
     <string name="err_save_no_writer">No active database save channel</string>
     <string name="err_save_no_database">No active database</string>

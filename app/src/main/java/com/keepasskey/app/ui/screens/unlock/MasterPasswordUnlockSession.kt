@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.keepasskey.app.ui.model.textArg
@@ -37,7 +38,16 @@ internal class MasterPasswordUnlockSession(
     private val activeDbId: () -> String?,
     // ISSUE-P3-453：错误码 → 本地化文案通道（生产由宿主显式注入真实现）
     private val strings: StringsProvider = StringsProvider { _, _ -> "" },
+    // ISSUE-P2-521：解锁页「从备份恢复」的会话读数通道（.bak 探测 + 原子恢复）。
+    // nullable 仅用于纯 JVM 单测；生产 DI 由 DatabaseModule 恒注入真实实例
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null,
 ) {
+
+    /**
+     * `ISSUE-P2-521`：待恢复的滚动备份目标文件——仅当本次失败为「文件损坏」分型且 `.bak` 存在时非空；
+     * 恢复成功（或解锁成功）后清空。凭据错误路径恒为 null（AC③：不得出现恢复入口）。
+     */
+    private var restoreCandidateFile: java.io.File? = null
 
     /**
      * 主密码敏感态：仅以 CharArray 驻留本会话内部（绝不进入 UiState/StateFlow）。
@@ -142,8 +152,22 @@ internal class MasterPasswordUnlockSession(
                     keyFileData = keyFileSession.keyFileData,
                     readOnly = uiState.value.openReadOnly
                 )) {
-                    is KdbxResult.Success -> onUnlockSuccess(activity, dbId, usedKeyFile)
-                    is KdbxResult.Failure -> onUnlockFailure(dbId, usedKeyFile, result)
+                    is KdbxResult.Success -> {
+                        // ISSUE-P2-521：解锁成功即撤下恢复入口（含「恢复后重新解锁成功」路径）
+                        restoreCandidateFile = null
+                        uiState.update { it.copy(canRestoreFromBackup = false) }
+                        onUnlockSuccess(activity, dbId, usedKeyFile)
+                    }
+                    is KdbxResult.Failure -> {
+                        // ISSUE-P2-521：仅「文件损坏」分型才解析恢复候选（且须 .bak 实际存在）
+                        val restoreCandidate =
+                            if (result.error is com.keepasskey.database.exception.KdbxCorruptFileException) {
+                                resolveRestoreCandidate(dbId)
+                            } else {
+                                null
+                            }
+                        onUnlockFailure(dbId, usedKeyFile, result, restoreCandidate)
+                    }
                 }
             } finally {
                 // ISSUE-P1-04：兜底无条件清零——原实现判据为 `if (_uiState.value.isLoading)`，
@@ -187,8 +211,48 @@ internal class MasterPasswordUnlockSession(
         events.emit(UnlockEvent.UnlockSuccess)
     }
 
+    /**
+     * `ISSUE-P2-521`：解析可恢复的滚动备份候选——文件损坏分型时按活动库登记路径探测 `.bak`。
+     * 无会话（单测）/ 无活动库 / `content://`（SAF 流式通道无 `.bak`）/ 备份不存在，一律 null。
+     */
+    private suspend fun resolveRestoreCandidate(dbId: String?): java.io.File? {
+        val session = databaseSession ?: return null
+        val path = vaultRepository.getDatabases().first()
+            .firstOrNull { it.id == dbId }?.path ?: return null
+        if (path.startsWith("content:")) return null
+        val file = java.io.File(path)
+        return file.takeIf { session.rollingBackupExistsFor(it) }
+    }
+
+    /**
+     * `ISSUE-P2-521`：从滚动备份恢复（用户显式确认后的动作；恢复不改凭据，成功仍须重新解锁）。
+     * 成功：清错误、置成功提示、撤下入口；失败：保留入口可重试，**备份文件原样保留**。
+     */
+    fun restoreFromRollingBackup() {
+        val target = restoreCandidateFile ?: return
+        val session = databaseSession ?: return
+        scope.launch {
+            val restored = session.restoreFromRollingBackup(target)
+            uiState.update {
+                it.copy(
+                    canRestoreFromBackup = !restored,
+                    errorMessage = if (restored) null else UiMessage(R.string.unlock_restore_failed),
+                    infoMessage = if (restored) UiMessage(R.string.unlock_restore_success) else it.infoMessage
+                )
+            }
+            if (restored) {
+                restoreCandidateFile = null
+            }
+        }
+    }
+
     /** 解锁失败分型：仅凭据错误计入节流；携带密钥文件时给出并列可行动提示（ISSUE-P3-04）。 */
-    private fun onUnlockFailure(dbId: String?, usedKeyFile: Boolean, result: KdbxResult.Failure) {
+    private fun onUnlockFailure(
+        dbId: String?,
+        usedKeyFile: Boolean,
+        result: KdbxResult.Failure,
+        restoreCandidate: java.io.File?
+    ) {
         val invalidCredentials =
             result.error is com.keepasskey.database.exception.KdbxInvalidCredentialsException
         // F-25 整改：失败留痕口径收敛为「异常类名 + 布尔判定」——原实现把库 id
@@ -214,8 +278,12 @@ internal class MasterPasswordUnlockSession(
             invalidCredentials && usedKeyFile ->
                 UiMessage(R.string.keyfile_or_password_mismatch)
             invalidCredentials -> UiMessage(R.string.unlock_error_invalid_password)
+            // ISSUE-P2-521：文件损坏分型给出专用文案（与凭据错误并列但互斥；配恢复入口）
+            result.error is com.keepasskey.database.exception.KdbxCorruptFileException ->
+                UiMessage(R.string.err_open_corrupt_file)
             else -> UiMessage(R.string.op_failed, listOf(result.textArg(strings)))
         }
+        restoreCandidateFile = restoreCandidate
         // ISSUE-P1-04：失败路径无条件清零主密码（不再保留错误密码驻留堆内存）
         wipe()
         uiState.update {
@@ -230,7 +298,9 @@ internal class MasterPasswordUnlockSession(
                 throttleLockoutRemainingMs =
                     (newGate as? ThrottleGate.Locked)?.remainingMs ?: 0L,
                 // ISSUE-P2-355 AC②：失败提示附「剩余 N 次尝试」（锁定态改走倒计时，此处收起）
-                throttleAttemptsRemaining = attemptsRemainingOf(newGate)
+                throttleAttemptsRemaining = attemptsRemainingOf(newGate),
+                // ISSUE-P2-521：文件损坏且备份在场 ⇒ 呈现「从备份恢复」入口
+                canRestoreFromBackup = restoreCandidate != null
             )
         }
         // ISSUE-P2-355 AC②：进入锁定即启动每秒倒计时 ticker（未锁定时空操作）

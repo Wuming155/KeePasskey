@@ -222,6 +222,18 @@ internal class SessionPersistence(
     }
 
     /**
+     * 从滚动备份（.bak）恢复指定文件（`ISSUE-P2-521`）。
+     *
+     * 解锁失败（文件损坏分型）时由 app 层在用户显式确认后调用；恢复不改凭据，成功仍须重新解锁。
+     * 文件读写挂 IO 调度（恢复的是整库字节，不得占用调用方线程）；
+     * 语义与失败口径见 `SessionFileWriter.restoreFromRollingBackup`。
+     */
+    suspend fun restoreFromRollingBackup(targetFile: java.io.File): Boolean = withContext(Dispatchers.IO) {
+        fileWriter.restoreFromRollingBackup(targetFile)
+    }
+
+
+    /**
      * 整库序列化（三条写盘路径的**唯一**实现）。
      *
      * ISSUE-P3-118：序列化缓冲必须**具名**并在用毕后清零——`toByteArray()` 只返回副本，

@@ -5,6 +5,10 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.sync.engine.SyncCache
+import com.keepasskey.sync.engine.SyncEngine
+import com.keepasskey.sync.engine.SyncOpenResult
+import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.model.SyncException
@@ -423,6 +427,127 @@ class LiveSyncServersTest {
 
     /** 固定 key→ID 映射：同一逻辑条目在三方库中必须共享同一 UUID（否则合并会误判为冲突） */
     private val KEY_IDS = mapOf("A" to 1L, "B" to 2L, "C" to 3L, "D" to 4L, "E" to 5L)
+
+    // ===== ISSUE-P2-518：防回滚端到端（真实服务层） =====
+    //
+    // 场景＝防回滚存在意义的原型：服务端 .kdbx 被整体回滚为设备曾接受过的旧版本（v1），
+    // 引擎经真实协议栈读到 v1，本地摘要环（状态文件）命中 ⇒ 拒绝应用。mock 层
+    // （SyncEngineTest ISSUE_P2_18 组）已锁裁决逻辑，本组补 mock 给不了的两件事：
+    // ① 真实服务端响应形态（真实 ETag / 字节真上板）下裁决链仍成立——裁决按内容摘要、
+    //    与 ETag 语义（弱/强/缺失）解耦，这正是要在真实服务器上验证的点；
+    // ② 摘要环跨引擎实例持久化（每条用例各自新建引擎与状态目录，v1/v2 两轮采纳后
+    //    同一实例裁决重放；状态文件在拒绝后必须原样保留）。
+    // 用户提示面（sync_error_rollback_rejected 的 snackbar/通知链）由 app 层既有单测
+    // 锁定（SyncCycleRunner / SyncConflictController 组），不在 LIVE 层重复。
+
+    /** 模拟 app 层采纳确认（与 SyncEngineTest.acceptAdoption 同口径：结算前基线不落地）。 */
+    private suspend fun acceptAdoptionOf(result: SyncOpenResult) {
+        (result as? SyncOpenResult.RemoteSynced)?.adoption?.accept()
+    }
+
+    @Test
+    fun `LIVE WebDAV 服务端整体回滚被防回滚裁决拒绝`() = runTest {
+        assumeLive()
+        val client = createTrustingClient()
+        val provider = WebDavSyncProvider(
+            serverUrl = webdavUrl,
+            username = webdavUser,
+            passwordChars = webdavPass.toCharArray(),
+            client = client
+        )
+        val cacheDir = java.nio.file.Files.createTempDirectory("live-rollback-wd").toFile()
+        val remotePath = "live-rollback-${UUID.randomUUID()}.kdbx"
+        val engine = SyncEngine(provider, SyncCache(cacheDir), SyncRollbackGuard(cacheDir))
+
+        // ① 建库 v1 上板 → 首次打开并采纳（记录 v1 内容摘要）
+        val v1 = dbToBytes(buildDb(mapOf("entry-a" to ("条目A" to "https://a.example"))))
+        provider.uploadAtomic(remotePath, v1).getOrThrow()
+        acceptAdoptionOf(engine.openRemote(remotePath))
+
+        // ② 远端更新 v2（另一客户端形态）→ 采纳（摘要环现含 v1、v2）
+        val v2 = dbToBytes(
+            buildDb(
+                mapOf(
+                    "entry-a" to ("条目A2" to "https://a.example"),
+                    "entry-b" to ("条目B" to "https://b.example")
+                )
+            )
+        )
+        provider.uploadAtomic(remotePath, v2).getOrThrow()
+        acceptAdoptionOf(engine.openRemote(remotePath))
+
+        // ③ 服务端被整体回滚为 v1（攻击者形态：真实字节重新上板，真实 ETag 随之刷新）
+        provider.uploadAtomic(remotePath, v1).getOrThrow()
+
+        // ④ 裁决：v1 命中已见摘要环 ⇒ RollbackRejected 且携远端旧字节（本地新版本保留）
+        val replayed = engine.openRemote(remotePath)
+        assertTrue("服务端整体回滚必须被拒绝应用", replayed is SyncOpenResult.RollbackRejected)
+        assertArrayEquals("拒绝时须携带远端旧版本字节", v1, (replayed as SyncOpenResult.RollbackRejected).remoteBytes)
+
+        // ⑤ 拒绝后防回滚状态文件必须原样保留（摘要环不被清，后续重放仍可判）。
+        // 落点＝注入的状态目录本身（此处 cacheDir）+ `<sha256(scopedKey)>.rollback` 后缀——
+        // 不是 cacheDir/STATE_DIR_NAME 子目录（后者只是生产装配的目录名约定，首轮实测教训）。
+        val stateFiles = cacheDir.listFiles().orEmpty()
+        assertTrue(
+            "防回滚状态文件必须仍在（拒绝不清摘要环）",
+            stateFiles.any { it.name.endsWith(SyncRollbackGuard.SUFFIX_STATE) }
+        )
+
+        provider.delete(remotePath)
+        cacheDir.deleteRecursively()
+    }
+
+    @Test
+    fun `LIVE S3 服务端整体回滚被防回滚裁决拒绝`() = runTest {
+        assumeLive()
+        val client = createTrustingClient()
+        val provider = S3SyncProvider(
+            endpoint = s3Endpoint,
+            bucketName = s3Bucket,
+            region = "us-east-1",
+            accessKeyId = s3Access.toCharArray(),
+            secretAccessKey = s3Secret.toCharArray(),
+            usePathStyle = true,
+            client = client
+        )
+        val cacheDir = java.nio.file.Files.createTempDirectory("live-rollback-s3").toFile()
+        val remotePath = "live-rollback-${UUID.randomUUID()}.kdbx"
+        val engine = SyncEngine(provider, SyncCache(cacheDir), SyncRollbackGuard(cacheDir))
+
+        val v1 = dbToBytes(buildDb(mapOf("entry-a" to ("条目A" to "https://a.example"))))
+        provider.uploadAtomic(remotePath, v1).getOrThrow()
+        acceptAdoptionOf(engine.openRemote(remotePath))
+
+        val v2 = dbToBytes(
+            buildDb(
+                mapOf(
+                    "entry-a" to ("条目A2" to "https://a.example"),
+                    "entry-b" to ("条目B" to "https://b.example")
+                )
+            )
+        )
+        provider.uploadAtomic(remotePath, v2).getOrThrow()
+        acceptAdoptionOf(engine.openRemote(remotePath))
+
+        // 服务端整体回滚为 v1（S3 侧条件写按当前 ETag 重新覆盖）
+        provider.uploadAtomic(remotePath, v1).getOrThrow()
+
+        val replayed = engine.openRemote(remotePath)
+        assertTrue("S3 服务端整体回滚必须被拒绝应用", replayed is SyncOpenResult.RollbackRejected)
+        assertArrayEquals("拒绝时须携带远端旧版本字节", v1, (replayed as SyncOpenResult.RollbackRejected).remoteBytes)
+
+        // ⑤ 拒绝后防回滚状态文件必须原样保留（摘要环不被清，后续重放仍可判）。
+        // 落点＝注入的状态目录本身（此处 cacheDir）+ `<sha256(scopedKey)>.rollback` 后缀——
+        // 不是 cacheDir/STATE_DIR_NAME 子目录（后者只是生产装配的目录名约定，首轮实测教训）。
+        val stateFiles = cacheDir.listFiles().orEmpty()
+        assertTrue(
+            "防回滚状态文件必须仍在（拒绝不清摘要环）",
+            stateFiles.any { it.name.endsWith(SyncRollbackGuard.SUFFIX_STATE) }
+        )
+
+        provider.delete(remotePath)
+        cacheDir.deleteRecursively()
+    }
 
     private fun buildDb(entries: Map<String, Pair<String, String>>): KdbxDatabaseLite {
         val kEntries = entries.map { (key, value) ->

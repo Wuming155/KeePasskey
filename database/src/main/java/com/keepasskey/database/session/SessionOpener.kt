@@ -191,7 +191,14 @@ internal class SessionOpener(
             } catch (t: Throwable) {
                 // ISSUE-P3-368：失败清进度（UI 随 isLoading 回落隐藏，不留半程残值）
                 progress(null)
-                KdbxResult.Failure(t, code = KdbxError.UNLOCK_FAILED)
+                // ISSUE-P2-521：文件损坏（KdbxCorruptFileException 族）与凭据错误分型——
+                // 前者可引导用户从滚动备份恢复，后者不得出现该入口
+                val code = if (t is com.keepasskey.database.exception.KdbxCorruptFileException) {
+                    KdbxError.UNLOCK_CORRUPT_FILE
+                } else {
+                    KdbxError.UNLOCK_FAILED
+                }
+                KdbxResult.Failure(t, code = code)
             }
         }
     }

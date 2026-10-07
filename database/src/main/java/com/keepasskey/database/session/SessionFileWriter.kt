@@ -53,6 +53,41 @@ internal class SessionFileWriter(private val createBackupProvider: () -> Boolean
     }
 
     /**
+     * 从滚动备份（.bak）恢复目标文件（`ISSUE-P2-521`）。
+     *
+     * 语义：备份字节经「临时文件 → fsync → 原子重命名」写回主文件（复用 [AtomicFileWriter.writeAtomic]），
+     * **不轮换备份**（createBackup=false：绝不把损坏的主文件覆盖成新 .bak）且**不删除备份**——
+     * 恢复后 .bak 仍在主文件旁，可再次恢复。内容为上次成功保存的版本（.bak 的既有语义）。
+     * 失败仅记语义化告警并返回 false（调用方据此呈现用户可见失败提示；绝不静默）。
+     * 边界：原子替换的极少数降级路径（同目录 ATOMIC_MOVE 失败）按上层既定口径拒绝无保护覆盖 ⇒ 返回 false，
+     * 主文件与备份均保持原状（fail-closed，不产生半截文件）。
+     *
+     * @return true = 已从备份恢复；false = 无备份 / 恢复失败（主文件与 .bak 均未受损）。
+     */
+    fun restoreFromRollingBackup(targetFile: File): Boolean {
+        val bakFile = AtomicFileWriter.backupFileFor(targetFile)
+        if (!bakFile.exists()) {
+            return false
+        }
+        return try {
+            val bytes = bakFile.readBytes()
+            try {
+                AtomicFileWriter.writeAtomic(targetFile, createBackup = false) { it.write(bytes) }
+            } finally {
+                bytes.fill(0)
+            }
+            true
+        } catch (e: Exception) {
+            logger.log(
+                Level.WARNING,
+                "从滚动备份恢复失败（主文件与备份均未改动）: ${targetFile.name}",
+                e
+            )
+            false
+        }
+    }
+
+    /**
      * 活动文件的滚动备份当前是否存在（ISSUE-P2-520 换密残余面读数）。
      *
      * 命名复用 [AtomicFileWriter.backupFileFor] 单一来源，不在本层复刻 `.bak` 规则；

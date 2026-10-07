@@ -929,6 +929,11 @@
     <string name="err_unknown">未知错误</string>
     <string name="err_open_create_failed">创建密码库失败</string>
     <string name="err_open_unlock_failed">解锁密码库失败</string>
+    <!-- ISSUE-P2-521：文件损坏分型（与凭据错误区分；配「从备份恢复」入口） -->
+    <string name="err_open_corrupt_file">密码库文件已损坏或无法解析。如存在自动备份，可从备份恢复</string>
+    <string name="unlock_restore_action">从备份恢复</string>
+    <string name="unlock_restore_success">已从备份恢复为上次成功保存的版本，请重新输入主密码解锁</string>
+    <string name="unlock_restore_failed">从备份恢复失败，备份文件仍保留在原处</string>
     <string name="err_save_read_only">数据库以只读模式打开，无法保存</string>
     <string name="err_save_no_writer">未指定活动数据库保存通道</string>
     <string name="err_save_no_database">当前无活动数据库</string>

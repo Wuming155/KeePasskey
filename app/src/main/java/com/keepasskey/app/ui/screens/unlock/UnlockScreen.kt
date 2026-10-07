@@ -140,6 +140,7 @@ fun UnlockScreen(
         onToggleReadOnly = viewModel::onToggleReadOnly,
         onSwitchMode = viewModel::switchUnlockMode,
         onUnlock = { viewModel.unlock(activity) },
+        onRestoreFromRollingBackup = { viewModel.masterPasswordSession.restoreFromRollingBackup() },
         onBiometricUnlock = { viewModel.unlockWithBiometric(activity) },
         onDowngradeDecision = viewModel::onQuickUnlockDowngradeDecision,
         onNavigateToDatabasePicker = onNavigateToDatabasePicker,
@@ -167,6 +168,8 @@ fun UnlockContent(
     onToggleReadOnly: () -> Unit,
     onSwitchMode: (UnlockMode) -> Unit,
     onUnlock: () -> Unit,
+    /** ISSUE-P2-521：从滚动备份恢复（默认空实现 = 预览等既有调用方零改动）。 */
+    onRestoreFromRollingBackup: () -> Unit = {},
     onBiometricUnlock: () -> Unit,
     modifier: Modifier = Modifier,
     onDowngradeDecision: (Boolean) -> Unit = {},
@@ -315,7 +318,8 @@ fun UnlockContent(
                         onClearKeyFile = onClearKeyFile,
                         onToggleReadOnly = onToggleReadOnly,
                         onUnlock = onUnlock,
-                        onSwitchMode = onSwitchMode
+                        onSwitchMode = onSwitchMode,
+                        onRestoreFromRollingBackup = onRestoreFromRollingBackup
                     )
                 }
             }

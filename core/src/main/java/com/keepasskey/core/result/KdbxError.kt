@@ -34,6 +34,9 @@ object KdbxError {
     const val CREATE_FAILED = "kdbx.open.create_failed"
     const val UNLOCK_FAILED = "kdbx.open.unlock_failed"
 
+    /** 文件损坏 / 结构校验失败（与凭据错误分型；`ISSUE-P2-521` 解锁页「从备份恢复」入口的判据）。 */
+    const val UNLOCK_CORRUPT_FILE = "kdbx.open.corrupt_file"
+
     // ---- 保存 / 导出（SessionPersistence）----
     const val SAVE_READ_ONLY = "kdbx.save.read_only"
     const val SAVE_NO_WRITER = "kdbx.save.no_writer"

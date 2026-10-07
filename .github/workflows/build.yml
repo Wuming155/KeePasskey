@@ -134,6 +134,27 @@ jobs:
       - name: 单元测试（全模块）
         run: ./gradlew test --console=plain
 
+      # ISSUE-P2-519：通行密钥 KPEX 互操作对拍接入 CI（此前无任何自动调用点，
+      # 见批次 449.5 的如实声明；「闸门存在 ≠ 闸门被执行」是 ISSUE-P3-305 同型根因）。
+      # 前置产物由上一「单元测试（全模块）」步骤内的 PasskeyInteropProbeTest（JVM 单测，
+      # 无 Assume 门控）产出到 database/build/interop-probe/。
+      # 退出码口径（verify_interop.py）：0 = 判据全过 / 1 = 判据失败 /
+      # 2 = 环境缺失（缺 keepassxc-cli，显式失败不得当绿——F22 的整改口径）。
+      # 缺 pip 依赖时脚本以非 0 硬退出（verify_interop.py:56-60），故依赖安装失败必红；
+      # 此处**没有** `|| true` / `continue-on-error` 之类吞掉失败的写法。
+      # 如实声明：本机无 CI 环境，apt 提供的 keepassxc-cli 版本（Ubuntu 24.04 ≈ 2.7.6）
+      # 与本机对拍所用 2.7.12 的差异未验证；若版本敏感判据首跑红，按 fail-closed 可见处置。
+      - name: 安装对拍依赖（keepassxc-cli + pykeepass/cryptography）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends keepassxc
+          python3 -m pip install --break-system-packages --quiet pykeepass cryptography
+
+      - name: 通行密钥互操作对拍（KPEX 双实现判据，fail-closed）
+        run: |
+          ls -la database/build/interop-probe/
+          python3 tools/passkey-interop/verify_interop.py
+
       # ISSUE-P2-217：`lint` 会经 AGP 的 lint 模型链触达原生构建——
       #   `:crypto:lint` → `:crypto:lintAnalyzeDebug` → `:crypto:generateDebugLintModel`
       #   → `:crypto:writeDebugLintModelMetadata` → `:crypto:bundleDebugLocalLintAar`

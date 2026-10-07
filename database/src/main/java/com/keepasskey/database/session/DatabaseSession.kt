@@ -390,4 +390,10 @@ class DatabaseSession(
 
     /** 活动文件滚动备份（`.bak`）当前是否存在（ISSUE-P2-520 换密残余面读数；语义见 `SessionFileWriter.rollingBackupExists`）。 */
     fun rollingBackupExists(): Boolean = fileWriter.rollingBackupExists(core.activeFile)
+
+    /** 指定文件的滚动备份是否存在（ISSUE-P2-521：解锁失败时会话 activeFile 未设置，须按目标文件探测）。 */
+    fun rollingBackupExistsFor(targetFile: java.io.File): Boolean = fileWriter.rollingBackupExists(targetFile)
+
+    /** 从滚动备份恢复指定文件（ISSUE-P2-521；语义与失败口径见 `SessionPersistence.restoreFromRollingBackup`）。 */
+    suspend fun restoreFromRollingBackup(targetFile: java.io.File): Boolean = persistence.restoreFromRollingBackup(targetFile)
 }

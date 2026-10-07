@@ -192,7 +192,10 @@ internal fun UnlockVaultGroupCard(
  * 此槽的叠放风险由 `tools/doc/check_box_slot_children.py` 机检（含框架槽与「多发射助手函数」）。
  */
 @Composable
-internal fun UnlockPasswordSupportingText(uiState: UnlockUiState) {
+internal fun UnlockPasswordSupportingText(
+    uiState: UnlockUiState,
+    onRestoreFromRollingBackup: () -> Unit = {}
+) {
     // ISSUE-P3-457：Column 是**契约**而非排版偏好——它把四行文案从「Box 同层兄弟」变成
     // 「Column 顺序子节点」，逐行上下分离；单行成立时渲染结果与平铺直出逐像素等价。
     Column {
@@ -231,6 +234,12 @@ internal fun UnlockPasswordSupportingText(uiState: UnlockUiState) {
                 style = MaterialTheme.typography.bodySmall
             )
         }
+        // ISSUE-P2-521：文件损坏且滚动备份在场时的恢复入口（用户显式确认；恢复后须重新解锁）
+        if (uiState.canRestoreFromBackup) {
+            androidx.compose.material3.TextButton(onClick = onRestoreFromRollingBackup) {
+                Text(stringResource(R.string.unlock_restore_action))
+            }
+        }
     }
 }
 
@@ -246,7 +255,9 @@ internal fun UnlockPasswordSupportingText(uiState: UnlockUiState) {
 internal fun hasUnlockPasswordSupportingText(uiState: UnlockUiState): Boolean =
     uiState.throttleLockoutRemainingMs > 0L ||
         uiState.errorMessage != null ||
-        uiState.infoMessage != null
+        uiState.infoMessage != null ||
+        // ISSUE-P2-521：恢复入口同属槽内容（与渲染分支逐条对齐的既有契约）
+        uiState.canRestoreFromBackup
 
 /**
  * 完整主密码解锁区（§436 重排为原型布局：分组卡〔数据库行 + 扁平主密码行〕→
@@ -266,7 +277,9 @@ internal fun UnlockStandardUnlockContent(
     onClearKeyFile: () -> Unit,
     onToggleReadOnly: () -> Unit,
     onUnlock: () -> Unit,
-    onSwitchMode: (UnlockMode) -> Unit
+    onSwitchMode: (UnlockMode) -> Unit,
+    /** ISSUE-P2-521：从滚动备份恢复（默认空实现 = 预览等既有调用方零改动）。 */
+    onRestoreFromRollingBackup: () -> Unit = {}
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         // ISSUE-P3-445 AC①：密钥文件高困惑点一次性可关闭提示（关闭态持久化，非模态）
@@ -287,7 +300,7 @@ internal fun UnlockStandardUnlockContent(
                         onPasswordChanged = onPasswordChange,
                         isError = uiState.errorMessage != null,
                         supportingText = if (hasUnlockPasswordSupportingText(uiState)) {
-                            { UnlockPasswordSupportingText(uiState) }
+                            { UnlockPasswordSupportingText(uiState, onRestoreFromRollingBackup) }
                         } else {
                             null
                         },

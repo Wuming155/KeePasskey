@@ -42,6 +42,7 @@ object KdbxErrorTexts {
         KdbxError.UNKNOWN to R.string.err_unknown,
         KdbxError.CREATE_FAILED to R.string.err_open_create_failed,
         KdbxError.UNLOCK_FAILED to R.string.err_open_unlock_failed,
+        KdbxError.UNLOCK_CORRUPT_FILE to R.string.err_open_corrupt_file,
         KdbxError.SAVE_READ_ONLY to R.string.err_save_read_only,
         KdbxError.SAVE_NO_WRITER to R.string.err_save_no_writer,
         KdbxError.SAVE_NO_DATABASE to R.string.err_save_no_database,

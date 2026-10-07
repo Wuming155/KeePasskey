@@ -36,6 +36,11 @@ data class UnlockUiState(
     // 仅在 isLoading 期间由解锁页渲染；与 loadProgress 同为过程可感知性通道，零敏感载荷。
     val loadStage: UnlockStage? = null,
     val errorMessage: UiMessage? = null,
+    /**
+     * `ISSUE-P2-521`：解锁失败为「文件损坏」分型且滚动备份存在——解锁页据此呈现
+     * 「从备份恢复」入口（凭据错误 / 无备份恒 false）。
+     */
+    val canRestoreFromBackup: Boolean = false,
     val infoMessage: UiMessage? = null,
     // H1 整改：默认值不再写死演示库名/假状态文案，由真实活动数据库填充
     val databaseName: String = "",

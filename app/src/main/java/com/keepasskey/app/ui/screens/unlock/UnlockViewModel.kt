@@ -75,6 +75,7 @@ class UnlockViewModel @Inject constructor(
     // §411（ISSUE-P3-448）：密钥文件私有目录收编副本通道。nullable 仅用于纯 JVM 单测；
     // 生产 DI 注入 @Singleton 真实实例（Keystore 加密落盘 filesDir/keyfiles）
     private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
+    private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null, // ISSUE-P2-521：从备份恢复（nullable 仅单测）
     // ISSUE-P1-429：封印 / 解封 keystore 密算的调度器（生产 DI 注入 @SealCryptoDispatcher = IO；
     // 默认值仅供未触 crypto 路径的既有 JVM 单测沿用，触路径的用例注入 TestDispatcher 保确定性）
     @com.keepasskey.app.di.SealCryptoDispatcher private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
@@ -131,7 +132,7 @@ class UnlockViewModel @Inject constructor(
     )
 
     /** 主密码解锁会话（ISSUE-P3-188）：承载主密码缓冲区与「节流闸门 → 解锁 → 收尾/分型」全流程 */
-    private val masterPasswordSession = MasterPasswordUnlockSession(
+    internal val masterPasswordSession = MasterPasswordUnlockSession( // ISSUE-P2-521：internal 暴露仅为解锁页恢复动作直达（SettingsViewModel 同型先例）
         scope = viewModelScope,
         uiState = _uiState,
         events = _events,
@@ -140,7 +141,8 @@ class UnlockViewModel @Inject constructor(
         keyFileSession = keyFileSession,
         enrollment = biometricEnrollment,
         debugLog = debugLog,
-        activeDbId = { activeDatabaseId }
+        activeDbId = { activeDatabaseId },
+        databaseSession = databaseSession
     )
 
     init {
