@@ -1,6 +1,10 @@
 # Gradle 版本目录（TASK-05）：5 模块插件与依赖集中管理，杜绝版本漂移。
 # 版本货币性核对（2026-09-08）：hilt 2.60.1 / credentials 1.6.0 / okhttp 5.5.0 /
 # coroutines 1.11.0 / zxing 4.3.0 均为当前稳定渠道版本。
+# 2026-10-07 核对（Dependabot PR #15/#13 落地）：core-ktx 1.19.1 / media 1.8.0 /
+# annotation 1.11.0 / navigation-compose 2.10.2 / work 2.12.0 五项均经 Google Maven
+# `maven-metadata.xml` 实查 `latest = release` 确认无更新版本；material3 1.5.0-alpha29
+# 同为渠道最新（详见下方 material3 段落的升级性质说明）。
 # Dependabot PR #1/#2/#3 批量落地：AGP 9.4.0（**后按 IDE 兼容性降回 9.2.1，见下方 [versions] 说明**）/
 # navigation 2.10.0 / hilt-ext 1.4.0 / bcprov 1.86 / coroutines 1.11.0 / okhttp 5.5.0 /
 # foojay-resolver 1.0.0 / wrapper 9.7.1
@@ -38,12 +42,19 @@ composeBom = "2026.09.00"
 # TASK-07：M3 Expressive 公开 API（MaterialExpressiveTheme/MotionScheme）在 1.5.0 才毕业公开，
 # 1.4.0 stable 中仍为 internal。
 # ISSUE-P3-09（ZT-20）AC3 管控结论（2026-09-10 核对 Google Maven material3 maven-metadata.xml：
-# latest = release = 1.5.0-alpha28，1.5.0 线无 stable，稳定渠道最新 1.4.0）：
+# 当时 latest = release = 1.5.0-alpha28；**2026-10-07 复核：渠道最新已为 1.5.0-alpha29**，
+# 1.5.0 线仍无 stable，稳定渠道最新 1.4.0）：
 #   **无法降级到 stable**——降级即失去 MaterialExpressiveTheme/MotionScheme，编译失败，
 #   故按「必须保留 alpha」处理，显式登记管控信息：
 #   - 必要性：ui/theme/Theme.kt 依赖 M3 Expressive 主题与弹性动效（产品级视觉规范）；
 #   - 风险：alpha 渠道存在 API 破坏性变更与未修复回归，不由稳定版语义背书；
 #   - 约束：本值仅允许在 1.5.0-alphaN 内部随安全修复上调，禁止跨 minor 跳跃；
+#   - **alpha28 → alpha29（2026-10-07，Dependabot PR #13）性质如实记录**：本次上调**不是**安全修复，
+#     而是上游的 bug fix 批 + 一处**源码级破坏性变更**——`Slider` / `RangeSlider` 的 `onValueChange`
+#     变为必填参数且在参数表中的位置调整（据官方 release notes「Source breaking change」）；
+#     本仓唯一 `Slider` 调用点 `ui/components/ValueSlider.kt:84` 全部使用具名实参，实测编译通过，
+#     故该破坏性变更对本仓无影响（若将来新增位置实参调用须改具名）。同批含 `ripple()` 新公开 API。
+#     该次上调已按本约束的「1.5.0-alphaN 内部」范围判定为允许，未跨 minor；
 #   - 退出条件：material3 1.5.0 stable 发布后，删除本项与 compose-material3-alpha 别名，
 #     回归 Compose BOM 托管（升级判据与步骤见 docs/records/退役依据承接-ISSUE-P3-09.md）。
 material3 = "1.5.0-alpha29"
