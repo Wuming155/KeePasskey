@@ -42,13 +42,16 @@ enum class CredentialRejectionAction(@StringRes val labelRes: Int) {
          * 原因 → 补救动作（**纯函数**，JVM 单测穷举）。无可执行动作时返回 `null`，
          * 此时拒绝页维持「只有退出」的原布局。
          *
-         * **顺序敏感**：`DAL_UNVERIFIED` 与 `DAL_NETWORK_UNAVAILABLE` 都源自同一条
-         * 「非白名单浏览器走了普通应用 DAL 分支」，授权对两者都是正解。
+         * **同一成因族**：`DAL_UNVERIFIED` / `DAL_NETWORK_UNAVAILABLE`（创建链路，非白名单
+         * 浏览器走了普通应用 DAL 分支）与 `CALLER_BROWSER_NOT_TRUSTED`（`ISSUE-P2-530`，
+         * 使用链路，同一条「非白名单浏览器无 web origin」成因）三者对
+         * [ADD_PRIVILEGED_BROWSER] 都是正解。
          */
         fun forReason(reason: CredentialRejectionReason): CredentialRejectionAction? =
             when (reason) {
                 CredentialRejectionReason.DAL_UNVERIFIED,
-                CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE -> ADD_PRIVILEGED_BROWSER
+                CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE,
+                CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED -> ADD_PRIVILEGED_BROWSER
 
                 else -> null
             }

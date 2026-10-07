@@ -55,6 +55,8 @@
          一律为**无插值**固定文本（ISSUE-P1-10）：拒绝原因不得携带 rpId / 调用包名 / 域名 /
          凭据 id 等敏感标识，故此处**不存在** %1$s 一类占位符（由 `CredentialRejectionFeedbackTest` 守护）。 -->
     <string name="cred_reject_title">无法创建通行密钥</string>
+    <!-- ISSUE-P2-530：断言（使用）链路的拒绝页标题——与创建链路分开，同一拒绝页基类按入口取用 -->
+    <string name="cred_reject_get_title">无法使用通行密钥</string>
     <string name="cred_reject_confirm">知道了</string>
     <string name="passkey_reject_missing_request">系统未提供完整的创建请求，已拒绝创建。</string>
     <string name="passkey_reject_caller_cert_unreadable">无法读取调用方应用的签名信息，已拒绝创建。</string>
@@ -62,6 +64,7 @@
     <string name="passkey_reject_dal_network_unavailable">无法联网校验调用应用对本站点的归属声明，已拒绝创建通行密钥。</string>
     <string name="passkey_reject_request_invalid">创建请求不符合通行密钥规范，已拒绝创建。</string>
     <string name="passkey_reject_credential_exists">该站点在此密码库中已存在通行密钥，无需重复创建。</string>
+    <string name="passkey_reject_caller_browser_not_trusted">发起请求的浏览器尚未加入特权浏览器白名单，已拒绝使用该通行密钥。</string>
 
     <!-- ===== ISSUE-P3-221：拒绝原因页的**就地补救**（窗口内授权、无跳转） =====
          - 「退出 / 动作按钮」文案无插值；

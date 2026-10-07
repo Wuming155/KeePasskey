@@ -199,26 +199,24 @@ class CredentialResponseAssembler @Inject constructor(
     }
 
     /**
-     * H1 整改：origin 与 RP-ID 强绑定。
-     * - 浏览器委派（可信 web origin）：requestJson 的 rp.id 必须等于浏览器 origin 域
-     *   或为其可注册后缀（WebAuthn 规范），杜绝伪造 rp.id 骗取任意站点凭据；
-     * - 普通应用（apk-key-hash origin）：不信任 requestJson 中的 web rp.id，仅返回调用包名
-     *   已绑定的凭据（P2-40：条目 url 必须是 `android://<包名>`，严格精确，无启发式），
-     *   故此处以空串占位并由 [passkeyCandidates] 的包名维度把关。
+     * 本次候选呈现的 RP-ID 检索键（`ISSUE-P2-530`：筛选与归属分离，判据与论据见 `PD-77`）。
      *
-     * 返回 null 表示按规范拒绝本次候选呈现（等价于拆分前的提前 `return`）。
+     * - **可信浏览器**：维持既有 H1 口径（rp.id 必须等于 origin 域或其可注册后缀，不匹配即 `null`）；
+     * - **无可信 web origin 的调用方**：按请求自报的 rp.id 检索——此处**只是筛选**，能否签出仍由
+     *   签发前的 origin ⇄ rpId / 包名 ⇄ 绑定包名复校裁决（`PasskeyAssertionActivity`）；
+     * - rp.id 缺失 / 空白时退回空串，交由 [CredentialCandidateMatcher.matchesPasskey] 的包名维度把关。
      */
     private fun resolvePasskeyTargetRpId(
         option: BeginGetPublicKeyCredentialOption,
         callingOrigin: String,
         browserFlow: Boolean
     ): String? {
-        if (!browserFlow) return ""
         val rpIdFromOption = try {
             JSONObject(option.requestJson).optJSONObject(WebAuthnJson.RP)?.optString(WebAuthnJson.ID).orEmpty()
         } catch (_: Exception) {
             ""
         }
+        if (!browserFlow) return rpIdFromOption.trim()
         val targetRpId = rpIdFromOption.ifBlank { DomainMatcher.extractDomain(callingOrigin) }
         if (targetRpId.isBlank()) return null
         if (!DomainMatcher.isDomainMatch(targetRpId, DomainMatcher.extractDomain(callingOrigin))) return null

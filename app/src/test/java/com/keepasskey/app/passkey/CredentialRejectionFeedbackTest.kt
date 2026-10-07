@@ -218,8 +218,11 @@ class CredentialRejectionFeedbackTest {
     @Test
     fun `仅确有用户可执行解法的原因才给出补救动作`() {
         for (reason in CredentialRejectionReason.entries) {
+            // ISSUE-P2-530：断言链路的「调用方浏览器未入白名单」与 DAL 两项同源
+            // （非白名单浏览器无 web origin），授权同样是唯一正解，故一并纳入期望集。
             val expected = reason == CredentialRejectionReason.DAL_UNVERIFIED ||
-                reason == CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE
+                reason == CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE ||
+                reason == CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED
             assertEquals(
                 "「$reason」的补救动作判定与预期不符——不得为无从下手的原因硬凑一个动作",
                 expected,
@@ -230,6 +233,11 @@ class CredentialRejectionFeedbackTest {
             "网络不可用与声明未通过同源（非白名单浏览器走普通应用 DAL 分支），授权对两者都是正解",
             CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
             CredentialRejectionAction.forReason(CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE)
+        )
+        assertEquals(
+            "断言链路同源（ISSUE-P2-530）：非白名单浏览器上「列得出、签不出」必须给出同一条补救",
+            CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED)
         )
     }
 
@@ -275,6 +283,32 @@ class CredentialRejectionFeedbackTest {
         assertTrue(
             "Builder 必须排除已启用项（已启用再给「添加」无意义）",
             builder.contains("if (browser.enabled) return null")
+        )
+    }
+
+    /**
+     * ISSUE-P2-530：候选列表侧放宽（按请求 rp.id 检索）之后，「列得出来、签不出去」成为
+     * 常规组合，故断言链路的归属复校失败**不得再静默收尾**，且签发侧门控必须原样保留。
+     */
+    @Test
+    fun `断言链路归属复校失败必须呈现原因并保留签发侧门控`() {
+        val activity = readCode(ASSERT_ACTIVITY_PATH)
+
+        assertTrue(
+            "断言链路必须复用同一补救资格判定（不得自造第二套入口）",
+            activity.contains("BrowserRemedyBuilder.build(")
+        )
+        assertTrue(
+            "归属复校失败必须走带原因与补救的收尾，并使用使用链路标题",
+            activity.contains("rejectAndFinish(reason, remedy, R.string.cred_reject_get_title)")
+        )
+        assertTrue(
+            "签发前归属复校必须原样保留——列表侧放宽不得连带放宽签发",
+            activity.contains("!passesOriginBinding(context, passkeyData, entry.url)")
+        )
+        assertTrue(
+            "补救只认系统背书的调用方包名（不得取 intent 里的自报值）",
+            activity.contains("CallingOriginResolver.systemAttestedPackageName(")
         )
     }
 
@@ -420,6 +454,8 @@ class CredentialRejectionFeedbackTest {
         )
         const val CREATE_ACTIVITY_PATH =
             "app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt"
+        const val ASSERT_ACTIVITY_PATH =
+            "app/src/main/java/com/keepasskey/app/passkey/PasskeyAssertionActivity.kt"
         const val BASE_ACTIVITY_PATH =
             "app/src/main/java/com/keepasskey/app/passkey/BaseCredentialActivity.kt"
         const val ZH_PASSKEY_STRINGS = "app/src/main/res/values/strings_sync_passkey.xml"

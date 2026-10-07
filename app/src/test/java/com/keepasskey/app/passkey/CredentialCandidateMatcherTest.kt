@@ -200,4 +200,79 @@ class CredentialCandidateMatcherTest {
             )
         )
     }
+
+    // ── ISSUE-P2-530：筛选与归属分离（无可信 origin 的调用方同样按请求 rp.id 检索） ──
+
+    @Test
+    fun `无可信 origin 的调用方按请求 rpId 命中 Web 绑定通行密钥`() {
+        val entry = passkeyEntry("https://$domain", rpId = domain)
+
+        assertTrue(
+            "列表侧只问「请求要的是哪把密钥」；能否签出由签发前门控裁决（本仓 PasskeyAssertionActivity）",
+            CredentialCandidateMatcher.matchesPasskey(
+                entry, browserFlow = false, targetRpId = domain,
+                callingPackage = "mark.via", packageDimensionAllowed = false
+            )
+        )
+        assertFalse(
+            "请求 rpId 与凭据 rpId 不同域时不得入选（列表放宽不等于放开跨域）",
+            CredentialCandidateMatcher.matchesPasskey(
+                entry, browserFlow = false, targetRpId = "evil$domain",
+                callingPackage = "mark.via", packageDimensionAllowed = false
+            )
+        )
+        assertTrue(
+            "反向（凭据 rpId 比请求更具体）仍按点号标签边界放行：请求 `login.example.com` 可命中 `example.com` 凭据",
+            CredentialCandidateMatcher.matchesPasskey(
+                passkeyEntry("https://$domain", rpId = domain),
+                browserFlow = false, targetRpId = "login.$domain",
+                callingPackage = "mark.via", packageDimensionAllowed = false
+            )
+        )
+        assertFalse(
+            "但凭据 rpId 若比请求更具体则不匹配（`login.example.com` 凭据不出现在 `example.com` 请求下）",
+            CredentialCandidateMatcher.matchesPasskey(
+                passkeyEntry("https://$domain", rpId = "login.$domain"),
+                browserFlow = false, targetRpId = domain,
+                callingPackage = "mark.via", packageDimensionAllowed = false
+            )
+        )
+    }
+
+    @Test
+    fun `无可信 origin 且请求未带 rpId 时退回包名维度`() {
+        assertFalse(
+            "Web 绑定凭据（https://）在缺 rpId 时不得经包名维度入选",
+            CredentialCandidateMatcher.matchesPasskey(
+                passkeyEntry("https://$domain", rpId = domain),
+                browserFlow = false, targetRpId = "", callingPackage = pkg, packageDimensionAllowed = true
+            )
+        )
+        assertTrue(
+            "android:// 绑定凭据仍按包名维度命中（缺 rpId 不得整体不出候选）",
+            CredentialCandidateMatcher.matchesPasskey(
+                passkeyEntry("android://$pkg", rpId = pkg),
+                browserFlow = false, targetRpId = "", callingPackage = pkg, packageDimensionAllowed = true
+            )
+        )
+    }
+
+    @Test
+    fun `通行密钥域维度只认凭据自身 rpId 不得经 entry url 兜底`() {
+        // ISSUE-P3-339 的既有约束：条目 url 写了本站、但自身 rpId 是别的域时不得入选
+        assertFalse(
+            CredentialCandidateMatcher.matchesPasskey(
+                passkeyEntry("https://$domain", rpId = "other.example"),
+                browserFlow = false, targetRpId = domain,
+                callingPackage = "mark.via", packageDimensionAllowed = false
+            )
+        )
+        assertFalse(
+            CredentialCandidateMatcher.matchesPasskey(
+                passkeyEntry("https://$domain", rpId = "other.example"),
+                browserFlow = true, targetRpId = domain,
+                callingPackage = "com.android.chrome", packageDimensionAllowed = false
+            )
+        )
+    }
 }

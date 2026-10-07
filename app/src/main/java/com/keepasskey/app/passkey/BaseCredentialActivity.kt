@@ -3,6 +3,7 @@ package com.keepasskey.app.passkey
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
+import androidx.annotation.StringRes
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
@@ -72,7 +73,13 @@ abstract class BaseCredentialActivity : FragmentActivity() {
      */
     internal fun rejectAndFinish(
         reason: CredentialRejectionReason,
-        remedy: CredentialRejectionRemedy? = null
+        remedy: CredentialRejectionRemedy? = null,
+        /**
+         * 拒绝页标题资源。缺省为**创建**链路标题；断言（使用）链路传
+         * `R.string.cred_reject_get_title`（`ISSUE-P2-530`）——同一条拒绝原因在两条链路上
+         * 的用户动作不同（「创建」 vs 「使用」），标题须分别如实表述。
+         */
+        @StringRes titleRes: Int = R.string.cred_reject_title
     ) {
         if (rejectionPresented) return
         rejectionPresented = true
@@ -80,7 +87,7 @@ abstract class BaseCredentialActivity : FragmentActivity() {
             // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
             ApplyObscuredTouchFilter()
             CredentialRejectionScreen(
-                title = getString(R.string.cred_reject_title),
+                title = getString(titleRes),
                 message = getString(reason.messageRes),
                 confirmText = getString(
                     if (remedy != null) R.string.cred_reject_exit else R.string.cred_reject_confirm

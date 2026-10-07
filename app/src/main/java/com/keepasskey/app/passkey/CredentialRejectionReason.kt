@@ -4,13 +4,14 @@ import androidx.annotation.StringRes
 import com.keepasskey.app.R
 
 /**
- * 凭据**创建链路** fail-closed 拒绝原因（ISSUE-P2-220）。
+ * 凭据链路 fail-closed 拒绝原因（创建：`ISSUE-P2-220`；断言：`ISSUE-P2-530`）。
  *
  * ## 缺陷形态
  *
  * 整改前创建链路的各拒绝分支统一走 `failAndFinish()`：只回传 `RESULT_CANCELED` 后立即
  * `finish()`，**任何界面都未呈现**。用户视角是「点了继续就断」——无法区分「功能坏了」
- * 与「被安全门控拒绝」，只能反复重试。
+ * 与「被安全门控拒绝」，只能反复重试。断言链路（`PasskeyAssertionActivity`）的
+ * 「调用方归属不匹配」分支原为同款静默收尾，`ISSUE-P2-530` 起一并接入本页。
  *
  * ## 文案口径（ISSUE-P1-10 沿用）
  *
@@ -49,6 +50,16 @@ enum class CredentialRejectionReason(@StringRes val messageRes: Int) {
 
     /** 请求违反 WebAuthn 规范（如注册携带 `evalByCredential`），拒绝 —— 外部输入可达 */
     REQUEST_INVALID(R.string.passkey_reject_request_invalid),
+
+    /**
+     * `ISSUE-P2-530`（断言链路）：调用方**未持系统背书的 web origin**（origin 退化为
+     * `apk-key-hash`）⇒ 由本应用签出的断言其 origin 无法被依赖方接受，故在签发前拒绝。
+     *
+     * 与 `DAL_*` 同因：非白名单浏览器走的是普通应用分支。区别是它出现在**使用**链路，
+     * 且候选已在列表侧放行（`ISSUE-P2-530` 起列表按请求 rp.id 检索），故拒绝页必须给出
+     * 「加入特权名单」的就地补救，否则用户看到条目却点不动、且无路可走。
+     */
+    CALLER_BROWSER_NOT_TRUSTED(R.string.passkey_reject_caller_browser_not_trusted),
 
     /** 创建过程内部异常（fail-closed 兜底） */
     INTERNAL_ERROR(R.string.cred_error_unknown);

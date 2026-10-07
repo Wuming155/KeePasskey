@@ -122,10 +122,42 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             return
         }
         if (!passesOriginBinding(context, passkeyData, entry.url)) {
-            failAndFinish()
+            rejectUntrustedCaller(context)
             return
         }
         requestAssertionUserVerification(context, passkeyData)
+    }
+
+    /**
+     * 归属复校失败后的收尾（`ISSUE-P2-530`）。
+     *
+     * 候选列表自本批起按请求 `rp.id` 放行（对齐同类项目），因此「列得出来、签不出去」不再
+     * 是理论组合：非白名单浏览器上用户会**先看到条目再被拒**。故此处把原先的静默
+     * [failAndFinish] 换成拒绝原因页——调用方确属「已安装、且未加入特权名单的浏览器」时
+     * 一并给出「加入特权名单」的就地补救（资格守卫复用 [BrowserRemedyBuilder]，
+     * 与创建链路同款）；其余情形（原生应用 / 已启用的浏览器 / 真不匹配）保持静默收尾，
+     * 不凭空造一个用户无从下手的页面。
+     *
+     * 本次断言**仍然失败**：origin 在候选组装之初即已固定为 `apk-key-hash`，授权只影响**下一次**发起
+     * （与 [CredentialRejectionAction] 的「就地」语义一致）。
+     */
+    private fun rejectUntrustedCaller(context: PasskeyAssertionContext) {
+        val attestedPackage = CallingOriginResolver.systemAttestedPackageName(context.providerReq?.callingAppInfo)
+        val reason = CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED
+        val remedy = attestedPackage?.let {
+            BrowserRemedyBuilder.build(
+                context = this,
+                store = privilegedBrowserStore,
+                reason = reason,
+                callerPackage = it,
+                scope = lifecycleScope
+            )
+        }
+        if (remedy == null) {
+            failAndFinish()
+            return
+        }
+        rejectAndFinish(reason, remedy, R.string.cred_reject_get_title)
     }
 
     /**
