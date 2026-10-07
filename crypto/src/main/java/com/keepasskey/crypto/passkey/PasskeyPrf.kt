@@ -22,7 +22,10 @@ import java.util.Base64
  *
  * 其中 `SHA-256("WebAuthn PRF" || 0x00 || input)` 是规范定义的**客户端侧处理**
  * （域分隔，避免与其它 HMAC 用途互相干扰）；认证器只做后半段 HMAC。KeePassDX 的
- * `PasskeyHelper.derivePrfSalt` / `computePrfValue` 即同一口径，本对象与之逐字节一致，
+ * `PasskeyHelper.derivePrfSalt` / `computePrfValue` 即同一口径——2026-10-07（`ISSUE-P3-522`）
+ * 逐行对照 `参考项目/KeePassDX/app/src/main/java/com/kunzisoft/keepass/credentialprovider/passkey/util/PasskeyHelper.kt:277-296`
+ * 核实：`SALT_PRF = "WebAuthn PRF"`、`derivePrfSalt = SHA-256(UTF8(SALT_PRF) || [0x00] || rawSalt)`、
+ * `computePrfValue = HMAC-SHA-256(secret, derivePrfSalt(salt))`，与本对象逐字节一致，
  * 保证两端对同一凭据给出相同 PRF 输出。
  *
  * ## 存储与敏感纪律

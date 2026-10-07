@@ -73,6 +73,21 @@ internal class SettingsMasterKeyChangeController(
     private val activeDbId: suspend () -> String? = {
         repository.getDatabases().first().firstOrNull { it.isActive }?.id
     },
+    /**
+     * ISSUE-P2-520：活动库是否绑定云端同步——回执的「云端旧版本」说明仅对同步库呈现
+     * （本地库无云端副本，该说明是噪音）。默认＝活动库登记 `isRemote`（与 [activeDbId] 同源同查）。
+     */
+    private val syncBound: suspend () -> Boolean = {
+        repository.getDatabases().first().firstOrNull { it.isActive }?.isRemote == true
+    },
+    /**
+     * ISSUE-P2-520：换密成功后活动库 `.bak` 残余探测（「删除失败 → 有可见信号」的读数侧）。
+     * null = 未装配（单测旁路），说明缺席——与 [resealAfterChange] 等可选挂点同一口径。
+     * 生产由 `SettingsViewModel` 以真会话装配（文件 stat 挂 IO 调度器；null 会话短路不产生
+     * 真实调度器跳跃，runTest 下默认装配也安全）；读数语义 =
+     * `AtomicFileWriter.backupFileFor(activeFile).exists()`。
+     */
+    private val residualBackupProbe: (suspend () -> Boolean)? = null,
     // ISSUE-P3-453：错误码 → 本地化文案通道（置于末位以免打乱既有位置传参；生产由宿主显式注入）
     private val strings: StringsProvider = StringsProvider { _, _ -> "" }
 ) {
@@ -119,13 +134,26 @@ internal class SettingsMasterKeyChangeController(
                 } else {
                     repository.changeMasterPassword(newPasswordChars, keyFileIntent)
                 }
+                val feedback = when (val r = result) {
+                    is KdbxResult.Success<*> -> {
+                        // ISSUE-P2-520：成功回执按残余面追加说明——① 云端旧版本（同步绑定库才有）
+                        // 在下次同步被替换、期间仍可用旧口令解开；② .bak 删除失败时旧口令可解的
+                        // 残留仍在私有目录（下次成功保存自动清理）。两项都缺席时占位为空串，
+                        // 渲染文本与旧口径逐字一致。
+                        val cloudNote =
+                            if (syncBound()) strings.get(R.string.set_master_key_cloud_old_version_note) else ""
+                        val backupNote =
+                            if (residualBackupProbe?.invoke() == true) {
+                                strings.get(R.string.set_master_key_backup_cleanup_failed_note)
+                            } else {
+                                ""
+                            }
+                        UiMessage(R.string.set_master_key_updated, listOf(cloudNote, backupNote))
+                    }
+                    is KdbxResult.Failure -> UiMessage(R.string.op_failed, listOf(r.textArg(strings)))
+                }
                 mutableState.update {
-                    it.copy(
-                        feedback = when (result) {
-                            is KdbxResult.Success<*> -> UiMessage(R.string.set_master_key_updated)
-                            is KdbxResult.Failure -> UiMessage(R.string.op_failed, listOf(result.textArg(strings)))
-                        }
-                    )
+                    it.copy(feedback = feedback)
                 }
                 if (result is KdbxResult.Success) {
                     // ISSUE-P3-434：记忆记录必须与新绑定的密钥文件一致（先于重封印）；

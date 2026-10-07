@@ -1,6 +1,5 @@
 package com.keepasskey.app.ui.screens.settings.subscreens
 
-import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
@@ -86,18 +85,6 @@ fun WebDavSyncScreen(
     )
 }
 
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步页 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "WebDAV 同步页 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun WebDavSyncScreenPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        WebDavSyncScreen(
-            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState(),
-            onBackClick = {},
-            onAutoSyncToggle = {},
-            onWifiOnlyToggle = {},
-            onTriggerSync = {}
-        )
-    }
-}
+// ISSUE-P3-519：本文件是 `CloudSyncScreen` 的兼容别名（生产调用走 NavGraph），曾有的
+// `WebDavSyncScreenPreview` 与「云端同步设置页」预览传同一默认态、导出图逐像素相同，
+// 已删除——该屏的预览以 `CloudSyncScreenPreviewScreenshotExport` 单一来源维护。

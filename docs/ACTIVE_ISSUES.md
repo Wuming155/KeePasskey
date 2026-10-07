@@ -47,7 +47,7 @@
 
 > **暂无开放项**（`ISSUE-P1-495` 已于 §449 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（4 项）
+## P2 中危缺陷与协议/测试缺口（3 项）
 
 > 来源见文首「新增批次（2026-10-07）」。
 
@@ -65,13 +65,6 @@
 - **涉及文件**：`.github/workflows/build.yml`、`tools/passkey-interop/verify_interop.py`（如需入口调整）。
 - **验收标准**：① CI 增加步骤：先 `:database:testDebugUnitTest --tests "*PasskeyInteropProbeTest*"` 产出产物，再跑 `python tools/passkey-interop/verify_interop.py`；退出码非 0 即红，严禁 `|| true` 吞码；② runner 缺 keepassxc-cli 时退出码 2 的口径须显式（安装 CLI；缺 CLI 退 2 即红，不得静默跳过）；③ 若纳入 `gate_readings.py` 解析范围须同步其段落。
 
-### ISSUE-P2-520：换密成功后 .bak 删除失败静默残留旧口令可解密文，且换密回执缺「云端旧版本仍可解」告知
-
-- **核实时间点**：2026-10-07；**核实方式**：实读 `AtomicFileWriter.kt:266-269`（deleteBackup「删除失败仅记录告警并返回 false，绝不在此抛出以阻断主流程」）、`SessionPersistence.kt:185-188`（changeCredentials 成功路径删 .bak）、`SessionFileWriter.kt:40-53` 同口径；grep 全 app 模块未发现呈现该残留的 UI 代码；换密回执仅「主密码已更新」（`SettingsMasterKeyChangeController.kt:122-135`，strings.xml:755）；换密链路无同步触发点（检索证据见综合报告 §4.1）。
-- **背景**：换密写盘完成与 deleteBackup 之间（或 unlink 失败）时，旧口令可解的 .bak 静默留在 files/ 下——与「凭据轮换后旧密文快照必须失效」的登记意图（`ISSUE-P2-11`，`AtomicFileWriter.kt:244-246`）相悖的残余窗口；云端旧版本保持旧口令加密直到下轮上传，同样无提示。本条为**残余暴露面缺告知**（deleteBackup 失败仅告警系既有实现取舍），非已证实的行为缺陷。
-- **涉及文件**：`AtomicFileWriter.kt`、`SessionPersistence.kt`、`SettingsMasterKeyChangeController.kt`、`strings.xml`（中英）。
-- **验收标准**：① deleteBackup 失败时给用户可见信号（换密回执附警告或等价可见提示），补宿主用例锁定「删除失败 → 有可见信号」路径；② 换密回执补充「云端旧版本稍后自动更新（上传前仍可用旧口令解开）」口径；③ 若某项裁决为接受残余，回写限界表而非留空。
-
 ### ISSUE-P2-521：库文件损坏时无 .bak 恢复路径——解锁失败只有通用错误，全 app 无任何 .bak 消费入口
 
 - **核实时间点**：2026-10-07；**核实方式**：实读 `MasterPasswordUnlockSession.kt:217` → `KdbxErrorTexts.kt:44`（损坏路径归 UNLOCK_FAILED 通用文案，无恢复指引）、`SessionOpener.kt:191-195`（打开失败仅返回 Failure）；grep 全 app 模块证实零 `.bak` 消费代码；`AtomicFileWriter.kt:67-114` 五步原子写保证 .bak 恒为上一稳定版本；SAF 自选位置非原子写（限界 §24）使「原文件真损坏」面真实可达。
@@ -79,7 +72,7 @@
 - **涉及文件**：app 解锁链（`UnlockViewModel` / `SessionOpener` / `MasterPasswordUnlockSession` / `KdbxErrorTexts`）、`database`（如需暴露备份定位）、`strings.xml`（中英）。
 - **验收标准**：① 解锁失败且错误分类属「文件损坏 / 格式错误」（**非**凭据错误）且 `.bak` 存在时，向用户提供「从 .bak 恢复」入口，并明确告知其内容为上次成功保存的版本；② 恢复动作须用户显式确认，以原子方式（临时文件 + rename）用 `.bak` 覆盖主文件，`.bak` 自身保留；③ 凭据错误（主密码 / 密钥文件不匹配）不得出现该入口，防误覆盖；④ 宿主用例锁定错误分类判据与恢复复制语义；⑤ 若裁决不做，回写限界表而非留空。
 
-## P3 低危问题、特性接线与体验优化（6 项）
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### ISSUE-P3-517：@Preview 反向态覆盖缺口——缺反向态预览 5 处、完全无预览 8 处（两态齐 14/27=51.9%）
 
@@ -88,33 +81,12 @@
 - **涉及文件**：上列组件所在文件（`app/src/main/java/com/keepasskey/app/ui/**`）。
 - **验收标准**：① 逐条补反向态 / 补预览（或逐条给出豁免理由并登记）；② 复跑 `check_preview_state_coverage.py` 读数回写批次文档，两态齐比率只升不降；③ 重生包装后 `:app:compileDebugScreenshotTestKotlin --rerun` 通过。
 
-### ISSUE-P3-519：预览走查两处观感/冗余项（非功能缺陷，低成本清理）
-
-- **核实时间点**：2026-10-07；**核实方式**：`export-preview-main.bat` 导出 40 张逐张 Read 目检 + 主会话复核截图（`preview-exports/main/light/ThemeSettingsScreenPreviewScreenshotExport_外观设置页 - 浅色_c88978fe_0.png` 孤字行属实；`WebDavSyncScreen.kt:90-103` 别名预览与 `CloudSyncScreen` 同传默认 `SettingsUiState()` 逐像素相同属实）。
-- **背景**：① `strings.xml:1008` `theme_mode_light_sub`「明亮清爽，适合日间」在模式卡片宽度下换行后第二行只剩一个「间」字（亮暗同现）；② `WebDavSyncScreenPreview` 经别名函数渲染与「云端同步设置页」预览完全重复，且别名函数本身有生产调用（`KeePasskeySettingsNavGraphRoutes.kt:133`）不可删。
-- **涉及文件**：`strings.xml:1008`（中英对称性核对）；`WebDavSyncScreen.kt`（删冗余预览函数）；`app/build.gradle.kts` `mainScreenPreviewPrefixes`（同步摘除 `WebDavSyncScreenPreviewScreenshotExport`，防逐屏命中断言红）。
-- **验收标准**：① 文案调整后复跑导出目检无孤字行；② 冗余预览删除后包装重生 + `:app:compileDebugScreenshotTestKotlin --rerun` 通过、导出任务逐屏断言仍绿；③ 改过 UI 后跑 `check_box_slot_children.py`。
-
-### ISSUE-P3-522：PasskeyPrf KDoc「与 KeePassDX 逐字节一致」为无出处声明——须升级为带引用的核实结论
-
-- **核实时间点**：2026-10-07；**核实方式**：目标性实读 `参考项目/KeePassDX/app/src/main/java/com/kunzisoft/keepass/credentialprovider/passkey/util/PasskeyHelper.kt:277-296`——`SALT_PRF = "WebAuthn PRF"`、`derivePrfSalt = SHA-256(UTF8(SALT_PRF) || [0x00] || rawSalt)`、`computePrfValue = HMAC-SHA-256(secret, derivePrfSalt(salt))`，与本仓 `PasskeyPrf.clientSideProcess` / `computeValue`（`digest.update(0x00)` 单字节 + `hmacSha256(secret, salt)`）逐字节同构，**声明属实**。
-- **背景**：`PasskeyPrf.kt` KDoc 的「本对象与之逐字节一致」仅为口径声明、无参考项目出处引用（综合报告 §3.1 指出其不可追溯）；已核实为真的前提下，把声明升级为带 `path:line` 与核实日期的引用即可闭环。
-- **涉及文件**：`crypto/src/main/java/com/keepasskey/crypto/passkey/PasskeyPrf.kt`（仅 KDoc）。
-- **验收标准**：KDoc 写明参考实现出处（`PasskeyHelper.kt:277-296`）与核实日期；不改动任何可执行代码。
-
 ### ISSUE-P3-523：MIUI 第二数据点（tests=51 / failures=3）的 3 例失败逐例定性未做
 
 - **核实时间点**：2026-10-07；**核实方式**：实读 `docs/architecture/实现约定与验证现状.md` §4.1（行 169-174）原文——「仅产出 tests=51（对照非 MIUI 基线 67）且 failures=3」并自陈「逐例定性未做」；三例为：① `DialogWindowHardeningDeviceTest` 479s 空 `<failure>`；② `AutofillAuthChainDeviceTest` 跨包显式启动失败；③ `CredentialSaveChainDeviceTest` 经 Assume 记录。
 - **背景**：`:app:` 层在 MIUI 的整层零结果已由 `ISSUE-P2-492` 收口定性（freezeUid 厂商冻结面），但第二数据点的 3 例失败至今无逐例归因——若其中混有非冻结面的真实缺陷，现口径无法区分。在位真机 Redmi 4X（santoni / **LineageOS** / API 37，非 MIUI）可承接复跑（§9.2b）。
 - **涉及文件**：`docs/architecture/实现约定与验证现状.md` §4.1（定性结论回写）；（定性后）可能新登记缺陷条目。
 - **验收标准**：① 在该非 MIUI 真机复跑三例（先按 §263 确认设备上无待保留的 keepasskey 数据），区分「MIUI 冻结/厂商面」与「可复现真实缺陷」；② 定性结论回写 §4.1（或新登记条目），禁止继续以「未定性」状态长期挂账。
-
-### ISSUE-P3-524：密钥文件交付文案与批次 416「私有副本兜底」现实的表述一致性待复核
-
-- **核实时间点**：2026-10-07；**核实方式**：Read `app/src/main/res/values/strings.xml:1483-1500`——`db_picker_keyfile_backup_warning`（:1491，建库一次性交付对话框语境）原文「该密钥文件是解锁本库的第二因子，**本应用不会代为保管**。请立即导出到安全位置；一旦丢失，即使记得主密码也无法再打开此库。」；对照批次 416 文档「副本在建库成功那一刻就已落私有目录，密钥文件再也不会『永久丢失』」与 `KeyFileVaultCopyStore.kt:19-38,66`（filesDir/keyfiles，DEK+Keystore 信封加密）。
-- **背景**：自批次 416 起应用确有私有加密副本兜底，「永久丢失」仅在「SAF 导出件与私有副本同时丢失」（典型为卸载/清除数据且未导出）时成立；交付文案「本应用不会代为保管」「一旦丢失……无法再打开」在「未导出但私有副本仍在」的常态下已过强，两处对同一风险的表述表面冲突。
-- **涉及文件**：`app/src/main/res/values/strings.xml:1489/:1491/:1497`（及 values-en 对应条目）。
-- **验收标准**：① 逐句核对三条文案与 416 兜底现实的一致性，给出「维持 / 加注限定 / 修订」结论并留痕批次文档；② 若修订文案，同步核对该对话框既有预览 / 测试断言是否需更新；③ 改动与文档同一次提交，`check_md_links.py` 与门禁读数通过。
 
 ### ISSUE-P3-525：@Preview 横屏维度零覆盖——50 个预览文件无任何 widthDp/heightDp/orientation 指定
 

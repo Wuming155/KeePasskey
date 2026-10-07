@@ -365,7 +365,6 @@ val mainScreenPreviewPrefixes = listOf(
     "SettingsContentPreviewScreenshotExport",
     "DatabaseSettingsScreenPreviewScreenshotExport",
     "CloudSyncScreenPreviewScreenshotExport",
-    "WebDavSyncScreenPreviewScreenshotExport",
     "AutofillSettingsScreenPreviewScreenshotExport",
     "SecuritySettingsScreenPreviewScreenshotExport",
     "ThemeSettingsScreenPreviewScreenshotExport",

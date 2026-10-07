@@ -49,7 +49,9 @@ import org.junit.Test
  * 1. 提交后 uiState 出现 `isChangingMasterKey = true`（对话框据此保持进度且禁提交/禁关闭）；
  * 2. 忙态中的**第二次提交被同步拒绝**且入参当场清零（数组所有权已移交）；
  * 3. 完成后忙态回落 + 成功回执落位 + 首个入参清零；
- * 4. 回执经 clearMasterKeyChangeFeedback 一次性清除。
+ * 4. 回执经 clearMasterKeyChangeFeedback 一次性清除；
+ * 5. `ISSUE-P2-520`：成功回执按残余面追加说明——同步绑定库附「云端旧版本」说明、
+ *    `.bak` 删除失败残留附删除失败说明，缺席时占位为空串（渲染与旧口径逐字一致）。
  *
  * 仓库用门闩挂起，制造**真实的在途窗口**——否则任务瞬时完成，忙态断言会退化成
  * 「读到的永远是终态」的空转断言。
@@ -335,6 +337,74 @@ class MasterKeyChangeTaskTest {
         assertNull("来源 Uri 缺失必须清旧记录", blankUri.remembered)
     }
 
+    // ── ISSUE-P2-520：换密成功回执的残余面追加说明 ────────────────────────
+
+    /** 标记文案通道：每条资源解析为「res:<id>」，使「说明是否被纳入回执」可断言。 */
+    private val markingStrings = StringsProvider { id, _ -> "res:$id" }
+
+    @Test
+    fun `换密成功且无残余面时回执两项占位均为空串`() = runTest {
+        val fake = FakeVaultRepository()
+        val controller = SettingsMasterKeyChangeController(
+            fake, this,
+            syncBound = { false },
+            strings = markingStrings
+        )
+        controller.submit("Master-Key-Fake-P2-520a".toCharArray())
+        testScheduler.advanceUntilIdle()
+        val feedback = controller.state.value.feedback
+        assertEquals(R.string.set_master_key_updated, feedback?.resId)
+        assertEquals("云端说明占位必须为空（本地库无云端副本）", listOf("", ""), feedback?.args)
+    }
+
+    @Test
+    fun `换密成功且bak残留时回执追加删除失败说明`() = runTest {
+        val fake = FakeVaultRepository()
+        val controller = SettingsMasterKeyChangeController(
+            fake, this,
+            syncBound = { false },
+            residualBackupProbe = { true },
+            strings = markingStrings
+        )
+        controller.submit("Master-Key-Fake-P2-520b".toCharArray())
+        testScheduler.advanceUntilIdle()
+        val feedback = controller.state.value.feedback
+        assertEquals(R.string.set_master_key_updated, feedback?.resId)
+        assertEquals("云端说明占位必须为空（未绑定同步）", "", feedback?.args?.get(0))
+        assertEquals(
+            "`.bak` 残留必须追加删除失败说明（AC①：删除失败 → 有可见信号）",
+            "res:${R.string.set_master_key_backup_cleanup_failed_note}",
+            feedback?.args?.get(1)
+        )
+    }
+
+    @Test
+    fun `回执的云端说明随同步绑定状态呈现或缺席`() = runTest {
+        val fake = FakeVaultRepository()
+        var bound = true
+        val controller = SettingsMasterKeyChangeController(
+            fake, this,
+            syncBound = { bound },
+            strings = markingStrings
+        )
+        controller.submit("Master-Key-Fake-P2-520c".toCharArray())
+        testScheduler.advanceUntilIdle()
+        assertEquals(
+            "同步绑定库必须追加云端旧版本说明（AC②）",
+            "res:${R.string.set_master_key_cloud_old_version_note}",
+            controller.state.value.feedback?.args?.get(0)
+        )
+
+        bound = false
+        controller.submit("Master-Key-Fake-P2-520d".toCharArray())
+        testScheduler.advanceUntilIdle()
+        assertEquals(
+            "本地库的云端说明占位必须为空串",
+            "",
+            controller.state.value.feedback?.args?.get(0)
+        )
+    }
+
     private class FakeKeyFileAccess(
         private val rememberEnabled: Boolean = true,
         private val persistPermission: Boolean = true
@@ -386,7 +456,9 @@ class MasterKeyChangeTaskTest {
             com.keepasskey.app.autofill.AutofillSaveBlocklistStore(null),
             com.keepasskey.app.autofill.AutofillFieldBlocklistStore(null),
             BreachCheckCoordinator(NoOpBreachRangeClient),
-            databaseSession = DatabaseSession(),
+            // ISSUE-P2-520：null 会话 ⇒ 换密回执的 .bak 残余探针短路、不产生真实 IO 调度器跳跃
+            // （runTest 的 advanceUntilIdle 等不到 Dispatchers.IO 上的续体；本用例只验任务态与回执）
+            databaseSession = null,
             stringsProvider = TEST_STRINGS
         ).also { MainDispatcherGuard.track(it) }
     }

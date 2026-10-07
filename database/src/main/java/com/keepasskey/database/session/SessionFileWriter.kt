@@ -51,4 +51,18 @@ internal class SessionFileWriter(private val createBackupProvider: () -> Boolean
             )
         }
     }
+
+    /**
+     * 活动文件的滚动备份当前是否存在（ISSUE-P2-520 换密残余面读数）。
+     *
+     * 命名复用 [AtomicFileWriter.backupFileFor] 单一来源，不在本层复刻 `.bak` 规则；
+     * [targetFile] 为 null（SAF 流式通道 / 无本地文件）恒 false。调用方负责调度器
+     * （文件 stat 不在 Main 执行）。
+     */
+    fun rollingBackupExists(targetFile: File?): Boolean {
+        if (targetFile == null) {
+            return false
+        }
+        return AtomicFileWriter.backupFileFor(targetFile).exists()
+    }
 }

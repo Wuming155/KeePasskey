@@ -387,4 +387,7 @@ class DatabaseSession(
      */
     suspend fun changeKeyFileOnly(newKeyFileData: ByteArray?): KdbxResult<Unit> =
         persistence.changeKeyFileOnly(newKeyFileData)
+
+    /** 活动文件滚动备份（`.bak`）当前是否存在（ISSUE-P2-520 换密残余面读数；语义见 `SessionFileWriter.rollingBackupExists`）。 */
+    fun rollingBackupExists(): Boolean = fileWriter.rollingBackupExists(core.activeFile)
 }

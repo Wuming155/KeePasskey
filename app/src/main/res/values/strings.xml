@@ -752,7 +752,10 @@
     <string name="debug_title">开发者调试</string>
     <string name="set_debug_entry_sub">查看内部运行状态与诊断信息</string>
     <string name="set_about_entry_sub">版本 %1$s</string>
-    <string name="set_master_key_updated">主密码已更新，加密密钥已重新派生</string>
+    <!-- ISSUE-P2-520：占位 %1$s＝云端旧版本说明（仅同步库）/ %2$s＝.bak 删除失败说明，缺席时为空串，渲染与旧口径一致 -->
+    <string name="set_master_key_updated">主密码已更新，加密密钥已重新派生%1$s%2$s</string>
+    <string name="set_master_key_cloud_old_version_note">。云端旧版本副本将在下次同步后被替换，期间仍可用旧口令解开</string>
+    <string name="set_master_key_backup_cleanup_failed_note">。注意：旧口令可解密的本地备份（.bak）删除失败，文件仍在应用私有目录内，将在下次成功保存时自动清理</string>
     <string name="set_master_key_dialog_desc">修改主密码将使用 %1$s 重新派生密钥并重加密整个数据库，过程不可逆</string>
     <!-- ISSUE-P3-433：「修改主密码」显式开关（KeePassDX 口径），取代「留空即保持」暗示语义 -->
     <string name="set_master_key_change_password_switch">修改主密码</string>
@@ -1005,7 +1008,8 @@
     <!-- ===== 主题设置子页 (ThemeSettingsScreen) ===== -->
     <string name="theme_section_mode">外观模式</string>
     <string name="theme_mode_light">浅色模式</string>
-    <string name="theme_mode_light_sub">明亮清爽，适合日间</string>
+    <!-- ISSUE-P3-519：原「明亮清爽，适合日间」在模式卡片宽度下第二行只剩孤字「间」 -->
+    <string name="theme_mode_light_sub">日间明亮清爽</string>
     <string name="theme_mode_dark">深色模式</string>
     <string name="theme_mode_dark_sub">低亮度夜间配色，护眼省电</string>
     <string name="theme_mode_system_sub">自动跟随系统昼夜切换</string>
@@ -1486,9 +1490,10 @@
     <string name="external_open_failed">打开密码库失败，请确认文件可读后在应用内重试</string>
 
     <!-- ===== ISSUE-P3-21：建库密钥文件的一次性交付（丢失即无法解锁，必须明示） ===== -->
-    <string name="db_picker_keyfile_generate_desc">将生成新的密钥文件作为第二因子；生成后必须立即保存到安全位置——丢失将无法再解锁本库</string>
+    <!-- ISSUE-P3-524：与批次 416「私有加密副本兜底」对齐——永久丢失仅在导出件与设备内副本同时丢失时成立 -->
+    <string name="db_picker_keyfile_generate_desc">将生成新的密钥文件作为第二因子；生成后请立即导出到安全位置——若导出件与设备内加密副本同时丢失，将无法再解锁本库</string>
     <string name="db_picker_keyfile_backup_title">请立即保存密钥文件</string>
-    <string name="db_picker_keyfile_backup_warning">该密钥文件是解锁本库的第二因子，本应用不会代为保管。请立即导出到安全位置；一旦丢失，即使记得主密码也无法再打开此库。</string>
+    <string name="db_picker_keyfile_backup_warning">该密钥文件是解锁本库的第二因子，应用仅在设备上保留一份加密副本（卸载应用或清除数据后随之消失）。请立即导出到安全位置——若导出件与设备内副本同时丢失，即使记得主密码也无法再打开此库。</string>
     <string name="db_picker_keyfile_backup_save">立即保存</string>
     <string name="db_picker_keyfile_backup_skip">暂不保存</string>
     <string name="db_picker_keyfile_saved">密钥文件已保存</string>

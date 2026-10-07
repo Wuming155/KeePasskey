@@ -154,7 +154,9 @@ class SettingsViewModel @Inject constructor(
         vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange, keyFileAccess,
         keyFileVaultCopyStore, // ISSUE-P3-434：第4参记忆位置同步；§411（P3-448）：副本同步 + 「导入密钥文件」收编
         // ISSUE-P3-453：strings 命名置末位（错误码 → 本地化文案通道），不打断既有位置传参序列
-        strings = strings
+        strings = strings,
+        // ISSUE-P2-520：换密回执的 `.bak` 残余探测（真会话读数，文件 stat 挂 IO；可空会话短路 ⇒ 单测默认装配不产生真实调度器跳跃）
+        residualBackupProbe = { databaseSession?.let { s -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { s.rollingBackupExists() } } ?: false }
     ) // §411（P3-452/P3-448）改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
     internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange
     internal val keyFileReader get() = features.keyFileReader // ISSUE-P3-428：改密对话框 SAF 读取通道（全仓唯一）

@@ -740,7 +740,10 @@
     <string name="debug_title">Developer diagnostics</string>
     <string name="set_debug_entry_sub">Inspect internal state and diagnostics</string>
     <string name="set_about_entry_sub">Version %1$s</string>
-    <string name="set_master_key_updated">Master password updated, encryption key re-derived</string>
+    <!-- ISSUE-P2-520: %1$s = cloud old-version note (sync-bound vaults only) / %2$s = .bak cleanup-failed note; empty when absent -->
+    <string name="set_master_key_updated">Master password updated, encryption key re-derived%1$s%2$s</string>
+    <string name="set_master_key_cloud_old_version_note">. The old cloud copy will be replaced at the next sync; until then it remains decryptable with the old password</string>
+    <string name="set_master_key_backup_cleanup_failed_note">. Warning: deleting the local .bak backup (still decryptable with the old password) failed; it remains in the app private storage and will be cleaned up on the next successful save</string>
     <string name="set_master_key_dialog_desc">Changing the master password re-derives the key with %1$s and re-encrypts the whole database. This cannot be undone</string>
     <!-- ISSUE-P3-433: explicit "change master password" switch (KeePassDX style), replacing the leave-empty-to-keep hint -->
     <string name="set_master_key_change_password_switch">Change master password</string>
@@ -1363,9 +1366,10 @@
     <string name="external_open_failed">Failed to open the vault. Make sure the file is readable and retry inside the app</string>
 
     <!-- ===== ISSUE-P3-21: one-time key file delivery when creating a database ===== -->
-    <string name="db_picker_keyfile_generate_desc">A new key file will be generated as a second factor. Save it to a safe location immediately - losing it makes this database impossible to unlock.</string>
+    <!-- ISSUE-P3-524: aligned with batch 416 in-app encrypted copy; permanent loss only when both copies are gone -->
+    <string name="db_picker_keyfile_generate_desc">A new key file will be generated as the second factor for this database. Export it to a safe location immediately - if both the exported file and the in-app encrypted copy are lost, the database can no longer be unlocked.</string>
     <string name="db_picker_keyfile_backup_title">Save the key file now</string>
-    <string name="db_picker_keyfile_backup_warning">This key file is the second factor for unlocking this database, and this app does not keep a copy. Export it to a safe location now; once lost, the database cannot be opened again even with the correct master password.</string>
+    <string name="db_picker_keyfile_backup_warning">This key file is the second factor for unlocking this database. The app keeps an encrypted copy on this device only (it is lost when the app is uninstalled or its data is cleared). Export it to a safe location now - if both the exported file and the in-app copy are lost, the database cannot be opened again even with the correct master password.</string>
     <string name="db_picker_keyfile_backup_save">Save now</string>
     <string name="db_picker_keyfile_backup_skip">Skip for now</string>
     <string name="db_picker_keyfile_saved">Key file saved</string>
