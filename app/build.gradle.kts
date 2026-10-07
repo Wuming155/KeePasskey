@@ -211,8 +211,10 @@ android {
             // 代码与 manifest 无硬编码包名（provider 用 ${applicationId}，autofill / passkey
             // 自校验走 Context.packageName），后缀不破这些面；代价是 debug / release 数据完全隔离。
             // 桌面名后缀走 debug 源集资源覆盖（app/src/debug/res 的 app_name）而非 manifest
-            // 占位符——`credential_provider_service.xml` 的 settingsSubtitle 也引用 @string/app_name，
-            // 占位符只作用于 manifest 覆盖不到它，资源覆盖两处一次生效。
+            // 占位符——占位符只作用于 manifest，覆盖不到 res XML。注：凭据提供者的
+            // settingsSubtitle 自 ISSUE-P3-527 起改指 credential_provider_settings_subtitle
+            // （说明服务能力，两版同文案）；系统服务列表里 debug / release 的区分由**上一行应用名**
+            // （android:label → @string/app_name）承担。
             applicationIdSuffix = ".debug"
         }
         release {

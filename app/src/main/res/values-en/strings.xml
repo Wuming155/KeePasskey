@@ -1277,6 +1277,9 @@
     <string name="totp_info_desc">Lookup order: the field names configured above first; on a miss, the official otp field and custom fields starting with TOTP are used. Refresh period and code length apply only when the entry itself does not specify them, and the length is always clamped to 6-8 digits (out-of-range values fall back with a notice). The engine is compatible with RFC 6238 HMAC-SHA1 / SHA256 / SHA512 and auto-corrects system clock drift</string>
 
     <!-- ===== Credential Provider & Autofill ===== -->
+    <!-- ISSUE-P3-527: subtitle of this app's row in the system service list, referenced by
+         credential_provider_service.xml (android:settingsSubtitle) — rendered by system UI only. -->
+    <string name="credential_provider_settings_subtitle">Passkeys, autofill credential provider</string>
     <string name="cred_unlock_action_title">Unlock KeePasskey to fill</string>
     <string name="cred_create_entry_title">Save in KeePasskey</string>
     <!-- ISSUE-P3-345 / PD-51 -->

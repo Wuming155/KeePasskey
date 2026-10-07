@@ -1331,6 +1331,11 @@
     <string name="totp_info_desc">查找顺序：先按上面配置的字段名，未命中则回退官方 otp 字段与 TOTP 开头的自定义字段。刷新周期与验证码位数只在条目自身未声明该参数时作为缺省值，位数始终限制在 6~8 位（超出会回落并提示）。引擎兼容 RFC 6238 HMAC-SHA1 / SHA256 / SHA512，并自动纠偏系统时钟漂移</string>
 
     <!-- ===== 系统凭据提供与自动填充 (Credential Provider & Autofill) ===== -->
+    <!-- ISSUE-P3-527：系统「服务」列表里本应用一行的副标题，由 credential_provider_service.xml 的
+         android:settingsSubtitle 引用（**只在系统 UI 渲染，应用内不出现**）。此前误指向
+         @string/app_name，副标题与应用名重复（列表里显成「KeePasskey / KeePasskey」），
+         等于没有说明本服务提供什么。 -->
+    <string name="credential_provider_settings_subtitle">通行密钥、自动填充凭据提供程序</string>
     <string name="cred_unlock_action_title">解锁 KeePasskey 填充凭据</string>
     <string name="cred_create_entry_title">在 KeePasskey 中保存</string>
     <!-- ISSUE-P3-345 / PD-51：无匹配就地新建（口令维度专用；CM Action 与选择器共用草稿页） -->
