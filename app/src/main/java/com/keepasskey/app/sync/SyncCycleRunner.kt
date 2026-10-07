@@ -80,7 +80,12 @@ class SyncCycleRunner @Inject constructor(
      * 行为与整改前逐字节一致；非 null 时缓存 / 基线 / 防回滚键含库身份命名空间，
      * 且绑定不符的同步中止于任何网络写之前。
      */
-    internal val vaultBindingStore: SyncVaultBindingStore? = null
+    internal val vaultBindingStore: SyncVaultBindingStore? = null,
+    /**
+     * `ISSUE-P3-528`：主凭据轮换后的「云端副本待替换」持久标记（生产由 Hilt 注入）。
+     * 为 null（既有手工装配路径 / 单测）时本机制整体旁路，装配期判定与整改前逐字节一致。
+     */
+    internal val credentialRotationStore: SyncCredentialRotationStore? = null
 ) {
 
     /**

@@ -158,7 +158,17 @@ private suspend fun SyncCycleRunner.buildCycleContext(
     // 字节级污染判据救不了它——KDBX4 每次保存重生成 masterSeed / IV / KDF salt，
     // 同一内容的两次序列化字节必然不同，`contentEquals` 无从命中。
     val baseSnapshotBytes = syncCache.readBaseContent(remotePath)
-    val localChangeState = changes.resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
+    // ISSUE-P3-528：本地库若已用**新主凭据**重新加密（换密 / 改绑密钥文件），云端副本仍持旧凭据。
+    // 该事实在**树内容**上不可见（换密只改文件头），故必须由持久标记补上——否则下面会走
+    // 「判无变化即复用旧缓存字节」分支，本地侧被当作与云端一致，一次上传都不发生：
+    // 既让「云端旧版本副本将在下次同步后被替换」的回执承诺落空，又让旧口令在云端长期可用。
+    // 消费口径＝读后即清；失败（离线等）时的重投由缓存版本号承担（见 SyncCredentialRotationStore）。
+    val credentialsRotated = credentialRotationStore?.consumeRecrypted(remotePath) == true
+    val localChangeState = if (credentialsRotated) {
+        LocalContentChangeState.CHANGED
+    } else {
+        changes.resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
+    }
     val hasLocalContentChanged = localChangeState != LocalContentChangeState.UNCHANGED
     preferences.verbose(
         settings,

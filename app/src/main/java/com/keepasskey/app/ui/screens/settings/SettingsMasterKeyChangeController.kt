@@ -56,6 +56,34 @@ internal data class MasterKeyChangeTaskState(
  * 另承载设置页「导入密钥文件」行的新语义入口 [importRememberedCopy]：把解锁时所选（记忆）
  * 的密钥文件收编进私有目录，不再要求用户重复手选。
  */
+/**
+ * `ISSUE-P3-528`：`SettingsViewModel` 侧的**唯一装配点**（自 VM 下沉，使该文件回到行数档沿之下）。
+ *
+ * 各参数语义与 [SettingsMasterKeyChangeController] 的 ctor KDoc 逐项一致，此处只记装配方三条口径：
+ * - [strings]：`ISSUE-P3-453` 的「错误码 → 本地化文案」通道，命名置末位以不打断既有位置传参序列；
+ * - [residualBackupProbe]：`ISSUE-P2-520` 的换密回执 `.bak` 残余读数（真会话 stat 挂 IO；可空会话短路）；
+ * - [onCredentialsRotated]：`ISSUE-P3-528` 的「云端副本待替换」登记（生产 = `SyncCoordinator.markLocalVaultRecrypted`）。
+ */
+internal fun masterKeyChangeControllerOf(
+    repository: VaultRepository,
+    scope: CoroutineScope,
+    resealAfterChange: suspend (FragmentActivity?, CharArray?) -> Unit,
+    keyFileAccess: KeyFileAccess?,
+    vaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore?,
+    strings: StringsProvider,
+    residualBackupProbe: suspend () -> Boolean,
+    onCredentialsRotated: suspend () -> Unit
+): SettingsMasterKeyChangeController = SettingsMasterKeyChangeController(
+    repository = repository,
+    scope = scope,
+    resealAfterChange = resealAfterChange,
+    keyFileAccess = keyFileAccess,
+    vaultCopyStore = vaultCopyStore,
+    strings = strings,
+    residualBackupProbe = residualBackupProbe,
+    onCredentialsRotated = onCredentialsRotated
+)
+
 internal class SettingsMasterKeyChangeController(
     private val repository: VaultRepository,
     private val scope: CoroutineScope,
@@ -89,7 +117,16 @@ internal class SettingsMasterKeyChangeController(
      */
     private val residualBackupProbe: (suspend () -> Boolean)? = null,
     // ISSUE-P3-453：错误码 → 本地化文案通道（置于末位以免打乱既有位置传参；生产由宿主显式注入）
-    private val strings: StringsProvider = StringsProvider { _, _ -> "" }
+    private val strings: StringsProvider = StringsProvider { _, _ -> "" },
+    /**
+     * `ISSUE-P3-528`：主凭据变更**成功后**的登记回调（生产 = `SyncCoordinator.markLocalVaultRecrypted`，
+     * 由 `SettingsViewModel` 装配；null = 未装配，机制整体旁路）。
+     *
+     * 调用时机：写盘成功之后、重封印**之前**——重封印可能要等用户过生物识别（甚至被取消），
+     * 而「本库已用新凭据重新加密、云端副本待替换」这一事实在写盘成功时就已成立。
+     * 契约：实现自身不得抛出（失败以返回值表达）；换密已成功这一结果不因登记失败而改变。
+     */
+    private val onCredentialsRotated: (suspend () -> Unit)? = null
 ) {
 
     private val mutableState = MutableStateFlow(MasterKeyChangeTaskState())
@@ -159,6 +196,9 @@ internal class SettingsMasterKeyChangeController(
                     // ISSUE-P3-434：记忆记录必须与新绑定的密钥文件一致（先于重封印）；
                     // §411（P3-448）：副本随同一裁决收编 / 清除
                     syncRememberedKeyFile(keyFileIntent)
+                    // ISSUE-P3-528：本地库已用新凭据重新加密 ⇒ 登记「云端副本待替换」，
+                    // 下一次同步周期据此强制重序列化并上传（否则云端长期保留旧口令可解版本）。
+                    onCredentialsRotated?.invoke()
                     resealAfterChange?.invoke(activity, newPasswordChars.takeIf { !keepPassword })
                 }
             } finally {

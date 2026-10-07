@@ -69,6 +69,9 @@ open class SyncCoordinator @Inject constructor(
     // ISSUE-P2-291：库身份绑定登记（生产 Hilt 注入；既有单测 4/5 参构造点为 null，
     // 就地装配时同步关闭绑定闸，行为与整改前一致）
     syncVaultBindingStore: SyncVaultBindingStore? = null,
+    // ISSUE-P3-528：主凭据轮换后的「云端副本待替换」持久标记（生产 Hilt 注入；
+    // 既有单测构造点为 null，就地装配时本机制整体旁路，行为与整改前一致）
+    syncCredentialRotationStore: SyncCredentialRotationStore? = null,
     // ISSUE-P3-366 AC②：同步（含三方合并与落盘）期间挂锁。可空 + 默认 null 仅为保持
     // 既有单测构造点兼容（同 strings / extendedSettingsStore 先例），生产路径由 Hilt 注入
     // @Singleton 守护——与保存挂点（RealVaultRepository）共享同一挂锁闸
@@ -88,6 +91,8 @@ open class SyncCoordinator @Inject constructor(
         ?: SyncConflictController(databaseSession, codec, effectiveStrings, session, debugLog)
     private val changes: SyncContentChangeDetector = syncContentChanges
         ?: SyncContentChangeDetector(codec, session)
+    /** `ISSUE-P3-528`：主凭据轮换标记表（null = 手工装配路径 / 既有单测，本机制整体旁路）。 */
+    private val credentialRotation: SyncCredentialRotationStore? = syncCredentialRotationStore
     private val cycle: SyncCycleRunner = syncCycle
         ?: SyncCycleRunner(
             context = context,
@@ -99,7 +104,8 @@ open class SyncCoordinator @Inject constructor(
             changes = changes,
             preferences = preferences,
             strings = effectiveStrings,
-            vaultBindingStore = syncVaultBindingStore
+            vaultBindingStore = syncVaultBindingStore,
+            credentialRotationStore = syncCredentialRotationStore
         )
 
     init {
@@ -197,6 +203,32 @@ open class SyncCoordinator @Inject constructor(
      */
     fun setOfflineMode(enabled: Boolean) {
         session.isOfflineMode = enabled
+    }
+
+    /**
+     * `ISSUE-P3-528`：主凭据变更**成功后**的事实登记——把「本地库已用新凭据重新加密」
+     * 落成持久标记，令下一次同步周期强制以当前凭据重新序列化并上传（替换云端仍持旧口令的副本）。
+     *
+     * 空操作口径：未注入标记表 / 无活动库文件 / 解析不出远端路径 ⇒ 返回 false
+     * （未配置同步时本就没有云端副本可替换）；任何异常**不上抛**——事实登记失败
+     * **不得**影响「换密已成功」这一既成结果，故只落脱敏日志（不含远端路径，防凭据面 PII 入日志）。
+     *
+     * @return true = 标记已落盘，下次同步周期将重传本地新凭据版本
+     */
+    suspend fun markLocalVaultRecrypted(): Boolean = withContext(Dispatchers.IO) {
+        val store = credentialRotation ?: return@withContext false
+        val fileName = databaseSession.currentFile?.name
+            ?: databaseSession.databaseFlow.value?.let { "${it.databaseName}.kdbx" }
+            ?: return@withContext false
+        try {
+            val remotePath = session.testRemotePath ?: providers.resolveRemotePath(fileName)
+            store.markRecrypted(remotePath)
+            debugLog.info(SYNC_LOG_TAG, "主凭据已轮换：已登记云端副本待替换")
+            true
+        } catch (e: Exception) {
+            debugLog.warn(SYNC_LOG_TAG, "登记云端副本待替换失败，按未登记继续: ${e.javaClass.simpleName}")
+            false
+        }
     }
 
     /**
