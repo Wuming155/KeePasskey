@@ -452,6 +452,18 @@ internal fun EntryEditTotpSectionPreview() {
                 overrideUrl = previewOverrideUrl.value,
                 onOverrideUrlChange = { previewOverrideUrl.value = it }
             )
+            // `ISSUE-P3-517`：过期编辑反向态（expiresEnabled = true，默认 false）——
+            // 日期选择行此前只有真机能见
+            EntryEditExtraSection(
+                tagsInput = previewTags.value,
+                onTagsInputChange = { previewTags.value = it },
+                autoTypeSequence = previewAutoType.value,
+                onAutoTypeSequenceChange = { previewAutoType.value = it },
+                overrideUrl = previewOverrideUrl.value,
+                onOverrideUrlChange = { previewOverrideUrl.value = it },
+                expiresEnabled = true,
+                expiryDate = java.time.LocalDate.of(2030, 1, 31)
+            )
             PasswordGeneratorWidget(
                 passLength = 20f,
                 useUpper = true,

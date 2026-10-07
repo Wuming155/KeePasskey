@@ -257,3 +257,20 @@ internal fun ImportExportSettingsScreenPreview() {
         )
     }
 }
+
+// `ISSUE-P3-517`：导出 / 导入长操作态（两开关默认 false，true 态此前只有真机能见）。
+// 整屏补态按工程规则另开 @Preview 函数，不与默认态叠图。
+@androidx.compose.ui.tooling.preview.Preview(name = "数据导入与导出页 - 导出与导入进行中", showBackground = true)
+@Composable
+internal fun ImportExportSettingsScreenBusyPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        ImportExportSettingsScreen(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+                databaseName = "预览示例密码库"
+            ),
+            onBackClick = {},
+            isExportInProgress = true,
+            keyFileImportBusy = true
+        )
+    }
+}

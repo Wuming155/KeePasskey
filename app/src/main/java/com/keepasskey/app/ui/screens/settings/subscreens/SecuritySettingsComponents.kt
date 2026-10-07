@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +28,21 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+
+// `ISSUE-P3-517`：enabled 反向态预览（默认 true；false = 生物识别验证等待期整行禁用，
+// ISSUE-P2-212 的该形态此前只有真机能见）
+@androidx.compose.ui.tooling.preview.Preview(name = "安全开关行 - 禁用态", showBackground = true)
+@Composable
+internal fun SecuritySwitchRowDisabledPreview() {
+    SecuritySwitchRow(
+        icon = Icons.Filled.Lock,
+        title = "预览开关行",
+        subtitle = "禁用态（生物识别验证等待期）",
+        checked = true,
+        enabled = false,
+        onCheckedChange = {}
+    )
+}
 
 @Composable
 internal fun SecuritySwitchRow(

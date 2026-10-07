@@ -11,8 +11,13 @@ import com.keepasskey.app.ui.theme.KeePasskeyTheme
  *
  * IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI。
  */
+// `ISSUE-P3-525`：横屏维度此前全仓零覆盖（无任何 widthDp/heightDp 指定）；800dp ≥ 600dp
+// 宽屏阈值（Rail 分支宿主为 hiltViewModel 的 KeePasskeyApp，预览不可达，见批次 462 豁免注记）。
+// 注：本条注解必须与其余 @Preview 注解行连续（包装生成器的注解块正则不接受夹注注释行，
+// 首轮实测：注释夹在注解之间会令浅/深变体从包装与渲染面静默丢失、dark 逐屏断言红）
 @Preview(name = "密码库列表 - 浅色", showBackground = true)
 @Preview(name = "密码库列表 - 深色", showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
+@Preview(name = "密码库列表 - 横屏 800dp", showBackground = true, widthDp = 800, heightDp = 360)
 @Composable
 internal fun VaultListContentPreview() {
     KeePasskeyTheme {
@@ -29,6 +34,55 @@ internal fun VaultListContentPreview() {
             ),
             onSearchQueryChange = {},
             onSortOptionSelect = {},
+            onGroupClick = {},
+            onNavigateUp = {},
+            onNavigateToBreadcrumb = {},
+            onEntryClick = {},
+            onEntryLongClick = {},
+            onCopyPassword = {},
+            onCopyUsername = {},
+            onCopyTotp = {},
+            onAddEntryClick = {},
+            onCreateFromTemplate = {},
+            onCreateGroup = { _, _ -> },
+            onRenameGroup = { _, _ -> },
+            onChangeGroupIcon = { _, _ -> },
+            onDeleteGroup = {},
+            onRestoreEntry = {},
+            onPurgeEntry = {},
+            onEmptyRecycleBin = {},
+            onTriggerSync = {},
+            onNavigateToConflictResolver = {},
+            onLockClick = {},
+            onSelectAllBatch = {},
+            onClearBatch = {},
+            onBatchDelete = {},
+            onBatchMove = {},
+            onKillApp = null,
+            onAutoActivateSearchConsumed = {}
+        )
+    }
+}
+
+// `ISSUE-P3-517`：高级搜索面板展开态（searchAdvancedExpanded 默认 false，true 态此前只有真机能见）
+@Preview(name = "密码库列表 - 高级搜索展开", showBackground = true)
+@Composable
+internal fun VaultListContentSearchAdvancedPreview() {
+    KeePasskeyTheme {
+        VaultListContent(
+            uiState = VaultListUiState().copy(
+                isLoading = false,
+                databaseName = "Preview Vault.kdbx",
+                currentGroups = com.keepasskey.app.ui.preview.PreviewGroups,
+                entries = com.keepasskey.app.ui.preview.PreviewEntries,
+                totalEntriesCount = 4,
+                sortOption = VaultSortOption.NAME_ASC,
+                lastSyncTimeText = "预览同步时间 10:25",
+                decorations = com.keepasskey.app.ui.preview.PreviewDecorations
+            ),
+            onSearchQueryChange = {},
+            onSortOptionSelect = {},
+            searchAdvancedExpanded = true,
             onGroupClick = {},
             onNavigateUp = {},
             onNavigateToBreadcrumb = {},

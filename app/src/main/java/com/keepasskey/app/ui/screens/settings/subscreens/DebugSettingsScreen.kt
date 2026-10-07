@@ -329,6 +329,20 @@ fun DebugSettingsScreen(
     }
 }
 
+// `ISSUE-P3-517`：enabled 反向态预览（默认 true，false 态此前只有真机能见）
+@androidx.compose.ui.tooling.preview.Preview(name = "调试开关行 - 禁用态", showBackground = true)
+@Composable
+internal fun DebugSwitchRowDisabledPreview() {
+    DebugSwitchRow(
+        icon = androidx.compose.material.icons.Icons.Filled.BugReport,
+        title = "预览开关行",
+        subtitle = "禁用态（整行降透明度且开关不可交互）",
+        checked = true,
+        onCheckedChange = {},
+        enabled = false
+    )
+}
+
 @Composable
 private fun DebugSwitchRow(
     icon: ImageVector,

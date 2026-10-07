@@ -18,8 +18,11 @@ import com.keepasskey.app.ui.model.UiMessage
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
 // （§392 自 UnlockScreen.kt 逐字搬移：该文件因 ISSUE-P3-427 新增一枚导航回调越入 400~500 档，
 //  按 §391 同一范式把预览拆出降档，预览内容零改动）
+// `ISSUE-P3-525`：横屏维度此前全仓零覆盖（解锁页横排布在 Layoutlib 从未渲染过）；
+// 注解行须连续（包装生成器正则不接受夹注注释行，见批次 462 过程缺陷）
 @androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 浅色", showBackground = true)
 @androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@androidx.compose.ui.tooling.preview.Preview(name = "解锁页 - 横屏 800dp", showBackground = true, widthDp = 800, heightDp = 360)
 @Composable
 internal fun UnlockContentPreview() {
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

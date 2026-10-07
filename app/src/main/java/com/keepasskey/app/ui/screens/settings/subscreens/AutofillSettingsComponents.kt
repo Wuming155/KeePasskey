@@ -360,6 +360,23 @@ internal fun AutofillInfoRow(
     }
 }
 
+// `ISSUE-P3-517`：enabled 反向态预览（默认 true；false = 未接线偏好整行降透明度且开关禁用，
+// 此前该形态只有真机能见）
+@androidx.compose.ui.tooling.preview.Preview(name = "自动填充开关行 - 禁用态", showBackground = true)
+@Composable
+internal fun AutofillSwitchRowDisabledPreview() {
+    androidx.compose.material3.MaterialTheme {
+        AutofillSwitchRow(
+            icon = Icons.Filled.Lock,
+            title = "预览开关行",
+            subtitle = "禁用态（整行降透明度且开关不可交互）",
+            checked = true,
+            onCheckedChange = {},
+            enabled = false
+        )
+    }
+}
+
 @Composable
 internal fun AutofillSwitchRow(
     icon: ImageVector,

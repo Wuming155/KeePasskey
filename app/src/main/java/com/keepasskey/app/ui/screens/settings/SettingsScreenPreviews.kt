@@ -15,8 +15,11 @@ import com.keepasskey.app.ui.theme.KeePasskeyTheme
  */
 
 // P3-23：以下 Preview name 为 IDE 预览标注（仅开发期可见，非运行时 UI），保留原样
+// `ISSUE-P3-525`：横屏维度此前全仓零覆盖（Rail 分支宿主为 hiltViewModel，预览不可达，见批次 462 豁免注记）；
+// 注解行须连续（包装生成器正则不接受夹注注释行，见批次 462 过程缺陷）
 @Preview(name = "浅色模式", showBackground = true)
 @Preview(name = "深色模式", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Preview(name = "浅色模式 - 横屏 800dp", showBackground = true, widthDp = 800, heightDp = 360)
 @Composable
 internal fun SettingsContentPreview() {
     KeePasskeyTheme {

@@ -97,6 +97,33 @@ internal fun DisplayPrefRow(
     }
 }
 
+// `ISSUE-P3-517`：isDarkCard / isSplitCard 反向态预览（默认 false——深色圆底与双色渐变圆底此前只有真机能见）
+@androidx.compose.ui.tooling.preview.Preview(name = "主题模式卡片 - 深色底与双色底", showBackground = true)
+@Composable
+internal fun ThemeSelectionCardDarkAndSplitPreview() {
+    androidx.compose.material3.MaterialTheme {
+        androidx.compose.foundation.layout.Row {
+            ThemeSelectionCard(
+                title = "深色",
+                subtitle = "isDarkCard = true",
+                icon = Icons.Filled.Check,
+                isSelected = false,
+                isDarkCard = true,
+                onClick = {}
+            )
+            androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.width(8.dp))
+            ThemeSelectionCard(
+                title = "跟随系统",
+                subtitle = "isSplitCard = true",
+                icon = Icons.Filled.Check,
+                isSelected = false,
+                isSplitCard = true,
+                onClick = {}
+            )
+        }
+    }
+}
+
 /** 亮/暗/跟随系统三选一卡片。 */
 @Composable
 internal fun ThemeSelectionCard(

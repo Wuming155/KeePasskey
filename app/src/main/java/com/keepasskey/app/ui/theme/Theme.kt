@@ -53,6 +53,15 @@ val LocalSecurityColors = staticCompositionLocalOf {
 val LocalThemeMode = compositionLocalOf { AppThemeMode.SYSTEM }
 val LocalThemePalette = compositionLocalOf { AppThemePalette.SAPPHIRE }
 
+// `ISSUE-P3-517`：动态取色反向态预览（dynamicColorEnabled 默认 false，true 态此前无预览）
+@androidx.compose.ui.tooling.preview.Preview(name = "动态取色主题 - 启用", showBackground = true)
+@Composable
+internal fun DynamicColorEnabledThemePreview() {
+    KeePasskeyTheme(dynamicColorEnabled = true) {
+        androidx.compose.material3.Text("Dynamic Color")
+    }
+}
+
 @Composable
 fun KeePasskeyTheme(
     themeMode: AppThemeMode = AppThemeMode.SYSTEM,

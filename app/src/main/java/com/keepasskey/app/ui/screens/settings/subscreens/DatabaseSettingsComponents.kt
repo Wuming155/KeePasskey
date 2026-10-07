@@ -162,6 +162,29 @@ internal fun SectionHeader(title: String) {
 }
 
 /** 标题 + 描述 + 右侧开关的设置行（`enabled=false` 时整行降透明度且开关不可交互） */
+// `ISSUE-P3-517`：enabled 反向态预览（默认 true，false 态此前只有真机能见）
+@androidx.compose.ui.tooling.preview.Preview(name = "库属性开关行 - 禁用态", showBackground = true)
+@Composable
+internal fun SettingsToggleRowDisabledPreview() {
+    androidx.compose.material3.MaterialTheme {
+        androidx.compose.foundation.layout.Column {
+            SettingsToggleRow(
+                title = "预览开关行",
+                description = "禁用态（整行降透明度且开关不可交互）",
+                checked = true,
+                onCheckedChange = {},
+                enabled = false
+            )
+            SettingsToggleRow(
+                title = "预览开关行（可用态参照）",
+                description = "默认 enabled = true",
+                checked = false,
+                onCheckedChange = {}
+            )
+        }
+    }
+}
+
 @Composable
 internal fun SettingsToggleRow(
     title: String,
