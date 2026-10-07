@@ -71,6 +71,12 @@
 > 复现 QQ 场景**（用户手机未连 adb；本机在连设备为 Redmi 4X / LineageOS 且未安装 QQ），故涉及
 > QQ 结构树具体形态的判断已按「代码链路必经点 + 待真机 dump 定性」分别标注。认领时须按条目维护规则
 > ② 先复核前提（正文行号为 2026-10-07 核对时刻的快照）。
+> **同日补证（2026-10-07）**：用户要求对照同类项目（keepass2android / Monica）——已按规则 3 做**定向取证**
+> 并落册 [`references/自动填充关联记忆与字段识别的参考项目对照.md`](references/自动填充关联记忆与字段识别的参考项目对照.md)
+> （Kp2a 的「Remember search text?」写回 `androidapp://<包名>` 就在其自动填充流内；Monica 有互动记忆 /
+> 字段签名学习 / 「填充并保存 URI」三条机制与数字类账号框的专门兜底）。两条目的验收标准已按取证结果校准；
+> 与既有裁决冲突的一条（把「应用名 / 包名 token」当**准入**档，会绕过 `ISSUE-P2-46` 绑定门）**未采纳**，
+> 已在该文档 §4 / §6 与 `ISSUE-P3-528` 正文显式登记为「不在本条范围」。
 
 ### ISSUE-P3-528：自动填充「手动选择器」不写回应用关联——纯 App 场景每次都要手动重选（缺「记住」闭环）
 
@@ -94,11 +100,29 @@
   3. **保存通道也不补关联**（`data/repository/VaultEntryWriteCoordinator.kt:283-334`）：`saveAutofillCredential`
      命中既有条目且账密未变时**幂等早退**（`:306-308` 直接 `return KdbxResult.Success(Unit)`），
      既不新建也不补齐 URL。
-- **对照先例（非全新设计）**：KeePass2Android 在**应用内搜索**里已有该自愈（`AppTask.cs:494-534`
-  「Remember search text?」：手选条目 URL 不覆盖搜索词时询问写入）；**本仓应用内搜索侧同样已实现**
-  （`ISSUE-P3-442`：`ui/screens/vault/VaultSearchWriteBackCoordinator.kt` + `SearchWriteBackPolicy.kt` +
-  字符串 `search_write_back_*`，只改 `URL` 一个字段、`{REF}` 拒绝写回、只读/回收站一票否决）。
-  缺的是**自动填充侧**的同形闭环 —— 两条通道能力不对称。
+- **对照先例（已定向取证，见 [`references/自动填充关联记忆与字段识别的参考项目对照.md`](references/自动填充关联记忆与字段识别的参考项目对照.md)）**：
+  1. **Kp2a 就在自动填充流里做这件事**：其自动填充选择器走的任务类即 `SearchUrlTask`
+     （`services/Kp2aAutofill/ChooseForAutofillActivity.cs:83`），该任务重写 `CompleteOnCreateEntryActivity`
+     （`app/AppTask.cs:494-538`）弹「Remember search text?」（`Resources/values/strings.xml:368-369`），
+     确认后把搜索词写进条目 URL —— 纯 App 的搜索词即 `androidapp://<包名>`
+     （`services/AutofillBase/AutofillServiceBase.cs:235`）⇒ **写回的就是应用关联**；
+     三个前置否决＝库只读 / 搜索词为空 / 该条目已能被搜索词命中（`AppTask.cs:499-503`）。
+  2. **本仓应用内搜索侧已实现同形闭环**（`ISSUE-P3-442`：`ui/screens/vault/VaultSearchWriteBackCoordinator.kt`
+     + `SearchWriteBackPolicy.kt` + 字符串 `search_write_back_*`，只改 `URL` 一个字段、`{REF}` 拒绝写回、
+     只读/回收站一票否决）。
+  3. Monica 的写法**不询问**，而是条目菜单并列「填充」/「填充并保存 URI」两个显式动作
+     （`autofill_ng/AutofillPickerActivityV2.kt:1776-1777`、`ui/InlinePasswordDetailContent.kt:36-37,195-204`）；
+     本仓取 **Kp2a 式询问**——与应用内搜索侧口径一致，避免同一产品里两种写回交互并存。
+  ⇒ 缺的只是**自动填充侧**的接线（两条通道能力不对称）；但判定内核**不可直接照搬**：
+  `SearchWriteBackPolicy.isUrlTerm` 只认域名形态，`android://<包名>` 恒为 false，形态口径须另立一档。
+- **附带发现（本仓自查，如实登记、本条不改）**：`AutofillCandidateRanker.scoreEntry` 在 `score <= 0` 时
+  `return null`，而 `APP_TITLE_MATCH`（95）加成位于其后 ⇒ 「纯 App + 调用方未绑定」场景下该维度**不可达**
+  （§352 吸收的应用名维度，在它本该服务的场景里失效，当前仅剩「包名维度已授权时的排序」价值）。
+- **明确不在本条范围（改的是准入面，须另立条目 + 重开 `ISSUE-P2-46` 口径后方可做）**：Monica 的
+  `EXACT_APP_TITLE 95` / `PACKAGE_TOKEN_TITLE 70` 是**准入**档（`BitwardenLikeAutofillMatcherNg.kt:203-262`），
+  以及其「互动记忆可直接作为零命中来源」（`MonicaAutofillServiceNg.kt:836-877` `resolveLastFilledEntry`）——
+  两者都会让**未完成包名+签名首次绑定**的调用方拿到候选，与本仓 §352 已锁定的「应用名仅排序 + 纯标题相似不得入选」
+  及 P2-46 绑定门冲突，故**不在本条目**内实施。
 - **涉及文件（预估）**：`app/.../autofill/AutofillPickerActivity.kt`（提示与写回入口）、
   新增判定内核（形态口径与 `SearchWriteBackPolicy` 分离：本次要写的是 `android://<包名>`，
   是非域名形态）、`data/repository/VaultRepository`（已有 `updateEntryUrl` 通道，复用不新开写口）、
@@ -109,8 +133,10 @@
      **不得**用表单自报的原始 webDomain）；
   ② 写入后**后续**填充请求中该条目成为自动候选（无需再手选）；用户拒绝时**不得**改动条目（含拒绝在
      会话内不被持久化为永久拒绝）；
-  ③ fail-closed 边界：只读会话 / 回收站内 / url 含 `{REF:…}` 一律不写；包名非法（`AutofillPackageNames.normalize`
-     为 null）或签名摘要不可读时**不产生**降级写入；写回只改 `URL` 一个字段，`Override URL` 与自定义字段零触碰；
+  ③ fail-closed 边界（与 `SearchWriteBackPolicy.shouldOffer` 的四条否决**同形**：只读 / 回收站 / `{REF}` /
+     已覆盖）：只读会话 / 回收站内 / url 含 `{REF:…}` 一律不写；包名非法（`AutofillPackageNames.normalize`
+     为 null）或签名摘要不可读时**不产生**降级写入；写回只改 `URL` 一个字段（复用 `updateEntryUrl`），
+     `Override URL` 与自定义字段零触碰；
   ④ 新增判定内核配 JVM 正/反两态用例；`.\gradlew.bat test` 全绿 **且** `python tools/doc/gate_readings.py`
      全 PASS，读数块原样入批次文档；真机走查按 §434 先跑 `python tools/device/check_installed_build.py
      --expect-symbol <本批新增符号>`。
@@ -138,14 +164,29 @@
   **具体哪一处是 QQ 的触发点未定性**（需结构树 dump；三处均为**可独立成立**的覆盖缺口，故本条不押注单点）。
 - **为何不是「已接受限界」**：数字类账号框（QQ 号 / 工号 / 学号 / 会员号）在中文应用里常见，且
   `docs/architecture/已知工程限界.md` 与 `产品裁决登记.md` 均无该形态的登记；这是**覆盖缺口**而非取舍。
+- **对照先例（已定向取证，见 [`references/自动填充关联记忆与字段识别的参考项目对照.md`](references/自动填充关联记忆与字段识别的参考项目对照.md) §3.2）**：Monica 对同一形态有**专门实现**——
+  `TYPE_CLASS_NUMBER` + `TYPE_NUMBER_VARIATION_NORMAL` 直接产出账号候选
+  （`EnhancedAutofillStructureParserV2.kt:1702-1718`），精度 `LOW`
+  （`AutofillDetectionPolicy.kt:74` `genericNumberFallbackAccuracy()`），
+  **保留门槛＝「表单存在密码目标」**（`:96-102` `shouldKeepTarget`：账号类「精度 ≥ MEDIUM **或** 有密码目标」）；
+  可见性另有一道更严的门（`:104-115`：账号类须 ≥ MEDIUM）⇒ 数字兜底**不会**让隐藏框被误收。
+  其注释两次点名 QQ（`:1648`「QQ 搜索框误弹修复」、`:1857`「无 password 术语的 QQ 搜索框不受影响」）
+  ⇒ 该兜底是**带登录上下文门**的，不是无条件放宽。上游出处为其自述对齐的 Bitwarden
+  （`updateForMissingPasswordFields`、「有 Login 字段就 Fillable」）。**Kp2a 侧本次取证未命中**同形兜底
+  （未命中声明见对照文档 §5，不得读作「Kp2a 没有该能力」）。
 - **验收标准**：
-  ① 纯 App（无 `webDomain`）登录表单中「数字类账号框 + 密码框」被识别为账号 / 密码目标（或经登录上下文
-     兜底合成），填充时**账密同时写入**；
+  ① 纯 App（无 `webDomain`）登录表单中「数字类账号框 + 密码框」被识别为账号 / 密码目标，填充时**账密同时写入**；
   ② **不得放宽**既有排除口径：搜索框 / 非凭据字段 / OTP 框仍排除，不可见账号框仍不参与，
      `importantForAutofill=no` 仍尊重，`FieldConfidence` 档位与「多候选择优」语义不变；
-  ③ 若走「扩词表」路线，新增项须配**反例**用例（防「号」泛化命中「订单号 / 工单号 / 验证码」类非账号字段）；
-     若走「放行数字类合成」路线，须保持「有密码框 + 聚焦 + 排除非凭据」的既有前置门；
-  ④ **真机取证先行**：先在设备上 dump 该表单结构树（`hint` / `idEntry` / `inputType` / `importantForAutofill`
+  ③ 整改口径取 **Monica 式**（对照文档 §4 第 6 行）：在**首轮**字段识别加「`TYPE_CLASS_NUMBER`（普通数字变体）
+     ⇒ 账号候选（`FieldConfidence.LOW`）」一档，并在目标解析处施加**「表单存在密码目标才保留」**门
+     （对齐 `shouldKeepTarget`）；可见性口径不动（账号类不可见仍须较高中等精度才准入）。
+     **不**采用泛化「号」子串（Monica 亦为枚举「工号 / 学号 / 职工号 / 员工编号」，泛化会在「订单号 / 工单号」
+     上误伤）；**不**以 `AutofillFieldFallback.isSynthesizableInput` 为主修（该兜底只覆盖「单字段聚焦」形态，
+     覆盖不到两个框都不聚焦的场景，可作为次要不变量同步维护）；
+  ④ 反例用例必配（三条，锁定不得回归）：① 无密码框的表单里纯数字框（数量 / 金额 / 搜索）**不得**入选账号目标；
+     ② 页面显式声明 OTP 的框仍排除；③ 无 password 术语的搜索框（Monica 踩过的「QQ 搜索框」形态）仍排除；
+  ⑤ **真机取证先行**：先在设备上 dump 该表单结构树（`hint` / `idEntry` / `inputType` / `importantForAutofill`
      四项读数）并在批次文档留痕，再据实测形态定点整改；`*/src/androidTest/**` 的新增或修改用例必须真机实跑
      （测试资产纪律②）；
-  ⑤ `.\gradlew.bat test` 全绿 **且** `python tools/doc/gate_readings.py` 全 PASS，读数块原样入批次文档。
+  ⑥ `.\gradlew.bat test` 全绿 **且** `python tools/doc/gate_readings.py` 全 PASS，读数块原样入批次文档。
