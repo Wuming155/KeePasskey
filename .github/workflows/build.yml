@@ -75,9 +75,14 @@ jobs:
   # 该形态 2026-09 已实测过一次：机检全绿（只盯字面量有没有中文）、真机却整屏中文（§414 事故），
   # 故此处按**接线点**钉死四条（Application 灌种 / Compose 首帧 initialValue / 取串通道 /
   # 语言写入点镜像），缺一即红。
+  # 第十条（ISSUE-P0-531）`check_projection_read_safety.py`：投影面读「已清零的
+  # `ProtectedString`」曾让真机闪退（2026-10-08 WebDAV 同步后连崩三次）。擦除侧已改为
+  # 「先发布、后擦除」，但残余调度窗口只能由投影面降级关闭 ⇒ 此处禁止投影面再出现裸
+  # `readString()` / `readUtf8()` / `readChars()`（写路径的 fail-fast **刻意不在**判据内，
+  # 就地降级会把空值写进用户的库）。
   # ---------------------------------------------------------------------------
   hygiene-gate:
-    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring)
+    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring, projection read safety)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -105,6 +110,7 @@ jobs:
           python3 tools/doc/check_bounded_type_names.py
           python3 tools/doc/check_box_slot_children.py
           python3 tools/audit/check_launch_language_seed.py
+          python3 tools/doc/check_projection_read_safety.py
 
   # ---------------------------------------------------------------------------
   # 门禁 1：快速门禁（不构建原生）

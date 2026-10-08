@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.sync.launchGuarded
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.model.KdbxConstants
@@ -252,7 +253,21 @@ class ConflictResolutionViewModel @Inject constructor(
     }
 
     fun applyMerge() {
-        viewModelScope.launch {
+        // ISSUE-P0-531：用户裁决链路同样不得让异常逃逸——逃逸即杀进程，且 isResolving 会卡在 true
+        // （`resolveConflicts` 内含落库与上传收尾，异常点不止引擎内部）
+        viewModelScope.launchGuarded(
+            onFailure = { e ->
+                _uiState.update {
+                    it.copy(
+                        isResolving = false,
+                        userMessage = UiMessage(
+                            R.string.sync_feedback_error,
+                            listOf(e.javaClass.simpleName)
+                        )
+                    )
+                }
+            }
+        ) {
             _uiState.update { it.copy(isResolving = true) }
             // TASK-30 整改：逐字段的用户选择不再塌缩为整条目二选一——每个条目生成
             // 「字段键 → 决策」映射交由 SyncCoordinator 按字段粒度合并

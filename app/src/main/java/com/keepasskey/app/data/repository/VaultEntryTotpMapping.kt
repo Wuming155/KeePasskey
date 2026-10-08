@@ -56,7 +56,9 @@ internal object VaultEntryTotpMapping {
         preferences: TotpPreferences = TotpPreferences.DEFAULT
     ): ParsedTotpConfig? {
         val source = locateConfigSource(entry, preferences) ?: return null
-        val rawBytes = source.readUtf8()
+        // ISSUE-P0-531：本文件整体是**投影 / 即时出码面**，种子实例已被并发擦除时返回 null（＝无码显示），
+        // 不得抛（TOTP 种子同样是 `clearSupersededSensitiveData` 的擦除候选，与条目字段同源）
+        val rawBytes = source.readUtf8ForDisplay() ?: return null
         return try {
             TotpKeyUriParser.parse(rawBytes, preferences.defaultStepSeconds, preferences.defaultDigits)
         } finally {

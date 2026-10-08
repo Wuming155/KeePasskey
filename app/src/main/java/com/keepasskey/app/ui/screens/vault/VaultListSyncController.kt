@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.vault
 import com.keepasskey.app.R
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.sync.launchGuarded
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.textArg
@@ -64,12 +65,16 @@ internal class VaultListSyncController(
             onMessage(UiMessage(R.string.sync_feedback_not_configured))
             return
         }
-        scope.launch {
+        // ISSUE-P0-531：编排段（状态上浮 / 文案装配）异常不得逃逸杀进程——见 launchGuarded KDoc
+        scope.launchGuarded(onFailure = ::onSyncFailure) {
             isSyncingFlow.value = true
-            val outcome = syncCoordinator.syncNow()
-            applySyncOutcome(outcome)
-            surfaceSyncCacheEvents()
-            isSyncingFlow.value = false
+            try {
+                val outcome = syncCoordinator.syncNow()
+                applySyncOutcome(outcome)
+                surfaceSyncCacheEvents()
+            } finally {
+                isSyncingFlow.value = false
+            }
         }
     }
 
@@ -100,11 +105,13 @@ internal class VaultListSyncController(
     fun confirmBindingTakeover() {
         if (!pendingBindingTakeoverFlow.value || isSyncingFlow.value) return
         pendingBindingTakeoverFlow.value = false
-        scope.launch {
+        scope.launchGuarded(onFailure = ::onSyncFailure) {
             isSyncingFlow.value = true
-            val outcome = syncCoordinator.confirmVaultBindingTakeover()
-            applySyncOutcome(outcome)
-            isSyncingFlow.value = false
+            try {
+                applySyncOutcome(syncCoordinator.confirmVaultBindingTakeover())
+            } finally {
+                isSyncingFlow.value = false
+            }
         }
     }
 
@@ -121,21 +128,34 @@ internal class VaultListSyncController(
     fun confirmBindingTakeoverKeepingCopy() {
         if (!pendingBindingTakeoverFlow.value || isSyncingFlow.value) return
         pendingBindingTakeoverFlow.value = false
-        scope.launch {
+        // ISSUE-P0-531：同 triggerPullRefresh——「先另存、成功才覆盖」整段异常不得逃逸
+        scope.launchGuarded(onFailure = ::onSyncFailure) {
             isSyncingFlow.value = true
-            val copy = syncCoordinator.backupCloudVaultCopy()
-            if (copy is KdbxResult.Success) {
-                applySyncOutcome(syncCoordinator.confirmVaultBindingTakeover())
-            } else {
-                onMessage(
-                    UiMessage(
-                        R.string.sync_vault_takeover_copy_failed,
-                        listOf((copy as KdbxResult.Failure).textArg(strings))
+            try {
+                val copy = syncCoordinator.backupCloudVaultCopy()
+                if (copy is KdbxResult.Success) {
+                    applySyncOutcome(syncCoordinator.confirmVaultBindingTakeover())
+                } else {
+                    onMessage(
+                        UiMessage(
+                            R.string.sync_vault_takeover_copy_failed,
+                            listOf((copy as KdbxResult.Failure).textArg(strings))
+                        )
                     )
-                )
+                }
+            } finally {
+                isSyncingFlow.value = false
             }
-            isSyncingFlow.value = false
         }
+    }
+
+    /**
+     * `ISSUE-P0-531`：同步编排段的**未预期异常**如实上浮，绝不静默吞（本仓既有纪律：
+     * 禁止空 catch 或捕获后仅打印）。异常详情只用**类名**（脱敏；沿用 `SyncCycleRunner`
+     * 报错文案的既有口径），经既有 `sync_feedback_error` 通道呈现。
+     */
+    private fun onSyncFailure(e: Throwable) {
+        onMessage(UiMessage(R.string.sync_feedback_error, listOf(e.javaClass.simpleName)))
     }
 
     private fun applySyncOutcome(outcome: SyncOutcome) {

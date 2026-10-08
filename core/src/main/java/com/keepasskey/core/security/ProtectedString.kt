@@ -122,6 +122,14 @@ class ProtectedString(
     }
 
     /**
+     * [readUtf8] 的**展示面**安全变体（`ISSUE-P0-531`）：实例已清零时返回 null（＝「不可读」），
+     * 不抛异常、也**不**返回空数组——空数组会被下游误判为「字段存在但内容为空」。
+     *
+     * 使用边界同 [readStringForDisplay]：仅限非持久化的展示 / 即时计算面（如列表页 TOTP 出码）。
+     */
+    fun readUtf8ForDisplay(): ByteArray? = if (isCleared) null else readUtf8()
+
+    /**
      * 将保护值转为 String。注意：一旦调用，明文字符串将驻留 JVM 堆内存，请仅在必要交互边界使用。
      */
     fun readString(): String {
@@ -133,6 +141,25 @@ class ProtectedString(
             Arrays.fill(plain, 0.toByte())
         }
     }
+
+    /**
+     * 展示面安全读取（`ISSUE-P0-531`）：实例**已清零**时返回 [fallback]（默认空串），不抛异常。
+     *
+     * **使用边界（违反即事故；机检 `tools/doc/check_projection_read_safety.py` 在 `hygiene-gate` 上把关）**：
+     * 仅允许**非持久化的展示 / 投影消费面**（UI 列表与详情投影、卡面字段、条目即时出码）使用。
+     * 写路径（序列化 / 保存 / 合并 / 导出 / 加解密 / 凭据下发）**必须**继续走 [readString] 的 fail-fast——
+     * 「读到已擦即失败」在那里是数据完整性的最后防线，就地降级会把空值写进用户的库。
+     *
+     * 存在理由：本类是**可变的共享引用**，会话层在整树替换时会对「被替换下线」的实例就地清零
+     * （`KdbxGroup.clearSupersededSensitiveData`，身份集合判定）。而 UI 投影链
+     * （`databaseFlow.map { ... }.flowOn(Dispatchers.Default)`）与该擦除点**不共享锁**，存在
+     * 「旧值已分发 → 擦除发生 → 投影才执行」的调度窗口；此时抛异常会逃逸到协程根（全仓无全局
+     * `CoroutineExceptionHandler`）直接杀进程（`ISSUE-P0-531` 真机实测：`DefaultDispatcher-worker` 上
+     * `KdbxEntry.getUserName` → 本方法 → 进程闪退）。
+     * 降级后的表现是「短暂显示空值」，语义上**正确**：被替换下线的数据本就不该再展示。
+     */
+    fun readStringForDisplay(fallback: String = ""): String =
+        if (isCleared) fallback else readString()
 
     /**
      * 安全闭包使用 CharArray，并在退出时自动清零

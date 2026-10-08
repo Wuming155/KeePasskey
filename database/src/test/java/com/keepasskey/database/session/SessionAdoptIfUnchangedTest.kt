@@ -2,6 +2,7 @@ package com.keepasskey.database.session
 
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
@@ -94,5 +95,45 @@ class SessionAdoptIfUnchangedTest {
         )
 
         assertFalse("锁库后（无活动库）必须拒绝采用", adopted)
+    }
+
+    /**
+     * `ISSUE-P0-531`：采用点的**擦除面**回归（擦除顺序整改不得改变擦除语义）。
+     *
+     * 采用点现在是「**先发布 replacement、再擦旧树**」（整改前相反；闪退根因见
+     * `docs/ACTIVE_ISSUES.md` 的 `ISSUE-P0-531`）。无论顺序如何，以下两条身份集合判据
+     * 必须不变——它们是 `ISSUE-P3-235` / `ISSUE-P3-258` / `ISSUE-P3-471` 的红线：
+     * ① 与 replacement **共享同一实例**的字段不得被擦（否则静默清空活动库内容）；
+     * ② 被 replacement 替换下线的实例必须清零（不得留给 GC）。
+     */
+    @Test
+    fun `采用后共享实例保持可读而被下线实例清零`() = runBlocking {
+        val session = newSession()
+        val shared = ProtectedString("keep-me", isProtected = true)
+        val retired = ProtectedString("retire-me", isProtected = true)
+        val entry = KdbxEntry(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to shared,
+                KdbxConstants.Fields.NOTES to retired
+            )
+        )
+        session.saveEntry(entry)
+        val atCycleStart = session.databaseFlow.value!!
+        assertFalse("前提：两个实例初始都未清零", shared.cleared || retired.cleared)
+
+        // 替换树复用 shared、丢弃 retired（合并器「单侧独有对象原实例复用」的同型形态）
+        val replacementRoot = KdbxGroup(
+            id = atCycleStart.rootGroup.id,
+            name = atCycleStart.rootGroup.name,
+            entries = listOf(entry.copy(fields = mapOf(KdbxConstants.Fields.TITLE to shared)))
+        )
+        val replacement = atCycleStart.copy(rootGroup = replacementRoot)
+
+        val adopted = session.adoptDatabaseIfUnchanged(atCycleStart, replacement)
+
+        assertTrue("会话树未偏离时必须采用成功", adopted)
+        assertSame("采用后会话树必须就是替换树", replacement, session.databaseFlow.value)
+        assertEquals("与替换树共享的实例不得被擦", "keep-me", shared.readString())
+        assertTrue("被替换下线的实例必须清零（不留 GC）", retired.cleared)
     }
 }

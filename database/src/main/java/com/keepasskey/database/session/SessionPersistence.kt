@@ -74,9 +74,14 @@ internal class SessionPersistence(
                 // 使该 Meta 字段真实生效；仅在确有修剪时重建内存树，避免每次保存无谓拷贝。
                 val prunedRoot = HistoryManager.pruneGroupHistoryByAge(db.rootGroup, db.maintenanceHistoryDays)
                 val dbToSave = if (prunedRoot !== db.rootGroup) {
-                    // ISSUE-P2-06：修剪下线了超期历史快照，替换前定点擦除其密文
+                    // ISSUE-P0-531：与 SessionContentMutations 同口径——**先发布修剪后的树、再擦下线历史**。
+                    // 整改前「先擦 → 再发布」时，`db` 仍是发布中的活动树，而 UI 投影链正读它的历史
+                    // 条目（`VaultEntryMapper` 的 `h.userName`，即真机崩溃堆栈命中点）⇒ 读到已清零实例 ⇒ 闪退。
+                    val pruned = db.copy(rootGroup = prunedRoot)
+                    core.database.value = pruned
+                    // ISSUE-P2-06：修剪下线了超期历史快照，**发布后**定点擦除其密文（身份集合判定不变）
                     db.rootGroup.clearSupersededSensitiveData(prunedRoot)
-                    db.copy(rootGroup = prunedRoot).also { core.database.value = it }
+                    pruned
                 } else {
                     db
                 }

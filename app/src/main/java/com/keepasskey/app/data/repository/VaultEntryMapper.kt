@@ -46,7 +46,8 @@ internal class VaultEntryMapper(
             UiCustomField(
                 id = "${entry.id.toHexString()}_${cf.key}",
                 key = cf.key,
-                value = if (cf.isProtected) "" else cf.value.readString(),
+                // ISSUE-P0-531：展示面安全读——并发擦除窗口内不得抛（边界见 readStringForDisplay KDoc）
+                value = if (cf.isProtected) "" else cf.value.readStringForDisplay(),
                 isProtected = cf.isProtected
             )
         }
@@ -56,8 +57,10 @@ internal class VaultEntryMapper(
                 id = h.id.toHexString(),
                 modifiedAt = formatInstant(h.times.lastModificationTime),
                 summary = strings.get(R.string.repo_revision_summary),
-                username = h.userName,
-                notes = h.notes
+                // ISSUE-P0-531：历史条目是 `SessionPersistence.save` 历史修剪的**首当其冲**擦除候选，
+                // 真机崩溃堆栈命中的正是此处链路（KdbxEntry.getUserName）
+                username = h.displayField(KdbxConstants.Fields.USER_NAME),
+                notes = h.displayField(KdbxConstants.Fields.NOTES)
             )
         }
 
@@ -77,17 +80,25 @@ internal class VaultEntryMapper(
 
         val totp = projectTotpFields(entry)
 
-        val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
+        // ISSUE-P0-531：通行密钥标记属**展示性**信息（仅决定图标与 isPasskey 标记）。
+        // 并发擦除窗口内解析到已清零字段时按「非通行密钥条目」展示，绝不让展示面拖垮进程；
+        // 签发 / 断言路径**不**经此处，仍走 PasskeyData 的 fail-fast 语义（降级不得外溢到凭据面）。
+        val passkeyData = try {
+            PasskeyData.fromCustomFields(entry.customFields)
+        } catch (_: IllegalStateException) {
+            null
+        }
         val icon = mapIconIdToName(entry.iconId)
 
         val card = projectCardFields(entry)
 
         return UiVaultEntry(
             id = entry.id.toHexString(),
-            title = entry.title,
-            username = entry.userName,
+            // ISSUE-P0-531：展示面安全读（当前条目字段）；写路径仍走 KdbxEntry 的 fail-fast getter
+            title = entry.displayField(KdbxConstants.Fields.TITLE),
+            username = entry.displayField(KdbxConstants.Fields.USER_NAME),
             passwordMasked = if (entry.password == null) "" else PASSWORD_MASK,
-            url = entry.url,
+            url = entry.displayField(KdbxConstants.Fields.URL),
             isPasskey = passkeyData != null,
             passkeyRpId = passkeyData?.relyingPartyId,
             totpCode = totp.code,
@@ -100,7 +111,8 @@ internal class VaultEntryMapper(
             isHotp = totp.isHotp,
             category = if (card.isCardEntry) EntryCategory.CARD else EntryCategory.LOGIN,
             isFavorite = entry.customData[RealVaultRepository.FAVORITE_CUSTOM_DATA_KEY] == "true",
-            notes = entry.notes,
+            // ISSUE-P0-531：展示面安全读（备注）
+            notes = entry.displayField(KdbxConstants.Fields.NOTES),
             groupId = entry.parentGroupId?.toHexString(),
             iconName = icon,
             customIconId = entry.customIconId?.toHexString(),
@@ -120,6 +132,18 @@ internal class VaultEntryMapper(
         )
     }
 
+    /**
+     * `ISSUE-P0-531`：**投影面**字段读取——字段实例已清零时降级为空串而不抛。
+     *
+     * 边界与理由见 [ProtectedString.readStringForDisplay]：只允许非持久化展示面使用；
+     * 写路径必须继续走 [KdbxEntry.title] / [KdbxEntry.userName] 等 getter 的 fail-fast
+     * （就地降级会把空值写进用户的库，属数据损坏）。机检
+     * `tools/doc/check_projection_read_safety.py` 在 `hygiene-gate` 上锁住本文件与
+     * `VaultEntryTotpMapping.kt` 不得再出现裸 `readString()` / `readUtf8()`。
+     */
+    private fun KdbxEntry.displayField(key: String): String =
+        fields[key]?.readStringForDisplay().orEmpty()
+
     /** 附件大小展示：不足 1 KiB 以字节计，否则折算 KiB（向上至少 1）。 */
     private fun formatAttachmentSize(byteCount: Long): String =
         if (byteCount < BYTES_PER_KIB) "$byteCount B"
@@ -137,7 +161,8 @@ internal class VaultEntryMapper(
             for (key in keys) {
                 val field = cfByKey[key] ?: continue
                 if (!field.isProtected) {
-                    val raw = field.value.readString()
+                    // ISSUE-P0-531：展示面安全读（卡面字段）
+                    val raw = field.value.readStringForDisplay()
                     if (raw.isNotBlank()) return raw
                 }
             }

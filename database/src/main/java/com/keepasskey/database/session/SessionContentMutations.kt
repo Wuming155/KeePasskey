@@ -116,7 +116,14 @@ internal class SessionContentMutations(
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val updated = transform(currentDb)
-        // ISSUE-P2-06：元数据变换同样可能下线旧条目实例，替换前定点擦除
+        // ISSUE-P0-531：**先发布、后擦除**。整改前为「先擦 → 再赋值」，而 `currentDb` 在赋值前
+        // 仍是发布中的活动树：UI 投影链（`entriesFlow` 的 `flowOn(Dispatchers.Default)`）与投影
+        // 读取**不共享锁**，会读到被就地清零的 `ProtectedString` 并抛「已经清零」⇒ 逃逸到协程根
+        // ⇒ 进程闪退（真机实测）。发布在前把「下游读旧树」的窗口压到最小；残余调度窗口由投影面
+        // 的 `readStringForDisplay` 降级兜底——两层缺一不可，改一侧必须复核另一侧。
+        databaseFlow.value = updated
+        stateFlow.value = DatabaseSession.SessionState.DIRTY
+        // ISSUE-P2-06：元数据变换同样可能下线旧条目实例，**发布后**定点擦除（身份集合判定不变）
         currentDb.rootGroup.clearSupersededSensitiveData(updated.rootGroup)
         // ISSUE-P3-258（契约 Step 4）：与树擦除同点收口——换下库的二进制池中，不被新库以同一
         // `BinaryItem` 实例引用的条目就地清零（copy 形态共享同一池列表 ⇒ 全部跳过；
@@ -127,8 +134,6 @@ internal class SessionContentMutations(
         // `CustomIcon` 实例引用的条目就地清零（`copy` 形态共享同一列表 ⇒ 全部跳过；删除单个
         // 图标 / 远端库整体接管的形态 ⇒ 下线图标清零，不再滞留 GC）。判据与上方池擦除同口径。
         currentDb.clearCustomIconPool(updated.customIcons)
-        databaseFlow.value = updated
-        stateFlow.value = DatabaseSession.SessionState.DIRTY
     }
 
     /**
@@ -154,12 +159,13 @@ internal class SessionContentMutations(
         if (readOnly()) return@withLock false
         val currentDb = databaseFlow.value ?: return@withLock false
         if (currentDb !== expectedAtCycleStart) return@withLock false
+        // ISSUE-P0-531：与 updateDatabaseMeta 同口径——**先发布、后擦除**（理由与两层兜底见该处注释）
+        databaseFlow.value = replacement
+        stateFlow.value = DatabaseSession.SessionState.DIRTY
         currentDb.rootGroup.clearSupersededSensitiveData(replacement.rootGroup)
         currentDb.clearBinaryPool(replacement.binaries)
         // ISSUE-P3-471：图标池与树 / 池同点收口（判据见 updateDatabaseMeta 处注释）
         currentDb.clearCustomIconPool(replacement.customIcons)
-        databaseFlow.value = replacement
-        stateFlow.value = DatabaseSession.SessionState.DIRTY
         true
     }
 

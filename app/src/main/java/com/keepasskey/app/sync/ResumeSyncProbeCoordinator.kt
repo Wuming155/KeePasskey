@@ -74,7 +74,16 @@ class ResumeSyncProbeCoordinator @Inject constructor(
     }
 
     private fun maybeProbe() {
-        scope.launch {
+        // ISSUE-P0-531：探测跑在独立 scope 上，逃逸异常会直达线程默认处理器杀进程
+        // （见 launchGuarded KDoc）。探测面本就是**静默结论面**，故失败也如实写结论、
+        // 不弹错：呈现口径与 probeRemote 内部的 Failed 分支逐字一致。
+        scope.launchGuarded(
+            onFailure = { e ->
+                _notice.value = describeOutcome(
+                    ResumeSyncProbePolicy.ProbeOutcome.Failed(e.javaClass.simpleName)
+                ).takeIf { it.isNotEmpty() }
+            }
+        ) {
             val settings = settingsRepository.getSettings().first()
             val isLocked = autoLockManager.isLocked.value
             // ISSUE-P2-496：先取**探测前**基线快照，节流判据与 classify 基线同源于它。
@@ -83,7 +92,7 @@ class ResumeSyncProbeCoordinator @Inject constructor(
                 isLocked = isLocked,
                 lastProbeAtMillis = _lastProbeAtMillis.value
             )
-            if (!plan.shouldProbe) return@launch
+            if (!plan.shouldProbe) return@launchGuarded
             val outcome = probeRemote(
                 probeEnabled = settings.syncProbeOnResumeEnabled,
                 isLocked = isLocked,

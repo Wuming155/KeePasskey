@@ -5,6 +5,7 @@ import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.sync.launchGuarded
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.StringsProvider
 import kotlinx.coroutines.CoroutineScope
@@ -314,7 +315,8 @@ internal class SettingsSyncController(
     fun triggerSync() {
         if (syncStateFlow.value.isSyncing) return
         val provider = syncStateFlow.value.provider
-        scope.launch {
+        // ISSUE-P0-531：同步编排段异常不得逃逸杀进程（见 launchGuarded KDoc），失败即复位 isSyncing
+        scope.launchGuarded(onFailure = ::onSyncFailure) {
             syncStateFlow.update {
                 it.copy(
                     isSyncing = true,
@@ -362,6 +364,20 @@ internal class SettingsSyncController(
         }
     }
 
+    /**
+     * `ISSUE-P0-531`：同步 / 连接测试编排段的**未预期异常**如实上浮（脱敏：只用异常类名，
+     * 沿用 `SyncCycleRunner` 报错文案的既有口径），并复位 `isSyncing` —— 否则一次失败会让
+     * 设置页指示器永久停在「同步中」。
+     */
+    private fun onSyncFailure(e: Throwable) {
+        syncStateFlow.update {
+            it.copy(
+                isSyncing = false,
+                syncFeedbackMessage = UiMessage(R.string.sync_feedback_error, listOf(e.javaClass.simpleName))
+            )
+        }
+    }
+
     /** 将本次同步完成时刻格式化为「今天/昨天/M月d日 HH:mm」本地文案（文案经资源解析） */
     fun formatSyncTimestamp(): String {
         val dateTime = java.time.Instant.ofEpochMilli(System.currentTimeMillis())
@@ -384,7 +400,13 @@ internal class SettingsSyncController(
     fun testSyncConnection(onResult: ((Boolean) -> Unit)? = null) {
         if (syncStateFlow.value.isSyncing) return
         val provider = syncStateFlow.value.provider
-        scope.launch {
+        // ISSUE-P0-531：连接测试编排段异常不得逃逸；异常一律按「未通过」上报顺序编排层
+        scope.launchGuarded(
+            onFailure = { e ->
+                onSyncFailure(e)
+                onResult?.invoke(false)
+            }
+        ) {
             syncStateFlow.update {
                 it.copy(
                     isSyncing = true,
