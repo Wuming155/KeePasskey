@@ -65,15 +65,30 @@
   ⑤ `app/.../sync/SyncFailureNotifier.kt:33-42` `isEngineFailure(CouldntOpenFromRemote)=true` ⇒ `post()`；
   ⑥ `:89-103` `lastOutcome.collect` 对**非 `Error`** 一律 `cancel()`。
 - **根因（与初版审查结论的差异，勿误修）**：**不是**「`Offline` 不发通知」——事件通道**确实**会 `post()`。
-  真缺陷是**同周期内定序**：事件先 `post()`、周期末 `lastOutcome = Offline` 再 `cancel()`，`posted` 被清零，
-  净效果＝通知从未出现。**照「`Offline` 也纳入通知」去改会误修**（真实断网时通知刷屏）。
+  **真缺陷是「同周期内竞态」**（**2026-10-09 真伪核实更正：原写「定序」不准确**）：
+  `SyncCoordinator.syncNow():254-255` 确实**先** `publishSyncEvents()`（内含 `_syncEvents.tryEmit`）**后**
+  写 `_lastOutcome.value` ⇒ 发射顺序为「先事件后结论」；但两个订阅者是 `SyncFailureNotifier.start():87-104`
+  在同一 scope 下的**兄弟协程**，该 scope 为 `guardedScope(Dispatchers.Default, …)`（`:76`）
+  ⇒ 两次唤醒分派到**不同线程并行**，**发射顺序不构成执行顺序保证**；且 `posted`（`:81`）是
+  **非 `@Volatile` 普通 `var`**（写于 `post()`、读于 `cancel()`）⇒ 跨线程**无 happens-before**。
+  **三种交错都会出现**：① `post()` 先且 `posted` 可见 → 通知被撤（原述结果）；② `cancel()` 先 →
+  `if (!posted) return`（`:135`）空转后由 `post()` 留下通知；③ `cancel()` 读到陈旧 `false` → 通知留下。
+  ⇒ 「通知被撤掉」**真实可能但非确定发生**；**确定成立**的是「同周期内既 `post()` 又 `cancel()`
+  ＋ `posted` 状态机数据竞态」——**两者都须一并整改**。
+  **照「`Offline` 也纳入通知」去改会误修**（真实断网时通知刷屏）。
+- **前提边界（2026-10-09 真伪核实补正）**：上述「通知被撤」路径只在**库已有缓存基线**（非首次同步）
+  时成立。首次同步走 `SyncEngine.openUncached:150-160`——401 时 `:158` emit 事件**并** `:159 throw ex`
+  ⇒ `handleOpenRemote` 的 `catch (NetworkError):365-366` **不匹配** ⇒ 落 `catch (Throwable)` ⇒
+  `SyncOutcome.Error` ⇒ 通知**留得住**。
 - **影响**：部分抵消 `ISSUE-P3-298`（其立项目标正是修复「同步失败零感知」）。
 - **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncFailureNotifier.kt`、
   `app/src/main/java/com/keepasskey/app/sync/SyncCycleRunner.kt`、
   `sync/src/main/java/com/keepasskey/sync/engine/SyncEngine.kt`
 - **验收标准**：
-  ① 鉴权 / 协议错误所在的同步周期结束后，失败通知**仍在通知栏**（新增单测覆盖「事件 + 结论同周期」定序）；
-  ② 真实网络不可达（`SyncException.NetworkError` **抛出**路径，`SyncCycleRunner.kt:363-365`）不得因本次整改变成常驻通知；
+  ① 鉴权 / 协议错误所在的同步周期结束后，失败通知**仍在通知栏**（新增单测覆盖「事件 + 结论同周期」**竞态**
+  与 `posted` 跨线程可见性；**2026-10-09 真伪核实**：`app/src/test` 现仅有 `SyncFailureSignalTest`（覆盖两个纯函数），
+  收集器交互**零覆盖**）；
+  ② 真实网络不可达（`SyncException.NetworkError` **抛出**路径，`SyncCycleRunner.kt:365-366`）不得因本次整改变成常驻通知；
   ③ UI 侧对鉴权失败不得再显示「离线」文案，须与真实离线区分（错误分类上收，不改降级语义）。
 
 ### ISSUE-P2-549：`ExtractedSaveCredentials` 持明文口令却无 `toString()` 覆写 + 无谓 `FLAG_MUTABLE`
@@ -100,7 +115,7 @@
 
 ## P3 低危问题、特性接线与体验优化（**5 项**）
 
-### ISSUE-P3-550：10 处异常 message 直出 UI（自订 ZT-10 / `ISSUE-P3-453` 纪律的残留）
+### ISSUE-P3-550：11 处异常 message 直出 UI（自订 ZT-10 / `ISSUE-P3-453` 纪律的残留）
 
 - **现象**：`t.message` / `e.message` 被直接拼进用户可见文案，违反本仓自订纪律。
 - **纪律出处**：`core/.../result/KdbxResult.kt:19-40` —— `Failure.message` 已标
@@ -109,11 +124,23 @@
   `VaultExportCoordinator.kt:47`、`:67`；`VaultFileDriftResolve.kt:63`、`:65`；
   `VaultLifecycleCoordinator.kt:272`、`:312`；`ResumeSyncProbeCoordinator.kt:157`；
   `SettingsHealthController.kt:161`、`:319`；`SettingsKdfBenchmarkController.kt:51`（共 **10 处**）。
-  **渲染路径实锤**：`HealthCheckScreenSections.kt:176` `Text(text = healthMessage)`。
-  （`ConflictResolutionViewModel.kt:323` 读的是 `SyncOutcome.Error.message`，属 app 层自产文案，**不计入**。）
+  **渲染路径实锤**：`HealthCheckScreenSections.kt:176` `Text(text = healthMessage)`；
+  其余经 `KdbxResult.Failure` 第二参 `userText` 上屏（`textArg() = userText ?: …` 口径 `userText` **优先**，
+  如 `VaultListActionController.kt:148` 等 28 处 `textArg(` 调用点）。
+- **第 11 处（2026-10-09 真伪核实补入，原 grep 漏计）**：`app/.../sync/SyncConflictAutoMerge.kt:250`
+  `SyncOutcome.Error(strings.get(R.string.sync_error_upload_merged_failed, ex?.message))` ——
+  原 `grep "\.message ?:"` 只匹配「`.message` + 可选空格 + `:`」，**`ex?.message` 不含 `?:` 故逃过**。
+- **排除理由更正（2026-10-09 真伪核实）**：原文写「`ConflictResolutionViewModel.kt:323` 读的是
+  `SyncOutcome.Error.message`，属 app 层自产文案，**不计入**」——**该定性不成立**：`SyncOutcome.Error.message`
+  **并非恒为 app 层自产**，`SyncConflictAutoMerge.kt:250` 即把原始 `ex.message` 灌入其中，且该字段有
+  **三处直出 UI**：`VaultListSyncController.kt:196`、`SettingsSyncController.kt:349`、
+  `ConflictResolutionViewModel.kt:323` ⇒ 构成端到端泄露链（上传失败的端点 / 主机 / 协议细节 → 界面），
+  **须一并处置**，不得按「不计入」放过。
 - **定级说明**：泄露内容为**文件路径 / 端点 / 主机 / 协议细节**，**非主密码明文** ⇒ P3。
-- **验收标准**：10 处 `message` 一律改为错误码映射（`KdbxErrorTexts.uiTextArg` 口径），
-  细节只进日志；增补机检禁止 `\.message` 进 `userText` / 文案槽，并挂入 `hygiene-gate`。
+- **验收标准**：**11 处** `message` 一律改为错误码映射（**`KdbxErrorTexts.textArg`** 口径；
+  `uiTextArg` 一名在本仓**不存在**，`grep uiTextArg` 零命中），细节只进日志；
+  连带处置 `SyncOutcome.Error` 的三处 UI 消费点；增补机检禁止 `\.message`（含 `?.message` 与裸 `message` 形参）
+  进 `userText` / 文案槽，并挂入 `hygiene-gate`。
 
 ### ISSUE-P3-551：序列化缓冲（整库密文）在写盘异常路径不清零
 
@@ -133,7 +160,9 @@
   `ConflictResolutionViewModel.kt:93-101` —— 三处同一套 `when(今天/昨天/else)` 判据 + 同一套
   `R.string.time_today` / `time_yesterday` / `date_pattern_month_day`，差异仅在入参与「0 → never」分支。
   三处**每次调用都重编译** `DateTimeFormatter.ofPattern("HH:mm")`；
-  同类：`EntryDetailExpiryCard.kt:25` 与 `EntryEditExpiryEditor.kt:37` 各自硬编码 `"yyyy-MM-dd"`。
+  同类：`EntryDetailExpiryCard.kt:25` 与 `EntryEditExpiryEditor.kt:37` 各自硬编码 `"yyyy-MM-dd"`；
+  **2026-10-09 真伪核实补入**：`sync/RemoteBrowsePaths.kt:65` 亦硬编码 `"yyyy-MM-dd HH:mm"`
+  （与 `VaultEntryMapper.INSTANT_PATTERN` 同模式，同一收敛动作）。
   （`VaultEntryMapper.kt:339-355` 已用 `ConcurrentHashMap<Locale, DateTimeFormatter>` 缓存并注释此坑 ⇒ 已知未收敛。）
 - **验收标准**：抽 `app/.../ui/model/RelativeTimeFormatter.kt` 统一出口（可空入参统一处理「从未」），
   pattern 常量化 + 缓存；三处调用点收敛，行为与文案不变。
@@ -152,8 +181,11 @@
 
 - **核实时间点 / 方式**：2026-10-09，静态取证：
   ① `app/build.gradle.kts:257-259` 只声明 `:core` / `:database` / `:sync`，**未声明 `:crypto`**；
-  ② `grep -rl "com.keepasskey.crypto" app/src/main` = **12 个文件**（如
-  `SettingsKdfBenchmarkController.kt:7`、`PasswordEntropyEstimator.kt:4`、`SettingsUiStateProjection.kt:8`）；
+  ② `grep -rl "com.keepasskey.crypto" app/src/main` = **11 个文件**（**2026-10-09 真伪核实更正：
+  原写「12 个」，经检索工具与 `grep -rl | wc -l` 两路独立取证均为 11**）：`PasskeyEntryCoordinator.kt`、
+  `PasskeyAssertionPayload.kt`、`PasskeyAuthFlags.kt`、`PasskeyCreateActivity.kt`、`PasskeyImportFactory.kt`、
+  `PasskeyRegistrationPayload.kt`、`WebAuthnJsonKeys.kt`、`PasswordEntropyEstimator.kt:4`、
+  `SettingsKdfBenchmarkController.kt:7`、`SettingsPreferencesController.kt`、`SettingsUiStateProjection.kt:8`）；
   ③ 能编译全靠 `database/build.gradle.kts:32` 的 `api(project(":crypto"))` 透传；
   ④ **单向性未被破坏**（已核实 core 无跨模块 import、crypto 只依赖 core、sync 只依赖 core、
   database 只依赖 core+crypto）。
