@@ -85,8 +85,21 @@ class SyncCycleRunner @Inject constructor(
      * `ISSUE-P3-528`：主凭据轮换后的「云端副本待替换」持久标记（生产由 Hilt 注入）。
      * 为 null（既有手工装配路径 / 单测）时本机制整体旁路，装配期判定与整改前逐字节一致。
      */
-    internal val credentialRotationStore: SyncCredentialRotationStore? = null
+    internal val credentialRotationStore: SyncCredentialRotationStore? = null,
+    /**
+     * `ISSUE-P2-536`：「本地库文件自上次成功同步以来未被重写」的进程内检查点（生产由 Hilt 注入）。
+     * 为 null（既有手工装配路径 / 单测）时本机制整体旁路，占位态判定与整改前逐字节一致。
+     */
+    internal val localFileCheckpoint: SyncLocalFileCheckpoint? = null
 ) {
+
+    /**
+     * `ISSUE-P2-536`：本轮周期已解析的远端路径（检查点记录与判定的归属键）。
+     * 由 `setupCycleContext` 写入；`takeoverVaultBinding` 独立解析、不写——该路径的成功结论
+     * （整库覆盖上传后两端一致）由 §372 兜底的「两端一致」臂覆盖，无须检查点参与。
+     */
+    @Volatile
+    internal var lastCycleRemotePath: String? = null
 
     /**
      * 测试钩子（`ISSUE-P2-277` AC③）：注入「记录调用线程」的 [SyncCache] 子类，用于断言缓存
@@ -107,8 +120,20 @@ class SyncCycleRunner @Inject constructor(
      * 前置装配见 `setupCycleContext`（ISSUE-P3-305 起实现位于同包 `SyncCycleSetup.kt`），
      * 步骤 2 / 3 的实现位于同包 `SyncCycleCommitPaths.kt`，
      * `return@withLock` 语义由返回值等价承载。
+     *
+     * `ISSUE-P2-536`：决策在 [runCycleUnderLock] 内完成后，于锁外统一执行检查点记录面
+     * （仅「已与远端收敛」的结论记录，判据见 [SyncOutcome.isInSyncWithRemote]）——
+     * 记录放在锁外是因为它只读本地文件并写进程内摘要，不触碰任何周期共享状态。
      */
-    suspend fun runSyncCycle(): SyncOutcome = session.mutex.withLock {
+    suspend fun runSyncCycle(): SyncOutcome {
+        val outcome = runCycleUnderLock()
+        if (outcome.isInSyncWithRemote()) {
+            localFileCheckpoint?.record(lastCycleRemotePath.orEmpty(), databaseSession.currentFile)
+        }
+        return outcome
+    }
+
+    private suspend fun runCycleUnderLock(): SyncOutcome = session.mutex.withLock {
         val currentDb = databaseSession.databaseFlow.value
             ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_vault_not_unlocked))
         // §411 走查（ISSUE-P3-447 局部收口）：SAF（自选位置）通道的库 `associatedFile == null`，
@@ -194,8 +219,9 @@ class SyncCycleRunner @Inject constructor(
                 isDirty = ctx.isDirty,
                 hasLocalContentChanged = ctx.hasLocalContentChanged,
                 localChangeState = ctx.localChangeState,
+                localFileUnchangedSinceSync = ctx.localFileUnchangedSinceSync,
                 conflictStrategy = ctx.conflictStrategy
-            )
+                )
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 协程取消原样重抛（结构化并发契约）
             throw e
@@ -297,6 +323,7 @@ class SyncCycleRunner @Inject constructor(
         isDirty: Boolean,
         hasLocalContentChanged: Boolean,
         localChangeState: LocalContentChangeState,
+        localFileUnchangedSinceSync: Boolean,
         conflictStrategy: SyncConflictStrategy
     ): SyncOutcome {
         val ctx = RemoteSyncContext(
@@ -309,6 +336,7 @@ class SyncCycleRunner @Inject constructor(
             isDirty = isDirty,
             hasLocalContentChanged = hasLocalContentChanged,
             localChangeState = localChangeState,
+            localFileUnchangedSinceSync = localFileUnchangedSinceSync,
             conflictStrategy = conflictStrategy
         )
         return try {

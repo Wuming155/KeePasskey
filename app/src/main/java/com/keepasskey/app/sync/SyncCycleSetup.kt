@@ -43,6 +43,11 @@ internal data class SyncCycleContext(
      * `handleRemoteSynced` 须以实际内容比较确证后再裁决。
      */
     val localChangeState: LocalContentChangeState,
+    /**
+     * `ISSUE-P2-536`：仅占位态（BASELINE_MISSING）下有意义——本地库文件自上次成功同步以来
+     * 未被重写（进程内检查点命中）⇒ 与远端的内容差异只能来自远端一侧。其余态恒 false。
+     */
+    val localFileUnchangedSinceSync: Boolean,
     val currentDb: KdbxDatabase
 )
 
@@ -73,6 +78,8 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
     } ?: return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials)))
 
     val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
+    // ISSUE-P2-536：检查点记录与判定按本轮远端路径归属（换绑即视为无记录，防跨库误命中）
+    lastCycleRemotePath = remotePath
 
     // ISSUE-P2-291 AC①：库身份（根分组 UUID，建库随机生成、跨保存稳定）参与
     // 缓存 / 基线 / 防回滚的键——同一 remotePath 被不同库共用时，各库的同步状态
@@ -170,10 +177,17 @@ private suspend fun SyncCycleRunner.buildCycleContext(
         changes.resolveLocalContentChanged(currentDb, cachedSnapshotBytes)
     }
     val hasLocalContentChanged = localChangeState != LocalContentChangeState.UNCHANGED
+    // ISSUE-P2-536：占位态（BASELINE_MISSING）下「本地内容变了吗」的证据已被锁库清缓存
+    // （ISSUE-P1-07）销毁，以进程内检查点补上「本地库文件自上次成功同步以来未被重写」这一件——
+    // 命中 ⇒ 与远端的内容差异只能来自远端一侧，`handleRemoteSynced` 据此走远端接管
+    // （零上传 + 「检测到云端已有更新」文案），绝不把占位投影出的 true 当「本地已修改」的证据。
+    // 仅占位态读取（其余态证据已足）；摘要为整库密文流式计算，不整份物化。
+    val localFileUnchangedSinceSync = localChangeState == LocalContentChangeState.BASELINE_MISSING &&
+        localFileCheckpoint?.isUnchangedSinceSync(remotePath, databaseSession.currentFile) == true
     preferences.verbose(
         settings,
         "同步周期开始: cached=$isCached, dirty=${databaseSession.state.value}, " +
-            "localChange=$localChangeState, " +
+            "localChange=$localChangeState, 本地文件自上次同步未变=$localFileUnchangedSinceSync, " +
             "远端比对=${settings.checkRemoteChangesBeforeSave}, 冲突策略=$conflictStrategy, " +
             "分块上传=${settings.webdavChunkedUpload}(${settings.webdavChunkSizeMb}MB)"
     )
@@ -205,6 +219,7 @@ private suspend fun SyncCycleRunner.buildCycleContext(
             baseSnapshotBytes = baseSnapshotBytes,
             hasLocalContentChanged = hasLocalContentChanged,
             localChangeState = localChangeState,
+            localFileUnchangedSinceSync = localFileUnchangedSinceSync,
             currentDb = currentDb
         )
     )

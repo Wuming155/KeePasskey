@@ -4,6 +4,7 @@ import com.keepasskey.app.R
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.sync.engine.SyncCache
+import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncOpenResult
 import com.keepasskey.sync.merge.SyncConflictStrategy
@@ -34,6 +35,11 @@ internal data class RemoteSyncContext(
      * 是「基线缺失占位」而非证据，`handleRemoteSynced` 须以实际内容比较确证。
      */
     val localChangeState: LocalContentChangeState,
+    /**
+     * `ISSUE-P2-536`：仅占位态（BASELINE_MISSING）下有意义——本地库文件自上次成功同步以来
+     * 未被重写（进程内检查点命中）⇒ 与远端的内容差异只能来自远端一侧。其余态恒 false。
+     */
+    val localFileUnchangedSinceSync: Boolean,
     val conflictStrategy: SyncConflictStrategy
 )
 
@@ -74,7 +80,14 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
             }
         }
     }
-    if (ctx.isDirty || ctx.hasLocalContentChanged) {
+    // ISSUE-P2-536：远端确有差异，但若检查点判定「本地库文件自上次成功同步以来未被重写」，
+    // 则差异只能来自远端一侧（他端改了云端、本地一行未改）——此刻占位投影出的
+    // hasLocalContentChanged=true **不是**「本地已修改」的证据，不得送进合并上传：
+    // 改走下方既有「远端接管」尾段（零上传），并经既有缓存事件通道如实告知
+    // 「检测到云端已有更新，本地数据库已刷新」。本地确有改动（isDirty 或文件已被重写）时
+    // 维持既有合并路径，F1「已落盘未同步」与「内存未落盘」两类覆盖面均不回退。
+    val remoteOnlyDifference = !ctx.isDirty && ctx.localFileUnchangedSinceSync
+    if (!remoteOnlyDifference && (ctx.isDirty || ctx.hasLocalContentChanged)) {
         // ISSUE-P2-308：转入三方合并——远端字节已完整持有（openResult.remoteBytes），
         // 下载回执弃置、基线保持原状；合并上传成功后由 markResolvedAndUpload 前移基线。
         // 此前基线在进入本分支前已被引擎前移到远端内容，合并失败后将触发
@@ -110,25 +123,39 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
     // 装配之后（探测 / 下载的网络往返窗口）UI 写路径仍可能编辑并保存，isDirty /
     // hasLocalContentChanged 都是 setup 时的旧值；若会话树已被替换，如实中止本周期，
     // 严禁静默接管（窗口内编辑会从内存与文件同时消失）。下一轮同步按冲突流程收敛。
-    return when (codec.loadAndApplyRemoteBytes(openResult.remoteBytes, ctx.localDbSnapshot)) {
-        SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
-            // ISSUE-P2-308：采纳确认（远端树已落库且保存成功）后才落地基线三步
-            openResult.adoption?.accept()
-            session.lastSyncedDb = databaseSession.databaseFlow.value
-            SyncOutcome.UpToDate
-        }
-        SyncDatabaseCodec.ApplyRemoteResult.SESSION_DIVERGED -> {
-            // ISSUE-P2-308：采纳失败 ⇒ 基线保持原状不前移，下轮同步重新下载重试
-            openResult.adoption?.reject()
-            SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
-        }
-        SyncDatabaseCodec.ApplyRemoteResult.PARSE_FAILED,
-        SyncDatabaseCodec.ApplyRemoteResult.SAVE_FAILED -> {
-            // ISSUE-P2-308：同上——采纳失败不前移基线（整改前 base 已前移且无回滚，
-            // 陈旧内存树会在下轮被 contentEquals 短路记为 lastSyncedDb 并整库覆盖远端）
-            openResult.adoption?.reject()
-            SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
-        }
+    if (remoteOnlyDifference) {
+        // ISSUE-P2-536：远端侧更新由本侧接管，经既有六事件通道如实上浮——列表页映射为
+        // 「检测到云端已有更新，本地数据库已刷新」，替代误导性的「本地修改已上传至云端」。
+        ctx.syncEngine.events.tryEmit(SyncCacheEvent.UpdatedCachedFileOnLoad(ctx.remotePath))
+    }
+    return adoptRemoteBytes(ctx, openResult)
+}
+
+/**
+ * 远端整库接管尾段（`ISSUE-P2-536` 自 [handleRemoteSynced] 切出，函数体逐行未改）：
+ * 解析远端字节并做「校验-采用」，按采纳结论映射基线结算与错误口径。
+ */
+private suspend fun SyncCycleRunner.adoptRemoteBytes(
+    ctx: RemoteSyncContext,
+    openResult: SyncOpenResult.RemoteSynced
+): SyncOutcome = when (codec.loadAndApplyRemoteBytes(openResult.remoteBytes, ctx.localDbSnapshot)) {
+    SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
+        // ISSUE-P2-308：采纳确认（远端树已落库且保存成功）后才落地基线三步
+        openResult.adoption?.accept()
+        session.lastSyncedDb = databaseSession.databaseFlow.value
+        SyncOutcome.UpToDate
+    }
+    SyncDatabaseCodec.ApplyRemoteResult.SESSION_DIVERGED -> {
+        // ISSUE-P2-308：采纳失败 ⇒ 基线保持原状不前移，下轮同步重新下载重试
+        openResult.adoption?.reject()
+        SyncOutcome.Error(strings.get(R.string.sync_error_local_changed_during_sync))
+    }
+    SyncDatabaseCodec.ApplyRemoteResult.PARSE_FAILED,
+    SyncDatabaseCodec.ApplyRemoteResult.SAVE_FAILED -> {
+        // ISSUE-P2-308：同上——采纳失败不前移基线（整改前 base 已前移且无回滚，
+        // 陈旧内存树会在下轮被 contentEquals 短路记为 lastSyncedDb 并整库覆盖远端）
+        openResult.adoption?.reject()
+        SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
     }
 }
 
