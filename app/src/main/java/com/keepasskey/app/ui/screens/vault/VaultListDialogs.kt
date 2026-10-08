@@ -231,11 +231,20 @@ internal fun VaultTemplatePickerDialog(
 /**
  * `ISSUE-P2-291` AC②：库身份绑定不符的整库覆盖确认对话框——确认按钮用 error 色
  * 强化「不可恢复」语义；取消即保持本地与云端现状。
+ *
+ * `ISSUE-P2-529` AC①：补第三条出口「另存云端副本并覆盖」——先把云端副本另存为本地独立库
+ * （`<原名> (副本 yyyyMMdd-HHmm).kdbx`），再把当前库覆盖上传。用户不再只有
+ * 「覆盖（不可恢复）/ 取消」两条路。该动作同属破坏性（照样覆盖云端），故同样用 error 色。
  */
 @Composable
 internal fun VaultBindingTakeoverDialog(
     onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /**
+     * AC① 的两份都留出口：先另存云端副本，成功后才覆盖。调用方负责失败时的用户提示
+     * （副本另存失败即中止，云端数据保持不动）。
+     */
+    onConfirmKeepingCopy: () -> Unit = {}
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -250,7 +259,16 @@ internal fun VaultBindingTakeoverDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
+            // 单槽内两枚按钮必须自包 Row（按钮槽按 FlowRow 排布，平铺两枚仍是同层兄弟）
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_cancel)) }
+                TextButton(onClick = onConfirmKeepingCopy) {
+                    Text(
+                        text = stringResource(R.string.sync_vault_takeover_confirm_keep_copy),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
         }
     )
 }

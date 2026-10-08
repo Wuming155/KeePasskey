@@ -104,6 +104,8 @@ fun DatabasePickerScreen(
         onNoteOpenVaultSource = viewModel::noteOpenVaultSource,
         onImportFromSource = viewModel::importDatabaseFromSource,
         onRemoveDatabase = viewModel::removeDatabase,
+        // ISSUE-P2-529 AC①：同一枚判据（confirmation.kind）下行，界面不自判
+        onSaveCopyAndRemoveDatabase = viewModel::saveCopyAndRemoveDatabase,
         // ISSUE-P3-400：远端目录浏览（对话框「浏览远端目录」与设置页共用同一控制器单例）
         browseState = viewModel.remoteBrowseState,
         onBrowseWebDav = viewModel::browseRemoteWebDav,
@@ -141,6 +143,8 @@ fun DatabasePickerContent(
     // ISSUE-P1-241：第二个参数即该动作的**真实对象**（应用私有库 = 真删文件 / 外部库 = 只摘登记），
     // 与确认弹窗所用文案同一枚判据，数据层据此决定是否删除物理文件
     onRemoveDatabase: (String, VaultRemovalKind) -> Unit,
+    // ISSUE-P2-529 AC①：应用私有库的「两份都留」出口——另存副本后再移除（参数与上行同源）
+    onSaveCopyAndRemoveDatabase: (String, VaultRemovalKind) -> Unit = { _, _ -> },
     // ISSUE-P3-21：生成型密钥文件的一次性交付（默认值便于预览与既有调用点复用）
     keyFileDelivery: KeyFileDeliveryState = KeyFileDeliveryState.None,
     onSaveKeyFile: (Uri) -> Unit = {},
@@ -365,7 +369,12 @@ fun DatabasePickerContent(
                 onRemoveDatabase(db.id, confirmation.kind)
                 dbToRemove = null
             },
-            onDismiss = { dbToRemove = null }
+            onDismiss = { dbToRemove = null },
+            // ISSUE-P2-529 AC①：两条出口共用同一枚判据（confirmation.kind），界面不做第二枚判定
+            onSaveCopy = {
+                onSaveCopyAndRemoveDatabase(db.id, confirmation.kind)
+                dbToRemove = null
+            }
         )
     }
 }

@@ -215,6 +215,28 @@ class DatabasePickerViewModelTest {
         assertEquals(VaultRemovalKind.PRIVATE_FILE, repo.lastRemovalKind)
     }
 
+    /**
+     * `ISSUE-P2-529` AC①/AC③：两条移除出口必须把「是否另存副本」这一开关**如实**下行到数据层——
+     * 界面选的是哪条出口，数据层收到的就是哪条（`saveCopy`），不得被吞掉或默认成 true。
+     */
+    @Test
+    fun `两条移除出口如实下行另存副本开关`() = runTest {
+        val (viewModel, repo) = createViewModel()
+
+        viewModel.removeDatabase("db_work", VaultRemovalKind.PRIVATE_FILE)
+        testScheduler.runCurrent()
+        assertFalse("「永久删除」出口不得顺手另存副本", repo.lastRemovalSaveCopy)
+
+        viewModel.saveCopyAndRemoveDatabase("db_work", VaultRemovalKind.PRIVATE_FILE)
+        testScheduler.runCurrent()
+        assertTrue("「另存副本后移除」出口必须把 saveCopy=true 下行到数据层", repo.lastRemovalSaveCopy)
+        // 反馈文案须与出口一致（否则用户无从判断副本到底存了没）
+        assertEquals(
+            R.string.db_picker_msg_copied_removed,
+            viewModel.uiState.value.userMessage?.resId
+        )
+    }
+
     @Test
     fun `移除数据库同时清除其按库密钥文件记忆键`() = runTest {
         // ISSUE-P3-466 ④：删库此前只清副本，按库记忆键（keyfile_remember_*_<dbId摘要>）成为

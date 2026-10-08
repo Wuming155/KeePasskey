@@ -7,6 +7,7 @@ import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.session.SessionLockObserver
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.merge.ConflictResolutionChoice
@@ -251,7 +252,7 @@ open class SyncCoordinator @Inject constructor(
         _lastOutcome.value = outcome
         // ISSUE-P3-381：远端 ETag 探测基线不在本周期直接读引擎 cache（internal）；
         // 探测协调器在首次探测成功时自行回写基线（ResumeSyncProbeCoordinator）。
-        debugLog.info(SYNC_LOG_TAG, "同步结束: ${describeOutcome(outcome)}")
+        debugLog.info(SYNC_LOG_TAG, "同步结束: ${syncOutcomeDescription(outcome)}")
         return outcome
     }
 
@@ -271,22 +272,17 @@ open class SyncCoordinator @Inject constructor(
         }
         publishSyncEvents()
         _lastOutcome.value = outcome
-        debugLog.info(SYNC_LOG_TAG, "库身份改绑确认结束: ${describeOutcome(outcome)}")
+        debugLog.info(SYNC_LOG_TAG, "库身份改绑确认结束: ${syncOutcomeDescription(outcome)}")
         return outcome
     }
 
-    private fun describeOutcome(outcome: SyncOutcome): String = when (outcome) {
-        is SyncOutcome.UpToDate -> "UpToDate(与云端一致)"
-        is SyncOutcome.UploadedLocal -> "UploadedLocal(本地已上传)"
-        is SyncOutcome.MergedAndUploaded -> "MergedAndUploaded(合并后已上传)"
-        is SyncOutcome.ConflictNeedsUser -> "ConflictNeedsUser(条目冲突数=${outcome.conflicts.size})"
-        is SyncOutcome.Offline -> "Offline(离线/网络不可达)"
-        // ISSUE-P2-69：Error.message 可能内嵌端点 URL / 主机 / 桶名（如 InvalidEndpointError
-        // 直接拼接原始 endpoint），属敏感插值，不得进入调试日志缓冲；
-        // 失败详情已由 UI 提示承载，日志只保留结果类型。
-        is SyncOutcome.Error -> "Error(同步失败，详情见界面提示)"
-        // ISSUE-P2-291：绑定拦截不携带凭据，但同样只记类型与路径形态，不记库 UUID 全文
-        is SyncOutcome.VaultBindingMismatch -> "VaultBindingMismatch(远端归属另一库，待用户确认)"
+    /**
+     * `ISSUE-P2-529` AC①：把当前云端副本另存为本地独立库；失败即 Failure，调用方据此**中止覆盖**。
+     * 挂长任务锁口径与 [confirmVaultBindingTakeover] 一致（下载期不得被自动锁定打断）。
+     */
+    suspend fun backupCloudVaultCopy(): KdbxResult<String> {
+        autoLockGuard?.beginLongTask()
+        return try { cycle.backupRemoteVaultCopy() } finally { autoLockGuard?.endLongTask() }
     }
 
     /**

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.repository.VaultCopyNaming
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.sync.network.SyncNetworkOptions
@@ -12,6 +13,7 @@ import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.time.LocalDateTime
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -51,7 +53,12 @@ sealed interface CloudVaultImportRequest {
 
 /** 云端打开导入结果：[Success.localPath] 为已落地的本地库文件绝对路径（即登记用的 `path`） */
 sealed interface CloudVaultImportResult {
-    data class Success(val localPath: String) : CloudVaultImportResult
+    /**
+     * [notice] 非空表示本次导入**非无声地改道**（当前唯一场景：本地已有同名库文件，
+     * 按 `ISSUE-P2-529` 的「保留副本」规则以副本落地，见 `VaultCopyNaming`）——
+     * 调用方须把它作为**信息性**提示呈现，使「导入的库为什么多了一个『副本』后缀」可解释。
+     */
+    data class Success(val localPath: String, val notice: UiMessage? = null) : CloudVaultImportResult
     data class Failure(val message: UiMessage) : CloudVaultImportResult
 }
 
@@ -74,6 +81,10 @@ fun interface CloudVaultProviderFactory {
  * 3. 下载成功才提交凭据（封印落盘 + 置当前 Provider），再把临时件原子改名为目标库文件；
  * 4. 上层据 `Success.localPath` 走仓库既有 `importExternalDatabase` 单一登记出口——
  *    此后该库就是一条**本地库 + 已保存同步配置**的常规链路（解锁、自动同步、浏览远端目录全部复用既有机制）。
+ *
+ * `ISSUE-P2-529` AC①：本地已有同名库文件时**不覆盖、也不死路**——按全仓统一的「保留副本」规则
+ * （`VaultCopyNaming`）以 `<原名> (副本 yyyyMMdd-HHmm).kdbx` 落地，两份都留；`Success.notice`
+ * 承载一条可解释该改道的**信息性**提示。凭据按副本路径（= 上层登记的库 ID）命名空间提交。
  */
 interface CloudVaultImporter {
     suspend fun import(request: CloudVaultImportRequest): CloudVaultImportResult
@@ -106,13 +117,14 @@ class RealCloudVaultImporter @Inject constructor(
             }
             val filesDir = context.filesDir ?: return CloudVaultImportResult.Failure(downloadFailed())
             val sanitized = if (request.name.endsWith(".kdbx", ignoreCase = true)) request.name else "${request.name}.kdbx"
-            val target = File(filesDir, sanitized)
-            // 本地同名库文件已存在时 fail-closed：覆盖既有库文件是数据丢失级动作，绝不静默
-            if (target.exists()) {
-                return CloudVaultImportResult.Failure(
-                    UiMessage(R.string.picker_cloud_local_conflict, isError = true)
-                )
-            }
+            val requested = File(filesDir, sanitized)
+            // ISSUE-P2-529 AC①：本地同名库文件已存在时**既不覆盖、也不死路**——按全仓统一的
+            // 「保留副本」规则以副本落地（`<原名> (副本 yyyyMMdd-HHmm).kdbx`），使两份都留。
+            // 覆盖既有库文件是数据丢失级动作，此前 fail-closed 拒绝对话「请换个名字重试」，
+            // 等于把出口推给用户；现改为一律以副本落地并回一条可解释的提示。
+            val asCopy = requested.exists()
+            val target = if (asCopy) VaultCopyNaming.uniqueCopyTarget(requested, LocalDateTime.now()) else requested
+            val notice = if (asCopy) UiMessage(R.string.picker_cloud_local_conflict) else null
             val provider = try {
                 providerFactory.create(request)
             } catch (e: Exception) {
@@ -149,7 +161,7 @@ class RealCloudVaultImporter @Inject constructor(
                     if (!tmp.renameTo(target)) {
                         return CloudVaultImportResult.Failure(downloadFailed())
                     }
-                    return CloudVaultImportResult.Success(target.absolutePath)
+                    return CloudVaultImportResult.Success(target.absolutePath, notice)
                 } finally {
                     tmp.delete()
                 }

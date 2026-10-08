@@ -27,7 +27,13 @@ data class VaultRemovalConfirmation(
     val messageArgs: List<String>,
     @StringRes val confirmRes: Int,
     /** 破坏性动作 ⇒ 红底危险按钮（AC②）；外部库的「仅移除关联」用普通按钮，两者措辞亦不同 */
-    val destructive: Boolean
+    val destructive: Boolean,
+    /**
+     * `ISSUE-P2-529` AC①：非空即呈现「另存副本后移除」这条**非唯一出路**（副本落点与命名见
+     * `VaultCopyNaming`：`<原名> (副本 yyyyMMdd-HHmm).kdbx`，与库文件同目录）。
+     * 仅应用私有库（真删文件）需要——外部库只摘登记，本就不丢数据，不必给副本出口。
+     */
+    @StringRes val saveCopyRes: Int? = null
 ) {
 
     companion object {
@@ -49,7 +55,9 @@ data class VaultRemovalConfirmation(
                 // 指名被删文件：界面展示的是本机私有目录里那个**具体文件**
                 messageArgs = listOf(database.name),
                 confirmRes = R.string.db_picker_remove_private_confirm,
-                destructive = true
+                destructive = true,
+                // ISSUE-P2-529：私有库唯一会真丢数据的形态 ⇒ 必须给出「另存副本后移除」出口
+                saveCopyRes = R.string.db_picker_remove_save_copy
             )
 
             VaultRemovalKind.EXTERNAL_LINK -> VaultRemovalConfirmation(

@@ -152,10 +152,14 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
      * 表示这是应用私有目录内的库文件，移除**会删除该物理文件**（不可恢复）；
      * [com.keepasskey.app.ui.model.VaultRemovalKind.EXTERNAL_LINK] 表示物理文件在应用之外，
      * 只摘除本机登记。实现**必须**据此决定是否删除文件，不得由 `id` 形状反推。
+     *
+     * `ISSUE-P2-529`（AC①）：[saveCopy] = true 即「另存副本后再移除」——删除前先把库文件另存为同目录
+     * 副本（`<原名> (副本 yyyyMMdd-HHmm).kdbx`）；副本另存失败即整体失败且不删原件。默认 false 保持既有语义。
      */
     suspend fun removeDatabase(
         id: String,
-        kind: VaultRemovalKind
+        kind: VaultRemovalKind,
+        saveCopy: Boolean = false
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**

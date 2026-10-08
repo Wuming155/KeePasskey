@@ -12,16 +12,13 @@ import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.result.KdbxResult
-import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
-import com.keepasskey.database.file.KdbxKdfStrengthAssessor
 import com.keepasskey.database.file.KdbxKeyFileGenerator
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.io.InputStream
 
 /**
  * 密码库生命周期协调器（ISSUE-P3-31 批次 B 自 `RealVaultRepository` 拆出，纯结构性改动）。
@@ -44,6 +41,9 @@ internal class VaultLifecycleCoordinator(
      */
     private val baselineHolder: VaultFileBaselineHolder? = null
 ) {
+
+    /** `ISSUE-P2-529`：来源只读探测（KDF 工作因子评估）——原实现自本类切出，见 [VaultSourceProbe]。 */
+    private val sourceProbe = VaultSourceProbe(context)
 
     /**
      * 解锁当前活动库；[candidates] 为仓库持有的当前库列表快照，
@@ -223,8 +223,16 @@ internal class VaultLifecycleCoordinator(
      *
      * 另：注册表条目的匹配收紧为 `id` / `path`（去掉按 `name` 匹配）——外部登记的
      * `name` 只是展示名，与其它库的文件名撞车时会摘掉**另一个库**的登记。
+     *
+     * `ISSUE-P2-529`：[saveCopy] = true 表示「另存副本后再移除」——删除前先把该库文件另存为
+     * 同目录副本（`<原名> (副本 yyyyMMdd-HHmm).kdbx`，见 [VaultCopyNaming]）。**副本另存失败
+     * 即整体失败且不删原件**（fail-closed：绝不出现「副本没落地、原件已删」）。
      */
-    suspend fun removeDatabase(id: String, kind: VaultRemovalKind): KdbxResult<Unit> {
+    suspend fun removeDatabase(
+        id: String,
+        kind: VaultRemovalKind,
+        saveCopy: Boolean = false
+    ): KdbxResult<Unit> {
         return try {
             val known = catalog.loadKnownDatabases()
             val matchExternal = known.find { it.id == id || it.path == id }
@@ -237,6 +245,16 @@ internal class VaultLifecycleCoordinator(
                 if (filesDir != null) {
                     val targetFile = File(filesDir, id)
                     if (targetFile.exists()) {
+                        // ISSUE-P2-529：另存副本后再移除——副本必须真正落地才允许删原件
+                        if (saveCopy) {
+                            val copy = VaultFileCopy.copyBeside(targetFile)
+                            if (copy == null) {
+                                return KdbxResult.Failure(
+                                    IllegalStateException("另存副本失败: $id"),
+                                    strings.get(R.string.repo_copy_failed)
+                                )
+                            }
+                        }
                         targetFile.delete()
                     }
                 }
@@ -298,32 +316,13 @@ internal class VaultLifecycleCoordinator(
     /**
      * 评估某个密码库来源的工作因子是否**低于本应用建库默认强度**（ISSUE-P2-87，非阻断提示）。
      *
-     * 读取的是 KDBX **外层明文头部**：按规范，头部位于认证之前、承载 KDF 参数（Argon2 `M / I / P`
-     * 或 AES-KDF `R`），故本方法**不需要任何凭据**，也不解密载荷、不接触库内容。
-     * 解析走数据库模块的**唯一**头部解析实现 [KdbxHeader.deserialize]（与解锁、保存同一条路径，
-     * 不新开旁路），并同样受其认证前加固闸门（字段长度 / 累计字节 / 字段数）约束。
-     *
-     * **任何失败一律降级为「未评估」（返回 null），绝不外抛**：本方法只服务于导入成功后的一条
-     * 提示，`content://` 提供方拒绝、远端 URL 不是本地文件、第三方构造的损坏头部等情况都不得
-     * 反过来影响已成功的导入，也不得据此谎报「低于基线」。
-     *
-     * 判据与文案口径见 [KdbxKdfStrengthAssessor]（结论只能表述为「低于本应用建库默认强度」，
-     * 不得解读为「不安全」；且**不修改任何 KDF 参数**）。
+     * `ISSUE-P2-529`：实现（含头部解析与来源流打开）已整体下沉 [VaultSourceProbe]
+     * （纯结构性搬移，方法体与 KDoc 逐字保留），本方法只保留委托；
+     * 判据、只读边界与失败降级口径见该类的 `assessKdfStrength` KDoc。
      */
-    suspend fun assessKdfStrength(path: String): KdbxKdfStrengthAssessment? = withContext(Dispatchers.IO) {
-        try {
-            openVaultSourceStream(path)?.use { stream ->
-                KdbxKdfStrengthAssessor.assess(KdbxHeader.deserialize(stream).first.kdfParameters)
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
+    suspend fun assessKdfStrength(path: String): KdbxKdfStrengthAssessment? =
+        sourceProbe.assessKdfStrength(path)
 
-    /**
-     * 打开密码库来源的读取流：`content://` 走 SAF，其余按本地文件路径。
-     * 来源不可用（非本地文件的远端地址 / 提供方拒绝 / 文件不存在）返回 null。
-     */
     /**
      * 更换主凭据：会话层重加密写盘（`DatabaseSession.changeCredentials`），
      * **仅成功时**刷新库列表（ISSUE-P3-305 自 `RealVaultRepository` 逐行搬出）。
@@ -377,13 +376,6 @@ internal class VaultLifecycleCoordinator(
     fun isLocked(): Boolean {
         return databaseSession.state.value != DatabaseSession.SessionState.OPENED
     }
-
-    private fun openVaultSourceStream(path: String): InputStream? =
-        if (path.startsWith("content://")) {
-            context.contentResolver.openInputStream(Uri.parse(path))
-        } else {
-            File(path).takeIf { it.isFile }?.inputStream()
-        }
 
     companion object {
         private const val TAG = "VaultLifecycle"

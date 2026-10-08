@@ -5,6 +5,8 @@ import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.textArg
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.sync.engine.SyncCacheEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -109,6 +111,31 @@ internal class VaultListSyncController(
     /** 用户取消整库覆盖：复位确认位，保持离线态（本地与云端均无变化）。 */
     fun dismissBindingTakeover() {
         pendingBindingTakeoverFlow.value = false
+    }
+
+    /**
+     * `ISSUE-P2-529` AC①：「另存云端副本并覆盖」——**先**把云端副本另存为本地独立库
+     * （`<原名> (副本 yyyyMMdd-HHmm).kdbx`），成功**才**执行整库覆盖并改绑；
+     * 副本另存失败即中止（云端原数据保持不动，绝不「副本没落地、云端已被替换」）。
+     */
+    fun confirmBindingTakeoverKeepingCopy() {
+        if (!pendingBindingTakeoverFlow.value || isSyncingFlow.value) return
+        pendingBindingTakeoverFlow.value = false
+        scope.launch {
+            isSyncingFlow.value = true
+            val copy = syncCoordinator.backupCloudVaultCopy()
+            if (copy is KdbxResult.Success) {
+                applySyncOutcome(syncCoordinator.confirmVaultBindingTakeover())
+            } else {
+                onMessage(
+                    UiMessage(
+                        R.string.sync_vault_takeover_copy_failed,
+                        listOf((copy as KdbxResult.Failure).textArg(strings))
+                    )
+                )
+            }
+            isSyncingFlow.value = false
+        }
     }
 
     private fun applySyncOutcome(outcome: SyncOutcome) {

@@ -48,6 +48,11 @@ class VaultRemovalWiringTest {
             screenSource.contains("onRemoveDatabase(db.id, confirmation.kind)")
         )
         assertTrue(
+            "[$PICKER_SCREEN] ISSUE-P2-529：「另存副本后移除」出口必须取**同一枚**判据" +
+                "（confirmation.kind）——新出口另判一次即同一形态复发",
+            screenSource.contains("onSaveCopyAndRemoveDatabase(db.id, confirmation.kind)")
+        )
+        assertTrue(
             "[$PICKER_SCREEN] 未把应用私有目录交给判据（判据退化后私有库会被判成外部库）",
             screenSource.contains("filesDir?.absolutePath")
         )
@@ -99,6 +104,8 @@ class VaultRemovalWiringTest {
                 "db_picker_remove_private_title",
                 "db_picker_remove_private_desc",
                 "db_picker_remove_private_confirm",
+                // ISSUE-P2-529 AC①：私有库的「两份都留」出口文案（中英同批存在）
+                "db_picker_remove_save_copy",
                 "db_picker_remove_external_title",
                 "db_picker_remove_external_desc",
                 "db_picker_remove_external_confirm"

@@ -335,8 +335,21 @@ class DatabasePickerViewModel @Inject constructor(
      * **不得**在调用侧以外的地方另行判定，也不得把该参数默认成「会删」。
      */
     fun removeDatabase(id: String, kind: VaultRemovalKind) {
+        performRemoval(id, kind, saveCopy = false)
+    }
+
+    /**
+     * `ISSUE-P2-529` AC①：应用私有库的「两份都留」出口——先把库文件另存为同目录副本，
+     * **副本落地成功后才**移除原库（副本另存失败则整体失败、原件保留，fail-closed）。
+     * 参数与 [removeDatabase] 同源：`kind` 仍由界面按同一枚判据下行。
+     */
+    fun saveCopyAndRemoveDatabase(id: String, kind: VaultRemovalKind) {
+        performRemoval(id, kind, saveCopy = true)
+    }
+
+    private fun performRemoval(id: String, kind: VaultRemovalKind, saveCopy: Boolean) {
         viewModelScope.launch {
-            val result = vaultRepository.removeDatabase(id, kind)
+            val result = vaultRepository.removeDatabase(id, kind, saveCopy)
             if (result is KdbxResult.Success) {
                 // §411（ISSUE-P3-448）：删库成功即清除其密钥文件收编副本（尽力清除，失败不影响回执）
                 keyFileVaultCopyStore?.clear(id)
@@ -349,7 +362,11 @@ class DatabasePickerViewModel @Inject constructor(
                 // 留着会在同路径重建新库时被静默继承（绑定闸门仍会拦截错传，但配置页会显示
                 // 「别人的服务器与远端路径」）。绑定登记的值是根分组 UUID，删库后无从反查，故不清。
                 syncCredentialsStore?.clearFor(id)
-                publishPickerMessage(UiMessage(R.string.db_picker_msg_removed))
+                publishPickerMessage(
+                    UiMessage(
+                        if (saveCopy) R.string.db_picker_msg_copied_removed else R.string.db_picker_msg_removed
+                    )
+                )
             } else {
                 publishPickerMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
             }

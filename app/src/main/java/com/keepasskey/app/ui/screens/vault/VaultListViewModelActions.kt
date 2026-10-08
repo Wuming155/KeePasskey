@@ -74,6 +74,10 @@ fun VaultListViewModel.confirmBindingTakeover() = syncController.confirmBindingT
 /** 用户取消整库覆盖（保持本地与云端现状） */
 fun VaultListViewModel.dismissBindingTakeover() = syncController.dismissBindingTakeover()
 
+/** `ISSUE-P2-529` AC①：先把云端副本另存为本地独立库，再整库覆盖并改绑（两份都留） */
+fun VaultListViewModel.confirmBindingTakeoverKeepingCopy() =
+    syncController.confirmBindingTakeoverKeepingCopy()
+
 fun VaultListViewModel.createGroup(name: String, iconName: String = "folder") = actions.createGroup(name, iconName)
 
 fun VaultListViewModel.renameGroup(group: VaultGroup, newName: String) = actions.renameGroup(group, newName)

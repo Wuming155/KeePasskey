@@ -6,6 +6,7 @@ import com.keepasskey.app.ui.model.VaultRemovalKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -120,6 +121,11 @@ class VaultRemovalPresentationTest {
         assertEquals(R.string.db_picker_remove_private_title, confirmation.titleRes)
         assertEquals(R.string.db_picker_remove_private_desc, confirmation.messageRes)
         assertEquals(R.string.db_picker_remove_private_confirm, confirmation.confirmRes)
+        assertEquals(
+            "ISSUE-P2-529 AC①：私有库必须给出「另存副本后移除」这条非唯一出路",
+            R.string.db_picker_remove_save_copy,
+            confirmation.saveCopyRes
+        )
     }
 
     @Test
@@ -132,6 +138,10 @@ class VaultRemovalPresentationTest {
         assertEquals(R.string.db_picker_remove_external_title, confirmation.titleRes)
         assertEquals(R.string.db_picker_remove_external_desc, confirmation.messageRes)
         assertEquals(R.string.db_picker_remove_external_confirm, confirmation.confirmRes)
+        assertNull(
+            "ISSUE-P2-529：外部库只摘登记、丢不了数据，不得呈现副本出口（多此一举的噪音）",
+            confirmation.saveCopyRes
+        )
     }
 
     @Test

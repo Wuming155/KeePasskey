@@ -263,6 +263,56 @@ class SyncVaultBindingTest {
         assertTrue("原归属库再同步应被反向拦截: $outcomeA2", outcomeA2 is SyncOutcome.VaultBindingMismatch)
     }
 
+    /**
+     * `ISSUE-P2-529` AC①②：绑定不符处的「另存云端副本」出口（「另存云端副本并覆盖」的第一步）。
+     *
+     * 判据：
+     * - 云端字节被下载并落为**本地独立库**（与源库同目录、名字带「副本」标记、`.kdbx` 后缀）
+     *   —— 应用私有目录内的库按目录扫描即可见（AC② 可见性）；
+     * - 副本仍是**密文 `.kdbx`**，以其**自身凭据**可解，内容是云端那一份（AC②）；
+     * - 本操作**只下载、不写云端**：远端字节一字未动（这是「先另存再覆盖」的安全前提）。
+     */
+    @Test
+    fun `另存云端副本落为本地独立库_密文可解且云端字节不变`() = runTest(testDispatcher) {
+        val harness = newHarness("keepcopy")
+        val sessionA = createVault(harness, "keepcopy", "库A")
+        sessionA.saveEntry(markerEntry("A的条目"))
+        val cycleA = newCycle(harness, sessionA)
+        assertTrue(cycleA.runSyncCycle() is SyncOutcome.UploadedLocal)
+        val remoteBytesBefore = harness.provider.remote.getValue(harness.remotePath).first
+
+        // 库 B：与远端归属不符，用户选择「另存云端副本并覆盖」的第一步——另存副本
+        val sessionB = createVault(harness, "keepcopy", "库B")
+        val cycleB = newCycle(harness, sessionB)
+        val backup = cycleB.backupRemoteVaultCopy()
+
+        assertTrue("另存云端副本必须成功: $backup", backup is KdbxResult.Success)
+        val copyFile = File((backup as KdbxResult.Success).data)
+        assertEquals("副本必须落在本地库目录（列表按目录扫描即可见）", harness.context.filesDir, copyFile.parentFile)
+        assertTrue("副本名须带「副本」标记: ${copyFile.name}", copyFile.name.startsWith("keepcopy (副本 "))
+        assertTrue("副本须保留 .kdbx 扩展名: ${copyFile.name}", copyFile.name.endsWith(".kdbx"))
+        assertFalse(
+            "副本不得是明文（必须仍是密文 .kdbx）",
+            String(copyFile.readBytes(), Charsets.ISO_8859_1).contains("A的条目")
+        )
+        val copyTitles = titlesOf(
+            com.keepasskey.database.file.KdbxFile.load(
+                copyFile.inputStream(),
+                "VaultBinding#2026".toCharArray(),
+                null
+            )
+        )
+        assertTrue("副本应以其自身凭据可解且内容为云端那一份: $copyTitles", "A的条目" in copyTitles)
+        assertTrue(
+            "另存副本不得改动云端任何字节",
+            remoteBytesBefore.contentEquals(harness.provider.remote.getValue(harness.remotePath).first)
+        )
+        assertTrue(
+            "不得留下下载临时件",
+            harness.context.filesDir.listFiles()!!.none { it.name.endsWith(".backup") }
+        )
+    }
+
     @Test
     fun `同库连续同步放行_缓存与基线落库身份键下_与另一库互不串用`() = runTest(testDispatcher) {
         val harness = newHarness("scope")

@@ -153,8 +153,20 @@ class FakeVaultRepository(
     var lastRemovalKind: VaultRemovalKind? = null
         private set
 
-    override suspend fun removeDatabase(id: String, kind: VaultRemovalKind): com.keepasskey.core.result.KdbxResult<Unit> {
+    /**
+     * `ISSUE-P2-529`：最近一次移除是否要求「另存副本后再移除」（测试观测点）。
+     * 仅记录下行开关，不参与行为——锁定「界面选的出口 == 数据层收到的开关」。
+     */
+    var lastRemovalSaveCopy: Boolean = false
+        private set
+
+    override suspend fun removeDatabase(
+        id: String,
+        kind: VaultRemovalKind,
+        saveCopy: Boolean
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
         lastRemovalKind = kind
+        lastRemovalSaveCopy = saveCopy
         databasesFlow.value = databasesFlow.value.filter { it.id != id }
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }

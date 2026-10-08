@@ -138,6 +138,7 @@
     <string name="db_picker_remove_private_title">Permanently delete this vault file from app-private storage?</string>
     <string name="db_picker_remove_private_desc">This permanently deletes the file "%1$s" in app-private storage. It cannot be recovered: there is no recycle bin, and the file is not covered by any backup.</string>
     <string name="db_picker_remove_private_confirm">Delete permanently</string>
+    <string name="db_picker_remove_save_copy">Save a copy, then remove</string>
     <string name="db_picker_remove_external_title">Remove vault connection?</string>
     <string name="db_picker_remove_external_desc">The physical file of this vault lives outside the app, so this only removes the entry from the quick switch list. The original physical file will not be deleted.</string>
     <string name="db_picker_remove_external_confirm">Remove link only</string>
@@ -435,6 +436,7 @@
     <string name="db_picker_msg_created">New vault created successfully</string>
     <string name="db_picker_msg_opened">External KDBX file opened and loaded</string>
     <string name="db_picker_msg_removed">Vault removed from the switch list</string>
+    <string name="db_picker_msg_copied_removed">A copy of the vault file was saved and the original vault was removed</string>
     <string name="edit_title_required">Please enter an entry title</string>
     <string name="edit_form_loading">Loading entry…</string>
     <string name="conflict_resolved_msg">Conflict resolved, local and cloud merged successfully</string>
@@ -947,6 +949,9 @@
     <string name="sync_vault_takeover_message">The cloud copy is registered to another vault. Confirming will overwrite it with the full contents of the current vault; the other vault\'s cloud data will be replaced and cannot be recovered. Make sure the other vault is backed up first.</string>
     <string name="sync_vault_takeover_confirm">Overwrite and bind this vault</string>
     <string name="sync_error_vault_takeover_failed">Overwrite upload failed; binding not applied. You can retry later</string>
+    <string name="sync_vault_takeover_confirm_keep_copy">Save a cloud copy, then overwrite</string>
+    <string name="sync_vault_takeover_copy_failed">Could not save the cloud copy; the overwrite was not performed: %1$s</string>
+    <string name="sync_error_vault_copy_backup_failed">Could not save the cloud copy (download or write failed); the overwrite was not performed</string>
     <string name="sync_feedback_error">Sync failed: %1$s</string>
     <string name="sync_section_offline">Offline &amp; background sync</string>
     <string name="sync_cold_start_title">Sync on cold start</string>
@@ -982,7 +987,7 @@
     <string name="sync_conflict_auto_merge">Auto merge</string>
     <string name="sync_conflict_auto_merge_desc">Merge changes field by field, fall back to manual when not possible</string>
     <string name="sync_conflict_prompt">Ask every time</string>
-    <string name="sync_conflict_prompt_desc">Open the resolver when a conflict is detected</string>
+    <string name="sync_conflict_prompt_desc">Open the resolver when a conflict is detected, where you choose which side to keep; you can also pick \"Keep both\", saving the other side as a separate copy (keep both)</string>
     <string name="sync_conflict_keep_remote">Keep remote</string>
     <string name="sync_conflict_keep_remote_desc">Always take the cloud version, local changes are overwritten</string>
     <string name="sync_conflict_keep_local">Keep local</string>
@@ -1545,6 +1550,7 @@
     <string name="repo_entry_not_found">Entry not found</string>
     <!-- %1$s = 失败原因 -->
     <string name="repo_remove_failed">Failed to remove the vault: %1$s</string>
+    <string name="repo_copy_failed">Failed to save a copy of the vault file; the removal was cancelled</string>
     <!-- %1$s = 失败原因 -->
     <string name="repo_import_failed">Failed to import the database: %1$s</string>
     <string name="repo_not_unlocked_state">The database is not currently unlocked</string>
@@ -1675,7 +1681,7 @@
     <string name="picker_s3_bucket_label">Bucket name</string>
     <string name="picker_cloud_remote_missing">Failed to open from cloud: the remote file does not exist or the path is incorrect. Check the remote path and credentials</string>
     <string name="picker_cloud_download_failed">Failed to open from cloud: could not download the remote vault. Check your network connection and credentials, then retry</string>
-    <string name="picker_cloud_local_conflict">A local vault file with the same name already exists. Choose a different display name and retry</string>
+    <string name="picker_cloud_local_conflict">A local vault file with the same name already exists. This import was landed as a copy instead (the existing file is left untouched)</string>
     <string name="picker_open_and_load">Open and load</string>
     <string name="picker_keyfile_toggle">Enable a key file (optional)</string>
     <string name="picker_keyfile_toggle_desc">Combine the master password with a physical key file for genuine two-factor authentication</string>

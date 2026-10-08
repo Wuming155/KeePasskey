@@ -147,6 +147,7 @@
     <string name="db_picker_remove_private_title">永久删除应用私有目录中的此文件？</string>
     <string name="db_picker_remove_private_desc">将永久删除应用私有目录中的文件「%1$s」，删除后无法恢复（本应用没有回收站，该文件不在任何备份之内）。</string>
     <string name="db_picker_remove_private_confirm">永久删除</string>
+    <string name="db_picker_remove_save_copy">另存副本后移除</string>
     <string name="db_picker_remove_external_title">移除密码库关联？</string>
     <string name="db_picker_remove_external_desc">该库的物理文件在本应用之外，这只会从本机的密码库切换列表中移除该条目，不会删除物理文件。</string>
     <string name="db_picker_remove_external_confirm">仅移除关联</string>
@@ -443,6 +444,7 @@
     <string name="db_picker_msg_created">新密码库已成功创建</string>
     <string name="db_picker_msg_opened">已成功打开并加载外部 KDBX 文件</string>
     <string name="db_picker_msg_removed">已从切换列表中移除该密码库关联</string>
+    <string name="db_picker_msg_copied_removed">已另存库文件副本并移除原库</string>
     <string name="edit_title_required">请输入凭据标题</string>
     <string name="edit_form_loading">正在加载凭据…</string>
     <string name="conflict_resolved_msg">冲突解决完毕，已完成本地与云端三方合并</string>
@@ -959,6 +961,9 @@
     <string name="sync_vault_takeover_message">云端副本登记为另一个密码库所有。确认后将以当前库的完整内容覆盖云端副本，原属于另一库的云端数据将被整体替换且无法恢复。建议先确认另一库已另行备份。</string>
     <string name="sync_vault_takeover_confirm">覆盖并绑定当前库</string>
     <string name="sync_error_vault_takeover_failed">整库覆盖上传失败，绑定未生效，可稍后重试</string>
+    <string name="sync_vault_takeover_confirm_keep_copy">另存云端副本并覆盖</string>
+    <string name="sync_vault_takeover_copy_failed">云端副本另存失败，未执行覆盖：%1$s</string>
+    <string name="sync_error_vault_copy_backup_failed">云端副本另存失败（下载或落盘失败），未执行覆盖</string>
     <string name="sync_feedback_error">同步失败：%1$s</string>
     <!-- ISSUE-P2-402：首传探测失败按异常类型如实归类（此前非 404 一律误报「离线」） -->
     <string name="sync_error_auth_failed">同步失败：远端鉴权被拒（401/403）。请到「设置 → 云端同步」核对用户名与 WebDAV 专用密码（或 S3 访问密钥）</string>
@@ -996,7 +1001,7 @@
     <string name="sync_conflict_auto_merge">自动合并</string>
     <string name="sync_conflict_auto_merge_desc">字段级合并双方修改，无法合并时转为手动处理</string>
     <string name="sync_conflict_prompt">每次询问</string>
-    <string name="sync_conflict_prompt_desc">检测到冲突时弹出解决器，由你决定保留哪一方</string>
+    <string name="sync_conflict_prompt_desc">检测到冲突时弹出解决器，由你决定保留哪一方；解决器里可选「双方保留」，把另一方另存为独立副本（保留两份）</string>
     <string name="sync_conflict_keep_remote">以云端为准</string>
     <string name="sync_conflict_keep_remote_desc">冲突时直接采用云端版本，本地修改将被覆盖</string>
     <string name="sync_conflict_keep_local">以本地为准</string>
@@ -1407,6 +1412,7 @@
     <string name="repo_invalid_entry_id">无效的条目 ID</string>
     <string name="repo_entry_not_found">条目不存在</string>
     <string name="repo_remove_failed">移除密码库失败: %1$s</string>
+    <string name="repo_copy_failed">另存库文件副本失败，已取消移除操作</string>
     <string name="repo_import_failed">导入数据库失败: %1$s</string>
     <string name="repo_not_unlocked_state">当前数据库未处于已解锁状态</string>
     <string name="repo_hotp_not_applicable">该条目未配置 HOTP 动态口令</string>

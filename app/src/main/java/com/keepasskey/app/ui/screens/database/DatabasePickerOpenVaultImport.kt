@@ -71,6 +71,9 @@ internal class DatabasePickerOpenVaultImporter(
         }
         when (val result = importer.import(request)) {
             is CloudVaultImportResult.Success -> {
+                // ISSUE-P2-529：本地上已有同名库时导入会以「副本」落地——先把该事实以
+                // **信息性**提示上抛（经全局 Snackbar 通道，退栈后仍可见），再走同一登记出口。
+                result.notice?.let { publish(it) }
                 val local = java.io.File(result.localPath)
                 val syncType = when (request) {
                     is CloudVaultImportRequest.WebDav -> OpenVaultSourceType.WEBDAV.label

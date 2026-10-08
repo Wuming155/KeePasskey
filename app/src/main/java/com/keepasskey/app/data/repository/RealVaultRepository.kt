@@ -204,9 +204,8 @@ class RealVaultRepository @Inject constructor(
     )
 
     override suspend fun removeDatabase(
-        id: String,
-        kind: VaultRemovalKind
-    ): KdbxResult<Unit> = lifecycle.removeDatabase(id, kind)
+        id: String, kind: VaultRemovalKind, saveCopy: Boolean
+    ): KdbxResult<Unit> = lifecycle.removeDatabase(id, kind, saveCopy)
 
     override suspend fun importExternalDatabase(
         name: String,

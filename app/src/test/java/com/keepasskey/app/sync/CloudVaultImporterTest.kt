@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -27,7 +28,7 @@ import java.nio.file.Files
  * ① 先下载后落凭据——下载失败时 `SyncCredentialsStore` 不得写入任何键（含 Provider 指向）；
  * ② 成功路径：远端内容落地为本地库文件、凭据封印落盘且 Provider 指向随来源切换；
  * ③ 借用语义：请求侧凭据 `CharArray` 在任何结果路径用毕擦除；
- * ④ 本地同名库文件冲突 fail-closed，绝不覆盖。
+ * ④ 本地同名库文件冲突**以副本落地**（ISSUE-P2-529：绝不覆盖既有文件，也不再拒绝，两份都留）。
  */
 class CloudVaultImporterTest {
 
@@ -162,23 +163,39 @@ class CloudVaultImporterTest {
         assertTrue(request.password.all { it == '0' })
     }
 
+    /**
+     * `ISSUE-P2-529` AC①（口径变更，原断言见批次文档 §471）：本地已有同名库文件时
+     * **既不覆盖、也不死路**——云端内容以「副本」落地（`<原名> (副本 yyyyMMdd-HHmm).kdbx`），
+     * 两份都留。整改前为 fail-closed 拒绝（提示「请换个名字重试」），等于把出口推给用户。
+     */
     @Test
-    fun `本地同名库文件冲突时拒绝且不触碰网络与存储`() = runTest {
-        File(filesDir, "cloud_vault.kdbx").writeText("EXISTING")
-        var factoryCalled = false
-        importer.providerFactory = CloudVaultProviderFactory {
-            factoryCalled = true
-            FakeProvider()
-        }
+    fun `本地同名库文件存在时以副本落地_原文件一字不动`() = runTest {
+        val existing = File(filesDir, "cloud_vault.kdbx").apply { writeText("EXISTING") }
+        val provider = FakeProvider()
+        importer.providerFactory = CloudVaultProviderFactory { provider }
 
         val request = webDavRequest()
         val result = importer.import(request)
 
-        assertTrue(result is CloudVaultImportResult.Failure)
-        assertFalse(factoryCalled)
-        assertEquals("EXISTING", File(filesDir, "cloud_vault.kdbx").readText())
-        assertNull(storage["webdav_url"])
+        assertTrue("同名冲突不再拒绝，必须以副本落地: $result", result is CloudVaultImportResult.Success)
+        val success = result as CloudVaultImportResult.Success
+        val landed = File(success.localPath)
+        // 既有同名人私有文件一字未动（绝不覆盖）
+        assertEquals("EXISTING", existing.readText())
+        assertFalse("副本不得复用既有文件名", landed.name == existing.name)
+        assertTrue("副本须落在同一目录: ${landed.absolutePath}", landed.parentFile == filesDir)
+        assertTrue("副本名须带「副本」标记: ${landed.name}", landed.name.startsWith("cloud_vault (副本 "))
+        assertTrue("副本须保留 .kdbx 扩展名: ${landed.name}", landed.name.endsWith(".kdbx"))
+        // 副本内容是云端那一份（密文字节原样落地）
+        assertArrayEquals("FAKE_KDBX".toByteArray(), landed.readBytes())
+        // 改道必须有可解释的信息性提示
+        assertNotNull("以副本落地时必须给出可解释的提示", success.notice)
+        // 凭据按副本路径（= 上层登记的库 ID）命名空间提交
+        activateImportedVault(success.localPath)
+        assertEquals(CloudSyncProvider.WEBDAV, store.loadProvider())
         assertTrue(request.password.all { it == '0' })
+        // 无临时残留
+        assertTrue(landed.parentFile!!.listFiles()!!.none { it.name.endsWith(".importing") })
     }
 
     @Test
