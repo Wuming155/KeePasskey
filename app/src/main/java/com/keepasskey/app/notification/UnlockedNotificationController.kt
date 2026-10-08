@@ -12,7 +12,6 @@ import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -60,7 +59,7 @@ class UnlockedNotificationController @Inject constructor(
     private val entryTracker: UnlockedNotificationEntryTracker
 ) {
 
-    private val scope = guardedScope(Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default, "UnlockedNotificationController")
 
     private var started = false
 

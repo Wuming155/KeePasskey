@@ -5,7 +5,6 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -188,7 +187,7 @@ class UnlockThrottleConfigProvider @Inject constructor(
     override var current: ThrottleConfig = ThrottleConfig(enabled = false)
         private set
 
-    private val scope = guardedScope(Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default, "UnlockThrottle")
 
     init {
         scope.launch {

@@ -110,6 +110,30 @@ class StructuredFillWiringTest {
         )
     }
 
+    /** `ISSUE-P2-539` ②：交付面必须「粗判 + 口令键精判」两道闸门，且都走「整条跳过」出口。 */
+    @Test
+    fun `交付面持有条目级与口令键两道擦除闸门`() {
+        val builders = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt")
+        assertTrue(
+            "登录候选必须保留条目级擦除闸门（粗判）",
+            builders.contains("entry.hasClearedFields()")
+        )
+        assertTrue(
+            "口令键精判：passwordId 有目标 + 口令读回为空 + 该字段已 cleared ⇒ 整条跳过（不交付半份）",
+            builders.contains("entry.password?.cleared == true")
+        )
+
+        val structured = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillStructuredDatasets.kt")
+        assertTrue(
+            "结构化交付面同样必须持有擦除闸门（残缺卡面比整条失败更糟）",
+            structured.contains("entry.hasClearedFields()")
+        )
+        assertTrue(
+            "结构化装配遇擦除必须整条跳过（返回 null 后由调用方 addDataset 短路）",
+            structured.contains("buildStructuredDataset(ctx, entry, structuredTargetIds)?.let")
+        )
+    }
+
     @Test
     fun `结构树投影 html autocomplete 且选择器带标注`() {
         val structureScan = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillStructureScan.kt")
