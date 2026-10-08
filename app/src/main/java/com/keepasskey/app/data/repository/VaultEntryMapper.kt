@@ -7,6 +7,7 @@ import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
@@ -80,10 +81,13 @@ internal class VaultEntryMapper(
 
         val totp = projectTotpFields(entry)
 
-        // ISSUE-P0-531 / P2-534：通行密钥标记属**展示性**信息（仅决定图标与 isPasskey 标记）。
-        // 已清零字段由 `PasskeyData.fromCustomFields` 自身按 `cleared` 判据 fail-safe 处理
-        // （形状短路 ⇒ null），此处**不再**用异常做流程控制——本仓定则：据 `cleared` 降级。
-        val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
+        // ISSUE-P0-531 / P2-534 / P1-537：通行密钥标记属**展示性**信息（仅决定图标与 isPasskey 标记）。
+        // 第一层判据在 `PasskeyData.fromCustomFields` 内部（解析面按 `cleared` 降级、任何字段不抛）；
+        // 此处保留**带留痕的第二层**兜底（ISSUE-P2-540 裁决③：兜底只允许作第二层且必须留痕）——
+        // 万一该解析面出现未预期异常，展示面降级为「无通行密钥」，绝不把异常抛给协程根（闪退）。
+        val passkeyData = runCatching { PasskeyData.fromCustomFields(entry.customFields) }
+            .onFailure { AppLog.w(TAG, "通行密钥标记解析失败，展示面降级为无通行密钥", it) }
+            .getOrNull()
         val icon = mapIconIdToName(entry.iconId)
 
         val card = projectCardFields(entry)
@@ -367,6 +371,9 @@ internal class VaultEntryMapper(
 
         /** 模板「信用卡」条目的 KDBX 标准图标 id（无卡面字段时按图标识别） */
         private const val CARD_ICON_ID = 27
+
+        /** 日志标签（第二层兜底留痕，ISSUE-P1-537） */
+        private const val TAG = "VaultEntryMapper"
 
         /** 卡号展示保留的末位位数 */
         private const val CARD_LAST_VISIBLE_DIGITS = 4

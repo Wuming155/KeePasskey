@@ -20,7 +20,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,7 +68,7 @@ class RealVaultRepository @Inject constructor(
     private val driftCoordinator: VaultFileDriftCoordinator? = null
 ) : VaultRepository {
 
-    private val repositoryScope = guardedScope(Dispatchers.Default)
+    private val repositoryScope = guardedScope(Dispatchers.Default, "RealVaultRepository")
 
     /** ISSUE-P3-447 AC②：保存侧漂移检测 / 基线刷新的单点收口（两通道元数据分流在此） */
     private val driftGuard = VaultFileDriftGuard(driftCoordinator, context)

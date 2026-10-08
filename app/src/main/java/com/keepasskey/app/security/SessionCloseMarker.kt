@@ -5,7 +5,6 @@ import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -34,7 +33,7 @@ class SessionCloseMarker @Inject constructor(
     private val databaseSession: DatabaseSession
 ) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val scope = guardedScope(Dispatchers.Main)
+    private val scope = guardedScope(Dispatchers.Main, "SessionCloseMarker")
     private var initialized = false
 
     /** 待消费的「上次异常关闭」事实（进程内存态，消费一次即清） */

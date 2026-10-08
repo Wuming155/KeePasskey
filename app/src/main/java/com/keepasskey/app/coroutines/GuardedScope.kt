@@ -32,10 +32,14 @@ import kotlinx.coroutines.SupervisorJob
  * 如实声明：这会把「未知缺陷 → 进程崩溃」降级为「未知缺陷 → 日志 + 该任务静默失败」，
  * 即**崩溃信号被弱化**；因此新代码仍应在调用点给出用户可见的失败语义（优先 `launchGuarded`），
  * 本工厂是兜底而非常态路径。
+ *
+ * `ISSUE-P3-541` ①：`tag` **改为必填**（原为带默认值的形参、15 个调用点无一传入 ⇒ 拦截日志
+ * 全落同一 TAG、归因失效，即「形同虚设的假能力」）。现每个调用点必须给出自身名字，归因由日志
+ * 直接可读；不再提供默认值，以免新调用点再次静默省掉。
  */
 fun guardedScope(
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    tag: String = "GuardedScope"
+    tag: String
 ): CoroutineScope = CoroutineScope(
     SupervisorJob() + dispatcher + CoroutineExceptionHandler { _, e ->
         AppLog.e(tag, "未捕获的协程异常（已拦截，进程不退出）：${e.javaClass.simpleName}", e)

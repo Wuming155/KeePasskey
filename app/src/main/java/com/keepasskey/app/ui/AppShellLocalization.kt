@@ -6,8 +6,8 @@ import android.content.res.Configuration
 import android.content.res.Resources
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.app.coroutines.guardedScope
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -134,7 +134,7 @@ class AppLocaleTracker @Inject constructor(
             .map { it.appLanguage }
             .distinctUntilChanged()
             .onEach { locale = localeFor(it) }
-            .launchIn(CoroutineScope(Dispatchers.IO))
+            .launchIn(guardedScope(Dispatchers.IO, "AppLocaleTracker"))
     }
 
     /**

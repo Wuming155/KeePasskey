@@ -13,7 +13,6 @@ import com.keepasskey.sync.engine.SyncCacheEvent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -74,7 +73,7 @@ class SyncFailureNotifier @Inject constructor(
     private val permissionPrompter: NotificationPermissionPrompter
 ) {
 
-    private val scope = guardedScope(Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default, "SyncFailureNotifier")
 
     private var started = false
 

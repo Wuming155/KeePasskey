@@ -109,9 +109,13 @@ internal suspend fun KeePasskeyAutofillService.unlockedConfirmationPolicy(
         vaultLocked = vaultRepository.isLocked(),
         grantActive = grantActive,
         // 首个候选即代表本批数据集的口令承载面（同批候选口径一致：口令通道同为
-        // passwordId + 非空口令才携带值），逐数据集计算无增量信息
+        // passwordId + 非空口令才携带值），逐数据集计算无增量信息。
+        // ISSUE-P2-539：本探测决定「能否跳过二次确认」，故**必须保守**——实例已清零
+        // （正被并发擦除）时一律判「携带口令」⇒ 不跳过确认；绝不因擦除把它误判成
+        // 「不携带」而放宽确认。判据落在 `cleared` 观测位（不物化明文）。
         datasetCarriesPassword = passwordId != null && candidates.ranked.any { ranked ->
-            ranked.entry.password?.readString()?.isNotEmpty() == true
+            val password = ranked.entry.password
+            password != null && (password.cleared || password.readStringForDisplay().isNotEmpty())
         }
     )
 }
