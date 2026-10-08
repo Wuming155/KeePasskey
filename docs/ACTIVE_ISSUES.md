@@ -92,7 +92,8 @@
   而后者把前者的文档面整批改回旧态。
 - **当前树内缺失清单（逐项已核实）**：
   1. `docs/resolved/batches/477-*.md` 不存在（`33a8b86b` 曾新增 297 行正文）；
-  2. `docs/RESOLVED_LOG.md` 无 `§477` 行，`docs/resolved/README.md` 仍写「当前最大为 **§476**」；
+  2. `docs/RESOLVED_LOG.md` 无 `§477` 行，`docs/resolved/README.md` 仍写「当前最大为 **§476**」
+     （后者已由 §478 例行把该行同步为 **§478** 并附缺项注记；`RESOLVED_LOG` 的 §477 行仍缺）；
   3. `docs/architecture/产品裁决登记.md` 无 `PD-79`（读取面分层 / 禁两步式）与 `PD-80`（比较器钝化）；
   4. `tools/doc/check_raw_coroutine_scope.py` **已删除**，`build.yml` 的 `hygiene-gate` 随之
      11 道 → **10 道**（现清单见该 run 块，末行为 `check_projection_read_safety.py`）；
