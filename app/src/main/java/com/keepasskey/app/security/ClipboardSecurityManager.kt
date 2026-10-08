@@ -91,7 +91,7 @@ class ClipboardSecurityManager @Inject constructor(
     private val clipboardManager: ClipboardManager =
         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-    private val scope = guardedScope(Dispatchers.Main, "ClipboardSecurityManager")
+    private val scope = guardedScope(Dispatchers.Main)
     private var clearJob: Job? = null
     private var lastSensitiveHash: ByteArray? = null
 

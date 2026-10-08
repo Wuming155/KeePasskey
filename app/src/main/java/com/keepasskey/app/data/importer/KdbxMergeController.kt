@@ -28,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -64,7 +65,7 @@ class KdbxMergeController @Inject constructor(
 ) {
     private val strings: StringsProvider = stringsProvider.orFallback(context)
 
-    private val scope = guardedScope(Dispatchers.Default, "KdbxMergeController")
+    private val scope = guardedScope(Dispatchers.Default)
 
     private val mutableUiState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
     val uiState: StateFlow<ImportUiState> = mutableUiState.asStateFlow()

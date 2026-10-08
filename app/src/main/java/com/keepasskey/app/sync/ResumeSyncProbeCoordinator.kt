@@ -12,6 +12,7 @@ import com.keepasskey.app.ui.model.StringsProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,7 +44,7 @@ class ResumeSyncProbeCoordinator @Inject constructor(
 ) {
 
     /** 进程级探测作用域（不走 Hilt CoroutineScope 绑定——该绑定在本图中不存在） */
-    private val scope = guardedScope(Dispatchers.Default, "ResumeSyncProbeCoordinator")
+    private val scope = guardedScope(Dispatchers.Default)
 
     private val _lastProbeAtMillis = MutableStateFlow<Long?>(null)
 

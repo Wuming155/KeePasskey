@@ -1,7 +1,6 @@
 package com.keepasskey.app.autofill
 
 import com.keepasskey.core.model.KdbxEntry
-import com.keepasskey.core.security.readStringForDisplayOrEmpty
 
 /**
  * 结构化数据填充的字段角色（ISSUE-P3-375，吸收 Monica `AutofillStructuredDataSupport`）。
@@ -258,7 +257,7 @@ object StructuredFieldPolicy {
             return parseExpiryHalf(role, raw) ?: counterpartResolved
         }
         // hint 键优先（本角色独立字段名）
-        val hintRaw = byKey[fieldNameFor(role)]?.value.readStringForDisplayOrEmpty()
+        val hintRaw = byKey[fieldNameFor(role)]?.value?.readString()?.orEmpty().orEmpty()
         if (hintRaw.isNotBlank()) return hintRaw
         // 中文/模板键：复合串拆半
         return parseExpiryHalf(role, raw) ?: raw
@@ -301,8 +300,7 @@ object StructuredFieldPolicy {
         role: StructuredFieldRole
     ): String? {
         for (key in acceptedFieldNamesFor(role)) {
-            // ISSUE-P2-539：展示 / 交付面安全读口——已清零视同空白（缺席），不抛、不物化明文
-            val v = byKey[key]?.value.readStringForDisplayOrEmpty()
+            val v = byKey[key]?.value?.readString()?.orEmpty().orEmpty()
             if (v.isNotBlank()) return v
         }
         return null
@@ -321,8 +319,7 @@ object StructuredFieldPolicy {
     private fun hasField(entry: KdbxEntry, role: StructuredFieldRole): Boolean {
         val byKey = entry.customFields.associateBy { it.key }
         return acceptedFieldNamesFor(role).any { name ->
-            // ISSUE-P2-539：过滤面安全读口——已清零视同空白（本条正在下线 ⇒ 不入选）
-            byKey[name]?.value.readStringForDisplayOrEmpty().isNotBlank()
+            byKey[name]?.value?.readString()?.isNotBlank() == true
         }
     }
 

@@ -15,6 +15,7 @@ import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.keepasskey.app.coroutines.guardedScope
@@ -181,7 +182,7 @@ class MainApplication : Application(), Configuration.Provider {
      *
      * 作用域与进程同生命周期，无需取消：进程终止即随之回收。
      */
-    private val coldStartBackgroundScope = guardedScope(Dispatchers.IO, "MainApplication")
+    private val coldStartBackgroundScope = guardedScope(Dispatchers.IO)
 
     private companion object {
         const val TAG = "MainApplication"

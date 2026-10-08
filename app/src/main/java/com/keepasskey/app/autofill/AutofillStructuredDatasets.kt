@@ -37,26 +37,16 @@ internal suspend fun KeePasskeyAutofillService.appendStructuredDatasets(
     // 只记数量（调试留痕与登录候选同口径）
     AppLog.d(TAG, "结构化候选数据集数量=${candidates.size}")
     for (entry in candidates) {
-        buildStructuredDataset(ctx, entry, structuredTargetIds)?.let { responseBuilder.addDataset(it) }
+        responseBuilder.addDataset(buildStructuredDataset(ctx, entry, structuredTargetIds))
     }
 }
 
-/**
- * 单条结构化候选 → 数据集：字段值 + 恒挂确认页认证（绝不走免确认路径）。
- *
- * `ISSUE-P2-539`：**返回 null 表示该候选已被并发擦除**，调用方须跳过——结构化字段分属多个
- * 自定义字段，条目在「检索 → 下发」窗口内被就地擦除时只会读到部分字段，写出**残缺的卡 / 地址**
- * （比整条失败更糟）。判据与登录候选同一出口：`hasClearedFields()`（现已覆盖 `customFields`）。
- */
+/** 单条结构化候选 → 数据集：字段值 + 恒挂确认页认证（绝不走免确认路径） */
 private fun KeePasskeyAutofillService.buildStructuredDataset(
     ctx: UnlockedDatasetContext,
     entry: KdbxEntry,
     structuredTargetIds: Map<StructuredFieldRole, AutofillId>
-): Dataset? {
-    if (entry.hasClearedFields()) {
-        AppLog.w(TAG, "结构化候选条目在检索与下发之间已被擦除，本轮跳过该候选（不交付半份）")
-        return null
-    }
+): Dataset {
     // 展示面只出条目标题 + 固定副标题（不暴露字段值）
     val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
         // ISSUE-P2-534：结构化数据集菜单是**展示面**，与会话整树替换的就地擦除并发 ⇒ 走展示面读口

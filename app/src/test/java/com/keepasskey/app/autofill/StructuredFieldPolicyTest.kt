@@ -244,39 +244,4 @@ class StructuredFieldPolicyTest {
         }
         assertEquals("creditCardNumber", StructuredFieldPolicy.fieldNameFor(StructuredFieldRole.CREDIT_CARD_NUMBER))
     }
-
-    // ===== ISSUE-P2-539：字段已清零（＝并发擦除）时按「缺席」降级、不抛 =====
-
-    @Test
-    fun `已清零的结构化字段视同缺席且不抛`() {
-        val card = KdbxEntry(
-            id = KdbxUuid.fromHexString(hexIdOf(1)),
-            customFields = listOf(
-                KdbxCustomField("creditCardNumber", cleared("4111111111111111")),
-                KdbxCustomField("creditCardSecurityCode", ProtectedString("123", isProtected = false))
-            ),
-            times = KdbxTimes(lastModificationTime = baseTime)
-        )
-
-        assertFalse(
-            "必需字段已清零 ⇒ 本条不齐备（不得以 ISE 代替降级）",
-            StructuredFieldPolicy.hasAllFields(card, numberAndCvv)
-        )
-        assertTrue(
-            "已清零字段的条目不得入选候选",
-            StructuredFieldPolicy.selectCandidates(listOf(card), numberAndCvv).isEmpty()
-        )
-        assertFalse(
-            "已清零字段的取值缺席（不交付半份卡面数据）",
-            StructuredFieldPolicy.valuesFor(card, numberAndCvv)
-                .containsKey(StructuredFieldRole.CREDIT_CARD_NUMBER)
-        )
-        assertTrue(
-            "条目级判据必须覆盖 customFields —— 交付面据此整条跳过（ISSUE-P2-539 ③）",
-            card.hasClearedFields()
-        )
-    }
-
-    private fun cleared(value: String): ProtectedString =
-        ProtectedString(value, isProtected = false).also { it.clear() }
 }

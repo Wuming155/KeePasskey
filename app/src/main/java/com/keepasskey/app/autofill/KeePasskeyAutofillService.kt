@@ -20,6 +20,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -92,7 +93,7 @@ class KeePasskeyAutofillService : AutofillService() {
     @Inject
     lateinit var callerTrustStore: AutofillCallerTrustStore
 
-    private val serviceScope = guardedScope(Dispatchers.Default, "KeePasskeyAutofillService")
+    private val serviceScope = guardedScope(Dispatchers.Default)
 
     override fun onFillRequest(
         request: FillRequest,

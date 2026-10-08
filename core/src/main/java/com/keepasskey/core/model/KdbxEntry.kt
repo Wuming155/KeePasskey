@@ -70,19 +70,17 @@ data class KdbxEntry(
         fields[key]?.readStringForDisplay().orEmpty()
 
     /**
-     * `ISSUE-P2-534` / `ISSUE-P2-539`：本条目是否含**已清零**的字段（＝正被会话层擦除，属「被替换下线」的旧实例）。
+     * `ISSUE-P2-534`：本条目是否含**已清零**的字段（＝正被会话层擦除，属「被替换下线」的旧实例）。
      *
      * 供**交付面 / 凭据面**在读取前预判中止使用：把已清零字段读成空串会向目标应用填入空账号 /
      * 空口令，或把空值写回库，比如实失败更糟。判据只读 `cleared` 观测位，**不物化明文**。
      *
-     * 判据取「**任一**字段（含 `customFields`）已清零」而非逐个键名比对：会话层的擦除按
-     * **逐实例身份集合**判定（[KdbxGroup.clearSupersededSensitiveData]）——**不是**子树级一次性擦除，
-     * 故同一「正在下线」的条目内可能**只有部分实例**被擦（这正是「预判通过、单字段已被擦」的
-     * 半份交付成因，见 `ISSUE-P2-540`）。保守判据：**有字段被擦即认定本条正在下线**——
-     * 宁可少给一个候选（下一轮请求即恢复），也不给一份可能残缺的交付。
+     * 判据取「任一字段已清零」而非逐个键名比对：会话层的擦除是**子树级**的
+     * （`clearSensitiveData` / `clearSupersededSensitiveData` 一次清掉整棵下线子树），
+     * 故「有字段被擦」即等价于「本条正在下线」。宁可少给一个候选（下一轮请求即恢复），
+     * 也不给一个空值。
      */
-    fun hasClearedFields(): Boolean =
-        fields.values.any { it.cleared } || customFields.any { it.value.cleared }
+    fun hasClearedFields(): Boolean = fields.values.any { it.cleared }
 
     fun withField(key: String, value: ProtectedString): KdbxEntry {
         val newFields = fields.toMutableMap()

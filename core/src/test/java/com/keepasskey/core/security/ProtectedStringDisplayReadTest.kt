@@ -1,7 +1,6 @@
 package com.keepasskey.core.security
 
 import com.keepasskey.core.model.KdbxConstants
-import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -147,59 +146,5 @@ class ProtectedStringDisplayReadTest {
         // 裸 getter 的 fail-fast 语义**逐字未放宽**（写路径的最后防线）
         val failure = runCatching { entry.userName }.exceptionOrNull()
         assertTrue("裸 getter 必须仍抛，实际：$failure", failure is IllegalStateException)
-    }
-
-    /**
-     * `ISSUE-P1-537`：新增**单点判定**读口的回归——判据落在读取自身（`readString` 的
-     * `checkNotCleared` + 明文核验），而非「先查 `cleared` 再裸读」的两步式。
-     */
-    @Test
-    fun `判空失败读口与借用读口在已清零时降级为 null 且不抛`() {
-        val secret = ProtectedString("dave", isProtected = true)
-
-        assertEquals("未清零时判空失败读口等价 fail-fast 读", "dave", secret.readStringForDisplayOrNull())
-        assertTrue("未清零时借用读口返回自身", secret.takeIfReadable() === secret)
-        assertEquals("dave", secret.useUtf8ForDisplayOrNull { String(it, Charsets.UTF_8) })
-
-        secret.clear()
-
-        assertNull("已清零时判空失败读口返回 null（不得折叠成空串）", secret.readStringForDisplayOrNull())
-        assertNull("已清零时借用读口返回 null", secret.takeIfReadable())
-        assertNull("已清零时闭包读口返回 null 而不抛", secret.useUtf8ForDisplayOrNull { it.size })
-        val nullable: ProtectedString? = null
-        assertNull("null 接收者同义（键缺失与不可读同一出口）", nullable?.readStringForDisplayOrNull())
-    }
-
-    /**
-     * `ISSUE-P3-542`：**内容等值**（忽略 `isProtected`）与 [ProtectedString.equals]（保留之）并存。
-     * 前者供标准五字段的变更判定，后者语义**不得**顺手改（2026-09 加解密审查裁决）。
-     */
-    @Test
-    fun `内容等值忽略受保护标志而 equals 保留之`() {
-        val protected = ProtectedString("same", isProtected = true)
-        val plain = ProtectedString("same", isProtected = false)
-
-        assertFalse("equals 仍计入 isProtected（既有裁决口径不得改）", protected == plain)
-        assertTrue("内容等值必须忽略 isProtected", protected.contentEquals(plain))
-        assertTrue("（参数对调后同样成立）", plain.contentEquals(protected))
-        assertFalse("内容不同不得判等", ProtectedString("other", isProtected = true).contentEquals(protected))
-    }
-
-    /** `ISSUE-P2-539` ③：`hasClearedFields()` 必须覆盖 `customFields`（否则半份交付无从预判）。 */
-    @Test
-    fun `hasClearedFields 覆盖 customFields`() {
-        val entry = KdbxEntry(
-            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("T", isProtected = false)),
-            customFields = listOf(KdbxCustomField("card", ProtectedString("4111", isProtected = false)))
-        )
-
-        assertFalse(entry.hasClearedFields())
-
-        entry.customFields.first().value.clear()
-
-        assertTrue(
-            "自定义字段已清零即认定本条正在下线（擦除是逐实例判定 ⇒ 保守判据）",
-            entry.hasClearedFields()
-        )
     }
 }

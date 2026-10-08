@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -64,7 +65,7 @@ class UnlockedNotificationCopyAction @Inject constructor(
     private val databaseSession: DatabaseSession
 ) {
 
-    private val scope = guardedScope(Dispatchers.Default, "UnlockedNotificationCopyAction")
+    private val scope = guardedScope(Dispatchers.Default)
 
     /**
      * 执行一次复制；[onFinished] 在动作结束后（无论成败）于协程侧回调，

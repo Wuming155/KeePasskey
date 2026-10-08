@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -47,7 +48,7 @@ class AutoLockManager @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) : DefaultLifecycleObserver {
 
-    private val scope = guardedScope(Dispatchers.Main, "AutoLockManager")
+    private val scope = guardedScope(Dispatchers.Main)
 
     val isLocked: StateFlow<Boolean> get() = sessionGuard.isLocked
 

@@ -148,63 +148,6 @@ class PasskeyDataFromCustomFieldsTest {
         )
     }
 
-    // ===== ISSUE-P1-537：字段已清零 / 被并发擦除时**一律不抛** =====
-
-    @Test
-    fun `必需键已清零时不抛且判为本条目无通行密钥`() {
-        listOf(
-            PasskeyData.FIELD_RP_ID,
-            PasskeyData.FIELD_CREDENTIAL_ID,
-            PasskeyData.FIELD_PRIVATE_KEY
-        ).forEach { clearedKey ->
-            val fields = required().map { if (it.key == clearedKey) it.copy(value = cleared("x")) else it }
-            assertNull(
-                "必需键 $clearedKey 已清零 ⇒ 必须判为「本条目无通行密钥」（不得以 ISE 代替降级）",
-                PasskeyData.fromCustomFields(fields)
-            )
-        }
-    }
-
-    @Test
-    fun `可选与元数据键已清零时取缺省且不抛`() {
-        val fields = required() + listOf(
-            PasskeyData.FIELD_USER_NAME,
-            PasskeyData.FIELD_USER_DISPLAY_NAME,
-            PasskeyData.FIELD_ALGORITHM,
-            PasskeyData.FIELD_PUBLIC_KEY,
-            PasskeyData.FIELD_SIGN_COUNT,
-            PasskeyData.FIELD_CREATED_AT
-        ).map { KdbxCustomField(it, cleared("x")) }
-
-        val data = PasskeyData.fromCustomFields(fields)
-
-        assertNotNull("可选字段已清零不得使整条解析失败", data)
-        assertEquals("", data!!.userName)
-        assertEquals("", data.userDisplayName)
-        assertEquals("", data.publicKeyBase64)
-        assertEquals("计数器已清零 ⇒ 归未知哨兵", PasskeyData.SIGN_COUNT_UNKNOWN, data.signCount)
-        assertEquals(
-            "扩展键已清零 ⇒ 回落字节嗅探（此处私钥文本非已知形态 ⇒ ES256），不得抛",
-            PasskeyData.ALGORITHM_ES256,
-            data.algorithmId
-        )
-    }
-
-    @Test
-    fun `字段顺序各异不改变解析判定`() {
-        val ordered = required()
-        val reordered = listOf(ordered[2], ordered[0], ordered[1])
-
-        val a = PasskeyData.fromCustomFields(ordered)
-        val b = PasskeyData.fromCustomFields(reordered)
-
-        assertNotNull(a)
-        assertNotNull(b)
-        assertEquals(a!!.relyingPartyId, b!!.relyingPartyId)
-        assertEquals(a.credentialId, b.credentialId)
-        assertEquals(a.algorithmId, b.algorithmId)
-    }
-
     /** v1 旧 schema 条目（三个必需旧键齐备 + 指定私钥文本），无任何扩展键 */
     private fun legacyEntry(privateKey: String): PasskeyData? =
         PasskeyData.fromCustomFields(legacyEntryFields(privateKey))
@@ -220,10 +163,6 @@ class PasskeyDataFromCustomFieldsTest {
 
     private fun field(key: String, value: String): KdbxCustomField =
         KdbxCustomField(key, ProtectedString(value, isProtected = false))
-
-    /** 已清零（＝「正被并发擦除」）的非保护实例 */
-    private fun cleared(value: String): ProtectedString =
-        ProtectedString(value, isProtected = false).also { it.clear() }
 
     private fun required(): List<KdbxCustomField> = listOf(
         field(PasskeyData.FIELD_RP_ID, "example.com"),

@@ -257,14 +257,6 @@ private suspend fun KeePasskeyAutofillService.buildCandidateDataset(
     val password = entry.password?.readStringForDisplay()
         ?.let { raw -> vaultRepository.resolveFieldReferences(entryIdHex, raw, RefField.PASSWORD) }
         .orEmpty()
-    // ISSUE-P2-539：**精确预判 + 读后复核**——上面的 `hasClearedFields()` 是粗判据（在更早时刻采样）；
-    // 若本请求含口令框而口令字段恰在此窗口内被擦除，读回空串会交付「只有用户名」的**半份交付**。
-    // 判据落在 `PASSWORD` 键自身（`passwordId != null && password.isEmpty() && 该字段 cleared`），
-    // 与 `hasClearedFields()` 分支**同一出口**：整条跳过并留脱敏日志。
-    if (ctx.passwordId != null && password.isEmpty() && entry.password?.cleared == true) {
-        AppLog.w(TAG, "候选口令字段在检索与下发之间已被擦除，本轮跳过该候选（不交付半份）")
-        return null
-    }
     val displayName = username.ifBlank { entryTitle }
 
     val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {

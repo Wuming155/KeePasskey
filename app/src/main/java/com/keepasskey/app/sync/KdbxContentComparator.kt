@@ -1,9 +1,7 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
-import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 
 /**
@@ -43,44 +41,9 @@ import com.keepasskey.database.file.KdbxDatabase
  * **必然改变条数**，故当前不构成漏判；若日后引入「等条数原地改写历史」的路径，
  * 须同步改本处判据（该分支由用例显式锁定为「刻意不判为变化」）。
  *
- * ## 标准五字段按**内容**比较（`ISSUE-P3-542`）
- *
- * 标准五字段（Title / UserName / Password / URL / Notes）的 `isProtected` **不参与序列化往返**：
- * 写侧 `KdbxXmlEntrySerializer.resolveProtectedFlag` 以**库级 MemoryProtection 无条件覆盖**
- * per-value 标志（对齐官方 `KdbxFile.Write.cs:838-854`），读侧从 `Protected="True"` 属性派生
- * ⇒ 同一内容的「内存构造实例」与「解析实例」可能标志不同却**不代表内容变化**。故本比较对
- * 标准五字段走 [ProtectedString.contentEquals]（忽略该标志），**自定义 / 非标准字段保留
- * per-value 标志比较**（对它们 per-value 才是被序列化的真值）。两种比较均不解密、不物化明文。
- *
- * `ProtectedString.equals` / [ProtectedString.contentEquals] 均以 HMAC 等值标签比较字节内容，
- * 整字段比较不会物化明文密码。
+ * ProtectedString.equals 为字节数组内容比较，整字段比较不会物化明文密码。
  */
 internal object KdbxContentComparator {
-
-    /** 官方标准五字段（`PwDefs.TitleField` … `NotesField`）——其受保护标志由库级配置决定。 */
-    private fun isStandardField(key: String): Boolean =
-        key == KdbxConstants.Fields.TITLE ||
-                key == KdbxConstants.Fields.USER_NAME ||
-                key == KdbxConstants.Fields.PASSWORD ||
-                key == KdbxConstants.Fields.URL ||
-                key == KdbxConstants.Fields.NOTES
-
-    /**
-     * `fields` 比较：标准五字段按**内容**（忽略 `isProtected`），其余键保留
-     * `ProtectedString.equals` 的 per-value 标志比较（`ISSUE-P3-542`，理由见类 KDoc）。
-     */
-    private fun fieldsChanged(
-        a: Map<String, ProtectedString>,
-        b: Map<String, ProtectedString>
-    ): Boolean {
-        if (a.size != b.size) return true
-        for ((key, av) in a) {
-            val bv = b[key] ?: return true
-            val differs = if (isStandardField(key)) !av.contentEquals(bv) else av != bv
-            if (differs) return true
-        }
-        return false
-    }
 
     /** `current` 相对 [reference] 是否存在内容变更（`deletedObjects` 为根级判据） */
     fun changed(current: KdbxDatabase, reference: KdbxDatabase): Boolean {
@@ -116,10 +79,9 @@ internal object KdbxContentComparator {
 
     /**
      * 条目比较：全部**内容**字段 + 历史**条数**（`times` 刻意不在此列，理由见类 KDoc）。
-     * `fields` 走 [fieldsChanged]（标准五字段按内容、忽略 `isProtected`）。
      */
     fun entryChanged(a: KdbxEntry, b: KdbxEntry): Boolean {
-        return fieldsChanged(a.fields, b.fields) ||
+        return a.fields != b.fields ||
                 a.customFields != b.customFields ||
                 a.tags != b.tags ||
                 a.attachments != b.attachments ||

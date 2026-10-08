@@ -410,20 +410,20 @@ data class PasskeyData(
         }
 
         /**
-         * 从条目自定义字段中解析还原 PasskeyData；缺少任一整套必需键则返回 null。
+         * 从条目自定义字段中解析还原 PasskeyData；若缺少关键字段则返回 null。
          *
          * 兼容两套 schema：**KPEX（新，优先）** 与 **v1 `Passkey.*`（历史，只读兼容）**；
          * 两套的必需键分别为「RP ID / Credential ID / PrivateKey」，任一整套齐备即可解析。
          *
-         * **非抛化契约（`ISSUE-P1-537`）**：本方法是**解析面**，已清零 / 并发擦除的字段一律降级
-         * （必需键 ⇒ `null`，可选键 ⇒ 缺省值），**任何字段均不抛**；调用方按 fail-safe 契约使用。
-         * 私钥字段**只引用不读取**（[privateKey] 直接挂接库内既有 [ProtectedString]）；扩展键
-         * `Passkey.Algorithm` 缺失时经 [useUtf8ForDisplayOrNull] 字节嗅探，仍不产生 String。
+         * 反序列化边界（ISSUE-P1-02）：本方法对私钥字段**只引用不读取**（[privateKey] 直接
+         * 挂接库内既有 [ProtectedString]，不物化明文）；仅在扩展键 `Passkey.Algorithm` 缺失时
+         * 才经 [usePrivateKeyBytes] 字节通道嗅探算法（外部管理器条目），仍不产生 String。
          */
         fun fromCustomFields(fields: List<KdbxCustomField>): PasskeyData? {
-            // ISSUE-P3-171：先做**不解密、不建 Map** 的形状短路——绝大多数条目没有 passkey 字段，
-            // 而原实现先 `associateBy` 建 Map 再逐个 `readString()`（每次都是一次驻留密文解密 +
-            // String 物化）。此处只扫 key 名，两套 schema 各三个必需键，均不齐备即返回。
+            // ISSUE-P3-171：先做**不解密、不建 Map** 的形状短路——绝大多数条目根本没有 passkey
+            // 字段，而原实现无论有没有都先 `associateBy` 建一次 Map，再逐个 `readString()`
+            // （每次都是一次驻留密文解密 + String 物化）。此处只扫 key 名，两套 schema 各三个
+            // 必需键，均不齐备即返回。
             var kpexRpId = false
             var kpexCredentialId = false
             var kpexPrivateKey = false
@@ -431,7 +431,7 @@ data class PasskeyData(
             var legacyCredentialId = false
             var legacyPrivateKey = false
             for (field in fields) {
-                // ISSUE-P2-534 / P1-537：已清零字段视同不存在 ⇒ 形状短路自然失败返回 null
+                // ISSUE-P2-534：已清零字段视同不存在 ⇒ 形状短路自然失败返回 null；下面是**同一判据**的纵深防御（必需键亦逐键 `takeUnless { cleared }`）
                 if (field.value.cleared) continue
                 when (field.key) {
                     KPEX_FIELD_RELYING_PARTY -> kpexRpId = true
@@ -447,36 +447,36 @@ data class PasskeyData(
             if (!kpexComplete && !legacyComplete) return null
 
             val map = fields.associateBy { it.key }
-            // ISSUE-P1-537：全部字段经**单点判定**的安全读口读取——判据只存在于读取自身
-            // （`readString` 的 checkNotCleared + 明文核验 / `takeIfReadable`），从构造上消灭
-            // 「先查 `cleared` 再裸读」的两步式（两步之间非原子，并发擦除即抛 ISE）。
-            // 必需键（RP ID / Credential ID / PrivateKey）读不到 ⇒ 判「本条目无通行密钥」。
-            val rpId = (map[KPEX_FIELD_RELYING_PARTY] ?: map[LEGACY_FIELD_RP_ID])?.value?.readStringForDisplayOrNull() ?: return null
-            val credId = (map[KPEX_FIELD_CREDENTIAL_ID] ?: map[LEGACY_FIELD_CREDENTIAL_ID])?.value?.readStringForDisplayOrNull() ?: return null
-            val privateKeyVal = (map[KPEX_FIELD_PRIVATE_KEY] ?: map[LEGACY_FIELD_PRIVATE_KEY])?.value?.takeIfReadable() ?: return null
-            // 可选 / 元数据键：已清零视同缺省值（不抛、也不物化明文）
-            val userHandle = (map[KPEX_FIELD_USER_HANDLE] ?: map[LEGACY_FIELD_USER_HANDLE])?.value?.readStringForDisplayOrNull().orEmpty()
-            val userName = (map[KPEX_FIELD_USERNAME] ?: map[LEGACY_FIELD_USER_NAME])?.value?.readStringForDisplayOrNull().orEmpty()
-            val userDisplayName = map[FIELD_USER_DISPLAY_NAME]?.value?.readStringForDisplayOrNull().orEmpty()
+            val rpId = (map[KPEX_FIELD_RELYING_PARTY] ?: map[LEGACY_FIELD_RP_ID])?.value?.takeUnless { it.cleared }?.readString() ?: return null
+            val credId = (map[KPEX_FIELD_CREDENTIAL_ID] ?: map[LEGACY_FIELD_CREDENTIAL_ID])?.value?.takeUnless { it.cleared }?.readString() ?: return null
+            val privateKeyVal = map[KPEX_FIELD_PRIVATE_KEY]?.value?.takeUnless { it.cleared }
+                ?: map[LEGACY_FIELD_PRIVATE_KEY]?.value?.takeUnless { it.cleared }
+                ?: return null
+
+            val userHandle = (map[KPEX_FIELD_USER_HANDLE] ?: map[LEGACY_FIELD_USER_HANDLE])
+                ?.value?.readString().orEmpty()
+            val userName = (map[KPEX_FIELD_USERNAME] ?: map[LEGACY_FIELD_USER_NAME])
+                ?.value?.readString().orEmpty()
+            val userDisplayName = map[FIELD_USER_DISPLAY_NAME]?.value?.readString().orEmpty()
             // 扩展键优先（写入口径）；缺失（外部管理器条目 / v1 历史条目）则字节嗅探
             // （PKCS#8 OID → v1 hex 标量 / 32 字节种子），仍不可得时回落 ES256
             // —— 签名侧由 crypto 的权威解析 fail-closed 兜底。
-            val algorithmId = map[FIELD_ALGORITHM]?.value?.readStringForDisplayOrNull()?.toIntOrNull()
-                ?: privateKeyVal.useUtf8ForDisplayOrNull { PasskeyKeyText.sniffAlgorithmId(it) }
+            val algorithmId = map[FIELD_ALGORITHM]?.value?.readString()?.toIntOrNull()
+                ?: privateKeyVal.useUtf8 { PasskeyKeyText.sniffAlgorithmId(it) }
                 ?: ALGORITHM_ES256
-            val publicKeyBase64 = map[FIELD_PUBLIC_KEY]?.value?.readStringForDisplayOrNull().orEmpty()
+            val publicKeyBase64 = map[FIELD_PUBLIC_KEY]?.value?.readString().orEmpty()
             // ISSUE-P3-10 子项 2：计数器文本经统一解析边界收口（钳制 + 缺失归哨兵），
             // 严禁裸 `toIntOrNull() ?: 0` 让不可信库直接注入溢出前值
-            val signCount = parseSignCount(map[FIELD_SIGN_COUNT]?.value?.readStringForDisplayOrNull())
+            val signCount = parseSignCount(map[FIELD_SIGN_COUNT]?.value?.readString())
             val backupEligible = parseFlag(
-                (map[KPEX_FIELD_FLAG_BE] ?: map[LEGACY_FIELD_BACKUP_ELIGIBLE])?.value?.readStringForDisplayOrNull(),
+                (map[KPEX_FIELD_FLAG_BE] ?: map[LEGACY_FIELD_BACKUP_ELIGIBLE])?.value?.readString(),
                 default = true
             )
             val backupState = parseFlag(
-                (map[KPEX_FIELD_FLAG_BS] ?: map[LEGACY_FIELD_BACKUP_STATE])?.value?.readStringForDisplayOrNull(),
+                (map[KPEX_FIELD_FLAG_BS] ?: map[LEGACY_FIELD_BACKUP_STATE])?.value?.readString(),
                 default = true
             )
-            val createdAt = map[FIELD_CREATED_AT]?.value?.readStringForDisplayOrNull()?.toLongOrNull()
+            val createdAt = map[FIELD_CREATED_AT]?.value?.readString()?.toLongOrNull()
                 ?: System.currentTimeMillis()
 
             return PasskeyData(

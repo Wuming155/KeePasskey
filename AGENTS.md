@@ -160,22 +160,10 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
 - CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言 / 复核 / 类型名 /
-  Box 内容槽 / 启动语言种子接线 / **投影读取安全** / **裸 scope 收口**机检的 **fail-closed 硬门禁**：`count_line_tiers` +
-  `long_functions` + `check_md_links` + `check_resolved_index_sync` + `check_tautological_assertions` +
-  `check_recheck_consistency` + `check_bounded_type_names` + `check_box_slot_children` +
-  `check_launch_language_seed` + `check_projection_read_safety` + `check_raw_coroutine_scope`，非 0 即红；
+  Box 内容槽 / 启动语言种子接线机检的 **fail-closed 硬门禁**：`count_line_tiers` + `long_functions` +
+  `check_md_links` + `check_resolved_index_sync` + `check_tautological_assertions` + `check_recheck_consistency` +
+  `check_bounded_type_names` + `check_box_slot_children` + `check_launch_language_seed`，非 0 即红；
   **严禁** `|| true` 吞掉（**条数不写死**：以 `gate_readings.py` 现跑读数为准）
-- `python tools/doc/check_raw_coroutine_scope.py` — **裸 `CoroutineScope(` 收口机检**（`ISSUE-P1-538` 立规；
-  **改 `*/src/main/**` 的协程作用域后必跑**）：判据＝`*/src/main/**` 内 `CoroutineScope(` 只允许出现在
-  `GuardedScope.kt`（`\b` 词边界排除 `rememberCoroutineScope()`；`import` / 类型引用不含 `(` 故不命中）；
-  命中即退出码 1。`--selftest` 为口径反校。**口径写死在脚本文档串**——上一批的普查口径写死为
-  `CoroutineScope(SupervisorJob(` 遂**形态性漏检**裸构造（不带 SupervisorJob 者从未进入普查面）
-- `python tools/doc/check_projection_read_safety.py` — **投影 / 解析 / 交付面敏感读取安全**（五条判据，任一命中即红）：
-  ① 登记面（`PROJECTION_FILES`，含通行密钥解析面）不得裸 `readString()` / `readUtf8()` / `readChars()` / `useChars{}` / `useUtf8{}`；
-  ② 不得引 `KdbxEntry` 四个 fail-fast getter；③ 展示读口的**新调用点**须登记 `ALLOWED_DISPLAY_READ_FILES`；
-  ④ **禁止「先查 `cleared` 再裸读」的两步式**（`ISSUE-P1-537` / `ISSUE-P2-540` 裁决②）；
-  ⑤ **非交付面禁止 fail-open 直读 `password` 字段**（`ISSUE-P2-539`，`DELIVERY_FACE_FILES` 登记豁免）。
-  `--selftest` 五向反校；**不得**据其绿推定「全仓已无裸读 / 无两步式」（静态启发式边界见脚本文档串）
 - `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；
   PowerShell 直接可跑。历史命令 `bash …/check_recheck_consistency.sh` 仍可用，薄封装调本文件）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`

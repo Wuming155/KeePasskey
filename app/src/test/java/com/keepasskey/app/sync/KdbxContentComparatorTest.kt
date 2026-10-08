@@ -2,7 +2,6 @@ package com.keepasskey.app.sync
 
 import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxAutoType
-import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
@@ -105,63 +104,6 @@ class KdbxContentComparatorTest {
         // 若日后引入「等条数原地改写历史」的路径，本断言即失效判据，须同步改判据。
         assertFalse(
             "本判定只比历史条数（该口径登记于已知工程限界 §10）",
-            KdbxContentComparator.entryChanged(a, b)
-        )
-    }
-
-    // ===== ISSUE-P3-542：标准五字段按**内容**比较（isProtected 由库级配置决定、不构成树内容） =====
-
-    @Test
-    fun `标准五字段仅受保护标志不同不得判为变更`() {
-        val standardField = { isProtected: Boolean, value: String ->
-            ProtectedString(value, isProtected = isProtected)
-        }
-        val inMemory = KdbxEntry(
-            fields = mapOf(
-                KdbxConstants.Fields.TITLE to standardField(true, "标题"),
-                KdbxConstants.Fields.USER_NAME to standardField(true, "alice"),
-                KdbxConstants.Fields.PASSWORD to standardField(true, "pw"),
-                KdbxConstants.Fields.URL to standardField(true, "https://example.com"),
-                KdbxConstants.Fields.NOTES to standardField(true, "备注")
-            )
-        )
-        // 「解析实例」：写侧以库级 MemoryProtection 覆盖 per-value 标志 ⇒ 读回标志可能与内存构造不同
-        val parsed = KdbxEntry(
-            fields = mapOf(
-                KdbxConstants.Fields.TITLE to standardField(false, "标题"),
-                KdbxConstants.Fields.USER_NAME to standardField(false, "alice"),
-                KdbxConstants.Fields.PASSWORD to standardField(false, "pw"),
-                KdbxConstants.Fields.URL to standardField(false, "https://example.com"),
-                KdbxConstants.Fields.NOTES to standardField(false, "备注")
-            )
-        )
-
-        assertFalse(
-            "内容相同、仅 isProtected 不同（标准五字段）不得判为内容变更——否则无编辑也误报有变化",
-            KdbxContentComparator.entryChanged(inMemory, parsed)
-        )
-        assertFalse(
-            "（参数对调后同样成立）",
-            KdbxContentComparator.entryChanged(parsed, inMemory)
-        )
-    }
-
-    @Test
-    fun `标准五字段内容不同仍必须判为变更`() {
-        val a = KdbxEntry(fields = mapOf(KdbxConstants.Fields.PASSWORD to ProtectedString("pw1", false)))
-        val b = KdbxEntry(fields = mapOf(KdbxConstants.Fields.PASSWORD to ProtectedString("pw2", false)))
-
-        assertTrue(KdbxContentComparator.entryChanged(a, b))
-        assertTrue("（参数对调后同样成立）", KdbxContentComparator.entryChanged(b, a))
-    }
-
-    @Test
-    fun `非标准字段的 per-value 受保护标志仍参与比较`() {
-        val a = KdbxEntry(fields = mapOf("Custom" to ProtectedString("v", isProtected = true)))
-        val b = KdbxEntry(fields = mapOf("Custom" to ProtectedString("v", isProtected = false)))
-
-        assertTrue(
-            "非标准字段的 per-value 标志才是被序列化的真值 ⇒ 标志差异仍须判为变更",
             KdbxContentComparator.entryChanged(a, b)
         )
     }

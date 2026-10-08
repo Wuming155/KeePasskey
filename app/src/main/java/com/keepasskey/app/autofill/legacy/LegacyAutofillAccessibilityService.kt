@@ -21,6 +21,7 @@ import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,7 +63,7 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
     @Inject
     lateinit var coordinator: LegacyAutofillCoordinator
 
-    private val serviceScope = guardedScope(Dispatchers.Default, "LegacyAutofillAccessibilityService")
+    private val serviceScope = guardedScope(Dispatchers.Default)
 
     /**
      * ISSUE-P3-374 AC②：按包名冷却的主动提示节流（取代原全局 2 秒去抖——内容变化事件

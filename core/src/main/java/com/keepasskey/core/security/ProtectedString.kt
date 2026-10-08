@@ -55,21 +55,6 @@ class ProtectedString(
     val cleared: Boolean
         get() = isCleared
 
-    /**
-     * `ISSUE-P1-537`：**借用读口**——实例已清零时返回 `null`（＝「不可读」），否则返回自身。
-     *
-     * 存在理由：调用方有时需要「实例存在且可读」但**不当场读取**（如把实例挂进模型、稍后按精确
-     * 时机嗅探字节）。此需求若写成调用点的 `takeUnless { it.cleared }` 即**两步式**——查与读之间
-     * 不是原子的，后续 fail-fast 读仍会抛（`ISSUE-P1-537` 的 TOCTOU 即此形态）。本读口把判据
-     * 收进持有状态的这一类自身（单点），**不物化任何明文**。
-     *
-     * **配套契约（违反即事故）**：本读口只回答「此刻是否可读」，**不提供原子性**——调用方后续
-     * 读取**必须**走安全读口（[readStringForDisplay] / [readUtf8ForDisplay] / `useUtf8ForDisplayOrNull`），
-     * **不得**用于 fail-fast 读（[readString] / [useUtf8] 等）。写路径不适用本读口，继续走 fail-fast +
-     * `cleared` 预判（见 [cleared]）。
-     */
-    fun takeIfReadable(): ProtectedString? = if (isCleared) null else this
-
     init {
         if (isProtected && bytes.isNotEmpty()) {
             val sealed = InMemoryCipher.seal(bytes)
@@ -160,22 +145,6 @@ class ProtectedString(
         }
 
     /**
-     * [readString] 的**判空失败变体**（`ISSUE-P1-537`）：实例已清零 / 被并发擦除时返回 `null`
-     * （＝「不可读」），不抛异常、也**不**折叠成空串——调用方据此把「键缺失 / 不可读」
-     * （判为无此数据）与「键存在但内容为空」区分开。
-     *
-     * 与 [readStringForDisplay]（读不到给 [fallback] 空串）的唯一差别是返回值；判据同样**只有**
-     * [readString] 内部那一次 `checkNotCleared`（外加明文核验）——**不是**「先查 `cleared` 再裸读」
-     * 的两步式。使用边界同 [readStringForDisplay]：仅限非持久化的展示 / 解析 / 检索面。
-     */
-    fun readStringForDisplayOrNull(): String? =
-        try {
-            readString()
-        } catch (_: IllegalStateException) {
-            null
-        }
-
-    /**
      * 将保护值转为 String。注意：一旦调用，明文字符串将驻留 JVM 堆内存，请仅在必要交互边界使用。
      */
     fun readString(): String {
@@ -246,23 +215,6 @@ class ProtectedString(
     }
 
     /**
-     * `ISSUE-P1-537`：[useUtf8] 的**解析 / 展示面安全变体** —— 实例已清零（含并发擦除）时返回
-     * `null` 且**不抛**；可读时把明文副本交给 [block]，并在 `finally` 清零（借用契约同 [useUtf8]）。
-     *
-     * 用途：解析面需要按字节嗅探（如通行密钥私钥的 PKCS#8 OID）却**不得**因并发擦除而抛异常的场合。
-     * 判据只有 [readUtf8ForDisplay] 内部那一次 `checkNotCleared` + 明文核验，非「先查后读」两步式。
-     * 使用边界同 [readStringForDisplay]：写路径必须继续走 fail-fast。
-     */
-    inline fun <R> useUtf8ForDisplayOrNull(block: (ByteArray) -> R): R? {
-        val bytes = readUtf8ForDisplay() ?: return null
-        try {
-            return block(bytes)
-        } finally {
-            Arrays.fill(bytes, 0.toByte())
-        }
-    }
-
-    /**
      * 显式擦除敏感内存（密文、IV 与等值标签一并清零）。
      * P3-10 整改：[EMPTY] 为全局共享单例，对其 clear 一律 no-op——
      * 防止任一调用方把共享空实例置为已清零态后污染后续引用者（equals/close 语义异常）。
@@ -323,32 +275,6 @@ class ProtectedString(
             InMemoryCipher.tagsEqual(a, b)
         } else {
             data.contentEquals(other.data)
-        }
-    }
-
-    /**
-     * `ISSUE-P3-542`：**内容**等值（**刻意不比 [isProtected]**）。
-     *
-     * 与 [equals] 的唯一差别是忽略 `isProtected` 标志。存在理由：对**标准五字段**，该标志
-     * **不构成 KDBX 树内容**——写侧 `KdbxXmlEntrySerializer.resolveProtectedFlag` 以**库级
-     * MemoryProtection 无条件覆盖** per-value 标志（对齐官方 `KdbxFile.Write.cs:838-854`），
-     * 读侧从 `Protected="True"` 属性派生 ⇒ 同一内容的「内存构造实例」与「解析实例」可能标志不同
-     * 却不代表内容变化。同步「内容是否变化」判据据此对标准五字段按内容比较。
-     *
-     * **不得**据此改 [equals]——其等值语义另有 2026-09 加解密审查的裁决依据与既有消费面。
-     * 比较仍不解密、不物化明文（复用 [InMemoryCipher.equalityTag] 标签）；一侧无标签
-     * （非保护 / 空值）时就地计算另一侧的标签比较，仍不产生 String。
-     */
-    fun contentEquals(other: ProtectedString): Boolean {
-        if (this === other) return true
-        if (isCleared || other.isCleared) return false
-        val a = memoryTag
-        val b = other.memoryTag
-        return when {
-            a != null && b != null -> InMemoryCipher.tagsEqual(a, b)
-            a != null -> InMemoryCipher.tagsEqual(a, InMemoryCipher.equalityTag(other.data))
-            b != null -> InMemoryCipher.tagsEqual(InMemoryCipher.equalityTag(data), b)
-            else -> data.contentEquals(other.data)
         }
     }
 

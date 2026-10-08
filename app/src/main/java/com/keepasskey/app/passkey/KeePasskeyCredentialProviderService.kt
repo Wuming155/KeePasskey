@@ -34,6 +34,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -88,7 +89,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     @Inject
     lateinit var settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
 
-    private val serviceScope = guardedScope(Dispatchers.Default, "CredentialProviderService")
+    private val serviceScope = guardedScope(Dispatchers.Default)
 
     override fun onBeginGetCredentialRequest(
         request: BeginGetCredentialRequest,
