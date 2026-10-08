@@ -147,7 +147,6 @@
     <string name="vault_search_hint">Search entries, passkeys, or folders...</string>
     <string name="vault_current_sort">Sorted by: %1$s</string>
     <string name="vault_reset_sort">Reset</string>
-    <string name="vault_filter_favorites">Favorites</string>
     <string name="vault_root_dir">Root</string>
     <string name="vault_empty_title">No search results</string>
     <string name="vault_search_clear">Clear search</string>

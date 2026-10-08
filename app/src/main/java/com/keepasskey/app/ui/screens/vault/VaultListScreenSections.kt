@@ -11,33 +11,6 @@ import androidx.compose.animation.core.FiniteAnimationSpec
  * 结构性拆分：`LazyListScope` 扩展形态，渲染语义零变化）。
  */
 
-/** ISSUE-P3-297 处置③：筛选芯片行的稳定 key */
-private const val FILTER_CHIP_ROW_KEY = "vault_filter_chip_row"
-
-/**
- * 3.0 ISSUE-P3-297 处置③：标签 / 收藏筛选芯片行（有候选时才渲染，回收站内不呈现）。
- */
-internal fun LazyListScope.vaultFilterChipRowSection(
-    uiState: VaultListUiState,
-    onFavoriteFilterChange: (Boolean) -> Unit,
-    onTagFilterChange: (String?) -> Unit
-) {
-    if ((uiState.hasFavoriteEntries || uiState.availableTags.isNotEmpty()) &&
-        !uiState.isInsideRecycleBin
-    ) {
-        item(key = FILTER_CHIP_ROW_KEY) {
-            VaultFilterChipRow(
-                availableTags = uiState.availableTags,
-                hasFavoriteEntries = uiState.hasFavoriteEntries,
-                favoriteOnly = uiState.favoriteOnly,
-                selectedTag = uiState.selectedTag,
-                onFavoriteFilterChange = onFavoriteFilterChange,
-                onTagFilterChange = onTagFilterChange
-            )
-        }
-    }
-}
-
 /**
  * 6. ISSUE-P3-30：已解锁子库的只读分区。
  *

@@ -23,15 +23,11 @@ import com.keepasskey.app.ui.screens.settings.SearchMatchMode
  * 逐字迁移至此，行为零变更。
  */
 
-/** 搜索与列表筛选（标签 / 收藏档）的防抖后参数快照 */
+/** 搜索与列表排序的防抖后参数快照 */
 internal data class VaultListFilterParams(
     val query: String,
     val isSearchActive: Boolean,
-    val sortOption: VaultSortOption,
-    // ISSUE-P3-297 处置③：标签筛选档（null = 未按标签筛选）
-    val selectedTag: String? = null,
-    // ISSUE-P3-297 处置③：是否只看收藏条目
-    val favoriteOnly: Boolean = false
+    val sortOption: VaultSortOption
 )
 
 /** 批量选择与同步指示的聚合快照 */
@@ -136,16 +132,12 @@ internal fun buildVaultListUiState(
         mountedChildDatabaseCount = session.childDatabase.mountedCount,
         childEntrySectionVisible = content.childEntrySectionVisible,
         templateEntries = content.templateEntries,
-        availableTags = content.availableTags,
-        hasFavoriteEntries = content.hasFavoriteEntries,
-        selectedTag = session.filterParams.selectedTag,
-        favoriteOnly = session.filterParams.favoriteOnly,
         // ISSUE-P3-439：高级搜索选项快照（搜索面板回显；过滤消费在 selectSortedEntries）
         searchAdvanced = session.extended.searchAdvanced
     )
 }
 
-/** 列表内容投影结果（面包屑 / 条目 / 分组 / 搜索路径 / 子库分区 / 模板条目 / 筛选候选） */
+/** 列表内容投影结果（面包屑 / 条目 / 分组 / 搜索路径 / 子库分区 / 模板条目） */
 private data class VaultListContent(
     val isInsideRecycleBin: Boolean,
     val breadcrumbs: List<VaultGroup>,
@@ -154,10 +146,7 @@ private data class VaultListContent(
     val entryGroupPaths: Map<String, String>,
     val childEntryGroups: List<ChildVaultEntryGroup>,
     val childEntrySectionVisible: Boolean,
-    val templateEntries: List<UiVaultEntry>,
-    // ISSUE-P3-297 处置③：全库去重标签与「是否有收藏」——筛选芯片行的可见性与候选
-    val availableTags: List<String>,
-    val hasFavoriteEntries: Boolean
+    val templateEntries: List<UiVaultEntry>
 )
 
 private fun projectVaultListContent(
@@ -186,8 +175,6 @@ private fun projectVaultListContent(
         isInsideRecycleBin = isInsideRecycleBin,
         effectiveGroupId = effectiveGroupId,
         sortOption = session.filterParams.sortOption,
-        selectedTag = session.filterParams.selectedTag,
-        favoriteOnly = session.filterParams.favoriteOnly,
         searchMatchMode = session.extended.searchMatchMode,
         searchAdvanced = session.extended.searchAdvanced
     )
@@ -211,20 +198,9 @@ private fun projectVaultListContent(
         entryGroupPaths = entryGroupPaths,
         childEntryGroups = childEntryGroups,
         childEntrySectionVisible = childEntrySectionVisible,
-        templateEntries = buildTemplateEntries(allGroups, allEntries),
-        availableTags = buildAvailableTags(allEntries),
-        hasFavoriteEntries = allEntries.any { it.isFavorite }
+        templateEntries = buildTemplateEntries(allGroups, allEntries)
     )
 }
-
-/**
- * ISSUE-P3-297 处置③：全库条目的去重标签候选（大小写不敏感排序）。
- * 空查询 / 无标签均得空表，UI 据此隐藏筛选行。
- */
-private fun buildAvailableTags(allEntries: List<UiVaultEntry>): List<String> = allEntries
-    .flatMap { it.tags }
-    .distinct()
-    .sortedWith(String.CASE_INSENSITIVE_ORDER)
 
 /**
  * ISSUE-P3-17：搜索结果行的分组路径——仅在「搜索中 + 开关开启」时装配，否则空表。
@@ -265,8 +241,7 @@ private fun buildBreadcrumbs(
  * [UiVaultEntry.isRecycled] 随投影下发（避免同一判据两份实现漂移）。
  */
 
-/** 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目；
- * 再叠加 ISSUE-P3-297 处置③的标签 / 收藏筛选档（与搜索独立、可叠加）。
+/** 1. 过滤条目：搜索时全局匹配（排除回收站内容），正常时只展示当前文件夹下的条目。
  *
  * ISSUE-P3-439 AC①：搜索态下按 [SearchAdvancedOptions.excludeExpired] 排除已过期条目——
  * 仅影响应用内搜索展示（非搜索态的分组浏览零变化），与 PD-61 填充链排除过期的口径独立。
@@ -278,8 +253,6 @@ private fun selectSortedEntries(
     isInsideRecycleBin: Boolean,
     effectiveGroupId: String?,
     sortOption: VaultSortOption,
-    selectedTag: String?,
-    favoriteOnly: Boolean,
     searchMatchMode: SearchMatchMode,
     searchAdvanced: SearchAdvancedOptions = SearchAdvancedOptions()
 ): List<UiVaultEntry> {
@@ -294,8 +267,6 @@ private fun selectSortedEntries(
     return sortEntries(
         targetEntries.filter {
             matchesSearchQuery(it, query, searchMatchMode, searchAdvanced) &&
-                (!favoriteOnly || it.isFavorite) &&
-                (selectedTag == null || selectedTag in it.tags) &&
                 (expiredCutoff == null || it.expiresAt?.isBefore(expiredCutoff) != true)
         },
         sortOption

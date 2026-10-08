@@ -83,9 +83,6 @@ fun VaultListScreen(
         searchQuery = searchQuery,
         onSearchQueryChange = viewModel::onSearchQueryChange,
         onSortOptionSelect = viewModel::setSortOption,
-        // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行
-        onFavoriteFilterChange = viewModel::onFavoriteFilterChange,
-        onTagFilterChange = viewModel::onTagFilterChange,
         // ISSUE-P3-439 / ISSUE-P2-544：高级搜索选项上行（入口在顶栏溢出菜单 → 选项对话框；
         // 选项写回进阶偏好通道，状态与持久化编排在 VaultSearchAdvancedStore）
         onSearchFieldToggle = { viewModel.searchAdvancedStore.toggleField(it) },

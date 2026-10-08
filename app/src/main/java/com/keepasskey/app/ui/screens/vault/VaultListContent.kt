@@ -43,9 +43,6 @@ fun VaultListContent(
     searchQuery: String = uiState.searchQuery,
     onSearchQueryChange: (String) -> Unit,
     onSortOptionSelect: (VaultSortOption) -> Unit,
-    // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行（预览与既有调用方可走缺省）
-    onFavoriteFilterChange: (Boolean) -> Unit = {},
-    onTagFilterChange: (String?) -> Unit = {},
     // ISSUE-P3-439 / ISSUE-P2-544：高级搜索选项（由溢出菜单项打开对话框；上行走 ViewModel 持久化通道）
     onSearchFieldToggle: (com.keepasskey.app.ui.screens.settings.SearchField) -> Unit = {},
     onSearchExcludeExpiredChange: (Boolean) -> Unit = {},
@@ -229,13 +226,6 @@ fun VaultListContent(
                         )
                     }
                 }
-
-                // 3.0 ISSUE-P3-297 处置③：标签 / 收藏筛选芯片行（段落组件见 VaultListScreenSections.kt）
-                vaultFilterChipRowSection(
-                    uiState = uiState,
-                    onFavoriteFilterChange = onFavoriteFilterChange,
-                    onTagFilterChange = onTagFilterChange
-                )
 
                 // 3.1 ISSUE-P3-30：搜索态下如实说明子库条目不参与搜索（有已挂载子库时才提示）
                 if (isSearching && uiState.mountedChildDatabaseCount > 0) {

@@ -136,15 +136,6 @@ data class VaultListUiState(
     // ISSUE-P3-51：「从模板新建」选择器的候选模板条目（库内「模板」分组内全部条目，按库内顺序）。
     // 模板为空（未安装模板库）时为空表，创建对话框不呈现该入口。
     val templateEntries: List<UiVaultEntry> = emptyList(),
-    // ISSUE-P3-297 处置③（标签/收藏接线）：库内全部条目的去重标签（大小写不敏感排序），
-    // 空表表示无可筛选标签——UI 据此隐藏筛选芯片行。
-    val availableTags: List<String> = emptyList(),
-    // ISSUE-P3-297 处置③：库内是否存在已收藏条目（收藏筛选芯片的可见性判据）
-    val hasFavoriteEntries: Boolean = false,
-    // ISSUE-P3-297 处置③：当前生效的标签筛选档（null = 未按标签筛选）
-    val selectedTag: String? = null,
-    // ISSUE-P3-297 处置③：是否只看收藏条目
-    val favoriteOnly: Boolean = false,
     // ISSUE-P3-439：高级搜索选项快照（字段范围 / 排除已过期 / 大小写档；搜索面板呈现与回显）
     val searchAdvanced: SearchAdvancedOptions = SearchAdvancedOptions()
 )

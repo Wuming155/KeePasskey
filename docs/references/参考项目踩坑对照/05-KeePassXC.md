@@ -420,13 +420,13 @@
 - **建议**：（无）
 - **需补充信息**：（无）
 
-### 21. EntryView.cpp:339 → VaultListFilterChips.kt:29
+### 21. EntryView.cpp:339 → VaultListProjection.kt:277
 - **坑的本质**：restoreState 前必须先清排序指示器，否则恢复出的视图状态错乱（Qt 缺陷 QTBUG-86694）
 - **触发条件**：setViewState 恢复带排序的表头状态
-- **主项目对应位置**：`app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListFilterChips.kt:29`
+- **主项目对应位置**：`app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListProjection.kt:277`（`sortEntries` 纯函数投影；**原对应点** `VaultListFilterChips.kt:29` 的筛选芯片行已于 §481 按用户裁决整体移除）
 - **对照情况**：同类模式：同为「条目列表排序状态的保存/恢复」
 - **是否有同样风险**：no
-- **建议**：无恢复路径即无该坑：排序与筛选均为会话态且明写「不持久化」（VaultListFilterChips.kt:29「筛选档与排序同口径为会话态（不持久化）」），排序在 VaultListProjection 纯函数投影（:290-307），无视图状态序列化/restore 机制；若未来引入排序持久化，须以此条为前置提醒
+- **建议**：无恢复路径即无该坑：排序为会话态且明写「不持久化」（`VaultListUiState` 的 `sortOption` 随 ViewModel 存活，无视图状态序列化/restore 机制），排序在 `VaultListProjection` 纯函数投影（`selectSortedEntries` :249 → `sortEntries` :277）；若未来引入排序持久化，须以此条为前置提醒
 - **需补充信息**：（无）
 
 ### 22. DatabaseOpenDialog.cpp:59 → 无直接对应

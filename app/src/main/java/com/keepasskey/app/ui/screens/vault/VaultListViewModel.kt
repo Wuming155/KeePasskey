@@ -103,9 +103,6 @@ class VaultListViewModel @Inject constructor(
     private val searchQueryFlow = MutableStateFlow("")
     private val isSearchActiveFlow = MutableStateFlow(false)
     private val sortOptionFlow = MutableStateFlow(VaultSortOption.DEFAULT)
-    // ISSUE-P3-297 处置③：标签 / 收藏筛选档（会话态，随排序同口径不持久化）
-    private val selectedTagFlow = MutableStateFlow<String?>(null)
-    private val favoriteOnlyFlow = MutableStateFlow(false)
     internal val userMessageFlow = MutableStateFlow<UiMessage?>(null) // ISSUE-P3-359 AC④：放宽 internal 供同包 publishVaultMessage 双写
 
     // H2 整改：存在待解决的冲突会话时驱动「去解决冲突」入口
@@ -247,11 +244,9 @@ class VaultListViewModel @Inject constructor(
     private val filterParamsFlow = combine(
         debouncedSearchQueryFlow,
         isSearchActiveFlow,
-        sortOptionFlow,
-        selectedTagFlow,
-        favoriteOnlyFlow
-    ) { query, isSearchActive, sortOption, selectedTag, favoriteOnly ->
-        VaultListFilterParams(query, isSearchActive, sortOption, selectedTag, favoriteOnly)
+        sortOptionFlow
+    ) { query, isSearchActive, sortOption ->
+        VaultListFilterParams(query, isSearchActive, sortOption)
     }
 
     /**
@@ -416,16 +411,6 @@ class VaultListViewModel @Inject constructor(
 
     fun setSortOption(sortOption: VaultSortOption) {
         sortOptionFlow.value = sortOption
-    }
-
-    /** ISSUE-P3-297 处置③：切换标签筛选档（再点同一标签 = 取消） */
-    fun onTagFilterChange(tag: String?) {
-        selectedTagFlow.value = tag
-    }
-
-    /** ISSUE-P3-297 处置③：切换「只看收藏」筛选档 */
-    fun onFavoriteFilterChange(favoriteOnly: Boolean) {
-        favoriteOnlyFlow.value = favoriteOnly
     }
 
     // 复制 / 批量 / 分组 / 回收站 / 通行密钥导入等对外门面随 §280 规模门禁拆分

@@ -156,7 +156,6 @@
     <string name="vault_search_hint">搜索凭据、通行密钥或文件夹...</string>
     <string name="vault_current_sort">当前排序：%1$s</string>
     <string name="vault_reset_sort">恢复默认</string>
-    <string name="vault_filter_favorites">收藏</string>
     <string name="vault_root_dir">根目录</string>
     <!-- ISSUE-P3-352 AC①：搜索空态标题（原「暂无内容」文案错位，改为直述搜索结果为空） -->
     <string name="vault_empty_title">无搜索结果</string>
