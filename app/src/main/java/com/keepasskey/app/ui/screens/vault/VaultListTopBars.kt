@@ -98,7 +98,8 @@ internal fun VaultListBatchModeTopBar(
 /**
  * 主顶栏：标题位为胶囊形搜索框；进入回收站后操作区替换为「清空回收站」入口。
  *
- * 常规态操作区收敛为一个竖排三点（MoreVert）溢出菜单，内含「排序」「锁定」「扫码」三项。
+ * 常规态操作区收敛为一个竖排三点（MoreVert）溢出菜单，内含「排序」「高级搜索」
+ * 「选择」「锁定」「扫码」若干项（`ISSUE-P2-544`：高级搜索自独立图标收进本菜单）。
  *
  * ISSUE-P3-17：
  * - [autoActivateSearch] 为 true 时聚焦搜索框并弹出输入法（一次性意图，消费后经
@@ -126,10 +127,8 @@ internal fun VaultListSearchTopBar(
     onScanClick: (() -> Unit)? = null,
     /** ISSUE-P3-360 AC④a：非空才呈现溢出菜单「选择」项（进入批量模式；回收站内无溢出菜单） */
     onSelectEntriesClick: (() -> Unit)? = null,
-    /** ISSUE-P3-439：高级搜索面板展开态（true 时入口高亮，提示面板已展开） */
-    advancedActive: Boolean = false,
-    /** ISSUE-P3-439：高级搜索面板展开/收起切换 */
-    onToggleAdvanced: () -> Unit = {},
+    /** ISSUE-P3-439 / ISSUE-P2-544：溢出菜单「高级搜索」项（打开选项对话框） */
+    onAdvancedSearchClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -214,15 +213,8 @@ internal fun VaultListSearchTopBar(
                     )
                 }
             } else {
-                // ISSUE-P3-439：高级搜索选项入口（展开态高亮；回收站内不呈现——搜索面板同样服务于搜索）
-                IconButton(onClick = onToggleAdvanced) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = stringResource(R.string.search_advanced_title),
-                        tint = if (advancedActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                // 收敛后的竖排三点溢出菜单：排序 / 选择（ISSUE-P3-360 AC④a）/ 锁定 / 扫码（只读隐藏）/（可选）彻底退出
+                // 收敛后的竖排三点溢出菜单：排序 / 高级搜索（ISSUE-P2-544）/ 选择（ISSUE-P3-360 AC④a）
+                // / 锁定 / 扫码（只读隐藏）/（可选）彻底退出
                 Box {
                     IconButton(onClick = { showOverflowMenu = true }) {
                         Icon(
@@ -247,6 +239,19 @@ internal fun VaultListSearchTopBar(
                             onClick = {
                                 showOverflowMenu = false
                                 onSortClick()
+                            }
+                        )
+                        // ISSUE-P2-544：高级搜索选项（字段范围 / 排除已过期 / 大小写）——自
+                        // 「搜索顶栏独立图标」收敛进本菜单；对话框形态不受列表滚动位置影响，
+                        // 点击后必然同屏可见（独立图标在已滚动的列表里会被插到视口上方，见该条目）
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.search_advanced_title)) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Tune, contentDescription = null)
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                onAdvancedSearchClick()
                             }
                         )
                         // ISSUE-P3-360 AC④a：批量模式的第二入口（首长按之外的可发现路径）

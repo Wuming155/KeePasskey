@@ -27,13 +27,15 @@ import com.keepasskey.app.ui.model.VaultGroup
 /**
  * 密码库列表页对话框编排（ISSUE-P3-29：自 `VaultListScreen.kt` 拆出，纯结构性拆分）。
  *
- * 把「10 个对话框的可见性 / 目标对象」状态从巨型 Composable 中收敛为一个
+ * 把「11 个对话框的可见性 / 目标对象」状态从巨型 Composable 中收敛为一个
  * [Stable] 状态持有者，配合 [VaultListDialogHost] 完成渲染；Screen 只负责触发者
  * （顶栏 / FAB / 行回调）与宿主之间的一次性开关置位，不再内联 100 行对话框接线。
  */
 @Stable
 internal class VaultListDialogController {
     var showSortDialog by mutableStateOf(false)
+    // ISSUE-P2-544：高级搜索选项对话框（入口在顶栏溢出菜单）
+    var showSearchAdvancedDialog by mutableStateOf(false)
     var showCreateTypeDialog by mutableStateOf(false)
     // ISSUE-P3-51：从模板新建的模板选择对话框
     var showTemplatePickerDialog by mutableStateOf(false)
@@ -72,7 +74,11 @@ internal fun VaultListDialogHost(
     onBatchMove: (String?) -> Unit,
     // ISSUE-P2-357 AC①：两条破坏性删除的确认出口（确认后才执行）
     onBatchDelete: () -> Unit,
-    onPurgeEntry: (String) -> Unit
+    onPurgeEntry: (String) -> Unit,
+    // ISSUE-P2-544：高级搜索选项的三条上行（改动即时生效）
+    onSearchFieldToggle: (com.keepasskey.app.ui.screens.settings.SearchField) -> Unit = {},
+    onSearchExcludeExpiredChange: (Boolean) -> Unit = {},
+    onSearchCaseSensitiveChange: (Boolean) -> Unit = {}
 ) {
     // 排序选择对话框
     if (controller.showSortDialog) {
@@ -83,6 +89,18 @@ internal fun VaultListDialogHost(
                 controller.showSortDialog = false
             },
             onDismiss = { controller.showSortDialog = false }
+        )
+    }
+
+    // ISSUE-P2-544：高级搜索选项对话框（字段范围 / 排除已过期 / 大小写；改动即时生效，
+    // 关闭键仅收窗——与 [VaultSortDialog] 同口径的「选完即生效」对话框）
+    if (controller.showSearchAdvancedDialog) {
+        VaultSearchAdvancedDialog(
+            options = uiState.searchAdvanced,
+            onFieldToggle = onSearchFieldToggle,
+            onExcludeExpiredChange = onSearchExcludeExpiredChange,
+            onCaseSensitiveChange = onSearchCaseSensitiveChange,
+            onDismiss = { controller.showSearchAdvancedDialog = false }
         )
     }
 

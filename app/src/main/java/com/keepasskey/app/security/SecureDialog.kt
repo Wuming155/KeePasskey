@@ -119,6 +119,9 @@ import androidx.compose.ui.window.DialogWindowProvider
  * 全仓亦无其它 `Popup(` / `TooltipBox(` / `ModalBottomSheet(` 调用点。
  * **2026-09-28 `ISSUE-P3-360` AC④a 复验**：顶栏溢出菜单新增第 12 个菜单项「选择」（纯静态动作
  * 文案 `vault_menu_select_entries`，无插值）——调用点仍 4 处，结论不变（详见同名测试的编年注记）。
+ * **2026-10-08 `ISSUE-P2-544` 复验**：高级搜索自顶栏独立图标收敛进该溢出菜单（第 13 个菜单项，
+ * 纯静态动作文案 `search_advanced_title`，无插值），同批删除顶栏独立 `Tune` 图标钮
+ * （不属 Popup 调用点）——调用点仍 4 处，结论不变（详见同名测试的编年注记）。
  *
  * ⇒ **不接线**（避免「全量加 flag」的过度改动）。**接线条件（须遵守）**：一旦任一 Popup
  * 的菜单项开始渲染**凭据类内容**（口令 / TOTP / 密钥 / 用户名等用户数据插值），

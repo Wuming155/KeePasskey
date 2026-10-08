@@ -46,9 +46,7 @@ fun VaultListContent(
     // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行（预览与既有调用方可走缺省）
     onFavoriteFilterChange: (Boolean) -> Unit = {},
     onTagFilterChange: (String?) -> Unit = {},
-    // ISSUE-P3-439：高级搜索选项面板（展开态由页面持有；上行走 ViewModel 持久化通道）
-    searchAdvancedExpanded: Boolean = false,
-    onToggleSearchAdvanced: () -> Unit = {},
+    // ISSUE-P3-439 / ISSUE-P2-544：高级搜索选项（由溢出菜单项打开对话框；上行走 ViewModel 持久化通道）
     onSearchFieldToggle: (com.keepasskey.app.ui.screens.settings.SearchField) -> Unit = {},
     onSearchExcludeExpiredChange: (Boolean) -> Unit = {},
     onSearchCaseSensitiveChange: (Boolean) -> Unit = {},
@@ -152,9 +150,8 @@ fun VaultListContent(
                     onKillApp = onKillApp,
                     onScanClick = onScanClick,
                     onSelectEntriesClick = onSelectEntriesBatch,
-                    // ISSUE-P3-439：高级搜索面板入口（顶栏「高级」图标钮）
-                    advancedActive = searchAdvancedExpanded,
-                    onToggleAdvanced = onToggleSearchAdvanced
+                    // ISSUE-P2-544：高级搜索入口（溢出菜单项 → 选项对话框）
+                    onAdvancedSearchClick = { dialogs.showSearchAdvancedDialog = true }
                 )
             }
         },
@@ -229,18 +226,6 @@ fun VaultListContent(
                         SortStatusHint(
                             sortOption = uiState.sortOption,
                             onResetSort = { onSortOptionSelect(VaultSortOption.DEFAULT) }
-                        )
-                    }
-                }
-
-                // 3.05 ISSUE-P3-439：高级搜索选项面板（用户展开时挂出；选项持久化于进阶偏好）
-                if (searchAdvancedExpanded) {
-                    item(key = SEARCH_ADVANCED_PANEL_KEY) {
-                        VaultSearchAdvancedPanel(
-                            options = uiState.searchAdvanced,
-                            onFieldToggle = onSearchFieldToggle,
-                            onExcludeExpiredChange = onSearchExcludeExpiredChange,
-                            onCaseSensitiveChange = onSearchCaseSensitiveChange
                         )
                     }
                 }
@@ -339,12 +324,13 @@ fun VaultListContent(
         onChangeGroupIcon = onChangeGroupIcon,
         onDeleteGroup = onDeleteGroup,
         onEmptyRecycleBin = onEmptyRecycleBin,
-        onBatchMove = onBatchMove, onBatchDelete = onBatchDelete, onPurgeEntry = onPurgeEntry
+        onBatchMove = onBatchMove, onBatchDelete = onBatchDelete, onPurgeEntry = onPurgeEntry,
+        // ISSUE-P2-544：高级搜索选项对话框的三条上行（改动即时生效，无草稿态）
+        onSearchFieldToggle = onSearchFieldToggle,
+        onSearchExcludeExpiredChange = onSearchExcludeExpiredChange,
+        onSearchCaseSensitiveChange = onSearchCaseSensitiveChange
     )
 }
 
 /** ISSUE-P3-30：搜索态子库排除提示行的稳定 key（不同排序 / 筛选下不重建） */
 private const val CHILD_DB_SEARCH_HINT_KEY = "child_db_search_exclusion"
-
-/** ISSUE-P3-439：高级搜索选项面板的稳定 key */
-private const val SEARCH_ADVANCED_PANEL_KEY = "vault_search_advanced_panel"

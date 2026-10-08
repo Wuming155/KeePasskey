@@ -56,9 +56,6 @@ fun VaultListScreen(
     // PD-47：扫码对话框 FLAG_SECURE 跟随设置页「禁止截屏与录屏」开关
     val flagSecureEnabled by viewModel.flagSecureEnabled.collectAsStateWithLifecycle()
 
-    // ISSUE-P3-439：高级搜索面板展开态（页面会话态；选项本身的持久化在偏好通道）
-    var showSearchAdvanced by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-
     // ISSUE-P3-17：页面每次进入组合时刷新进阶显示偏好快照
     // （ExtendedSettingsStore 只有同步快照 API，设置页改动返回本页即生效）
     LaunchedEffect(Unit) { viewModel.onScreenEntered() }
@@ -89,10 +86,8 @@ fun VaultListScreen(
         // ISSUE-P3-297 处置③：标签 / 收藏筛选档上行
         onFavoriteFilterChange = viewModel::onFavoriteFilterChange,
         onTagFilterChange = viewModel::onTagFilterChange,
-        // ISSUE-P3-439：高级搜索面板展开态与选项上行（选项写回进阶偏好通道，
-        // 状态与持久化编排在 VaultSearchAdvancedStore）
-        searchAdvancedExpanded = showSearchAdvanced,
-        onToggleSearchAdvanced = { showSearchAdvanced = !showSearchAdvanced },
+        // ISSUE-P3-439 / ISSUE-P2-544：高级搜索选项上行（入口在顶栏溢出菜单 → 选项对话框；
+        // 选项写回进阶偏好通道，状态与持久化编排在 VaultSearchAdvancedStore）
         onSearchFieldToggle = { viewModel.searchAdvancedStore.toggleField(it) },
         onSearchExcludeExpiredChange = viewModel.searchAdvancedStore::setExcludeExpired,
         onSearchCaseSensitiveChange = viewModel.searchAdvancedStore::setCaseSensitive,

@@ -64,55 +64,6 @@ internal fun VaultListContentPreview() {
     }
 }
 
-// `ISSUE-P3-517`：高级搜索面板展开态（searchAdvancedExpanded 默认 false，true 态此前只有真机能见）
-@Preview(name = "密码库列表 - 高级搜索展开", showBackground = true)
-@Composable
-internal fun VaultListContentSearchAdvancedPreview() {
-    KeePasskeyTheme {
-        VaultListContent(
-            uiState = VaultListUiState().copy(
-                isLoading = false,
-                databaseName = "Preview Vault.kdbx",
-                currentGroups = com.keepasskey.app.ui.preview.PreviewGroups,
-                entries = com.keepasskey.app.ui.preview.PreviewEntries,
-                totalEntriesCount = 4,
-                sortOption = VaultSortOption.NAME_ASC,
-                lastSyncTimeText = "预览同步时间 10:25",
-                decorations = com.keepasskey.app.ui.preview.PreviewDecorations
-            ),
-            onSearchQueryChange = {},
-            onSortOptionSelect = {},
-            searchAdvancedExpanded = true,
-            onGroupClick = {},
-            onNavigateUp = {},
-            onNavigateToBreadcrumb = {},
-            onEntryClick = {},
-            onEntryLongClick = {},
-            onCopyPassword = {},
-            onCopyUsername = {},
-            onCopyTotp = {},
-            onAddEntryClick = {},
-            onCreateFromTemplate = {},
-            onCreateGroup = { _, _ -> },
-            onRenameGroup = { _, _ -> },
-            onChangeGroupIcon = { _, _ -> },
-            onDeleteGroup = {},
-            onRestoreEntry = {},
-            onPurgeEntry = {},
-            onEmptyRecycleBin = {},
-            onTriggerSync = {},
-            onNavigateToConflictResolver = {},
-            onLockClick = {},
-            onSelectAllBatch = {},
-            onClearBatch = {},
-            onBatchDelete = {},
-            onBatchMove = {},
-            onKillApp = null,
-            onAutoActivateSearchConsumed = {}
-        )
-    }
-}
-
 /**
  * ISSUE-P3-352 AC①：搜索无结果空态（专用文案 + 「新建凭据条目 / 清除搜索」双出口）。
  * 只读形态（onCreateEntryFromSearch = null，仅剩清除搜索）由第二个预览覆盖。
