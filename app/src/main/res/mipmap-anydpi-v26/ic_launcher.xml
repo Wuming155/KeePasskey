@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    启动图标（自适应层叠定义）。三层几何与产图口径见 `tools/icons/generate_launcher_icons.py`：
+    - 背景层：底板渐变铺满 108dp 画布（外圈以底板边缘色延拓）；
+    - 前景层：底板等比映射到中央 72dp、图案四周透明（实测最大外接半径 29.85dp < 36dp，圆蒙版下不裁切）；
+    - 单色层：**复用前景层**——主题图标（Android 13+）只取 alpha 通道着色，而前景的 alpha 恰好就是
+      「锁梁 / 锁体 / 钥匙实心、锁孔镂空」的剪影，故不另出资产（原手绘单色矢量图已退役）。
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@mipmap/ic_launcher_background" />
     <foreground android:drawable="@mipmap/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>

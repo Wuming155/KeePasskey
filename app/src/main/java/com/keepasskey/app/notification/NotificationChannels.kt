@@ -114,7 +114,8 @@ object NotificationChannels {
      *
      * 采用系统框架的**单色锁形图标**：官方设计要求通知小图标必须是单色 alpha 蒙版，
      * 而本模块不持有 `res/drawable` 写权限——仓库内唯一图标 [R.drawable.ic_launcher] 是
-     * 彩色全幅矢量（108dp 实心底 + 白盾牌），用作小图标会被系统渲染成纯白方块。
+     * 彩色全幅图标（蓝底渐变 + 白锁 + 黄钥匙，`tools/icons/generate_launcher_icons.py` 生成），
+     * 用作小图标会被系统渲染成纯白方块。
      * 后续若补齐品牌单色小图标，只需把本常量指向新的 `R.drawable.*`，发送逻辑无需改动。
      */
     const val SMALL_ICON_RES = android.R.drawable.ic_lock_lock
