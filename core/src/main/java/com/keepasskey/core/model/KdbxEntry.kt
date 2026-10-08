@@ -97,6 +97,32 @@ data class KdbxEntry(
         return withField(key, ProtectedString(value, isProtected))
     }
 
+    /**
+     * `ISSUE-P3-543`：`fields` 的**内容**等值——标准五字段忽略 `isProtected`，其余键保留
+     * per-value 标志比较。**两侧判据的单一入口**（禁止在调用方各写一份字段清单与比较方式）：
+     * 同步「是否被修改」侧（`KdbxEntryMerger.isModified`）与「是否需要重新上传」侧
+     * （`KdbxContentComparator`）同引本函数。
+     *
+     * 忽略标准五字段标志的理由（与 `PD-80` 同口径）：该标志**不参与序列化往返**——写侧
+     * `KdbxXmlEntrySerializer.resolveProtectedFlag` 以**库级 MemoryProtection 无条件覆盖**
+     * per-value 标志（对齐官方 `KdbxFile.Write.cs:838-854` 的 `=` 语义），读侧从 `Protected="True"`
+     * 属性派生 ⇒ 同一内容的「解析实例」与「内存构造实例」可能标志不同却**不代表内容变化**。
+     * 非标准 / 自定义字段的 per-value 标志**才是被序列化的真值**，故保留比较。
+     *
+     * 比较**不解密、不物化明文**（标准字段复用 [ProtectedString.contentEquals] 的 HMAC 等值标签）。
+     * 与 [ProtectedString.equals] 的分工：后者把标志计入等值，其语义另有加解密审查的裁决依据，
+     * **不得**据本函数去改它。
+     */
+    fun fieldsContentEquals(other: KdbxEntry): Boolean {
+        if (fields.size != other.fields.size) return false
+        for ((key, av) in fields) {
+            val bv = other.fields[key] ?: return false
+            val same = if (isStandardField(key)) av.contentEquals(bv) else av == bv
+            if (!same) return false
+        }
+        return true
+    }
+
     fun clearSensitiveData() {
         fields.values.forEach { it.clear() }
         customFields.forEach { it.value.clear() }
@@ -177,5 +203,15 @@ data class KdbxEntry(
         return "KdbxEntry(id=$id, parentGroupId=$parentGroupId, iconId=$iconId, " +
             "fields=${fields.size}, customFields=${customFields.size}, " +
             "attachments=${attachments.size}, history=${history.size}, tags=$tags)"
+    }
+
+    private companion object {
+        /** 官方标准五字段（`PwDefs.TitleField` … `NotesField`）——其受保护标志由库级配置决定。 */
+        fun isStandardField(key: String): Boolean =
+            key == KdbxConstants.Fields.TITLE ||
+                    key == KdbxConstants.Fields.USER_NAME ||
+                    key == KdbxConstants.Fields.PASSWORD ||
+                    key == KdbxConstants.Fields.URL ||
+                    key == KdbxConstants.Fields.NOTES
     }
 }

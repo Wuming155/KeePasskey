@@ -65,25 +65,9 @@
 > **暂无开放项**（`ISSUE-P2-539` / `ISSUE-P2-540` 已于 §477 闭环归档；`ISSUE-P2-536` 已于 §476、
 > `ISSUE-P2-544` 已于 §478、`ISSUE-P2-545` 已于 §479 闭环，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（**1 项**）
+## P3 低危问题、特性接线与体验优化（**0 项**）
 
-### `ISSUE-P3-543` `KdbxEntryMerger.isModified` 的 `fields` 比较保留 per-value `isProtected`——与 `ISSUE-P3-542` 同源的「误报已修改」面，且本批未取证
+> **暂无开放项**（`ISSUE-P3-543` 已于 §480 整条闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-- **来源**：`ISSUE-P3-542` 整改时的同族普查副产品（代理核对「`KdbxMerger` 侧的 equals 比较面同样敏感」这一提示时发现）。
-- **核实时间点 / 核实方式**（2026-10-08，代理现跑 grep + 逐行实读）：`sync/…/merge/KdbxEntryMerger.kt:161`
-  `if (base.fields != current.fields) return true`——走 `Map` → `ProtectedString.equals`，而后者**把 `isProtected` 计入等值**。
-- **缺陷面**：与 `ISSUE-P3-542` 同源——标准五字段的 `isProtected` **不参与序列化往返**（写侧库级 MemoryProtection
-  无条件覆盖 per-value，见 `KdbxXmlEntrySerializer.resolveProtectedFlag`），故「解析出的 base」与「内存构造的 current」
-  在**库级配置非默认**时恒不等 ⇒ `isModified` 误判「已修改」⇒ 冲突裁决 / 「双方都改」噪声。
-- **未取证的部分（认领时须先补）**：① `KdbxMerger` 的 `base` 树**来源**（解析自 basecache 字节 vs 内存基线）决定本条是否现形——**未查**；
-  ② 合并侧与内容变更侧是否共用同一份 base 快照语义——**未查**。取证方式：读 `sync/…/merge/KdbxMerger.kt` 的 base 构造链并加临时探针，
-  复演 `ISSUE-P3-542` 的「内存构造 vs 解析」读数。
-- **整改方向（取证后再定）**：若确认现形，须与 `PD-80` **同口径**处置（标准五字段按内容比较）——但 `sync` 模块**不得依赖 `app`**
-  （模块单向），故应在 `core` 侧提供**共用的内容比较入口**（如 `KdbxEntry` 上的 `fieldsContentEquals`），两侧同引，**禁止各写一份判据**。
-- **验收标准**：① 取证结论写入批次文档（现形 / 不现形 + 决定性读数）；② 若现形，两侧判据同源且新增双向用例；
-  ③ 不得回退 `PD-80` / §372 / §476 的任何行为；④ 全量 `test` 绿 + `gate_readings` 全 PASS。
-- **边界**：本条与 `PD-80` 是**同族不同面**（一个管「是否需要重新上传」、一个管「是否被修改」），两条口径**刻意不同**的既有结论（`PD-20`）不受影响；
-  本条只动 `fields` 的比较方式，**不**纳入 `times`。
-
-> **近期闭环（指针）**：`ISSUE-P1-537` / `ISSUE-P1-538` / `ISSUE-P2-539` / `ISSUE-P2-540` / `ISSUE-P3-541` / `ISSUE-P3-542` 六条已于 §477 整条闭环归档（读路径判据收口与同族续扩）；`ISSUE-P2-545`（§477 登记面 / 第 11 道机检被整树回退）已于 §479 整条闭环归档；`ISSUE-P2-544`（密码库高级搜索入口「点了没反应」）已于 §478 闭环；`ISSUE-P2-536`（同步冷启动「远端侧更新误报本地修改」）已于 §476 闭环；`ISSUE-P2-518` / `519` / `521` 已于 §463、`ISSUE-P2-520` 已于 §461、`ISSUE-P2-528` 已于 §467、`ISSUE-P2-530` 已于 §470、`ISSUE-P2-529` 已于 §471 闭环归档；`ISSUE-P3-531` / `ISSUE-P3-532` 两条纯验证条目经用户 **2026-10-08 真机走查回执通过**，已于 §472 整条闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> **近期闭环（指针）**：`ISSUE-P3-543`（`KdbxEntryMerger.isModified` 同源内容比较判据上收 `core` 单点）已于 §480 整条闭环归档；`ISSUE-P1-537` / `ISSUE-P1-538` / `ISSUE-P2-539` / `ISSUE-P2-540` / `ISSUE-P3-541` / `ISSUE-P3-542` 六条已于 §477 整条闭环归档（读路径判据收口与同族续扩）；`ISSUE-P2-545`（§477 登记面 / 第 11 道机检被整树回退）已于 §479 整条闭环归档；`ISSUE-P2-544`（密码库高级搜索入口「点了没反应」）已于 §478 闭环；`ISSUE-P2-536`（同步冷启动「远端侧更新误报本地修改」）已于 §476 闭环；`ISSUE-P2-518` / `519` / `521` 已于 §463、`ISSUE-P2-520` 已于 §461、`ISSUE-P2-528` 已于 §467、`ISSUE-P2-530` 已于 §470、`ISSUE-P2-529` 已于 §471 闭环归档；`ISSUE-P3-531` / `ISSUE-P3-532` 两条纯验证条目经用户 **2026-10-08 真机走查回执通过**，已于 §472 整条闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
 

@@ -153,12 +153,20 @@ internal object KdbxEntryMerger {
      * 回答，那一侧**刻意不比 `times`**（`KdbxTimes` 含使用性字段 `lastAccessTime` / `usageCount`，
      * 纳入会让「触碰但内容等同」被判成变更 ⇒ 无意义重传并前移远端 ETag）。
      * 两处口径**刻意不同**，理由各自就地声明；边界登记于 `docs/architecture/已知工程限界.md` §10。
+     *
+     * **`fields` 比较口径与 `KdbxContentComparator` 同源**（`ISSUE-P3-543`，与 `PD-80` 同口径）：
+     * 标准五字段按**内容**比较（忽略 `isProtected`），非标准 / 自定义字段保留 per-value 标志比较，
+     * 两侧同引 [KdbxEntry.fieldsContentEquals]——**禁止各写一份判据**。忽略该标志的理由：
+     * 对标准五字段它由**库级 MemoryProtection** 决定、不参与序列化往返（写侧
+     * `KdbxXmlEntrySerializer.resolveProtectedFlag` 无条件覆盖 per-value），故「解析出的 base」
+     * 与「内存构造的 current」可能标志不同却**不代表内容变化**——按 `Map` 等值比较会误报「已修改」
+     * （`ISSUE-P3-543` 探针：同内容 / 异标志 ⇒ `isModified=true`，且删除 vs 修改分支据此**复活**条目）。
      */
     fun isModified(base: KdbxEntry?, current: KdbxEntry): Boolean {
         if (base == null) return true
-        // ProtectedString.equals 为字节数组内容比较，直接用 Map 相等性判断，
-        // 不经 readString() 将全库密码物化为不可清除的 String
-        if (base.fields != current.fields) return true
+        // 内容等值（标准五字段忽略 isProtected）；比较不经 readString()，
+        // 不将全库密码物化为不可清除的 String
+        if (!base.fieldsContentEquals(current)) return true
         if (base.customFields != current.customFields) return true
         // ISSUE-P2-385：条目级 customData（KPEX 扩展以外的第三方键、KeePassXC 浏览器扩展
         // 密钥等）参与修改判定——否则远端只改 customData 会被判为「未修改」而整表被本地覆盖。
