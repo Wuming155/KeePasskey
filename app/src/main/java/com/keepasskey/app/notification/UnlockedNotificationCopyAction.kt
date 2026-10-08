@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 「已解锁」常驻通知的**复制快捷动作**可作用字段。
@@ -64,7 +65,7 @@ class UnlockedNotificationCopyAction @Inject constructor(
     private val databaseSession: DatabaseSession
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default)
 
     /**
      * 执行一次复制；[onFinished] 在动作结束后（无论成败）于协程侧回调，

@@ -26,6 +26,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 旧版无障碍自动填充通道（ISSUE-P3-324）。
@@ -62,7 +63,7 @@ class LegacyAutofillAccessibilityService : AccessibilityService() {
     @Inject
     lateinit var coordinator: LegacyAutofillCoordinator
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val serviceScope = guardedScope(Dispatchers.Default)
 
     /**
      * ISSUE-P3-374 AC②：按包名冷却的主动提示节流（取代原全局 2 秒去抖——内容变化事件

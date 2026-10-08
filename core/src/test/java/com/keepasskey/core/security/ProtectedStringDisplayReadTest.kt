@@ -1,5 +1,7 @@
 package com.keepasskey.core.security
 
+import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxEntry
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -72,5 +74,77 @@ class ProtectedStringDisplayReadTest {
         assertEquals("", empty.readString())
         assertEquals("", empty.readStringForDisplay())
         assertTrue(empty.readUtf8ForDisplay()!!.isEmpty())
+    }
+
+    /**
+     * `ISSUE-P2-534`（§473 复核 #3）：锁定「等值标签复核」的**前提成立性**。
+     *
+     * 驻留加密是 AES/CTR（无认证标签），`clear()` 又会先填零密文、后置标志；并发读取因此可能
+     * 通过 `checkNotCleared` 却拿到**正在被填零**的密文 —— CTR 只会把它解成密钥流垃圾明文而不报错。
+     * `ProtectedString.plainBytes()` 正是靠「解出的明文重算标签 ≠ 驻留标签」把该形态转成 fail-closed。
+     * 本用例复演「密文被填零而 IV 仍在」，断言标签**必然对不上** ——
+     * 否则复核就是空守卫（这正是 `ISSUE-P3-303` 那类「闸门存在 ≠ 闸门有效」的教训）。
+     */
+    @Test
+    fun `等值标签能识别被填零的驻留密文（防静默垃圾明文）`() {
+        val plain = "correct horse battery staple".toByteArray(Charsets.UTF_8)
+        val sealed = InMemoryCipher.seal(plain)
+        assertTrue(
+            "前提：正常密封标签必须与明文重算的标签一致",
+            InMemoryCipher.tagsEqual(sealed.tag, InMemoryCipher.equalityTag(plain))
+        )
+
+        sealed.data.fill(0)
+        val garbage = InMemoryCipher.unseal(sealed.iv, sealed.data)
+        try {
+            assertFalse(
+                "被填零的密文解出的结果必须与驻留标签不符（否则复核形同虚设）",
+                InMemoryCipher.tagsEqual(sealed.tag, InMemoryCipher.equalityTag(garbage))
+            )
+        } finally {
+            garbage.fill(0)
+            plain.fill(0)
+        }
+    }
+
+    /**
+     * `ISSUE-P2-534`：条目级展示读访问器与「已清零」判据的外显行为。
+     *
+     * ① `displayTitle/displayUserName/displayUrl/displayNotes` 与裸 getter 语义相同（正向对照）；
+     * ② 字段实例被擦后降级为空串而**不抛**（§473 崩溃点即 `getUserName`）；
+     * ③ `hasClearedFields()` 供交付 / 凭据面预判中止（只读 `cleared`，不物化明文）。
+     */
+    @Test
+    fun `KdbxEntry 展示读访问器降级且 hasClearedFields 如实上报`() {
+        val title = ProtectedString("标题", isProtected = true)
+        val userName = ProtectedString("alice", isProtected = true)
+        val url = ProtectedString("https://example.test", isProtected = true)
+        val notes = ProtectedString("备注", isProtected = true)
+        val entry = KdbxEntry(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to title,
+                KdbxConstants.Fields.USER_NAME to userName,
+                KdbxConstants.Fields.URL to url,
+                KdbxConstants.Fields.NOTES to notes
+            )
+        )
+
+        // 正向对照：未清零时展示读口与裸 getter 逐字一致
+        assertEquals(entry.title, entry.displayTitle())
+        assertEquals(entry.userName, entry.displayUserName())
+        assertEquals(entry.url, entry.displayUrl())
+        assertEquals(entry.notes, entry.displayNotes())
+        assertFalse("未清零时不得误报", entry.hasClearedFields())
+
+        listOf(title, userName, url, notes).forEach { it.clear() }
+
+        assertEquals("", entry.displayTitle())
+        assertEquals("", entry.displayUserName())
+        assertEquals("", entry.displayUrl())
+        assertEquals("", entry.displayNotes())
+        assertTrue("字段已清零时必须如实上报，供交付面预判中止", entry.hasClearedFields())
+        // 裸 getter 的 fail-fast 语义**逐字未放宽**（写路径的最后防线）
+        val failure = runCatching { entry.userName }.exceptionOrNull()
+        assertTrue("裸 getter 必须仍抛，实际：$failure", failure is IllegalStateException)
     }
 }

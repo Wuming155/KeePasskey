@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * ISSUE-P3-381：回前台 / 网络恢复时的远端变更探测编排。
@@ -43,7 +44,7 @@ class ResumeSyncProbeCoordinator @Inject constructor(
 ) {
 
     /** 进程级探测作用域（不走 Hilt CoroutineScope 绑定——该绑定在本图中不存在） */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default)
 
     private val _lastProbeAtMillis = MutableStateFlow<Long?>(null)
 

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 「密码库已解锁」常驻通知控制器（ISSUE-P3-18 验收标准 3：`showUnlockedNotification` 真实生效）。
@@ -59,7 +60,7 @@ class UnlockedNotificationController @Inject constructor(
     private val entryTracker: UnlockedNotificationEntryTracker
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default)
 
     private var started = false
 

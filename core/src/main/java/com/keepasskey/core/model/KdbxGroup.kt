@@ -96,7 +96,11 @@ data class KdbxGroup(
      * **严禁**改用 [clearSensitiveData] 递归擦除：新树会共享未修改子树的引用，
      * 递归擦除会造成存活数据丢失。
      *
-     * 调用约定：在把旧树替换为 [surviving] 之前调用 oldRoot.clearSupersededSensitiveData(newRoot)。
+     * 调用约定（`ISSUE-P2-534` 起，**改前必读**）：**先把新树发布上线（换下旧树），再调用**
+     * `oldRoot.clearSupersededSensitiveData(newRoot)`。理由：擦除是**就地清零**，而发布面
+     * （`DatabaseSession.databaseFlow`）的读取者与擦除点**不共享锁**——先擦会让「仍持旧树快照」
+     * 的读取者读到已清零实例（真机闪退根因见 `docs/RESOLVED_LOG.md` §473）。发布在前把窗口压到最小；
+     * 残余调度窗口由消费面的展示读口（`KdbxEntry.displayTitle` 等 / `ProtectedString.readStringForDisplay`）兜底。
      * 新旧根为同一实例（无替换）时直接返回。
      */
     fun clearSupersededSensitiveData(surviving: KdbxGroup) {

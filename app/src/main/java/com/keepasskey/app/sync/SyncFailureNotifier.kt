@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 同步失败的可观测性判定（ISSUE-P3-298 ④；纯函数，JVM 可单测）。
@@ -73,7 +74,7 @@ class SyncFailureNotifier @Inject constructor(
     private val permissionPrompter: NotificationPermissionPrompter
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default)
 
     private var started = false
 

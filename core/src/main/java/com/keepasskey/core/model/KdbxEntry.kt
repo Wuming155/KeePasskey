@@ -40,6 +40,48 @@ data class KdbxEntry(
     val notes: String
         get() = fields[KdbxConstants.Fields.NOTES]?.readString().orEmpty()
 
+    /**
+     * 展示面读取（`ISSUE-P2-534`）：与 [title] / [userName] / [url] / [notes] 四个裸 getter
+     * **语义完全相同**，唯一差别是「字段实例已被并发擦除」时降级为空串而**不抛**。
+     *
+     * 为何必须入口化：§473 真机闪退的崩溃点正是 [userName]——裸 getter 内部就是
+     * `ProtectedString.readString()`（fail-fast），而展示面（UI 投影 / 检索 / 差异展示）与会话层
+     * 「整树替换时就地清零」**不共享锁**，因此「投影面顺手写 `entry.userName`」这种语义等价的
+     * 回退会把 fail-fast 重新带回展示面。机检 `tools/doc/check_projection_read_safety.py`
+     * 据此把「登记在案的投影面文件引用这四个裸 getter」判红，并要求改走本组读口。
+     *
+     * **使用边界（违反即事故）**：仅限非持久化的展示 / 检索 / 差异消费面。写路径、序列化、
+     * 凭据下发、`{REF:}` 取值面**必须**继续走裸 getter（fail-fast）或 `cleared` 预判 ——
+     * 就地降级会把空值写进用户的库，或把空账号 / 空口令填进目标应用。
+     */
+    fun displayTitle(): String = displayFieldForDisplay(KdbxConstants.Fields.TITLE)
+
+    /** 展示面读取：[userName] 的降级变体（边界见 [displayTitle]）。 */
+    fun displayUserName(): String = displayFieldForDisplay(KdbxConstants.Fields.USER_NAME)
+
+    /** 展示面读取：[url] 的降级变体（边界见 [displayTitle]）。 */
+    fun displayUrl(): String = displayFieldForDisplay(KdbxConstants.Fields.URL)
+
+    /** 展示面读取：[notes] 的降级变体（边界见 [displayTitle]）。 */
+    fun displayNotes(): String = displayFieldForDisplay(KdbxConstants.Fields.NOTES)
+
+    /** 标准字段的展示面取值：键缺失与实例已清零同义，均得空串。 */
+    private fun displayFieldForDisplay(key: String): String =
+        fields[key]?.readStringForDisplay().orEmpty()
+
+    /**
+     * `ISSUE-P2-534`：本条目是否含**已清零**的字段（＝正被会话层擦除，属「被替换下线」的旧实例）。
+     *
+     * 供**交付面 / 凭据面**在读取前预判中止使用：把已清零字段读成空串会向目标应用填入空账号 /
+     * 空口令，或把空值写回库，比如实失败更糟。判据只读 `cleared` 观测位，**不物化明文**。
+     *
+     * 判据取「任一字段已清零」而非逐个键名比对：会话层的擦除是**子树级**的
+     * （`clearSensitiveData` / `clearSupersededSensitiveData` 一次清掉整棵下线子树），
+     * 故「有字段被擦」即等价于「本条正在下线」。宁可少给一个候选（下一轮请求即恢复），
+     * 也不给一个空值。
+     */
+    fun hasClearedFields(): Boolean = fields.values.any { it.cleared }
+
     fun withField(key: String, value: ProtectedString): KdbxEntry {
         val newFields = fields.toMutableMap()
         newFields[key] = value

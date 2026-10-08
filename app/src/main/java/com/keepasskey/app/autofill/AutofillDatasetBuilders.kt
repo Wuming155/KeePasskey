@@ -204,7 +204,9 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     AppLog.d(TAG, "已解锁分支候选数据集数量=${candidates.ranked.size}")
 
     for (ranked in candidates.ranked) {
-        responseBuilder.addDataset(buildCandidateDataset(context, ranked))
+        // ISSUE-P2-534：候选在「检索 → 下发」窗口内被并发擦除时 `buildCandidateDataset` 返回 null
+        // （交付面拒绝把已清零字段读成空串填给目标应用），此处如实跳过该候选
+        buildCandidateDataset(context, ranked)?.let { responseBuilder.addDataset(it) }
     }
 
     // ISSUE-P3-375 AC②：结构化数据集（卡 / 地址）——与登录候选正交追加
@@ -224,34 +226,49 @@ internal data class UnlockedDatasetContext(
     val skipRepeatConfirmation: Boolean
 )
 
-/** 单候选 → 数据集：值解析、菜单 / 内联呈现、字段值与二次认证挂接 */
+/**
+ * 单候选 → 数据集：值解析、菜单 / 内联呈现、字段值与二次认证挂接。
+ *
+ * `ISSUE-P2-534`：**返回 null 表示该候选已被并发擦除**，调用方须跳过（绝不向目标应用交付空值）。
+ * 判据见 [hasClearedDeliveryFields]。
+ */
 private suspend fun KeePasskeyAutofillService.buildCandidateDataset(
     ctx: UnlockedDatasetContext,
     ranked: AutofillCandidateRanker.Ranked
-): Dataset {
+): Dataset? {
     val entry = ranked.entry
+    // ISSUE-P2-534：**交付面预判**——「检索 → 下发」窗口内候选可能已被会话整树替换就地清零。
+    // 此时把已清零字段读成空串，会向目标应用填入空账号 / 空口令（静默污染，比报错更糟）；
+    // 故按 `cleared` 观测位（不物化明文）预判中止，跳过该候选并留脱敏日志。
+    if (entry.hasClearedFields()) {
+        AppLog.w(TAG, "候选条目在检索与下发之间已被擦除，本轮跳过该候选")
+        return null
+    }
     // TASK-17：下发前解析 {REF:...} 字段引用（仅在取值消费点展开，投影层不物化）
     // ISSUE-P0-08：消费点面白名单——username 通道为非口令消费点，{REF:P@…} 一律掩码，
     // 口令明文不得经用户名通道进入 RemoteViews / IME 内联建议 / 确认页 extra / 请求方输入框；
     // password 通道为口令消费点，按 KDBX 语义展开
     val entryIdHex = entry.id.toHexString()
-    val username = vaultRepository.resolveFieldReferences(entryIdHex, entry.userName, RefField.USER_NAME)
-        ?: entry.userName
-    val password = entry.password?.readString()
+    val entryTitle = entry.displayTitle()
+    // 上面已按 `cleared` 预判中止；此处仍走展示面读口，覆盖「预判 → 读取」之间仅剩的几条指令窗口
+    val entryUserName = entry.displayUserName()
+    val username = vaultRepository.resolveFieldReferences(entryIdHex, entryUserName, RefField.USER_NAME)
+        ?: entryUserName
+    val password = entry.password?.readStringForDisplay()
         ?.let { raw -> vaultRepository.resolveFieldReferences(entryIdHex, raw, RefField.PASSWORD) }
         .orEmpty()
-    val displayName = username.ifBlank { entry.title }
+    val displayName = username.ifBlank { entryTitle }
 
     val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
         setTextViewText(R.id.tv_username, displayName)
-        setTextViewText(R.id.tv_subtitle, entry.title)
+        setTextViewText(R.id.tv_subtitle, entryTitle)
     }
     val dsBuilder = Dataset.Builder(
         Presentations.Builder()
             .setMenuPresentation(views)
             .setDialogPresentation(views)
             .apply {
-                buildInlinePresentation(ctx.inlineRequest, displayName, entry.title)
+                buildInlinePresentation(ctx.inlineRequest, displayName, entryTitle)
                     ?.let { setInlinePresentation(it) }
             }
             .build()

@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * ISSUE-P3-384：从另一 `.kdbx` 导入 / 并入当前库的执行体。
@@ -64,7 +65,7 @@ class KdbxMergeController @Inject constructor(
 ) {
     private val strings: StringsProvider = stringsProvider.orFallback(context)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default)
 
     private val mutableUiState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
     val uiState: StateFlow<ImportUiState> = mutableUiState.asStateFlow()

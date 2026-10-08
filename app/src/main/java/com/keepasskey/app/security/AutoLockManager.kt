@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 自动锁定 (Auto-Lock) Android 注册管道。
@@ -47,7 +48,7 @@ class AutoLockManager @Inject constructor(
     private val settingsRepository: SettingsRepository
 ) : DefaultLifecycleObserver {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = guardedScope(Dispatchers.Main)
 
     val isLocked: StateFlow<Boolean> get() = sessionGuard.isLocked
 

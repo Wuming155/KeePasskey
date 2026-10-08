@@ -1,11 +1,15 @@
 package com.keepasskey.app.data.repository
 
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.ConcurrentHashMap
+
+/** 本类日志标签（只记异常类型与事件，不含任何凭据内容）。 */
+private const val TAG = "VaultEntrySecretReader"
 
 /**
  * 条目敏感值读取协调器（ISSUE-P3-31 批次 B 自 `RealVaultRepository` 拆出，纯结构性改动）。
@@ -95,50 +99,70 @@ internal class VaultEntrySecretReader(
         }
     }
 
+    /**
+     * `ISSUE-P2-534`：凭据读取的**快照重取守卫**（§473 复核 #1 的凭据面收口）。
+     *
+     * 本类所有读点都先取 `databaseFlow` 快照、再读其中的字段；而会话层整树替换时会**就地清零**
+     * 快照里「被替换下线」的实例（发布面与本读取**不共享锁**）⇒ 快照可能是「正在被擦除的旧树」。
+     * 撞上时（`ProtectedString` 的 fail-fast 判据抛 `IllegalStateException`）**重取一次快照**即可
+     * 读到替换后的新树（新树实例未被擦除）——这比向用户报「读取失败」更贴合事实（数据并未丢失），
+     * 也比降级成空值安全：**凭据面绝不静默给空**（空口令会被当成真实口令交付给目标应用）。
+     *
+     * 重取后仍失败则**如实上抛**：那已不是竞态，而是真缺陷，由调用方按既有契约呈现失败。
+     * 留痕只记异常类型（不含任何凭据内容）。
+     */
+    private suspend fun <T> guardedCredentialRead(block: suspend () -> T): T =
+        try {
+            block()
+        } catch (e: IllegalStateException) {
+            AppLog.w(TAG, "凭据读取撞上会话树并发替换，重取快照后重试：${e.javaClass.simpleName}")
+            block()
+        }
+
     // 原 readErasableChars（ProtectedString? → CharArray?）随 ISSUE-P3-273 的字段定位收敛
     // 失去全部调用点（修订快照改走 VaultEntryTotpMapping.locateConfigSource().readChars()），
     // 按「删除死代码」口径移除；需要该能力处直接调 ProtectedString.readChars()（同为独占副本语义）。
 
-    suspend fun getEntryPassword(entryId: String): String? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
+    suspend fun getEntryPassword(entryId: String): String? = guardedCredentialRead {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@guardedCredentialRead null
+        val currentDb = databaseSession.databaseFlow.first() ?: return@guardedCredentialRead null
         val entry = currentDb.rootGroup.findEntry(targetUuid)
         // ISSUE-P2-15：不再直接 readString()，经 CharArray 独占副本中转并即时清零
-        return readErasableString(entry?.password)
+        readErasableString(entry?.password)
     }
 
-    suspend fun getEntryPasswordChars(entryId: String): CharArray? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
+    suspend fun getEntryPasswordChars(entryId: String): CharArray? = guardedCredentialRead {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@guardedCredentialRead null
+        val currentDb = databaseSession.databaseFlow.first() ?: return@guardedCredentialRead null
         val entry = currentDb.rootGroup.findEntry(targetUuid)
         // readChars() 返回独占副本（内部中间量已清零），清零责任随契约移交调用方
-        return entry?.password?.readChars()
+        entry?.password?.readChars()
     }
 
-    suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
+    suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? = guardedCredentialRead {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@guardedCredentialRead null
+        val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return@guardedCredentialRead null
+        val currentDb = databaseSession.databaseFlow.first() ?: return@guardedCredentialRead null
         val entry = currentDb.rootGroup.findEntry(targetUuid)
         // ISSUE-P2-15：不再直接 readString()，经 CharArray 独占副本中转并即时清零
-        return readErasableString(entry?.history?.firstOrNull { it.id == revisionUuid }?.password)
+        readErasableString(entry?.history?.firstOrNull { it.id == revisionUuid }?.password)
     }
 
-    suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
+    suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray? = guardedCredentialRead {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@guardedCredentialRead null
+        val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return@guardedCredentialRead null
+        val currentDb = databaseSession.databaseFlow.first() ?: return@guardedCredentialRead null
         val entry = currentDb.rootGroup.findEntry(targetUuid)
         // M2 整改：回滚路径全程 CharArray（readChars 返回独占副本，内部中间量已清零）
-        return entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readChars()
+        entry?.history?.firstOrNull { it.id == revisionUuid }?.password?.readChars()
     }
 
-    suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
-        val revision = entry.history.firstOrNull { it.id == revisionUuid } ?: return null
+    suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? = guardedCredentialRead {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@guardedCredentialRead null
+        val revisionUuid = parseKdbxUuidOrNull(revisionId) ?: return@guardedCredentialRead null
+        val currentDb = databaseSession.databaseFlow.first() ?: return@guardedCredentialRead null
+        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return@guardedCredentialRead null
+        val revision = entry.history.firstOrNull { it.id == revisionUuid } ?: return@guardedCredentialRead null
         // 断点8 整改：整修订快照投影 + 受保护字段解密回填（仅驻留回滚会话），
         // 使回滚保存时 title/url/自定义字段/TOTP/密码全字段真实还原
         val projection = entryMapper.mapKdbxEntryToUi(revision)
@@ -160,18 +184,18 @@ internal class VaultEntrySecretReader(
         val totpRawChars = VaultEntryTotpMapping.locateConfigSource(revision, totpPreferences())
             ?.readChars()
             ?: CharArray(0)
-        return EntryRevisionSnapshot(
+        EntryRevisionSnapshot(
             entry = projection.copy(customFields = decryptedFields),
             totpSecretChars = totpRawChars
         )
     }
 
-    suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
+    suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? = guardedCredentialRead {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@guardedCredentialRead null
+        val currentDb = databaseSession.databaseFlow.first() ?: return@guardedCredentialRead null
+        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return@guardedCredentialRead null
         // TASK-10：编辑态 CharArray 化——readChars 返回独占副本，调用方按借用语义用毕清零
-        return entry.customFields.firstOrNull { it.key == fieldKey }?.value?.readChars()
+        entry.customFields.firstOrNull { it.key == fieldKey }?.value?.readChars()
     }
 
     /**

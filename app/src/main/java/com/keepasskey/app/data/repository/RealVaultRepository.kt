@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 基于真实 KDBX 数据库引擎与 DatabaseSession 的生产级数据仓库。
@@ -68,7 +69,7 @@ class RealVaultRepository @Inject constructor(
     private val driftCoordinator: VaultFileDriftCoordinator? = null
 ) : VaultRepository {
 
-    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val repositoryScope = guardedScope(Dispatchers.Default)
 
     /** ISSUE-P3-447 AC②：保存侧漂移检测 / 基线刷新的单点收口（两通道元数据分流在此） */
     private val driftGuard = VaultFileDriftGuard(driftCoordinator, context)

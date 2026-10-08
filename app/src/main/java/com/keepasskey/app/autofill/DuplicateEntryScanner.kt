@@ -48,16 +48,19 @@ object DuplicateEntryScanner {
     }
 
     internal fun keyOf(entry: KdbxEntry, rule: DuplicateRule): String? {
+        // ISSUE-P2-534：健康检查的重复扫描是**只读报告面**（`Dispatchers.Default` 上遍历全库），
+        // 与会话整树替换的就地擦除不共享锁 ⇒ 元数据读取一律走展示面读口
+        // （裸 getter / 裸 readString 撞上已擦实例会抛 ISE 崩进程）
         return when (rule) {
             DuplicateRule.SAME_URL_AND_USERNAME -> {
-                val url = normalizeUrl(entry.url)
-                val user = entry.fields[KdbxConstants.Fields.USER_NAME]?.readString()?.trim().orEmpty()
+                val url = normalizeUrl(entry.displayUrl())
+                val user = entry.displayUserName().trim()
                 if (url.isEmpty() && user.isEmpty()) null else url + "|" + user
             }
 
             DuplicateRule.SAME_TITLE_AND_URL -> {
-                val title = entry.title.trim()
-                val url = normalizeUrl(entry.url)
+                val title = entry.displayTitle().trim()
+                val url = normalizeUrl(entry.displayUrl())
                 if (title.isEmpty() || url.isEmpty()) null else title + "|" + url
             }
         }

@@ -431,6 +431,8 @@ data class PasskeyData(
             var legacyCredentialId = false
             var legacyPrivateKey = false
             for (field in fields) {
+                // ISSUE-P2-534：已清零字段视同不存在 ⇒ 形状短路自然失败返回 null；下面是**同一判据**的纵深防御（必需键亦逐键 `takeUnless { cleared }`）
+                if (field.value.cleared) continue
                 when (field.key) {
                     KPEX_FIELD_RELYING_PARTY -> kpexRpId = true
                     KPEX_FIELD_CREDENTIAL_ID -> kpexCredentialId = true
@@ -445,12 +447,10 @@ data class PasskeyData(
             if (!kpexComplete && !legacyComplete) return null
 
             val map = fields.associateBy { it.key }
-            val rpId = (map[KPEX_FIELD_RELYING_PARTY] ?: map[LEGACY_FIELD_RP_ID])?.value?.readString()
-                ?: return null
-            val credId = (map[KPEX_FIELD_CREDENTIAL_ID] ?: map[LEGACY_FIELD_CREDENTIAL_ID])?.value?.readString()
-                ?: return null
-            val privateKeyVal = map[KPEX_FIELD_PRIVATE_KEY]?.value
-                ?: map[LEGACY_FIELD_PRIVATE_KEY]?.value
+            val rpId = (map[KPEX_FIELD_RELYING_PARTY] ?: map[LEGACY_FIELD_RP_ID])?.value?.takeUnless { it.cleared }?.readString() ?: return null
+            val credId = (map[KPEX_FIELD_CREDENTIAL_ID] ?: map[LEGACY_FIELD_CREDENTIAL_ID])?.value?.takeUnless { it.cleared }?.readString() ?: return null
+            val privateKeyVal = map[KPEX_FIELD_PRIVATE_KEY]?.value?.takeUnless { it.cleared }
+                ?: map[LEGACY_FIELD_PRIVATE_KEY]?.value?.takeUnless { it.cleared }
                 ?: return null
 
             val userHandle = (map[KPEX_FIELD_USER_HANDLE] ?: map[LEGACY_FIELD_USER_HANDLE])

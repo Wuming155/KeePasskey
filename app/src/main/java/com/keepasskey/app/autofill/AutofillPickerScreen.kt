@@ -199,15 +199,18 @@ fun AutofillPickerScreen(
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(items = results, key = { it.id.toHexString() }) { entry ->
-                        val title = entry.title.ifBlank { entry.userName }
+                        // ISSUE-P2-534：选择器列表是**展示面**——它与会话整树替换的就地擦除并发
+                        // （后台同步 / 编辑落库都可能触发），故元数据一律走展示面读口
+                        val displayName = entry.displayUserName()
+                        val title = entry.displayTitle().ifBlank { displayName }
                         val subtitle = buildList {
-                            if (entry.userName.isNotBlank()) add(entry.userName)
-                            val host = entry.url
+                            if (displayName.isNotBlank()) add(displayName)
+                            val host = entry.displayUrl()
                                 .removePrefix("https://")
                                 .removePrefix("http://")
                                 .trimEnd('/')
                                 .substringBefore('/')
-                            if (host.isNotBlank() && host != entry.userName) add(host)
+                            if (host.isNotBlank() && host != displayName) add(host)
                         }.joinToString(" · ").ifBlank { null }
                         ListItem(
                             modifier = Modifier

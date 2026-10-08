@@ -220,10 +220,12 @@ class AlgoHotPathGuardsTest {
     @Test
     fun `自动填充评分不得逐条目重复解密与建 Map`() {
         val ranker = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillCandidateRanker.kt")
+        // ISSUE-P2-534：url 读取改走**展示面读口**（`displayUrl()`，已清零即降级空串而不抛），
+        // 判据随实现同步更新；**「只允许读一次」的意图逐字不变**（每次访问仍是一次驻留密文解密 + String 物化）。
         assertEquals(
             "url 属性只允许读一次（每次访问都是一次驻留密文解密 + String 物化）",
             1,
-            Regex("val entryUrl = entry\\.url").findAll(ranker).count()
+            Regex("val entryUrl = entry\\.displayUrl\\(\\)").findAll(ranker).count()
         )
         assertFalse(
             "isExactDomain 不得再接收 entry 并自行读一遍 url",

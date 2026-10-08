@@ -234,7 +234,9 @@ object AutofillCandidateRanker {
 
         // ISSUE-P3-171：`url` 是属性 getter——每次访问都是一次驻留密文解密 + String 物化；
         // 本函数与其助手 [isExactDomain] 合计最多访问 4 次 ⇒ 每条目只读一次并下传。
-        val entryUrl = entry.url
+        // ISSUE-P2-534：本函数在自动填充服务 / 选择器里于 `Dispatchers.Default` 上对候选排序，
+        // 与会话整树替换的就地擦除不共享锁 ⇒ 元数据读取一律走展示面读口（裸 getter 会崩进程）
+        val entryUrl = entry.displayUrl()
 
         // ISSUE-P2-46：包名维度必须同时满足「条目显式 android:// 绑定」与「调用方已按
         // 包名 + 签名摘要完成首次绑定」。仅有前者时，任意以同 applicationId 侧载的应用
@@ -275,7 +277,7 @@ object AutofillCandidateRanker {
         if (score <= 0) return null
 
         // 标题只读一次，供两个排序加成维度共用（ISSUE-P3-171 同口径：属性 getter 少次化）
-        val entryTitle = entry.title
+        val entryTitle = entry.displayTitle()
 
         if (MatchReason.EXACT_PACKAGE in reasons &&
             (MatchReason.EXACT_DOMAIN in reasons || MatchReason.PARENT_DOMAIN in reasons)

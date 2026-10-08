@@ -147,6 +147,17 @@ internal object InMemoryCipher {
     }
 
     /**
+     * 明文 → 等值标签（HMAC-SHA256(eqKey, 明文)），与 [seal] 写入驻留实例的标签同源。
+     *
+     * `ISSUE-P2-534`：本原语存在的唯一理由是让读取侧能**复核**密文完整性。驻留加密是
+     * **AES/CTR（无认证标签）**（见本类 KDoc「如实声明的边界」），因此密文一旦在读取途中被
+     * 并发就地清零（[ProtectedString.clear] 先填零 `data`、后置 `isCleared`），`unseal` 不会报错，
+     * 而是**静默吐出密钥流垃圾明文**——比抛异常更糟（绕过 fail-fast 且污染展示面）。
+     * 读取侧以本标签复核即可把该形态统一收敛为 fail-closed。
+     */
+    fun equalityTag(plain: ByteArray): ByteArray = hmacSha256(eqKey, plain)
+
+    /**
      * 常时时间等值标签比较（供 ProtectedString.equals 使用，避免逐字节短路计时侧信道）。
      */
     fun tagsEqual(a: ByteArray, b: ByteArray): Boolean = MessageDigest.isEqual(a, b)

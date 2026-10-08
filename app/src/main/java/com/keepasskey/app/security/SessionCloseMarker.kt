@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 会话开合跨进程标记（ISSUE-P3-438）。
@@ -33,7 +34,7 @@ class SessionCloseMarker @Inject constructor(
     private val databaseSession: DatabaseSession
 ) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = guardedScope(Dispatchers.Main)
     private var initialized = false
 
     /** 待消费的「上次异常关闭」事实（进程内存态，消费一次即清） */

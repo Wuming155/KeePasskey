@@ -49,7 +49,8 @@ private fun KeePasskeyAutofillService.buildStructuredDataset(
 ): Dataset {
     // 展示面只出条目标题 + 固定副标题（不暴露字段值）
     val views = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
-        setTextViewText(R.id.tv_username, entry.title)
+        // ISSUE-P2-534：结构化数据集菜单是**展示面**，与会话整树替换的就地擦除并发 ⇒ 走展示面读口
+        setTextViewText(R.id.tv_username, entry.displayTitle())
         setTextViewText(R.id.tv_subtitle, getString(R.string.structured_dataset_subtitle))
     }
     val dsBuilder = Dataset.Builder(
@@ -66,6 +67,6 @@ private fun KeePasskeyAutofillService.buildStructuredDataset(
         }
     }
     // 恒挂认证：结构化字段每次交付强制确认（调用方以 ctx 表达，skip 分支不适用于本路径）
-    attachConfirmationAuth(dsBuilder, entry.id.toHexString(), entry.title, ctx)
+    attachConfirmationAuth(dsBuilder, entry.id.toHexString(), entry.displayTitle(), ctx)
     return dsBuilder.build()
 }

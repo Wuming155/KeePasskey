@@ -289,7 +289,9 @@ class AutofillUnlockActivity : FragmentActivity() {
             putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
             putExtra(
                 AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,
-                entry.userName.ifBlank { entry.title }
+                // ISSUE-P2-534：解锁页候选列表是**展示面**——与会话整树替换的就地擦除并发，
+                // 裸 getter（`entry.userName` / `entry.title`）会抛 ISE 崩进程
+                entry.displayUserName().ifBlank { entry.displayTitle() }
             )
             putExtra(
                 AutofillConfirmActivity.EXTRA_GRANT_PACKAGE,

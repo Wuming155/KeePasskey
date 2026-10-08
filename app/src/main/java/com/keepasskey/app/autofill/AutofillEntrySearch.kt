@@ -39,10 +39,14 @@ object AutofillEntrySearch {
             entries
         } else {
             entries.filter { entry ->
-                entry.title.lowercase().contains(q) ||
-                        entry.userName.lowercase().contains(q) ||
-                        entry.url.lowercase().contains(q) ||
-                        hostLadderMatches(entry.url, q)
+                // ISSUE-P2-534：检索面改走**展示面读口**——本函数在自动填充服务 / 选择器里于
+                // `Dispatchers.Default` 上遍历全库，与会话整树替换的就地擦除**不共享锁**；
+                // 裸 getter（`entry.userName` 等）内部即 fail-fast 读，撞上已擦实例会崩进程。
+                // 判据仍是同一批非敏感元数据（标题 / 用户名 / 网址），零秘密热路径语义不变。
+                entry.displayTitle().lowercase().contains(q) ||
+                        entry.displayUserName().lowercase().contains(q) ||
+                        entry.displayUrl().lowercase().contains(q) ||
+                        hostLadderMatches(entry.displayUrl(), q)
             }
         }
         return matched.take(limit.coerceAtLeast(1))

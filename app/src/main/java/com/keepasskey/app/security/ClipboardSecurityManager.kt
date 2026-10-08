@@ -13,6 +13,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.guardedScope
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
@@ -22,7 +23,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -91,7 +91,7 @@ class ClipboardSecurityManager @Inject constructor(
     private val clipboardManager: ClipboardManager =
         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = guardedScope(Dispatchers.Main)
     private var clearJob: Job? = null
     private var lastSensitiveHash: ByteArray? = null
 

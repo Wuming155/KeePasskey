@@ -25,6 +25,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 生产级传统系统自动填充服务 (AutofillService) 实现（对齐 P0-4 修复计划）。
@@ -92,7 +93,7 @@ class KeePasskeyAutofillService : AutofillService() {
     @Inject
     lateinit var callerTrustStore: AutofillCallerTrustStore
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val serviceScope = guardedScope(Dispatchers.Default)
 
     override fun onFillRequest(
         request: FillRequest,

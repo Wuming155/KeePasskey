@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.time.Duration.Companion.seconds
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * 主密码解锁失败节流记录（ISSUE-P1-04 / ZT-04）。
@@ -187,7 +188,7 @@ class UnlockThrottleConfigProvider @Inject constructor(
     override var current: ThrottleConfig = ThrottleConfig(enabled = false)
         private set
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default)
 
     init {
         scope.launch {

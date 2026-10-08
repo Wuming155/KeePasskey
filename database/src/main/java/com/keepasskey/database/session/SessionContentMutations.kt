@@ -12,7 +12,12 @@ import kotlinx.coroutines.sync.withLock
  * 会话内容变更（ISSUE-P3-31 批次 D 结构拆分）。
  *
  * 自 [DatabaseSession] 原样抽出条目 / 分组的增删改与批量操作：统一在 [mutex] 临界区内
- * 对 [databaseFlow] 做 copy-on-write 替换、对 [stateFlow] 置 DIRTY，并在替换前定点擦除下线实例。
+ * 对 [databaseFlow] 做 copy-on-write 替换、对 [stateFlow] 置 DIRTY，并在**发布新树之后**
+ * 定点擦除下线实例。
+ *
+ * `ISSUE-P2-534`：擦除时序是**「先发布、后擦除」**（整改前为「替换前擦除」）。擦除是就地清零，
+ * 而发布面的读取者与本临界区**不共享锁**；先擦会让「仍持旧树快照」的读取者读到已清零实例，
+ * 即 §473 真机闪退的同型面。约定与红线见 `KdbxGroup.clearSupersededSensitiveData` KDoc。
  *
  * 擦除分两档（ISSUE-P3-156 / ISSUE-P3-157）：
  * - **增量**（[saveEntry] / [saveGroup] / [batchMoveEntries] / [updateEntryById]）：树变换回报被替换节点，
@@ -33,11 +38,14 @@ internal class SessionContentMutations(
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val edit = SessionTreeEditor.updateOrAddEntry(currentDb.rootGroup, entry)
-        // ISSUE-P2-06 / P3-156：copy-on-write 替换前定点擦除——只以本次被替换下线的旧节点为候选，
-        // 集合规模不随全库规模增长（前提是 SessionTreeEditor 的路径复制契约）
-        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
+        // ISSUE-P2-06 / P3-156：copy-on-write 的**增量定点擦除**——只以本次被替换下线的旧节点为候选，
+        // 集合规模不随全库规模增长（前提是 SessionTreeEditor 的路径复制契约）。
+        // ISSUE-P2-534：**先发布新树、后擦除**——`edit.replaced` 属于尚未换下的旧树（发布面仍可达），
+        // 先擦会让「仍持旧树快照」的读取者读到已清零实例（与 §473 真机闪退同型；约定见
+        // `KdbxGroup.clearSupersededSensitiveData` KDoc）。
         databaseFlow.value = currentDb.copy(rootGroup = edit.root)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
+        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
     }
 
     /** 删除条目。 */
@@ -69,10 +77,11 @@ internal class SessionContentMutations(
         } else {
             SessionTreeEditor.updateOrAddGroup(currentDb.rootGroup, group)
         }
-        // ISSUE-P2-06 / P3-156：分组保存可能下线旧条目/旧字段实例，替换前对被替换节点定点擦除
-        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
+        // ISSUE-P2-06 / P3-156：分组保存可能下线旧条目 / 旧字段实例，对被替换节点做增量定点擦除。
+        // ISSUE-P2-534：**先发布新树、后擦除**（同 [saveEntry]，理由与约定见该处注释）
         databaseFlow.value = currentDb.copy(rootGroup = edit.root)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
+        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
     }
 
     /**
@@ -96,10 +105,13 @@ internal class SessionContentMutations(
         val currentDb = databaseFlow.value ?: return@withLock null
         val edit = SessionTreeEditor.updateEntryById(currentDb.rootGroup, entryId, transform)
             ?: return@withLock null
-        // ISSUE-P2-06 / P3-157：copy-on-write 替换前定点擦除——只以本次被替换下线的旧条目为候选
-        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
+        // ISSUE-P2-06 / P3-157：copy-on-write 的增量定点擦除——只以本次被替换下线的旧条目为候选。
+        // ISSUE-P2-534：**先发布新树、后擦除**（同 [saveEntry]，理由见该处注释）。
+        // 读回契约不变：`edit.replacement` 即落树上线的实例，调用方须从它读取；擦除只触碰
+        // `edit.replaced`（旧实例），不触碰新实例 ⇒ `ISSUE-P3-157` 的同源读回语义不因此损失。
         databaseFlow.value = currentDb.copy(rootGroup = edit.root)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
+        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
         edit.replacement
     }
 
@@ -199,10 +211,11 @@ internal class SessionContentMutations(
             superseded += e to movedEntry
             edit.replaced?.let { superseded += it to movedEntry }
         }
-        // 擦除在**最终树**上执行（存活判定需看到全部移动结果）
-        superseded.forEach { (old, moved) -> currentRoot.eraseSupersededSensitiveData(old, moved) }
+        // 擦除在**最终树**上执行（存活判定需看到全部移动结果）。
+        // ISSUE-P2-534：**先发布最终树、后擦除**（同 [saveEntry]；擦除只触碰 `superseded` 中的旧实例）
         databaseFlow.value = currentDb.copy(rootGroup = currentRoot)
         stateFlow.value = DatabaseSession.SessionState.DIRTY
+        superseded.forEach { (old, moved) -> currentRoot.eraseSupersededSensitiveData(old, moved) }
     }
 
     /** 批量删除条目。 */

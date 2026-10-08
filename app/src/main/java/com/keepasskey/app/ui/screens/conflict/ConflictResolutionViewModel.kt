@@ -10,6 +10,8 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.core.security.readCharsForDisplayOrNull
+import com.keepasskey.core.security.readStringForDisplayOrEmpty
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.KdbxMerger
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -55,7 +57,9 @@ class ConflictResolutionViewModel @Inject constructor(
                     val items = conflicts.map { pair ->
                         ConflictedEntryItem(
                             id = pair.entryId,
-                            title = pair.localEntry.title.ifBlank { pair.remoteEntry.title },
+                            // ISSUE-P2-534：冲突条目标题属**展示面**（本页在同步刚结束时渲染），
+                            // 与会话整树替换的就地擦除并发 ⇒ 走展示面读口
+                            title = pair.localEntry.displayTitle().ifBlank { pair.remoteEntry.displayTitle() },
                             groupPath = strings.get(R.string.conflict_group_path),
                             fields = pair.modifiedFields.map { key -> buildConflictedField(pair, key) }
                         )
@@ -102,13 +106,19 @@ class ConflictResolutionViewModel @Inject constructor(
      *
      * 安全裁决：**不做「揭示」开关**——冲突裁决无需明文即可完成，明文进 UiState 违反
      * 敏感数据铁律（能用 Char 的地方绝不落到 String）。长度与形态统计经
-     * [ProtectedString.useChars] 在 CharArray 通道完成，不物化明文、不入日志。
+     * [readCharsForDisplayOrNull] 在 CharArray 通道完成，不物化明文、不入日志。
+     *
+     * `ISSUE-P2-534`：本页在**同步刚结束**时渲染，与会话整树替换的就地擦除极易并发。
+     * 整改前是「先查 `cleared` 再 `useChars`」的两步式——两步之间不是原子的，撞上即抛
+     * `IllegalStateException` 且逃逸到 `viewModelScope` ⇒ 闪退；现统一走展示面读口，
+     * 已清零 / null 一律降级为既有回退掩码。
      *
      * @param fallbackMask [value] 缺失 / 已清零时的回退掩码（保持既有降级形态）
      */
     private fun sensitiveValueHint(value: ProtectedString?, fallbackMaskRes: Int): String {
-        if (value == null || value.cleared) return strings.get(fallbackMaskRes)
-        return value.useChars { chars ->
+        // 返回值是**独占副本**，用毕在 finally 清零（与 `ProtectedString.readChars` 同契约）
+        val chars = value.readCharsForDisplayOrNull() ?: return strings.get(fallbackMaskRes)
+        return try {
             if (chars.isEmpty()) {
                 strings.get(R.string.conflict_sensitive_hint_length_only, 0)
             } else {
@@ -125,6 +135,8 @@ class ConflictResolutionViewModel @Inject constructor(
                     strings.get(R.string.conflict_sensitive_hint, chars.size, categories.joinToString(separator))
                 }
             }
+        } finally {
+            chars.fill('0')
         }
     }
 
@@ -158,8 +170,10 @@ class ConflictResolutionViewModel @Inject constructor(
                 ConflictedField(
                     fieldKey = key,
                     fieldName = strings.get(labelRes),
-                    localValue = local.fields[key]?.readString().orEmpty(),
-                    remoteValue = remote.fields[key]?.readString().orEmpty()
+                    // ISSUE-P2-534：冲突差异展示面——本页在同步刚结束时渲染，与会话整树替换的
+                    // 就地擦除极易并发；裸 readString 撞上已擦实例会崩进程（§473 同型面）
+                    localValue = local.fields[key].readStringForDisplayOrEmpty(),
+                    remoteValue = remote.fields[key].readStringForDisplayOrEmpty()
                 )
             }
             key.startsWith(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX) -> {
@@ -173,12 +187,12 @@ class ConflictResolutionViewModel @Inject constructor(
                     localValue = if (sensitive) {
                         sensitiveValueHint(lv, R.string.conflict_mask_local)
                     } else {
-                        lv?.readString().orEmpty()
+                        lv.readStringForDisplayOrEmpty()
                     },
                     remoteValue = if (sensitive) {
                         sensitiveValueHint(rv, R.string.conflict_mask_remote)
                     } else {
-                        rv?.readString().orEmpty()
+                        rv.readStringForDisplayOrEmpty()
                     },
                     isSensitive = sensitive
                 )

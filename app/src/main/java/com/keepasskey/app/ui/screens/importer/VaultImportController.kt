@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * ISSUE-P3-19 交付物 1.3：**导入执行入口**（设置页调用面）。
@@ -57,7 +58,7 @@ class VaultImportController @Inject constructor(
     private val kdbxMergeController: KdbxMergeController
 ) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = guardedScope(Dispatchers.Default)
 
     private val mutableUiState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
 

@@ -39,6 +39,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
+import com.keepasskey.app.coroutines.guardedScope
 
 /**
  * Android 16+ 原生系统级凭据提供者服务 (CredentialProviderService)。
@@ -88,7 +89,7 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
     @Inject
     lateinit var settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val serviceScope = guardedScope(Dispatchers.Default)
 
     override fun onBeginGetCredentialRequest(
         request: BeginGetCredentialRequest,

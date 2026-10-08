@@ -35,6 +35,16 @@ class ProtectedString(
     /** 等值标签：HMAC-SHA256(eqKey, 明文)（非保护或空值时为 null，equals/hashCode 使用） */
     private val memoryTag: ByteArray?
 
+    /**
+     * 已清零标志。
+     *
+     * `ISSUE-P2-534`：`@Volatile` 是**必需**的，不是优化——本实例是跨线程共享的可变引用
+     * （会话层在主线程/Default/IO 上擦除，展示面在 `Dispatchers.Default` 上读取），
+     * 无 `volatile` 时读侧可能长期看不到写侧置位，`cleared` 观测与展示读口的降级判据都会失效。
+     * 注意它**不能**单独构成读取的原子性保证：并发擦除下仍可能读到「正在被填零」的缓冲，
+     * 故 [plainBytes] 另有等值标签复核（fail-closed）。
+     */
+    @Volatile
     private var isCleared = false
 
     /**
@@ -127,7 +137,12 @@ class ProtectedString(
      *
      * 使用边界同 [readStringForDisplay]：仅限非持久化的展示 / 即时计算面（如列表页 TOTP 出码）。
      */
-    fun readUtf8ForDisplay(): ByteArray? = if (isCleared) null else readUtf8()
+    fun readUtf8ForDisplay(): ByteArray? =
+        try {
+            readUtf8()
+        } catch (_: IllegalStateException) {
+            null
+        }
 
     /**
      * 将保护值转为 String。注意：一旦调用，明文字符串将驻留 JVM 堆内存，请仅在必要交互边界使用。
@@ -145,10 +160,15 @@ class ProtectedString(
     /**
      * 展示面安全读取（`ISSUE-P0-531`）：实例**已清零**时返回 [fallback]（默认空串），不抛异常。
      *
-     * **使用边界（违反即事故；机检 `tools/doc/check_projection_read_safety.py` 在 `hygiene-gate` 上把关）**：
-     * 仅允许**非持久化的展示 / 投影消费面**（UI 列表与详情投影、卡面字段、条目即时出码）使用。
-     * 写路径（序列化 / 保存 / 合并 / 导出 / 加解密 / 凭据下发）**必须**继续走 [readString] 的 fail-fast——
-     * 「读到已擦即失败」在那里是数据完整性的最后防线，就地降级会把空值写进用户的库。
+     * **使用边界（违反即事故）**：仅允许**非持久化的展示 / 投影消费面**（UI 列表与详情投影、卡面字段、
+     * 条目即时出码、检索 / 差异展示）使用。写路径（序列化 / 保存 / 合并 / 导出 / 加解密 / 凭据下发）
+     * **必须**继续走 [readString] 的 fail-fast —— 「读到已擦即失败」在那里是数据完整性的最后防线，
+     * 就地降级会把空值写进用户的库。
+     *
+     * 机检 `tools/doc/check_projection_read_safety.py` **双向**把关：① 登记在案的投影面文件不得出现裸
+     * fail-fast 读（含 `KdbxEntry.title` 等 getter 与 `useChars` / `useUtf8`）；② 本读口的**每一个调用点
+     * 所在文件都必须在白名单内登记**（fail-closed：新调用点未登记即红）。清单**不外推**——它只覆盖
+     * 登记过的文件与调用点，不构成「全仓已无裸读」的证明。
      *
      * 存在理由：本类是**可变的共享引用**，会话层在整树替换时会对「被替换下线」的实例就地清零
      * （`KdbxGroup.clearSupersededSensitiveData`，身份集合判定）。而 UI 投影链
@@ -159,7 +179,16 @@ class ProtectedString(
      * 降级后的表现是「短暂显示空值」，语义上**正确**：被替换下线的数据本就不该再展示。
      */
     fun readStringForDisplay(fallback: String = ""): String =
-        if (isCleared) fallback else readString()
+        try {
+            readString()
+        } catch (_: IllegalStateException) {
+            // ISSUE-P2-534：判据**只有** readString 内部那一次 checkNotCleared（外加 plainBytes 的
+            // 等值标签复核）。整改前是「先查 isCleared → 再 readString」的两步式，两步之间不是原子的：
+            // 标志尚不可见时仍会走到 readString 抛异常（承诺的「不抛」不成立）；更糟的是标志不可见
+            // 而缓冲已被并发填零时，`unseal` 会解出**垃圾明文**且不报错。故此处以 try/catch 包住唯一
+            // 判据点，与 plainBytes 的标签复核共同保证「要么读到正确明文，要么降级」——绝不返回垃圾、绝不抛。
+            fallback
+        }
 
     /**
      * 安全闭包使用 CharArray，并在退出时自动清零
@@ -208,13 +237,29 @@ class ProtectedString(
         check(!isCleared) { "ProtectedString 已经清零，禁止继续访问" }
     }
 
-    /** 解密出明文新副本（非保护实例直接克隆驻留值）；调用方用毕负责清零 */
+    /**
+     * 解密 / 克隆出明文新副本（调用方用毕负责清零）。
+     *
+     * `ISSUE-P2-534`：受保护实例在解密后**复核等值标签**。驻留加密是 AES/CTR（**无认证标签**），
+     * 而 [clear] 是就地清零（先填零 `data`、后置 [isCleared]）；并发下读取者可能通过 `checkNotCleared`
+     * 却读到**正在被填零**的密文 —— CTR 只会把它解成密钥流垃圾明文而不报错。不复核标签就会
+     * ① 静默返回垃圾（污染展示面）；② 绕过 fail-fast（写路径可能据此写出错误数据）。
+     * 复核不通过即清零该缓冲并按「已清零 / 已损坏」如实 fail-closed，使**所有**读路径（含展示读口
+     * 的 try/catch）收敛到唯一判据。代价：每次读取多一次 HMAC-SHA256（与已有的 CTR 解密同量级）。
+     *
+     * 残余面（如实声明）：非保护实例（`memoryIv == null`，如外部工具写入的明文自定义字段）**没有**标签，
+     * 并发填零只会读到「部分明文」而非垃圾串；该形态由 [isCleared] 的 `@Volatile` 可见性覆盖，
+     * 属已接受的小窗口，不再叠加同步原语（读路径性能优先）。
+     */
     private fun plainBytes(): ByteArray {
-        return if (memoryIv != null) {
-            InMemoryCipher.unseal(memoryIv, data)
-        } else {
-            data.clone()
+        val iv = memoryIv ?: return data.clone()
+        val plain = InMemoryCipher.unseal(iv, data)
+        val tag = memoryTag
+        if (tag == null || !InMemoryCipher.tagsEqual(InMemoryCipher.equalityTag(plain), tag)) {
+            Arrays.fill(plain, 0.toByte())
+            throw IllegalStateException("ProtectedString 已经清零或密文已损坏，禁止继续访问")
         }
+        return plain
     }
 
     override fun equals(other: Any?): Boolean {
