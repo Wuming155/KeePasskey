@@ -9,7 +9,7 @@
 |---|---|
 | [`../AGENTS.md`](../AGENTS.md) | 给 AI 协作代理的硬约束与闭环纪律（版本基线、工程限界已下沉至 `docs/`） |
 | [`ACTIVE_ISSUES.md`](ACTIVE_ISSUES.md) | **唯一**待办清单（P0 → P3），自包含背景与验收标准 |
-| [`RESOLVED_LOG.md`](RESOLVED_LOG.md) | 已整改问题归档**总索引**（**一行索引、不复制正文**；§154 迁移后 47 KB / 152 行，直达每个批次文件） |
+| [`RESOLVED_LOG.md`](RESOLVED_LOG.md) | 已整改问题归档**总索引**（**一行索引、不复制正文**：`主题` 列只写短标题，批次细节一律看正文；直达每个批次文件） |
 
 ## architecture/ — 架构与技术选型
 
