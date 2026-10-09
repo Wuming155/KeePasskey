@@ -51,7 +51,7 @@ class BrowserCsvImporter @Inject constructor() : EntryImporter {
                     warnings.add(ImportWarningLocation.DOCUMENT, ImportWarningReason.INVALID_UTF8)
                 }
                 KdbxResult.Success(scan(text, warnings, produced))
-            } catch (t: Throwable) {
+            } catch (t: Throwable) { // cancel-n/a: 保护段为纯 CPU 解析（withContext(Default) 内无挂起点）
                 ImportParseGuard.failure(ImportParseGuard.unwrap(t), produced)
             }
         }

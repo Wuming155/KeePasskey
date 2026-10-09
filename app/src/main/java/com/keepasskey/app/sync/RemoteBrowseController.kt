@@ -85,7 +85,7 @@ class RemoteBrowseController @Inject constructor(
                 networkOptions = SyncNetworkOptions(),
                 transferOptions = SyncTransferOptions.DISABLED
             )
-        } catch (t: Throwable) {
+        } catch (t: Throwable) { // cancel-n/a: 保护段为非挂起 Provider 构造
             debugLog.warn(TAG, "WebDAV 浏览 Provider 构造失败: ${t.javaClass.simpleName}")
             publishBrowseFailure(t.javaClass.simpleName)
             return
@@ -120,7 +120,7 @@ class RemoteBrowseController @Inject constructor(
                 usePathStyle = usePathStyle,
                 networkOptions = SyncNetworkOptions()
             )
-        } catch (t: Throwable) {
+        } catch (t: Throwable) { // cancel-n/a: 保护段为非挂起 Provider 构造
             accessClone.fill('0')
             secretClone.fill('0')
             debugLog.warn(TAG, "S3 浏览 Provider 构造失败: ${t.javaClass.simpleName}")

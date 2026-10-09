@@ -8,6 +8,7 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -67,7 +68,7 @@ class SafKeyFileAccess @Inject constructor(
             } else {
                 KeyFileReadResult.Success(bytes, queryDisplayName(target))
             }
-        } catch (e: Exception) {
+        } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式流读取（readKeyFileBytes 非挂起）
             // 禁止静默失败：仅留痕异常类名，不外传 Uri / 异常 message
             debugLog.warn(TAG, "密钥文件读取失败: ${e.javaClass.simpleName}")
             KeyFileReadResult.Unreadable
@@ -89,6 +90,7 @@ class SafKeyFileAccess @Inject constructor(
             debugLog.info(TAG, "密钥文件提供方不支持持久化读授权，降级为仅本次会话可用")
             false
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             debugLog.warn(TAG, "密钥文件持久化读授权申请失败: ${e.javaClass.simpleName}")
             false
         }

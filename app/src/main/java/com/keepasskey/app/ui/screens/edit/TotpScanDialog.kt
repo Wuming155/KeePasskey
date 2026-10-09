@@ -418,7 +418,7 @@ private suspend fun <T> ListenableFuture<T>.awaitOn(executor: java.util.concurre
         addListener({
             try {
                 cont.resume(get())
-            } catch (t: Throwable) {
+            } catch (t: Throwable) { // cancel-n/a: suspendCancellableCoroutine 回调内，取消经 resumeWithException 原样转交续体
                 cont.resumeWithException(t)
             }
         }, executor)

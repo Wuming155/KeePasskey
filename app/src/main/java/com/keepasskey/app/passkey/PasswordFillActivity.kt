@@ -16,6 +16,7 @@ import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -90,6 +91,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
             try {
                 performFill(request)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "密码填充失败", t)
                 failAndFinish()
             }
@@ -240,6 +242,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                 setResult(RESULT_OK, resultIntent)
                 finish()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "密码回传组装失败", t)
                 failAndFinish()
             }

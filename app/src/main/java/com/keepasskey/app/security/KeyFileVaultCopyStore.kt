@@ -98,7 +98,7 @@ class KeyFileVaultCopyStore @Inject constructor(
                     return@withContext false
                 }
                 true
-            } catch (e: Exception) {
+            } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式加密封装与写盘（无挂起点）
                 debugLog?.warn(TAG, "副本写入失败: ${e.javaClass.simpleName}")
                 false
             } finally {

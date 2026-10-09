@@ -13,6 +13,7 @@ import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,6 +84,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             try {
                 performAssertion(context)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 认证执行失败", t)
                 failAndFinish()
             }
@@ -300,6 +302,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
                 finish()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 认证执行失败", t)
                 failAndFinish()
             }

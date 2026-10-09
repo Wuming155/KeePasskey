@@ -34,7 +34,7 @@ class SyncDatabaseCodec @Inject constructor(
                 // P1-10：pwdClone 为 null 表示仅密钥文件会话（无主密码分量），直接透传
                 KdbxFile.save(baos, db, pwdClone, keyClone)
                 baos.toByteArray()
-            } catch (e: Exception) {
+            } catch (e: Exception) { // cancel-n/a: 保护段为非挂起序列化（KdbxFile.save）
                 // P3-31 整改：序列化失败不再静默吞掉，至少落调试日志保留异常细节
                 debugLog.warn(SYNC_LOG_TAG, "本地数据库序列化失败（合并上传中断）: ${e.javaClass.simpleName}")
                 null

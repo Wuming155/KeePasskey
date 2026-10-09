@@ -17,6 +17,7 @@ import com.keepasskey.sync.merge.KdbxMerger
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import kotlinx.coroutines.CancellationException
 
 /** ISSUE-P3-550：异常细节（含库文件本地路径）只进日志，UI 侧只留错误码映射。 */
 private const val TAG = "VaultFileDriftResolve"
@@ -62,6 +63,7 @@ internal class VaultFileDriftResolve(
                     mergeAndSave(pathId, localFile)
             }
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             driftCoordinator?.requestPrompt(pathId)
             // ISSUE-P3-550：`t.message` 携带**库文件本地路径**（漂移处置的异常常来自
             // 文件通道），只进日志；UI 侧统一走错误码映射（未归类 ⇒ `err_unknown`）

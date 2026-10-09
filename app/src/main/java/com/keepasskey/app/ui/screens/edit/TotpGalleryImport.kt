@@ -33,6 +33,7 @@ import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.ReaderException
 import com.google.zxing.common.HybridBinarizer
 import com.keepasskey.app.R
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -107,6 +108,7 @@ internal fun TotpGalleryImport(
                         }
                     }
                 } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
                     // 读流 / 解码异常：如实提示，对话框保持打开供更换图片重试
                     errorMessageRes = R.string.edit_scan_gallery_read_error
                 } finally {

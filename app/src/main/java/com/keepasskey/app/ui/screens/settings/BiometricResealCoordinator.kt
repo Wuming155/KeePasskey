@@ -11,6 +11,7 @@ import com.keepasskey.app.security.UnlockAuthPolicy
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.screens.unlock.BiometricSealedPayloadCodec
 import com.keepasskey.app.ui.screens.unlock.SealedKeyProvision
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -207,6 +208,7 @@ internal class BiometricResealCoordinator(
                 bytes.fill(0)
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             debugLog.warn(TAG, "生物识别重封印异常: ${e.javaClass.simpleName}")
             null
         }

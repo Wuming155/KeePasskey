@@ -7,6 +7,7 @@ import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxProgress
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.io.WipableByteArrayOutputStream
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -102,6 +103,7 @@ internal class SessionPersistence(
                     serialized.fill(0)
                 }
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 // ISSUE-P3-368：失败清进度（不留半程残值）
                 progress(null)
                 KdbxResult.Failure(t, code = KdbxError.SAVE_FAILED)
@@ -129,7 +131,7 @@ internal class SessionPersistence(
         withContext(Dispatchers.Default) {
             try {
                 KdbxResult.Success(serializeToBytes(db, pwd, credentials.currentKeyFile()))
-            } catch (t: Throwable) {
+            } catch (t: Throwable) { // cancel-n/a: 保护段为非挂起序列化（serializeToBytes）
                 KdbxResult.Failure(t, code = KdbxError.EXPORT_FAILED)
             }
         }
@@ -205,6 +207,7 @@ internal class SessionPersistence(
                 serialized.fill(0)
             }
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             // 失败时回滚既有凭据
             credentials.restoreCredentials(oldPwd, oldKey)
             KdbxResult.Failure(t, code = KdbxError.CREDENTIALS_CHANGE_FAILED)

@@ -40,7 +40,7 @@ internal class VaultSourceProbe(private val context: Context) {
             openStream(path)?.use { stream ->
                 KdbxKdfStrengthAssessor.assess(KdbxHeader.deserialize(stream).first.kdfParameters)
             }
-        } catch (_: Exception) {
+        } catch (_: Exception) { // cancel-n/a: 保护段为阻塞式流打开与头部解析（无挂起点）
             null
         }
     }

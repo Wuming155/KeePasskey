@@ -105,7 +105,7 @@ jobs:
   # 判据按「文案槽内出现 `.message` 即红」钉死；反校证据：以整改前（HEAD）版本跑本脚本命中 13 处。
   # ---------------------------------------------------------------------------
   hygiene-gate:
-    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring, projection read safety, raw coroutine scope, archive monotonicity, plaintext carrier toString, exception message not in user text)
+    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring, projection read safety, raw coroutine scope, archive monotonicity, plaintext carrier toString, exception message not in user text, cancellation semantics)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -124,7 +124,8 @@ jobs:
       # ISSUE-P3-457 扩面：框架文本框 `supportingText` 槽同在 Box 内 + 「多发射助手函数」入槽）→
       # 启动语言种子接线（ISSUE-P3-459 续）→ 投影读取安全（含两步式 / 口令 fail-open）→
       # 裸 scope 收口（ISSUE-P1-538）→ 归档面不可回退（ISSUE-P2-546，读 HEAD~1）→
-      # 明文口令载体的 `toString()` 护栏（ISSUE-P2-549）→ 异常 `message` 不进文案槽（ISSUE-P3-550）。
+      # 明文口令载体的 `toString()` 护栏（ISSUE-P2-549）→ 异常 `message` 不进文案槽（ISSUE-P3-550）→
+      # 协程上下文 catch 的取消语义（ISSUE-P3-569；判据须认出 `SyncGuardedLaunch` 式前置取消分支）。
       # `long_functions` 用默认阈值 100（§280 收工线 functions_ge_100=0 不得回潮）；
       # 传更低阈值仅作本地普查。
       - name: 规模与卫生机检（fail-closed）
@@ -144,6 +145,7 @@ jobs:
           python3 tools/doc/check_archive_monotonicity.py
           python3 tools/doc/check_plaintext_carrier_to_string.py
           python3 tools/doc/check_message_not_in_user_text.py
+          python3 tools/doc/check_cancellation_semantics.py
 
   # ---------------------------------------------------------------------------
   # 门禁 1：快速门禁（不构建原生）

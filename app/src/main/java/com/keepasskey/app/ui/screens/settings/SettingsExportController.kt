@@ -63,7 +63,7 @@ internal class SettingsExportController(
                 debugExportFeedbackFlow.value =
                     if (written) UiMessage(R.string.debug_export_done)
                     else UiMessage(R.string.debug_export_failed, isError = true)
-            } catch (e: Exception) {
+            } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式日志导出写盘（无挂起点）
                 // 只留痕异常类型，不落异常消息（防御性，避免潜在敏感内容回流日志缓冲）
                 debugLogBuffer.warn(TAG, "调试日志导出失败: ${e.javaClass.simpleName}")
                 debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed, isError = true)
@@ -223,7 +223,7 @@ internal class SettingsExportController(
                             os.flush()
                             true
                         } ?: false
-                    } catch (e: Exception) {
+                    } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式 SAF 写盘（无挂起点）
                         debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
                         false
                     }

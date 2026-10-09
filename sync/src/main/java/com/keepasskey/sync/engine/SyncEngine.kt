@@ -175,8 +175,7 @@ class SyncEngine(
             throw ex
         }
 
-        // ISSUE-P2-18：若远端返回设备侧曾接受过的历史版本（回退/重放），拒绝写入缓存与基线
-        // ISSUE-P3-167：摘要由接收期一次算出并全程贯穿，不再对整库重算
+        // ISSUE-P2-18：远端返回设备侧曾接受过的历史版本（回退/重放）即拒绝写入缓存与基线；摘要由接收期一次算出并全程贯穿（ISSUE-P3-167），不再对整库重算
         if (isReplay(remotePath, receipt.digest)) {
             val remoteBytes = receipt.readBytes()
             receipt.abort()
@@ -388,6 +387,7 @@ class SyncEngine(
                         provider.download(remotePath, sink).getOrThrow()
                     }
                 } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) throw t
                     downloadFailure = t
                     null
                 }

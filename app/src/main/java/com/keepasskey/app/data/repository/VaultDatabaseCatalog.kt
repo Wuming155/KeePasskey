@@ -123,7 +123,7 @@ internal class VaultDatabaseCatalog(
                             (cursor.getLong(sizeIndex) / 1024).coerceAtLeast(1)
                         } else null
                     } ?: 32L
-                } catch (t: Throwable) {
+                } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式 ContentResolver 查询（无挂起点）
                     AppLog.w(TAG, "查询外部库大小失败，按缺省 32KB 回落", t)
                     32L
                 }

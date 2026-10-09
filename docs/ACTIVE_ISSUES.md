@@ -11,9 +11,13 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**1 条**（`ISSUE-P3-569`），来源＝`ISSUE-P3-568`（§483）达标时「建议面」普查的结论
-> （`catch (Throwable)` 的取消语义逐处收口，经判定属另一条独立评估面）。新条目附「核实时间点 + 核实方式」。
-> 上一批 2026-10-09 第二轮多维深度审查登记的**十三条**（`ISSUE-P2-556` / `ISSUE-P2-557` /
+> **在册批次**：**1 条**（`ISSUE-P3-570`，来源＝`ISSUE-P3-569`（§484）闭环时「`runCatching` 面不属本判据」
+> 的边界声明）。新条目附「核实时间点 + 核实方式」。
+> 上一批 `ISSUE-P3-569`（`catch (Throwable)` 的协程取消语义逐处收口）已于 **§484** 整条闭环归档——正文见
+> [`resolved/batches/484-协程catch取消语义逐处收口批次.md`](resolved/batches/484-协程catch取消语义逐处收口批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)；该批的逐处判定表（36 处补重抛 / 21 处判不适用并就地标注）
+> 与机检读数留痕见该批次正文。
+> 再上一批 2026-10-09 第二轮多维深度审查登记的**十三条**（`ISSUE-P2-556` / `ISSUE-P2-557` /
 > `ISSUE-P3-558` ~ `ISSUE-P3-568`）已于 **§483** 整批闭环归档——正文见
 > [`resolved/batches/483-存量十三条整改批次.md`](resolved/batches/483-存量十三条整改批次.md)，
 > 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)；该批的来源证据与「被推翻 / 降档的代理结论」留痕见
@@ -54,24 +58,22 @@
 
 ## P3 低危问题、特性接线与体验优化（**1 项**）
 
-> ### ISSUE-P3-569：`catch (Throwable)` 的协程取消语义未**逐一**收口（`ISSUE-P3-568` 达标时「建议面」普查的结论）
+> ### ISSUE-P3-570：`runCatching` 的协程取消语义与 `catch` 面同型、**未逐一收口**（`ISSUE-P3-569` 闭环时的判据边界）
 >
-> - **现象**：`CancellationException` 在 JVM 上是 `java.util.concurrent.CancellationException` 的别名、继承
->   `IllegalStateException` ⇒ 全部 `runCatching` / `catch (e: Exception)` / `catch (t: Throwable)` 都会顺手吞掉它。
->   `ISSUE-P3-555`（§482）只收敛了 `sync` 模块的 provider / 上传重试与 `markResolvedAndUpload`；
->   `ISSUE-P3-568`（§483）只补了 `SettingsKdfBenchmarkController` 一处，其余同型点**未逐一判定**。
-> - **核实时间点 / 方式**：2026-10-09，**静态启发式普查**（临时脚本：按「最近前置的 `fun` / `launch` / `async` /
->   `withContext` / `runBlocking` 行」推断 catch 所属上下文，并检查 catch 体 12 行内是否出现
->   `CancellationException`；脚本为一次性分析、未入库）。
-> - **实测读数**：五模块 `src/main` 的 `catch (… : Throwable)` 共 **131 处**，其中 **63 处**落在挂起 / 协程上下文，
->   **62 处**未见取消重抛。**该启发式不可直接当缺陷清单**——已确证一例误报：`app/.../sync/SyncGuardedLaunch.kt:39`
->   的外层 `catch (e: Throwable)` **两行之前**即有 `catch (e: CancellationException) { throw e }`（正确形态），
->   扫改会误伤。
-> - **影响**：取消被归一为业务失败 / 错误态时，「用户退出页面 / 换库」会被记成一次「操作失败」，
->   与 `runCatchingCancellable` 的立规意图（取消沿链重抛）相悖。**须逐处判定**才能定性——
->   部分点位的 catch 位于不可能观测取消的非挂起路径，改动仅是死代码。
-> - **涉及文件**：`app/src/main/**`、`database/src/main/**`、`sync/src/main/**`、`core/src/main/**`（候选以脚本现跑为准）
-> - **验收标准**：① 逐处判定并为「挂起 / 协程上下文」中的同型点补取消重抛
->   （`if (t is CancellationException) throw t` 置于其它分支之前）；② 对判为**不适用**的点位在批次文档登记理由
->   （不得静默跳过）；③ 评估为「协程上下文中的 `catch (Throwable/Exception)` 必须显式处理取消」增设机检——
->   **判据须避开 `SyncGuardedLaunch` 式「前置取消分支」形态**（否则误报），并须以 `--selftest` 正反样本反校。
+> - **现象**：`kotlinx.coroutines.CancellationException` 在 JVM 上是
+>   `java.util.concurrent.CancellationException` 的别名、继承 `IllegalStateException` ⇒ 裸 `runCatching { }`
+>   与裸 `catch (Throwable)` **同型**地吞掉取消。`ISSUE-P3-569`（§484）的机检判据只钉 `catch (…)` 子句，
+>   已在脚本文档串显式声明 **`runCatching` 不属本判据面**；`sync` 模块侧的 `runCatchingCancellable`
+>   （`ISSUE-P3-555`，§482）只覆盖了 provider / 上传重试与 `markResolvedAndUpload` 数处。
+> - **核实时间点 / 方式**：2026-10-09，**静态启发式普查**（临时脚本，一次性分析、未入库）：五模块 `src/main`
+>   的 `runCatching` 内联调用共 **80 处**，其中 **30 处**落在协程上下文；按「保护段内出现 `suspend fun`
+>   名（排除同名非挂起者）或 `.first(` / `.collect` 等已知挂起调用」进一步筛出 **16 处**——**该数字含已知误报**
+>   （例：`sync/.../S3SyncProvider.kt` / `WebDavSyncProvider.kt` 的命中实为已收口的
+>   `runCatchingCancellable`，被脚本的子串匹配误计；`SafKeyFileAccess.kt:79` 的保护段只是
+>   `Uri.parse`），**故不得当缺陷清单**。
+> - **影响**：与 `ISSUE-P3-569` 同——取消被归一为业务失败 / 默认值后，上层按失败处置。
+> - **涉及文件**：`app/src/main/**`、`database/src/main/**`、`sync/src/main/**`、`core/src/main/**`（候选以现跑为准）
+> - **验收标准**：① 逐处判定并为协程上下文中「保护段含挂起点」的 `runCatching` 换用**等价的不吞取消**写法
+>   （可复用 `runCatchingCancellable` 的口径，或就地补 `is CancellationException` 判定）；
+>   ② 对判为不适用者登记理由（不得静默跳过）；③ 评估把该面并入 `check_cancellation_semantics.py`
+>   （或另立机检），**判据须与 `catch` 面同款避开「前置取消分支」误报**，并以 `--selftest` 正反样本反校。

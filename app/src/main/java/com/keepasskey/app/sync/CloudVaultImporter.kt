@@ -127,7 +127,7 @@ class RealCloudVaultImporter @Inject constructor(
             val notice = if (asCopy) UiMessage(R.string.picker_cloud_local_conflict) else null
             val provider = try {
                 providerFactory.create(request)
-            } catch (e: Exception) {
+            } catch (e: Exception) { // cancel-n/a: 保护段为非挂起 Provider 工厂构造
                 return CloudVaultImportResult.Failure(
                     if (e is com.keepasskey.sync.model.SyncException.InvalidEndpointError) {
                         UiMessage(R.string.sync_error_https_required, listOf(protocolLabel(request)), isError = true)

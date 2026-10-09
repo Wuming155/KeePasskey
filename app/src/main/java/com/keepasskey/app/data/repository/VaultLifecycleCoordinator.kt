@@ -15,6 +15,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.file.KdbxKeyFileGenerator
 import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -145,7 +146,7 @@ internal class VaultLifecycleCoordinator(
         val generatedKeyFile = if (keyFileFactor is CreateKeyFileFactor.Generate) {
             try {
                 KdbxKeyFileGenerator.generate()
-            } catch (t: Throwable) {
+            } catch (t: Throwable) { // cancel-n/a: 保护段为非挂起密钥文件生成
                 // 禁止静默失败：生成失败时**不创建任何库**（否则会留下无第二因子的库）
                 return KdbxResult.Failure(t, strings.get(R.string.repo_keyfile_generate_failed))
             }
@@ -269,6 +270,7 @@ internal class VaultLifecycleCoordinator(
             refresh()
             KdbxResult.Success(Unit)
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             // ISSUE-P3-550：细节（含 `content://` URI 与文件路径）只进日志，UI 走错误码映射
             AppLog.w(TAG, "移除密码库失败", t)
             KdbxResult.Failure(t, strings.get(R.string.repo_remove_failed, strings.get(R.string.err_unknown)))
@@ -289,7 +291,7 @@ internal class VaultLifecycleCoordinator(
                         uri,
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     )
-                } catch (t: Throwable) {
+                } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式 takePersistableUriPermission（无挂起点）
                     // 部分外部 Provider 不支持持久化授权，容错继续（不得改为硬失败，见 ISSUE-P3-230 AC③）；
                     // 但**不得静默**：本次会话结束后该 uri 将失去读权限（重启后库打不开），
                     // 故落脱敏告警留痕，并由列表状态 / 解锁页一次性提示向用户归因（AC①）
@@ -311,6 +313,7 @@ internal class VaultLifecycleCoordinator(
             refresh()
             KdbxResult.Success(Unit)
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             // ISSUE-P3-550：细节（含外部库路径）只进日志，UI 走错误码映射
             AppLog.w(TAG, "登记外部库失败", t)
             KdbxResult.Failure(t, strings.get(R.string.repo_import_failed, strings.get(R.string.err_unknown)))

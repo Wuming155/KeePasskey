@@ -10,6 +10,7 @@ import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.exception.KdbxUnsupportedVersionException
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -139,6 +140,7 @@ internal class ChildReadOnlySession(
             }
         }
     } catch (t: Throwable) {
+        if (t is CancellationException) throw t
         classify(t)
     }
 
@@ -157,6 +159,7 @@ internal class ChildReadOnlySession(
         }
         Attempt.Loaded(projected)
     } catch (t: Throwable) {
+        if (t is CancellationException) throw t
         classify(t)
     }
 

@@ -17,6 +17,7 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.crypto.passkey.PasskeyPrf
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -168,6 +169,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             try {
                 awaitRegistration()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 注册异常", t)
                 rejectAndFinish(CredentialRejectionReason.INTERNAL_ERROR)
             }
@@ -362,6 +364,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 setResult(RESULT_OK, resultIntent)
                 finish()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 注册异常", t)
                 rejectAndFinish(CredentialRejectionReason.INTERNAL_ERROR)
             }

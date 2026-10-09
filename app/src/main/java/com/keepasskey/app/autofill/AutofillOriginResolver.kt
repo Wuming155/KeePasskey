@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 
 /**
  * 自动填充 webDomain 归属解析器（ISSUE-P2-07 / ZT-12 / ISSUE-P1-11）。
@@ -59,6 +60,7 @@ class AutofillOriginResolver @Inject constructor(
                 dalVerifier.verify(domain, callingPackage, certDigests) ==
                     DigitalAssetLinksVerifier.DalResult.VERIFIED
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 // 网络/解析异常：按未验证处理（DAL 内部已记录，degraded 不重试不静默放行）
                 AppLog.w(TAG, "webDomain 归属 DAL 校验异常，按未验证处理", t)
                 false

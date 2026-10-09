@@ -22,6 +22,7 @@ import com.keepasskey.app.ui.localizedContextOf
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -143,6 +144,7 @@ class CredentialUnlockActivity : FragmentActivity() {
                 setResult(RESULT_OK, resultIntent)
                 finish()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "链式解锁回传候选失败", t)
                 failAndFinish()
             }

@@ -9,6 +9,7 @@ import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -116,6 +117,7 @@ internal class SessionOpener(
 
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 KdbxResult.Failure(t, code = KdbxError.CREATE_FAILED)
             }
         }
@@ -189,6 +191,7 @@ internal class SessionOpener(
                 core.state.value = DatabaseSession.SessionState.OPENED
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 // ISSUE-P3-368：失败清进度（UI 随 isLoading 回落隐藏，不留半程残值）
                 progress(null)
                 // ISSUE-P2-521：文件损坏（KdbxCorruptFileException 族）与凭据错误分型——

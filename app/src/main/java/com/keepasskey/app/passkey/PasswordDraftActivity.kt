@@ -23,6 +23,7 @@ import com.keepasskey.app.ui.screens.edit.generatePasswordChars
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxUuid
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.security.SecureRandom
 import javax.inject.Inject
@@ -216,6 +217,7 @@ class PasswordDraftActivity : BaseCredentialActivity() {
                     }
                 }
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "口令新建异常", t)
                 isSaving = false
                 isSaveFailed = true

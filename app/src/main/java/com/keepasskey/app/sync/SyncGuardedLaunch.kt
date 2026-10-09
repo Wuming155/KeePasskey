@@ -42,7 +42,7 @@ internal fun CoroutineScope.launchGuarded(
         // 职责是「不让进程死」，不得成为新的崩溃源。留痕经 AppLog，不含任何敏感明文。
         try {
             onFailure(e)
-        } catch (failureInFallback: Throwable) {
+        } catch (failureInFallback: Throwable) { // cancel-n/a: 兜底分支：onFailure 为非挂起回调，取消已在上一分支排除
             AppLog.e(TAG, "同步入口守护的 onFailure 自身抛异常（已吞，避免二次逃逸）", failureInFallback)
         }
     }

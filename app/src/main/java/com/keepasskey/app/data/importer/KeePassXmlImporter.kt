@@ -40,7 +40,7 @@ class KeePassXmlImporter @Inject constructor() : EntryImporter {
                 requireKeePassFileRoot(text)
                 HardenedXmlReader.parse(text, handler)
                 KdbxResult.Success(handler.buildBatch(source))
-            } catch (t: Throwable) {
+            } catch (t: Throwable) { // cancel-n/a: 保护段为纯 CPU 解析（withContext(Default) 内无挂起点）
                 // 任意异常路径统一清零已产出条目的敏感数组，并归一为非敏感 Failure
                 ImportParseGuard.failure(ImportParseGuard.unwrap(t), handler.producedEntries())
             }

@@ -43,7 +43,7 @@ internal class VaultExportCoordinator(
                 )
             try {
                 KdbxResult.Success(KeePassXmlExporter.export(db))
-            } catch (t: Throwable) {
+            } catch (t: Throwable) { // cancel-n/a: 保护段为纯 CPU 导出（挂起的 .first() 在 try 之前）
                 // ISSUE-P3-550：`t.message` 会带出文件路径 / 协议细节，只进日志；
                 // UI 侧一律走错误码映射（未归类 ⇒ `err_unknown`）
                 AppLog.w(TAG, "导出 XML 失败", t)
@@ -66,7 +66,7 @@ internal class VaultExportCoordinator(
                 )
             try {
                 KdbxResult.Success(KdbxCsvExporter.export(db))
-            } catch (t: Throwable) {
+            } catch (t: Throwable) { // cancel-n/a: 保护段为纯 CPU 导出（挂起的 .first() 在 try 之前）
                 // ISSUE-P3-550：细节只进日志，UI 走错误码映射
                 AppLog.w(TAG, "导出 CSV 失败", t)
                 KdbxResult.Failure(

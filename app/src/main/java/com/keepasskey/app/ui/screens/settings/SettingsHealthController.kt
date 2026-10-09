@@ -10,6 +10,7 @@ import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.audit.EntryHealthIssue
 import com.keepasskey.database.audit.HealthCheckEngine
 import com.keepasskey.database.audit.PasswordRiskLevel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -156,6 +157,7 @@ internal class SettingsHealthController(
                 )
                 applyHealthScanSummary(summary)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 // ISSUE-P3-550：扫描异常可能来自文件通道 / 网络层，`message` 只进日志；
                 // UI 侧走错误码映射（未归类 ⇒ `err_unknown`）
                 AppLog.w(TAG, "健康扫描失败", e)

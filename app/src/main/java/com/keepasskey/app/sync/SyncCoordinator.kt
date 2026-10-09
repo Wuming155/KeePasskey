@@ -14,6 +14,7 @@ import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.provider.SyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -229,7 +230,7 @@ open class SyncCoordinator @Inject constructor(
             store.markRecrypted(remotePath)
             debugLog.info(SYNC_LOG_TAG, "主凭据已轮换：已登记云端副本待替换")
             true
-        } catch (e: Exception) {
+        } catch (e: Exception) { // cancel-n/a: 保护段为非挂起登记（resolveRemotePath / markRecrypted）
             debugLog.warn(SYNC_LOG_TAG, "登记云端副本待替换失败，按未登记继续: ${e.javaClass.simpleName}")
             false
         }
@@ -322,6 +323,7 @@ open class SyncCoordinator @Inject constructor(
                 )
             provider.testConnection()
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Result.failure(e)
         }
     }

@@ -10,6 +10,7 @@ import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.result.KdbxResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -274,6 +275,7 @@ internal class BiometricUnlockCoordinator(
                 // ISSUE-P3-327：解锁断言层已整体移除，快速解锁 = 生物识别授权 → 解封封印凭据
                 completeBiometricUnlock(decryptedBytes, storage, dbId)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 // ISSUE-P1-08 迁移容错：密钥经生物录入变更吊销（KeyPermanentlyInvalidated）
                 // 或旧「BIOMETRIC_STRONG|DEVICE_CREDENTIAL」密钥迁移重建后，
                 // 旧封印密文解密必然失败（AEADBadTagException 等）——清除陈旧凭据，

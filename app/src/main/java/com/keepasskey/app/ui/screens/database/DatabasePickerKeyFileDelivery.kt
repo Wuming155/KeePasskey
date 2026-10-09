@@ -90,7 +90,7 @@ internal class DatabasePickerKeyFileDeliveryController(
                         output.flush()
                         true
                     } ?: false
-                } catch (_: Exception) {
+                } catch (_: Exception) { // cancel-n/a: 保护段为阻塞式 SAF 写盘（无挂起点）
                     // 异常不外泄内容（可能是提供方拒绝/磁盘满），统一由下方语义化提示承接
                     debugLog?.warn(TAG, "交付状态机: SAF 写盘抛异常（细节不外泄）")
                     false

@@ -10,6 +10,7 @@ import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.UnlockAuthPolicy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -219,6 +220,7 @@ internal class BiometricEnrollmentCoordinator(
                 bytes.fill(0)
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             // 禁止静默失败：任何异常一律留痕，绝不 catch(ignored)
             debugLog.warn(TAG, "生物识别凭据登记异常: ${e.javaClass.simpleName}")
             null

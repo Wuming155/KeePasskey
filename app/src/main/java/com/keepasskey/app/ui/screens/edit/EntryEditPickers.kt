@@ -19,6 +19,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.vault.PasskeyImportConfirmDialog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -193,6 +194,7 @@ private fun rememberAttachmentPicker(
                         viewModel.addAttachment(displayName, formatAttachmentSize(bytes.size), bytes)
                     }
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     withContext(Dispatchers.Main) {
                         viewModel.showMessage(UiMessage(R.string.edit_attachment_empty))
                     }
@@ -240,6 +242,7 @@ private fun rememberCustomIconPicker(
                         }
                     }
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     withContext(Dispatchers.Main) {
                         viewModel.showMessage(UiMessage(R.string.icon_invalid_not_png))
                     }

@@ -6,6 +6,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -83,6 +84,7 @@ class AutofillPickerViewModel @Inject constructor(
                 // ISSUE-P2-341：选择器列的是"可交给调用方的凭据"，回收站内的须排除
                 vaultRepository.getUsableKdbxEntries()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "读取库内条目失败，选择器按空列表处理", t)
                 emptyList()
             }
@@ -134,6 +136,7 @@ class AutofillPickerViewModel @Inject constructor(
         val chars = try {
             vaultRepository.getEntryPasswordChars(entryId)
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             AppLog.e(TAG, "按需解密选中条目密码失败", t)
             null
         } ?: return Credentials(username, "")
@@ -145,6 +148,7 @@ class AutofillPickerViewModel @Inject constructor(
                 com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.PASSWORD
             ) ?: String(chars)
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             AppLog.w(TAG, "解析字段引用失败，按原值下发", t)
             String(chars)
         } finally {

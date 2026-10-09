@@ -7,6 +7,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CancellationException
 
 /**
  * 周期性后台同步执行体（TASK-08 整改）。
@@ -41,6 +42,7 @@ class PeriodicSyncWorker(
                 else -> Result.success()
             }
         } catch (t: Throwable) {
+            if (t is CancellationException) throw t
             // 周期任务返回 success 而非 retry：失败场景下个周期自然重试，避免退避风暴
             Result.success()
         }

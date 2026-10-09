@@ -169,11 +169,12 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
 - CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言 / 复核 / 类型名 /
   Box 内容槽 / 启动语言种子接线 / **投影读取安全** / **裸 scope 收口** / **归档面不可回退** /
-  **明文载体 `toString` 护栏** / **异常 message 文案槽** 机检的 **fail-closed 硬门禁**：`count_line_tiers` +
+  **明文载体 `toString` 护栏** / **异常 message 文案槽** / **协程 catch 取消语义** 机检的 **fail-closed 硬门禁**：`count_line_tiers` +
   `long_functions` + `check_md_links` + `check_resolved_index_sync` + `check_tautological_assertions` +
   `check_recheck_consistency` + `check_bounded_type_names` + `check_box_slot_children` +
   `check_launch_language_seed` + `check_projection_read_safety` + `check_raw_coroutine_scope` +
-  `check_archive_monotonicity` + `check_plaintext_carrier_to_string` + `check_message_not_in_user_text`，非 0 即红；
+  `check_archive_monotonicity` + `check_plaintext_carrier_to_string` + `check_message_not_in_user_text` +
+  `check_cancellation_semantics`，非 0 即红；
   **严禁** `|| true` 吞掉（**条数不写死**：以 `gate_readings.py` 现跑读数为准）。
   本 job 的 checkout 必须 `fetch-depth: 0`（归档回退判据要读 `HEAD~1`）
 - `python tools/doc/check_raw_coroutine_scope.py` — **裸 `CoroutineScope(` 收口机检**（`ISSUE-P1-538` 立规；
@@ -208,6 +209,16 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   `userMessage =`）的**实参文本**内出现 `.message`（含 `?.message` 与方法接收者 `x.y()?.message`）即红；
   **按括号配对取整段实参（非逐行）** ⇒ 多行调用全覆盖（`ISSUE-P2-556` ③④）；`checked == 0` **判红**（`ISSUE-P3-562`）。
   唯一豁免＝被 `catch` 绑定的 `ImportFormatException`；`--selftest` 为口径反校（含多行 / 方法接收者 / 两新槽反样本）
+- `python tools/doc/check_cancellation_semantics.py` — **协程 `catch` 取消语义机检**（`ISSUE-P3-569` 立规；
+  **改 `*/src/main/**` 的 `catch` 后必跑**）：判据＝五个生产模块 `src/main/**` 内处于**协程上下文**
+  （最近上溯行命中 `suspend fun` / `launch` / `async` / `withContext` / `runBlocking` / `coroutineScope` /
+  `supervisorScope` / `channelFlow` / `callbackFlow` / `produce`）的 `catch (v: Throwable|Exception)`，
+  在**自身子句体**既无 `CancellationException`、也无原样重抛 `throw <v>`、且**同 `try` 的前置兄弟分支**
+  也无 `catch (… : CancellationException)`（含全限定名）时命中；命中即退出码 1。
+  判为**不适用**（`try` 体内**无挂起点**，补守卫即死代码）者在该子句行标注 `// cancel-n/a: <理由>`——
+  **新增点位不会因缺标注而被静默放行**。`--selftest` 为口径反校（含「前置取消分支」/「自身处理」/
+  「非协程」/「已标注」/「原样重抛」五个绿样本与裸吞取消红样本）；**不得**据其绿推定「全仓已无吞取消面」
+  （`runCatching` / 挂起 lambda 参数体两族看不见，边界见脚本文档串）
 - `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；
   PowerShell 直接可跑。历史命令 `bash …/check_recheck_consistency.sh` 仍可用，薄封装调本文件）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`

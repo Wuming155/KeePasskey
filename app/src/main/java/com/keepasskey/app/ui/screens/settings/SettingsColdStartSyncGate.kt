@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.data.repository.SettingsRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -32,7 +33,8 @@ internal class SettingsColdStartSyncGate(
                 if (settingsRepository.getSettings().first().syncOnColdStart) {
                     onTriggerSync()
                 }
-            } catch (_: Exception) {
+            } catch (t: Exception) {
+                if (t is CancellationException) throw t
             }
         }
     }

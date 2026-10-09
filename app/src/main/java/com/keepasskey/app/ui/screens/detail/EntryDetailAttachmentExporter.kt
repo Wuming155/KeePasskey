@@ -10,6 +10,7 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
 import com.keepasskey.app.ui.screens.settings.ExportAuditRecorder
 import com.keepasskey.app.ui.screens.settings.SafDocumentCleanup
+import kotlinx.coroutines.CancellationException
 
 /**
  * 附件明文导出的写出与审计留痕（断点3 整改 / ISSUE-P2-10 (ZT-15)）。
@@ -58,6 +59,7 @@ internal class EntryDetailAttachmentExporter(
                 bytes.fill(0)
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             // 只留痕异常类型，不落异常消息或附件名（防御性，避免敏感内容回流日志缓冲）
             exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
             debugLog?.warn(TAG, "附件导出失败: ${e.javaClass.simpleName}")

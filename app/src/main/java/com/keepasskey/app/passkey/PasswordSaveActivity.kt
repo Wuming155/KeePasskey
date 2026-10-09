@@ -12,6 +12,7 @@ import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -132,6 +133,7 @@ class PasswordSaveActivity : BaseCredentialActivity() {
                 }
                 finish()
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 AppLog.e(TAG, "保存密码凭据失败", t)
                 failAndFinish()
             } finally {
