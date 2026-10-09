@@ -6,7 +6,7 @@
 
 | 模块 | 类型 | 依赖 | 职责 |
 |------|------|------|------|
-| `app` | application | core, database, sync | Compose UI、导航、Hilt 装配；平台集成（生物识别 / 自动填充 / 通行密钥认证）作为 app 内部包实现 |
+| `app` | application | core, database, **crypto**, sync | Compose UI、导航、Hilt 装配；平台集成（生物识别 / 自动填充 / 通行密钥认证）作为 app 内部包实现 |
 | `core` | library | — | 共享领域模型、`Result`、工具、DI 限定符；不依赖任何模块 |
 | `crypto` | library | core | AES / Twofish / ChaCha20 分组加密、Argon2 / AES-KDF、KDBX 块流 |
 | `database` | library | core, **crypto(api)** | kdbx v3/v4 解析与序列化、条目/分组模型、搜索、合并、OTP、通行密钥凭据存储 |
@@ -16,9 +16,14 @@
 
 ```
 app ──> database ──> crypto ──> core
- └───> sync ────────────────> core
+ ├───> sync ────────────────> core
+ └───> crypto ──────────────> core
 ```
 
+- `app` 对 `crypto` 的依赖是**直接**的（`ISSUE-P3-563`）：通行密钥载荷 / 熵估算 / KDF 基准等
+  9 个文件 / 14 处直接 `import com.keepasskey.crypto.*`，故 `app/build.gradle.kts` 显式声明
+  `implementation(project(":crypto"))`（`ISSUE-P3-554`）。它与 `database → crypto(api)` 并存——
+  后者是 `database` 接口签名引用 `crypto` 类型所需，前者是 `app` 自身的真实依赖。
 - `database` 对 `crypto` 用 `api` 暴露（database 的接口签名会引用 crypto 类型）。
 - `sync` 抽象与 WebDAV / S3 实现暂放同一模块；若后续 SDK 依赖冲突或体量变大，再拆 `sync-webdav` / `sync-s3`。
 

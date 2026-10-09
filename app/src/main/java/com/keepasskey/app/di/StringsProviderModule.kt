@@ -9,6 +9,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.util.Locale
 import javax.inject.Singleton
 
 /**
@@ -34,7 +35,18 @@ object StringsProviderModule {
     fun provideStringsProvider(
         @ApplicationContext context: Context,
         localeTracker: AppLocaleTracker
-    ): StringsProvider = StringsProvider { id, args ->
-        localizedResourcesFor(context, localeTracker.snapshot()).getString(id, *args)
+    ): StringsProvider = object : StringsProvider {
+
+        override fun get(id: Int, vararg args: Any?): String =
+            localizedResourcesFor(context, localeTracker.snapshot()).getString(id, *args)
+
+        /**
+         * `ISSUE-P3-560`：把应用内语言一并交出去——需要 Locale 的格式化（如
+         * `RelativeTimeFormatter` 的 `ofPattern(pattern, locale)`）必须与取 pattern 的同一语言，
+         * 否则英文资源里的 `MMM d` 会按系统 Locale 渲染出混合语言文案。
+         * `null` 表示跟随系统（`RelativeTimeFormatter` 侧回落 `Locale.getDefault()`）。
+         */
+        override val locale: Locale?
+            get() = localeTracker.snapshot()
     }
 }

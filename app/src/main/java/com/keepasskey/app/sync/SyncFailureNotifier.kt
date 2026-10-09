@@ -11,6 +11,7 @@ import com.keepasskey.app.notification.NotificationPermissionPrompter
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.sync.engine.SyncCacheEvent
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -79,8 +80,16 @@ enum class SyncFailureNotificationAction { POST, CANCEL, NONE }
  * - 「发 / 撤」决策与 `posted` 收进**单个对象**并以 `@Synchronized` 串行化 ⇒ 无丢失更新；
  * - 幂等：重复失败只发一次 [SyncFailureNotificationAction.POST]，已在目标态则 `NONE`
  *   （杜绝每个同步周期重复 `notify` 与无谓 `cancel`）；
- * - 调用方另把两条流**合并为单个收集器**（见 [SyncFailureNotifier.signals]），
- *   使「先事件后结论」的发射顺序**构成**执行顺序保证。
+ * - 调用方另把两条流**合并为单个收集器**（见 [SyncFailureNotifier.signals]），处理**严格串行**；
+ *   注意 `merge` 只保证**单条上游流内部**有序，**不保证跨上游的相对到达顺序** ⇒
+ *   终态一致依赖「事件 `cause` 与结论 `classify` 同源」（同一同步周期内两者用的是同一个异常对象）。
+ *
+ * ## 幂等口径与复位条件（`ISSUE-P3-559` 登记；详见 `docs/architecture/已知工程限界.md` §40）
+ *
+ * `posted` 的语义是「**本次失败周期内已亮出过通知**」，**不是**「通知当前在屏」——
+ * 用户在系统 UI 上划掉通知不会回调本类（`state` 无「通知被移除」的观测通道），
+ * 故同一失败周期内不再重复亮出。**复位条件**＝任一次非失败结论经 [onOutcome] 把目标态
+ * 置 `false`（成功 / 离线 / 冲突等皆然），下一失败周期即重新 [POST]。该口径为**有意防抖**。
  */
 class SyncFailureNotificationState {
 
@@ -125,9 +134,64 @@ class SyncFailureNotificationState {
  * 合并后的单一输入（ISSUE-P2-548）：把「同步周期结论」与「引擎事件」变成**一条流**，
  * 使裁决只可能串行发生——两个并发收集器是原竞态的结构性根因。
  */
-private sealed interface SyncFailureInput {
+internal sealed interface SyncFailureInput {
     data class CycleOutcome(val outcome: SyncOutcome) : SyncFailureInput
     data class EngineEvent(val event: SyncCacheEvent) : SyncFailureInput
+}
+
+/**
+ * 同步失败信号的**元素级处理**（`ISSUE-P2-557` ①③）：状态机裁决 + 动作执行 + 异常隔离。
+ *
+ * 与 Android 侧（[SyncFailureNotifier] 的发 / 撤通知）解耦——执行体 [execute] 由调用方注入，
+ * 故「单个元素裁决抛异常」这一失效形态可在 **JVM 单测**里直接复现，无需真机。
+ *
+ * ## 为什么需要单独一层
+ *
+ * 整改前 `signals().collect { … }` **整段无 `try/catch`**：`post()` 只捕 `SecurityException`，
+ * 而 `permissionPrompter.isGranted()` / `NotificationIntents.openAppForSyncFailure(...)` 都在
+ * try **之外** ⇒ 任何非 `SecurityException` 的 `Throwable` 逃出 `collect` ⇒ `launch` 协程
+ * 终止 ⇒ 宿主 `guardedScope` 的 `CoroutineExceptionHandler` 只落日志、不重抛（其 KDoc 自陈
+ * 「该任务静默失败」）⇒ 该组件的**唯一存在理由**（让同步失败可见）静默消失，且无重启通道。
+ *
+ * 现改为**元素级**隔离：单个信号处理失败只落脱敏日志并回退状态，收集器继续；
+ * `CancellationException` 照常沿链重抛（与 `ISSUE-P3-555` 的收敛口径一致）。
+ */
+internal class SyncFailureSignalHandler(
+    private val execute: (SyncFailureNotificationAction) -> Unit,
+    private val state: SyncFailureNotificationState = SyncFailureNotificationState()
+) {
+
+    /** 当前是否已留有失败通知（供单测断言与诊断）。 */
+    val isPosted: Boolean get() = state.isPosted
+
+    /**
+     * 处理单个信号。单个元素抛出的**非取消**异常被就地隔离：
+     * 只落脱敏日志，且若失败动作是 [SyncFailureNotificationAction.POST] 则回退
+     * [SyncFailureNotificationState.markPostFailed]（通知并未真正上屏，避免下一周期空撤
+     * 与「幽灵已发」）。
+     */
+    fun onSignal(input: SyncFailureInput) {
+        val action = when (input) {
+            is SyncFailureInput.CycleOutcome -> state.onOutcome(input.outcome)
+            is SyncFailureInput.EngineEvent ->
+                if (SyncFailureSignal.isEngineFailure(input.event)) state.onEngineFailure()
+                else return
+        }
+        try {
+            execute(action)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            if (action == SyncFailureNotificationAction.POST) {
+                state.markPostFailed()
+            }
+            AppLog.w(TAG, "同步失败通知动作执行异常，已隔离（收集继续）", t)
+        }
+    }
+
+    private companion object {
+        const val TAG = "SyncFailureNotifier"
+    }
 }
 
 /**
@@ -149,6 +213,8 @@ private sealed interface SyncFailureInput {
  *   「发 / 撤」与 `posted` 状态收进 [SyncFailureNotificationState]（`@Synchronized`）——
  *   整改前两个订阅者是兄弟协程 + 非 `@Volatile` 标志 ⇒ 鉴权失败的通知会被同周期的
  *   `Offline` 结论撤掉（且是否发生不确定）；现处理严格串行，终态唯一；
+ * - **元素级异常隔离**（`ISSUE-P2-557`）：见 [SyncFailureSignalHandler]——单个信号处理失败
+ *   不再终止收集器；
  * - 通知内容为**固定通用文案**（不含库文件名 / 路径等用户数据），静默
  *   （`IMPORTANCE_LOW` + `setSilent`）、锁屏 `VISIBILITY_SECRET`、点击回主界面；
  * - 「可静音、可关」：通道级语义——`SYNC_FAILURE` 通道低重要度即静音，用户可随时在
@@ -167,10 +233,18 @@ class SyncFailureNotifier @Inject constructor(
 
     private val scope = guardedScope(Dispatchers.Default, "SyncFailureNotifier")
 
+    /**
+     * 幂等启动标志。`@Volatile`（`ISSUE-P2-557` ②）：`start()` 由冷启动点在
+     * `Dispatchers.Default` 之外的调用方可能多线程触发，此前是非 `@Volatile` 裸 `var`。
+     */
+    @Volatile
     private var started = false
 
     /** 「已发出/已撤下」的唯一状态源（替代原先非 `@Volatile` 的裸 `posted`） */
     private val state = SyncFailureNotificationState()
+
+    /** 元素级裁决 + 隔离（`ISSUE-P2-557` ①）；状态与 [state] 共用同一实例。 */
+    private val handler = SyncFailureSignalHandler(execute = ::apply, state = state)
 
     /**
      * ISSUE-P2-548：两条流**合并为单个收集器**。
@@ -179,8 +253,9 @@ class SyncFailureNotifier @Inject constructor(
      * 「先 `publishSyncEvents()` 后写 `_lastOutcome`」只是**发射**顺序，
      * 不构成**执行**顺序 ⇒ 「同周期既 `post()` 又 `cancel()`、谁后跑全看线程调度」。
      *
-     * 合并后只有一个收集协程：`merge` 按发射次序交付，处理**严格串行**且无并发窗口；
-     * 事件与结论的裁决再一并收进 [SyncFailureNotificationState]，终态唯一。
+     * 合并后只有一个收集协程，处理**严格串行**且无并发窗口——但 `merge` 只保证
+     * **单条上游流内部**有序，**不保证跨上游的相对到达顺序**；终态一致依赖
+     * 「事件 `cause` 与结论 `classify` 同源」（见 [SyncFailureNotificationState]）。
      */
     private fun signals(): Flow<SyncFailureInput> = merge(
         syncCoordinator.lastOutcome.filterNotNull().map { SyncFailureInput.CycleOutcome(it) },
@@ -192,17 +267,11 @@ class SyncFailureNotifier @Inject constructor(
         if (started) return
         started = true
         scope.launch {
-            signals().collect { input ->
-                when (input) {
-                    is SyncFailureInput.CycleOutcome -> apply(state.onOutcome(input.outcome))
-                    is SyncFailureInput.EngineEvent ->
-                        if (SyncFailureSignal.isEngineFailure(input.event)) apply(state.onEngineFailure())
-                }
-            }
+            signals().collect { input -> handler.onSignal(input) }
         }
     }
 
-    /** 状态机结论 → Android 侧执行（仅由 [signals] 合并后的**唯一**收集器调用） */
+    /** 状态机结论 → Android 侧执行（仅由 [SyncFailureSignalHandler] 调用） */
     private fun apply(action: SyncFailureNotificationAction) {
         when (action) {
             SyncFailureNotificationAction.POST -> post()

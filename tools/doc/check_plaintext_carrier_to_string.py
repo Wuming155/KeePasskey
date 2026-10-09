@@ -23,11 +23,19 @@
 - 字段名以 `Id` / `Key` / `Ref` / `Index`（复数同）结尾的**豁免**：那是**标识符 / 字典键**，
   不是明文本身（实扫反证见模块内 `EXEMPT_SUFFIX_RE` 注释）。豁免必须窄，否则真命中
   （`revealedPassword` 就是揭示出来的明文口令）会被噪声淹没。
-- 类体范围＝从参数表右括号到**下一个行首 `}`**（Kotlin 顶层声明的收口列）；
-  类名与允许清单按「相对仓库根的 posix 路径 + 类名」登记。
+- **声明头解析（`ISSUE-P2-556` AC①②）**：类名后允许可选的 `<...>` 泛型参数表与可选的
+  `constructor` 关键字——`data class Foo<T>(...)` / `data class Foo constructor(...)`
+  此前**整条声明不进判定**（形态性漏检）。
+- **类体范围（`ISSUE-P2-556` AC②）**：从**主构造右括号同一行内**的类体 `{` 起按**花括号配对**
+  收口；**无体** `data class`（如 `data class Leaky(val password: String)`）即无类体、
+  视为**未覆写**。旧实现取「到下一个**行首** `}`」的区间，会把**无体类的区间越过本类**
+  延到**后随兄弟类**，兄弟体内的覆写使其被**误判为已覆写**而放行。
+- 类名与允许清单按「相对仓库根的 posix 路径 + 类名」登记。
 - 类型判定只看 `String` / `String?`——`CharArray` / `ByteArray` 的默认 `toString()` 在
   data class 里是**内容展开**（`contentToString()`），同属泄漏面，但本判据先钉
   `ISSUE-P2-549` AC③ 明写的 `String` 形态，其余形态留待普查后扩面（避免首版即误伤）。
+- **非退化断言**（`ISSUE-P3-562` AC）：`checked == 0`（扫描面为空 / `--root` 传错 / 模块改名）
+  **判红**——与 `check_box_slot_children.py` 同范式。
 
 ## 口径声明（**不得**据其绿推定「全仓明文无泄漏」）
 
@@ -37,7 +45,7 @@
 ③ 字段名不叫 `password` 的敏感载体（如 `secret` / `token`）。
 
 用法：`python tools/doc/check_plaintext_carrier_to_string.py [--root 目录] [--selftest]`；
-命中即退出码 1（无命中退 0）；`--selftest` 用内嵌正 / 反样本反校判据本身。
+命中即退出码 1（无命中退 0，扫描面为空同样退 1）；`--selftest` 用内嵌正 / 反样本反校判据本身。
 """
 
 from __future__ import annotations
@@ -51,8 +59,8 @@ import tempfile
 # 允许「命中形态但不覆写」的类（相对仓库根 posix 路径 + 类名）。新成员入列须写明理由。
 ALLOWED: tuple[str, ...] = ()
 
-# 顶层 `data class Name(` 声明
-DECL_RE = re.compile(r"\bdata\s+class\s+(\w+)\s*\(")
+# 顶层 `data class Name` 声明（泛型参数表 / `constructor` 关键字由 `_primary_ctor_open` 续解）
+DECL_RE = re.compile(r"\bdata\s+class\s+(\w+)")
 
 # 构造参数：`val name: Type` / `var name: Type = ...`（只取主构造参数表里的显式声明）
 PARAM_RE = re.compile(r"^\s*(?:val|var)\s+(\w+)\s*:\s*([A-Za-z_][\w.?<>,\s]*?)\s*(?:=[^,]+)?$")
@@ -72,6 +80,8 @@ CARRIER_TYPES = ("String", "String?")
 # 扫描面：五个生产模块的 `src/main`（不随未跟踪目录漂移）
 MODULES = ("app", "database", "crypto", "sync", "core")
 
+_OPEN_TO_CLOSE = {"(": ")", "<": ">", "[": "]"}
+
 
 def _is_comment(line: str) -> bool:
     stripped = line.strip()
@@ -87,6 +97,79 @@ def _matching_paren(text: str, open_idx: int) -> int:
         if ch == "(":
             depth += 1
         elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return idx
+        idx += 1
+    return -1
+
+
+def _skip_balanced(text: str, open_idx: int) -> int:
+    """跳过 `(` / `<` / `[` 起的配对组，返回其后的下标；不配对返回 -1。"""
+    close = _OPEN_TO_CLOSE[text[open_idx]]
+    depth = 0
+    idx = open_idx
+    while idx < len(text):
+        ch = text[idx]
+        if ch == text[open_idx]:
+            depth += 1
+        elif ch == close:
+            depth -= 1
+            if depth == 0:
+                return idx + 1
+        idx += 1
+    return -1
+
+
+def _skip_hspace(text: str, idx: int) -> int:
+    while idx < len(text) and text[idx] in " \t\r":
+        idx += 1
+    return idx
+
+
+def _primary_ctor_open(text: str, after_name: int) -> int:
+    """`data class Name` 之后主构造左括号的下标；解析不到返回 -1。
+
+    允许类名后可选的 `<...>` 泛型参数表与可选的 `constructor` 关键字（ISSUE-P2-556 AC①）。
+    """
+    idx = _skip_hspace(text, after_name)
+    if idx < len(text) and text[idx] == "<":
+        idx = _skip_balanced(text, idx)
+        if idx < 0:
+            return -1
+        idx = _skip_hspace(text, idx)
+    if text.startswith("constructor", idx):
+        idx = _skip_hspace(text, idx + len("constructor"))
+    return idx if idx < len(text) and text[idx] == "(" else -1
+
+
+def _body_start(text: str, close_idx: int) -> int:
+    """主构造右括号之后、**同一行内**的类体 `{` 下标；无体（无 `{`）返回 -1。"""
+    line_end = text.find("\n", close_idx)
+    if line_end < 0:
+        line_end = len(text)
+    idx = close_idx + 1
+    while idx < line_end:
+        ch = text[idx]
+        if ch == "{":
+            return idx
+        if ch in _OPEN_TO_CLOSE:
+            idx = _skip_balanced(text, idx)
+            if idx < 0:
+                return -1
+            continue
+        idx += 1
+    return -1
+
+
+def _matching_brace(text: str, open_idx: int) -> int:
+    """返回与 `text[open_idx] == '{'` 配对的右花括号下标；找不到返回 -1。"""
+    depth = 0
+    idx = open_idx
+    while idx < len(text):
+        if text[idx] == "{":
+            depth += 1
+        elif text[idx] == "}":
             depth -= 1
             if depth == 0:
                 return idx
@@ -114,11 +197,13 @@ def _split_params(params_text: str) -> list[str]:
     return parts
 
 
-def _class_body(text: str, body_start: int) -> str:
-    """类体范围：从 `body_start` 到下一个**行首** `}`（顶层声明收口列）。"""
-    m = re.search(r"^}", text[body_start:], re.M)
-    end = body_start + m.start() if m else len(text)
-    return text[body_start:end]
+def _class_body(text: str, close_idx: int) -> str:
+    """类体文本：主构造右括号同行内的 `{` 起按花括号配对收口；无体类返回空串。"""
+    body_start = _body_start(text, close_idx)
+    if body_start < 0:
+        return ""
+    body_end = _matching_brace(text, body_start)
+    return text[body_start:] if body_end < 0 else text[body_start : body_end + 1]
 
 
 def scan(root: pathlib.Path) -> tuple[list[str], int]:
@@ -140,7 +225,9 @@ def scan(root: pathlib.Path) -> tuple[list[str], int]:
                 lineno = text[: m.start()].count("\n") + 1
                 if _is_comment(text.splitlines()[lineno - 1]):
                     continue
-                open_idx = text.index("(", m.end() - 1)
+                open_idx = _primary_ctor_open(text, m.end())
+                if open_idx < 0:
+                    continue
                 close_idx = _matching_paren(text, open_idx)
                 if close_idx < 0:
                     continue
@@ -162,8 +249,7 @@ def scan(root: pathlib.Path) -> tuple[list[str], int]:
                 class_name = m.group(1)
                 if "%s::%s" % (rel, class_name) in ALLOWED:
                     continue
-                body = _class_body(text, close_idx)
-                if "override fun toString(" in body:
+                if "override fun toString(" in _class_body(text, close_idx):
                     continue
                 hits.append(
                     "MISSING_TO_STRING %s:%d  %s（明文口令载体 %s）"
@@ -172,7 +258,14 @@ def scan(root: pathlib.Path) -> tuple[list[str], int]:
     return hits, checked
 
 
-# `--selftest` 内嵌样本：绿样本（已覆写 / 非 String 承载 / 字段名不命中）0 命中；红样本命中一次。
+def verdict(hits: list[str], checked: int) -> int:
+    """统一判定：命中即红；**扫描面为空同样判红**（`ISSUE-P3-562`）。"""
+    if checked == 0:
+        return 1
+    return 1 if hits else 0
+
+
+# `--selftest` 内嵌样本：绿样本（已覆写 / 非 String 承载 / 字段名不命中 / 泛型与 constructor 已覆写）0 命中。
 SELFTEST_GOOD = """package demo
 
 data class Safe(val username: String, val password: String) {
@@ -184,11 +277,30 @@ data class CharCarrier(val password: CharArray)
 data class IdCarrier(val passwordId: String?, val passwordKey: String?)
 
 data class OtherField(val secret: String)
+
+data class Generic<T>(val password: String) {
+    override fun toString(): String = "Generic(<redacted>)"
+}
+
+data class ExplicitCtor constructor(val password: String) {
+    override fun toString(): String = "ExplicitCtor(<redacted>)"
+}
 """
 
+# 反样本：无体类 / 泛型类 / 无体类的兄弟类体内有覆写（旧「到下一个行首 `}`」口径的漏检形态）。
 SELFTEST_BAD = """package demo
 
 data class Leaky(val username: String, val password: String)
+
+data class LeakyNoBody(val password: String)
+
+data class GenericLeaky<T>(val password: String)
+
+data class SiblingLeaky(val password: String)
+
+data class Sibling {
+    override fun toString(): String = "Sibling"
+}
 """
 
 
@@ -205,22 +317,41 @@ def selftest() -> int:
         good_hits, good_checked = scan(good_root)
         bad_root = _write(pathlib.Path(tmp) / "bad", "Bad.kt", SELFTEST_BAD)
         bad_hits, bad_checked = scan(bad_root)
+        empty_root = pathlib.Path(tmp) / "empty"
+        empty_root.mkdir(parents=True, exist_ok=True)
+        empty_hits, empty_checked = scan(empty_root)
 
+    # 红样本 4 处：Leaky / LeakyNoBody / GenericLeaky / SiblingLeaky（后者须不被兄弟类覆写放行）。
     ok = (
         good_checked == 1
         and bad_checked == 1
         and not good_hits
-        and len(bad_hits) == 1
-        and bad_hits[0].startswith("MISSING_TO_STRING")
+        and len(bad_hits) == 4
+        and all(h.startswith("MISSING_TO_STRING") for h in bad_hits)
+        and empty_checked == 0
+        and verdict(empty_hits, empty_checked) == 1
+        and verdict(bad_hits, bad_checked) == 1
+        and verdict(good_hits, good_checked) == 0
     )
     print(
-        "[selftest] 绿样本命中=%d（须 0，检查 %d 文件）；红样本命中=%d（须 1，检查 %d 文件）"
-        % (len(good_hits), good_checked, len(bad_hits), bad_checked)
+        "[selftest] 绿样本命中=%d（须 0，检查 %d 文件）；红样本命中=%d（须 4，检查 %d 文件）；"
+        "空树 checked=%d 判定=%d（须 1）"
+        % (
+            len(good_hits),
+            good_checked,
+            len(bad_hits),
+            bad_checked,
+            empty_checked,
+            verdict(empty_hits, empty_checked),
+        )
     )
     if not ok:
         print("[selftest] FAIL：判据与样本不符，闸门读数不可信")
         return 1
-    print("[selftest] PASS：判据可分辨「已覆写 / 非 String 承载」与「明文载体未覆写」")
+    print(
+        "[selftest] PASS：判据可分辨「已覆写 / 非 String 承载 / 泛型与 constructor 已覆写」"
+        "与「明文载体未覆写（含无体类不被兄弟类放行）」"
+    )
     return 0
 
 
@@ -243,6 +374,12 @@ def main(argv: list[str]) -> int:
     )
     for hit in hits:
         print("  HIT " + hit)
+    if checked == 0:
+        print(
+            "[check_plaintext_carrier_to_string] FAIL：扫描面为空（--root 传错 / 模块被移动或改名）"
+            "——空转不得当绿（ISSUE-P3-562）"
+        )
+        return 1
     if hits:
         print(
             "[check_plaintext_carrier_to_string] FAIL：承载明文口令的 data class 必须覆写 toString()"

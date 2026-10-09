@@ -21,8 +21,12 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 1. **模块依赖严格单向**，禁止反向或同层互依：
    ```
    app ──> database ──> crypto ──> core
-    └───> sync ────────────────> core
+    ├───> sync ────────────────> core
+    └───> crypto ──────────────> core
    ```
+   （`app → crypto` 为 `ISSUE-P3-563` 补记：app 直接使用 crypto 的通行密钥 / 熵估算 / KDF 基准面，
+   已显式声明依赖；与 `database → crypto(api)` 的透传并存，两者不冲突。拓扑明细见
+   [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) §2。）
 2. **敏感数据铁律**：主密码、密钥只用 `CharArray`/`ByteArray` 并显式清零，绝不落地为 `String`；日志严禁敏感明文。
    - 原生侧 `crypto/src/main/rust/` 四个内核（Argon2 / AES-KDF / Twofish-CBC / 口令强度）的敏感缓冲一律由 `Zeroizing`
      RAII 全路径擦除：**禁止**手写 C/C++ 秘密缓冲管理，**禁止**以「启用了 `zeroize` feature」推定已擦除；生产派生只走
@@ -160,11 +164,12 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   的前提成立性用 `python tools/doc/scaffold_block_fingerprint.py <git rev> <目录> <页名>…`
   （**目测登记前提曾造成一次真实回归**，见 `ISSUE-P3-195`）
 - CI **`hygiene-gate`**（`.github/workflows/build.yml`）——上述规模 / 链接 / 索引 / 重言断言 / 复核 / 类型名 /
-  Box 内容槽 / 启动语言种子接线 / **投影读取安全** / **裸 scope 收口** / **归档面不可回退**机检的 **fail-closed 硬门禁**：`count_line_tiers` +
+  Box 内容槽 / 启动语言种子接线 / **投影读取安全** / **裸 scope 收口** / **归档面不可回退** /
+  **明文载体 `toString` 护栏** / **异常 message 文案槽** 机检的 **fail-closed 硬门禁**：`count_line_tiers` +
   `long_functions` + `check_md_links` + `check_resolved_index_sync` + `check_tautological_assertions` +
   `check_recheck_consistency` + `check_bounded_type_names` + `check_box_slot_children` +
   `check_launch_language_seed` + `check_projection_read_safety` + `check_raw_coroutine_scope` +
-  `check_archive_monotonicity`，非 0 即红；
+  `check_archive_monotonicity` + `check_plaintext_carrier_to_string` + `check_message_not_in_user_text`，非 0 即红；
   **严禁** `|| true` 吞掉（**条数不写死**：以 `gate_readings.py` 现跑读数为准）。
   本 job 的 checkout 必须 `fetch-depth: 0`（归档回退判据要读 `HEAD~1`）
 - `python tools/doc/check_raw_coroutine_scope.py` — **裸 `CoroutineScope(` 收口机检**（`ISSUE-P1-538` 立规；
@@ -188,6 +193,17 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   ④ **禁止「先查 `cleared` 再裸读」的两步式**（`ISSUE-P1-537` / `ISSUE-P2-540` 裁决②）；
   ⑤ **非交付面禁止 fail-open 直读 `password` 字段**（`ISSUE-P2-539`，`DELIVERY_FACE_FILES` 登记豁免）。
   `--selftest` 五向反校；**不得**据其绿推定「全仓已无裸读 / 无两步式」（静态启发式边界见脚本文档串）
+- `python tools/doc/check_plaintext_carrier_to_string.py` — **明文口令载体 `toString()` 护栏机检**（`ISSUE-P2-549` 立规；
+  **改 `*/src/main/**` 的 `data class` 声明后必跑**）：判据＝字段名命中 `password`（忽略大小写）且承载 `String` / `String?`
+  的 `data class` 必须在类体内 `override fun toString(`；`Id` / `Key` / `Ref` / `Index` 后缀豁免（标识符 / 字典键）。
+  声明头允许可选 `<...>` 与 `constructor`（`ISSUE-P2-556` ①）；类体按**花括号配对**收口、**无体类不外延到兄弟类**
+  （`ISSUE-P2-556` ②）；`checked == 0` **判红**（`ISSUE-P3-562` 非退化）。`--selftest` 为口径反校（含无体 / 泛型 / 兄弟类反样本）
+- `python tools/doc/check_message_not_in_user_text.py` — **异常 `message` 不得进用户可见文案槽机检**（`ISSUE-P3-550` 立规；
+  **改 `*/src/main/**` 的文案装配后必跑**）：文案槽（`strings.get(` / `UiMessage(` / `KdbxResult.Failure(` /
+  `SyncOutcome.Error(` / `ProbeOutcome.Failed(` / `showSnackbar(` / `makeText(` / `errorMessage =` / `healthMessage =` /
+  `userMessage =`）的**实参文本**内出现 `.message`（含 `?.message` 与方法接收者 `x.y()?.message`）即红；
+  **按括号配对取整段实参（非逐行）** ⇒ 多行调用全覆盖（`ISSUE-P2-556` ③④）；`checked == 0` **判红**（`ISSUE-P3-562`）。
+  唯一豁免＝被 `catch` 绑定的 `ImportFormatException`；`--selftest` 为口径反校（含多行 / 方法接收者 / 两新槽反样本）
 - `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；
   PowerShell 直接可跑。历史命令 `bash …/check_recheck_consistency.sh` 仍可用，薄封装调本文件）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**`

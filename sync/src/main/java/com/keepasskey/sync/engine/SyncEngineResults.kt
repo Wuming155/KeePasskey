@@ -154,13 +154,21 @@ sealed class SyncOpenResult {
      * 导致「密码填错」在 UI 上显示成「离线，已保留本地副本」。
      */
     data class RemoteRejectedUsingCache(val localBytes: ByteArray, val cause: Throwable?) : SyncOpenResult() {
+        /**
+         * [equals] / [hashCode]**都不含 [cause]**（`ISSUE-P3-558`）：口径与兄弟类型
+         * [RemoteUnreachableUsingCache]（同为「降级读本地缓存」、只比 `localBytes`）对齐。
+         * 整改前 `equals` 忽略 `cause` 而 `hashCode` 计入它（`Throwable.hashCode` 为身份哈希），
+         * 同字节异 `cause` 的两实例 `equals == true` 而 `hashCode` 不同，破坏
+         * `equals`/`hashCode` 契约。`cause` 是随结果上抛的诊断对象（供 app 层归类文案），
+         * 非值语义的一部分。
+         */
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
             other as RemoteRejectedUsingCache
             return localBytes.contentEquals(other.localBytes)
         }
-        override fun hashCode(): Int = 31 * localBytes.contentHashCode() + (cause?.hashCode() ?: 0)
+        override fun hashCode(): Int = localBytes.contentHashCode()
     }
 }
 

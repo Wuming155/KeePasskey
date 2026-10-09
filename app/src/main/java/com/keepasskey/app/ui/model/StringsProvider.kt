@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.model
 
 import androidx.annotation.StringRes
+import java.util.Locale
 
 /**
  * TASK-21：ViewModel / 控制器层的字符串资源解析通道。
@@ -9,7 +10,18 @@ import androidx.annotation.StringRes
  * 用途：把非 Composable 层的用户可见文案统一收敛到 `strings.xml`（P3-23）。
  */
 fun interface StringsProvider {
+
     fun get(@StringRes id: Int, vararg args: Any?): String
+
+    /**
+     * 文案语言（`ISSUE-P3-560`）：应用内语言；`null` 表示「跟随系统」。
+     *
+     * 供需要 `Locale` 的格式化消费——`DateTimeFormatter.ofPattern(pattern, locale)` 必须与
+     * **取 pattern 的同一语言**，否则英文资源里的 `MMM d` 会按系统 Locale 渲染出
+     * 「10月 9 14:30」这类混合语言文案（`RelativeTimeFormatter` 即此场景）。
+     * 默认 `null`（跟随系统）⇒ 既有 SAM 实现与假实现零改动。
+     */
+    val locale: Locale? get() = null
 }
 
 /**

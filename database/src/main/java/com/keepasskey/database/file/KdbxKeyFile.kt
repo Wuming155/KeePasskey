@@ -131,8 +131,13 @@ internal object KdbxKeyFile {
                     throw KdbxCorruptFileException("密钥文件格式无效: Hash 属性不是合法十六进制", it)
                 }
                 val actual = HashUtil.sha256(key)
+                // ISSUE-P3-567：改用 MessageDigest.isEqual（先按 expected 长度对齐）替代短路
+                // 的 Arrays.equals，与同族密钥材料比较口径统一。可利用性：expected 来自密钥文件
+                // 自身的 Hash 属性、actual = SHA256(key)，两者同源且攻击者须已持有该文件，
+                // 时序侧信道无实际收益——本处属口径一致性问题，非漏洞。
+                val comparable = actual.copyOf(expected.size)
                 val mismatch = expected.size > actual.size ||
-                        !Arrays.equals(expected, actual.copyOf(expected.size))
+                        !java.security.MessageDigest.isEqual(expected, comparable)
                 Arrays.fill(actual, 0.toByte())
                 if (mismatch) {
                     Arrays.fill(key, 0.toByte())

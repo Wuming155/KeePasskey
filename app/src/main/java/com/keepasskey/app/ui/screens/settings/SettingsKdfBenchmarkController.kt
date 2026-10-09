@@ -6,6 +6,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.crypto.kdf.KdfBenchmark
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +48,9 @@ internal class SettingsKdfBenchmarkController(
                     recommendedParallelism = recommendation.parallelism
                 )
             } catch (t: Throwable) {
+                // ISSUE-P3-568：取消必须沿链重抛（与 runCatchingCancellable 立规意图一致），
+                // 不得把协程取消归一为「基准测试失败」落进 UI 状态
+                if (t is CancellationException) throw t
                 // ISSUE-P3-550：原生 Argon2 的失败细节（内存 / 参数）只进日志，
                 // UI 侧恒用已本地化的固定文案
                 AppLog.w(TAG, "KDF 基准测试失败", t)

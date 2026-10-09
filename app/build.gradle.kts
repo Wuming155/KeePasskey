@@ -257,7 +257,7 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":database"))
     implementation(project(":sync"))
-    // ISSUE-P3-554：app 有 11 个文件直接 `import com.keepasskey.crypto.*`
+    // ISSUE-P3-554：app 有 9 个文件 / 14 处直接 `import com.keepasskey.crypto.*`
     // （通行密钥载荷 / 熵估算 / KDF 基准等），却一直**未显式声明**本依赖——
     // 能编译全靠 `database` 的 `api(project(":crypto"))` 透传（api 会外溢到消费方编译类路径）。
     // 那是一条隐式脆点：`database` 若把该依赖改成 `implementation`，app 会立刻编译不过，

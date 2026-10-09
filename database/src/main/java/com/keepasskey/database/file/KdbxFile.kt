@@ -163,7 +163,7 @@ object KdbxFile {
             // 4. 读取并校验 Header HMAC-SHA256
             // 官方规范 / 对齐 KeePass 2.x、pykeepass：headerKey = SHA-512(LE64(0xFFFFFFFFFFFFFFFF) ‖ hmacKey64)
             val headerHmacKey = HashUtil.sha512(
-                LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()),
+                LittleEndianUtil.longTo8Bytes(KdbxConstants.Header.HMAC_KEY_LE64_SENTINEL),
                 hmacKey64
             )
             val actualHeaderHmac = HashUtil.hmacSha256(headerHmacKey, headerBytes)
@@ -424,7 +424,7 @@ object KdbxFile {
 
             // 与读取侧一致：SHA-512(LE64(0xFFFFFFFFFFFFFFFF) ‖ hmacKey64)
             val headerHmacKey = HashUtil.sha512(
-                LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()),
+                LittleEndianUtil.longTo8Bytes(KdbxConstants.Header.HMAC_KEY_LE64_SENTINEL),
                 hmacKey64
             )
             val headerHmac = HashUtil.hmacSha256(headerHmacKey, headerBytes)

@@ -39,6 +39,21 @@ object KdbxConstants {
     }
 
     /**
+     * 外层 Header 的认证常量（KDBX 4 头部 HMAC）。
+     */
+    object Header {
+        /**
+         * 头部 HMAC 密钥派生的固定哨兵（`0xFFFFFFFFFFFFFFFF`，即全 1 的 64 位无符号数）。
+         *
+         * `headerKey = SHA-512(LE64(HMAC_KEY_LE64_SENTINEL) ‖ hmacKey64)`——官方规范 /
+         * 对齐 KeePass 2.x、pykeepass。读侧（[com.keepasskey.database.file.KdbxFile] 校验头部 HMAC）
+         * 与写侧（写出头部 HMAC）**共用本常量**，避免同一 magic 值双点维护造成读写不对称
+         * （`ISSUE-P3-565`）。
+         */
+        const val HMAC_KEY_LE64_SENTINEL: Long = -1L
+    }
+
+    /**
      * 外层 Header 字段 ID (KDBX 3 & 4)
      */
     object HeaderFieldId {
