@@ -170,6 +170,31 @@ class NativePasswordStrengthDeviceTest {
         expected.fill(0)
     }
 
+    /**
+     * **降级实现与原生内核的直译等价**（B3 裁决 2026-10-09）。
+     *
+     * 降级路径已由「不覆盖模式分析的独立近似」改为 `strength.rs` 的直译，故同一输入上两侧的
+     * **分档与标志位必须逐条相同**。宿主侧该对拍在 `cargoHostBuild` 产物缺失时被 `Assume` 跳过，
+     * 只有真机（NDK 产物）能真正执行——本用例补上这个只有设备侧可见的执行点。
+     */
+    @Test
+    fun 降级实现与原生内核在合成语料上分档与标志位逐条一致() {
+        for (pw in corpus) {
+            val bytes = pw.toByteArray(Charsets.UTF_8)
+            val native = NativePasswordStrength.evaluate(bytes)
+            val fallback = PasswordStrengthFallback.evaluate(bytes)
+            assertTrue(
+                "[$pw] 分档不一致：原生 ${native.score} / 降级 ${fallback.score}",
+                native.score == fallback.score
+            )
+            assertTrue(
+                "[$pw] 标志位不一致：原生 0x${native.flags.toString(16)} / 降级 0x${fallback.flags.toString(16)}",
+                native.flags == fallback.flags
+            )
+            bytes.fill(0)
+        }
+    }
+
     private companion object {
         private const val LAYOUT_SIZE = 3
         private const val LONG_PASSWORD_BYTES = 10_000

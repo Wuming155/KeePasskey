@@ -45,7 +45,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
    2. **整改 + 验证**：`.\gradlew.bat test` 全绿（含相关回归）**且** `python tools/doc/gate_readings.py` **全 PASS**
       （清单与条数随 `hygiene-gate` 段落自动解析，**本文件不写死**）方准入库；
       批次文档须**原样粘贴该脚本输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
-      「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因，§308 立规。
+      「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因，§308 立规。**读数块只入批次文档**（结案证据的
+      唯一载体；B2 瘦身 2026-10-09）：报告 / 记录类文档**引用批次编号**即可，**不得**再全文搬移同一读数块
+      （历史报告已贴的保留为该次运行的原始证据，不追改）。
       **首轮红取证（`ISSUE-P3-489` 立规）**：`test` 非零退出时**先**跑
       `python tools/doc/preserve_test_failures.py` 把肇事用例清单落盘（`build/failure-evidence/`）**再**重跑——
       `--rerun-tasks` 会全量覆盖 `test-results`，覆盖后首轮肇事者不可复原（§445.6 实测）。
@@ -74,6 +76,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) — 待办（P0→P3）；[`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) — 归档总索引
 - [`docs/architecture/已知工程限界.md`](docs/architecture/已知工程限界.md) — **已接受工程限界 / 残余风险登记表**（改这些面之前必读；判「是否为已知限界」只认此表）
 - [`docs/architecture/产品裁决登记.md`](docs/architecture/产品裁决登记.md) — **已裁决的产品口径登记表**（判「这是不是已定的取舍」只认此表；**属取舍而非缺陷的条目一律不进 `ACTIVE_ISSUES.md`**）
+- 检索上述两表：`python tools/doc/find_decision.py <关键词>`（`--list` 列全量）— **统一检索入口**（B2 瘦身 2026-10-09）；
+  两表条目之间**不再逐条互链**，关联一律**引编号**（`PD-xx` / `§n`），由本入口定位
 - `.codebuddy/rules/engineering-rules.md` — 工程规则；写代码前
 - [`docs/security/同步层记录级完整性威胁建模.md`](docs/security/同步层记录级完整性威胁建模.md) — 改同步 / 合并 / 防回滚前
 - [`docs/security/SECURITY_RECHECK_2026-09.md`](docs/security/SECURITY_RECHECK_2026-09.md) — 认领安全条目 / 重评 severity / 发布前

@@ -95,7 +95,11 @@ pub const MAX_ANALYZED_CHARS: usize = 256;
 const EXCESS_PENALTY_PER_CHAR: f64 = 0.05;
 
 /// `log2(10)`——用于把「比特」换算为「log10(猜测次数)」。
-const LOG2_10: f64 = 3.321_928_092_440_296;
+///
+/// 与 Kotlin 侧 `PasswordStrengthFallback.LOG2_10` **同字面量**（B3 裁决 2026-10-09：原值
+/// `3.321_928_092_440_296` 系笔误，与真实 `log2(10)` 在第 9 位小数起偏离，构成两侧唯一的
+/// 常数级漂移面；直译落地时一并订正，两侧取到同一 double）。
+const LOG2_10: f64 = 3.321_928_094_887_362;
 
 /// 常见口令表（全小写；对齐 `HealthCheckEngine.COMMON_WEAK_PASSWORDS` 并补充键盘行走与
 /// 低基数重复型；**不含任何真实用户凭据**）。
