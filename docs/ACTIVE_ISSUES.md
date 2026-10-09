@@ -205,17 +205,24 @@
 >
 > - **核实时间点 / 方式**：2026-10-09，读源码 + grep 确认无别名常量。
 > - **根因**：`database/.../file/KdbxFile.kt:166`（读侧）与 `:427`（写侧）均为
->   `LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong())`。`grep FFFFFFFFFFFFFFFF` 仅命中这 2 行，未见具名常量。
+>   `LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong())`。`grep FFFFFFFFFFFFFFFF` 在生产侧仅命中这 2 行，
+>   未见具名常量（**2026-10-09 真伪核实更正**：原写「仅命中这 2 行」不完整——`database/src/test/.../KdbxCompatibilityAndSecurityTest.kt`
+>   的 `:552` / `:591` 另有同一字面量，合计 **4 处**；`KdbxConstants` 内**无** `Header` 子对象，既有 `object` 为 `HeaderFieldId`）。
 >   违反 `.codebuddy/rules/engineering-rules.md` §禁止魔法数字第 3 条（同一数值多处出现须收敛到常量定义）。
 > - **影响**：同一 magic 值双点维护，改一侧漏另一侧会造成读写不对称（头部完整性语义）。
 > - **涉及文件**：`database/src/main/java/com/keepasskey/database/file/KdbxFile.kt`、`core/.../model/KdbxConstants.kt`
-> - **验收标准**：在 `KdbxConstants` 增设具名常量（如 `Header.HMAC_KEY_LE64_SENTINEL`），读 / 写两侧共用。
+> - **验收标准**：在 `KdbxConstants` 增设具名常量（**2026-10-09 真伪核实更正**：该文件**无** `Header` 子对象，
+>   形如 `Header.HMAC_KEY_LE64_SENTINEL` 的路径不存在，宜落 `HeaderFieldId` 同级的新 `object` 或直接置于 `KdbxConstants` 顶层），
+>   读 / 写两侧共用。
 >
 > ### ISSUE-P3-566：`SyncFailureNotifier` 注释过度声明 `merge` 顺序保证（登记**重开条件**）
 >
 > - **核实时间点 / 方式**：2026-10-09，逐行读注释 + 核对 `merge` 语义。
-> - **根因**：`SyncFailureNotifier.kt:176-183` 称「`merge` 按发射次序交付」「使『先事件后结论』的发射顺序**构成**执行顺序保证」，`:148-151` 同调。
->   **`merge` 只保证单条上游流内部有序，不保证跨上游的相对到达顺序** ⇒ 表述不成立。
+> - **根因**：`SyncFailureNotifier.kt:82-83` 的「调用方另把两条流合并为单个收集器……使『先事件后结论』的发射顺序
+>   **构成**执行顺序保证」与 `:182` 的「`merge` 按发射次序交付」同属**过度声明**；
+>   **`merge` 只保证单条上游流内部有序，不保证跨上游的相对到达顺序** ⇒ 上述表述不成立。
+>   （**2026-10-09 真伪核实更正**：原引 `:176-183` / `:148-151` 有偏差——「构成执行顺序保证」句实为 `:82-83`（`SyncFailureNotificationState` 的 KDoc），
+>   `:182` 只是「按发射次序交付」，而 `:148-151` 仅称「现处理严格串行，终态唯一」、**不含**该过度声明。）
 >   结果当前**仍正确**，因同一同步周期内「事件 `cause`」与「结论 `classify`」**用的是同一个异常对象**，两种到达序**终态一致**。
 > - **影响**：属注释过度声明；**风险在于后续据此注释推断「顺序已保证」**。
 > - **涉及文件**：`app/src/main/java/com/keepasskey/app/sync/SyncFailureNotifier.kt`
@@ -234,7 +241,7 @@
 > ### ISSUE-P3-568：`SettingsKdfBenchmarkController` 的 `catch (t: Throwable)` 仍吞 `CancellationException`
 >
 > - **核实时间点 / 方式**：2026-10-09，读源码 + 对照 `ISSUE-P3-555` 的收敛范围。
-> - **根因**：`app/.../ui/screens/settings/SettingsKdfBenchmarkController.kt:47` 的 `catch (t: Throwable)` 会把 `CancellationException` 一并归一为 `errorMessage`。
+> - **根因**：`app/.../ui/screens/settings/SettingsKdfBenchmarkController.kt:49` 的 `catch (t: Throwable)` 会把 `CancellationException` 一并归一为 `errorMessage`（**2026-10-09 真伪核实更正**：`catch` 实为 `:49`，原写 `:47` 是 `recommendedParallelism` 赋值行）。
 >   `ISSUE-P3-555`（本批闭环）的收敛范围为「`runCatchingCancellable` provider 11 处 + `markResolvedAndUpload` / 上传重试」，**未枚举本处** ⇒ 同型残留。
 > - **影响**：基准测试被取消时被记为「失败」并落 UI 状态，与 `runCatchingCancellable` 的立规意图（取消须沿链重抛）相悖。低危。
 > - **涉及文件**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsKdfBenchmarkController.kt`
