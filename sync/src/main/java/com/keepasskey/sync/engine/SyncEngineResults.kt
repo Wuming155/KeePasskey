@@ -128,7 +128,13 @@ sealed class SyncOpenResult {
         override fun hashCode(): Int = localBytes.contentHashCode()
     }
 
-    /** 远端不可达，降级读取本地缓存 */
+    /**
+     * 远端**不可达**（`SyncException.NetworkError`：连接失败 / 超时），降级读取本地缓存。
+     *
+     * 语义边界（ISSUE-P2-548）：本结果**只**代表「网络层连不上」这一**设计内降级**——
+     * 用户无需修任何配置，网络恢复后同步自动成功。鉴权 / 协议 / 服务端失败**不得**归到本结果，
+     * 否则 app 层会把它归一成「离线」，用户长期误以为同步正常。
+     */
     data class RemoteUnreachableUsingCache(val localBytes: ByteArray) : SyncOpenResult() {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -137,6 +143,24 @@ sealed class SyncOpenResult {
             return localBytes.contentEquals(other.localBytes)
         }
         override fun hashCode(): Int = localBytes.contentHashCode()
+    }
+
+    /**
+     * 远端**可达但拒绝/失败**（鉴权 401/403、协议错误、5xx、配额等），降级读取本地缓存。
+     *
+     * ISSUE-P2-548：此类失败**用户必须知悉**（改密码 / 换服务端 / 等限流恢复），
+     * 网络恢复也不会自愈；[cause] 随结果上抛，供 app 层按既有口径（ISSUE-P2-402）
+     * 归类成具体用户文案。整改前它与 [RemoteUnreachableUsingCache] 是同一个结果，
+     * 导致「密码填错」在 UI 上显示成「离线，已保留本地副本」。
+     */
+    data class RemoteRejectedUsingCache(val localBytes: ByteArray, val cause: Throwable?) : SyncOpenResult() {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+            other as RemoteRejectedUsingCache
+            return localBytes.contentEquals(other.localBytes)
+        }
+        override fun hashCode(): Int = 31 * localBytes.contentHashCode() + (cause?.hashCode() ?: 0)
     }
 }
 
@@ -188,8 +212,21 @@ sealed class SyncCommitResult {
         override fun hashCode(): Int = 31 * remoteBytes.contentHashCode() + remoteEtag.hashCode()
     }
 
-    /** 远端不可达，已将变更安全保存在本地缓存 */
+    /**
+     * 远端**不可达**（`SyncException.NetworkError`），已将变更安全保存在本地缓存。
+     *
+     * 语义边界（ISSUE-P2-548）：只代表「网络层连不上」这一设计内降级。
+     */
     data class RemoteUnreachable(val keptLocal: Boolean) : SyncCommitResult()
+
+    /**
+     * 远端**可达但拒绝**（401 / 403 / 协议错误 / 5xx），已将变更安全保存在本地缓存。
+     *
+     * ISSUE-P2-548：上传侧的鉴权失败此前与「真断网」共用 [RemoteUnreachable] ⇒
+     * UI 显示「离线」、失败通知被 `Offline` 结论同周期撤掉；现携带 [cause] 上抛，
+     * 由 app 层按单点口径归类（见 `SyncRemoteFailureOutcome`）。
+     */
+    data class RemoteRejected(val keptLocal: Boolean, val cause: Throwable?) : SyncCommitResult()
 
     /**
      * 冲突路径下载到的远端内容为设备侧曾接受过的历史版本（回退 / 重放），

@@ -9,6 +9,7 @@ import android.os.Build
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.AutoLockManager
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -154,7 +155,10 @@ class ResumeSyncProbeCoordinator @Inject constructor(
                 remoteChanged = remoteChanged
             )
         } catch (e: Exception) {
-            ResumeSyncProbePolicy.ProbeOutcome.Failed(e.message ?: "探测失败")
+            // ISSUE-P3-550：探测异常常来自 HTTP 层，`message` 内嵌端点 / 主机 / 状态码细节
+            // 且服务端可控 ⇒ **只透出异常类型名**（与同文件 :83 的既有口径一致），明细只进日志
+            AppLog.w(TAG, "回前台探测远端变化失败", e)
+            ResumeSyncProbePolicy.ProbeOutcome.Failed(e.javaClass.simpleName)
         }
     }
 
@@ -189,5 +193,10 @@ class ResumeSyncProbeCoordinator @Inject constructor(
         } catch (_: Exception) {
             // 注册失败仅失去网络恢复挂点；回前台挂点仍生效
         }
+    }
+
+    private companion object {
+        /** ISSUE-P3-550：探测异常细节只进日志，UI 侧只透出异常类型名。 */
+        const val TAG = "ResumeSyncProbe"
     }
 }

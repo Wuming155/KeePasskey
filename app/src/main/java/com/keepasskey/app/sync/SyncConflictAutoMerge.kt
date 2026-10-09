@@ -227,6 +227,16 @@ internal suspend fun autoMergeAndUpload(
                         )
                         AutoMergeUploadResult.Completed(SyncOutcome.Offline)
                     }
+                    is SyncCommitResult.RemoteRejected -> {
+                        // ISSUE-P2-548：合并产物上传被鉴权 / 协议 / 服务端拒绝——不是「离线」
+                        eraseDiscardedParseResults(
+                            localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
+                            databaseSession.databaseFlow.value
+                        )
+                        AutoMergeUploadResult.Completed(
+                            strings.remoteFailureOutcome(fresh.cause)
+                        )
+                    }
                     is SyncCommitResult.RollbackRejected -> {
                         // ISSUE-P2-18：最新远端为设备侧曾接受过的历史版本（回放），拒绝其参与合并
                         eraseDiscardedParseResults(
@@ -247,7 +257,10 @@ internal suspend fun autoMergeAndUpload(
             )
             AutoMergeUploadResult.Completed(
                 SyncOutcome.Error(
-                    strings.get(R.string.sync_error_upload_merged_failed, ex?.message)
+                    // ISSUE-P3-550（原 grep `\.message ?:` 漏计本处：`ex?.message` 不含 `?:`）：
+                    // 上传失败的 `message` 内嵌端点 / 主机 / 协议细节且服务端可控 ⇒
+                    // 只透出**状态码或异常类型名**
+                    strings.get(R.string.sync_error_upload_merged_failed, remoteFailureDescriptor(ex))
                 )
             )
         }

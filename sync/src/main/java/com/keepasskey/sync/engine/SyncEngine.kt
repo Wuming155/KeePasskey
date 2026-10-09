@@ -199,7 +199,7 @@ class SyncEngine(
 
     /**
      * [openRemote] 元数据获取失败分支：远端 404 且有缓存 -> 上传恢复；
-     * 其余（网络不可达 / 服务器错误）-> 降级读取缓存。
+     * 其余降级读缓存，并按起因分型（见 [degradeUsingCache]，ISSUE-P2-548）。
      */
     private suspend fun recoverFromMetaFailure(
         remotePath: String,
@@ -218,9 +218,8 @@ class SyncEngine(
             SyncOpenResult.RemoteLostRestored(newEtag)
         }
         else -> {
-            // 网络不可达或服务器错误，降级读取缓存
             events.tryEmit(SyncCacheEvent.CouldntOpenFromRemote(remotePath, ex))
-            SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
+            degradeUsingCache(cachedBytes, ex) // 网络不可达或服务器错误 → 降级读缓存（按起因分型）
         }
     }
 
@@ -291,7 +290,7 @@ class SyncEngine(
             }
             val forcedEx = forcedUpload.exceptionOrNull()
             events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, forcedEx))
-            return SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
+            return degradeUsingCache(cachedBytes, forcedEx)
         }
         if (!remoteProbe.isRemoteUnchanged()) {
             // 本地有修改且远端也有修改 -> 双方冲突（远端内容仅供三方合并，缓存保留本地工作副本）
@@ -341,7 +340,7 @@ class SyncEngine(
             )
         }
         events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, uploadEx))
-        return SyncOpenResult.RemoteUnreachableUsingCache(cachedBytes)
+        return degradeUsingCache(cachedBytes, uploadEx)
     }
 
     /**
@@ -408,11 +407,11 @@ class SyncEngine(
                     // 本地缓存已在步骤 1 安全保留，如实返回远端不可达，
                     // 待网络恢复后重新同步走完整的冲突检测与合并流程。
                     events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, downloadFailure ?: ex))
-                    SyncCommitResult.RemoteUnreachable(keptLocal = true)
+                    degradeCommitUsingCache(keptLocal = true, downloadFailure ?: ex)
                 }
             } else {
                 events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, ex))
-                SyncCommitResult.RemoteUnreachable(keptLocal = true)
+                degradeCommitUsingCache(keptLocal = true, ex)
             }
         }
     }
@@ -454,7 +453,7 @@ class SyncEngine(
         } else {
             val ex = uploadResult.exceptionOrNull()
             events.tryEmit(SyncCacheEvent.CouldntSaveToRemote(remotePath, ex))
-            SyncCommitResult.RemoteUnreachable(keptLocal = true)
+            degradeCommitUsingCache(keptLocal = true, ex)
         }
     }
 
@@ -492,6 +491,8 @@ class SyncEngine(
                     this@SyncEngine, remotePath, null, mergedBytes, localHash, newEtag, null
                 )
             )
+        } catch (t: kotlinx.coroutines.CancellationException) {
+            throw t // ISSUE-P3-555：取消属 IllegalStateException 子类，勿被下支吞成上传失败
         } catch (t: Throwable) {
             SyncResolveUploadResult.Failed(t)
         }

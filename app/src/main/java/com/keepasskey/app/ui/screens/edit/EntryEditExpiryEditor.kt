@@ -34,7 +34,8 @@ internal fun ExpiryEditorRow(
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
     val dateFormatter = remember {
-        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")
+        // ISSUE-P3-552（同类）：日期 pattern 收敛为常量，避免同一字面量散落多处
+        java.time.format.DateTimeFormatter.ofPattern(com.keepasskey.app.ui.model.RelativeTimeFormatter.PATTERN_ISO_DATE)
     }
 
     Row(

@@ -3,7 +3,9 @@ package com.keepasskey.app.ui.screens.detail
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityChannel
+import com.keepasskey.app.security.tryWrite
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.clipboardCopyFailedMessage
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.fieldref.FieldReferenceEngine
 import kotlinx.coroutines.CoroutineScope
@@ -16,7 +18,7 @@ import com.keepasskey.app.ui.model.StringsProvider
  *
  * 覆盖密码 / 用户名 / 自定义字段（受保护与非保护同通道）/ TOTP 的剪贴板交付与 HOTP 取码；
  * 引用解析与敏感通道选择逐条保持。ISSUE-P2-353 AC①②：**只在剪贴板实际写入成功后才报成功**，
- * 通道缺失 / 写入异常 / 取不到值一律如实报失败（[writeToClipboard] 统一裁决），见各方法 KDoc。
+ * 通道缺失 / 写入异常 / 取不到值一律如实报失败（[com.keepasskey.app.security.tryWrite] 统一裁决），见各方法 KDoc。
  */
 internal class EntryDetailCopyCoordinator(
     private val vaultRepository: VaultRepository,
@@ -53,19 +55,8 @@ internal class EntryDetailCopyCoordinator(
         return copy(clipboardClearSeconds = seconds)
     }
 
-    /**
-     * ISSUE-P2-353 AC①：执行一次剪贴板写入并返回**实际结果**——通道缺失（null）或写入抛异常
-     * 一律按失败处理（只判成败，异常消息不落日志），供各复制入口「只在真正写入成功后才报成功」。
-     */
-    private fun writeToClipboard(write: ClipboardSecurityChannel.() -> Unit): Boolean {
-        val channel = clipboardSecurityManager ?: return false
-        return try {
-            channel.write()
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
+    // ISSUE-P3-553：写入成败裁决已收口为 [com.keepasskey.app.security.tryWrite]
+    // （与列表页 `VaultListClipboardCopy` 的原逐字重复实现合并为单点）
 
     /**
      * 复制密码：按需解密后写入受保护剪贴板（M1 整改：不再从条目投影取明文）。
@@ -80,7 +71,7 @@ internal class EntryDetailCopyCoordinator(
             // ISSUE-P0-08：口令消费点声明 P 面（白名单放行受保护引用展开）
             val chars = vaultRepository.getEntryPasswordChars(entryId)
             if (chars == null) {
-                showMessage(UiMessage(R.string.clipboard_copy_failed))
+                showMessage(clipboardCopyFailedMessage())
                 return@launch
             }
             val raw = chars.toDisplayString().orEmpty()
@@ -88,9 +79,9 @@ internal class EntryDetailCopyCoordinator(
                 entryId, raw,
                 FieldReferenceEngine.RefField.PASSWORD
             ) ?: raw
-            val copied = writeToClipboard { copySensitiveText(title, password) }
+            val copied = clipboardSecurityManager.tryWrite { copySensitiveText(title, password) }
             showMessage(
-                if (copied) passwordCopyMessage() else UiMessage(R.string.clipboard_copy_failed)
+                if (copied) passwordCopyMessage() else clipboardCopyFailedMessage()
             )
         }
     }
@@ -109,15 +100,15 @@ internal class EntryDetailCopyCoordinator(
             // 即便引擎已掩码输出，复制通道仍按敏感数据处理（EXTRA_IS_SENSITIVE + 调度自动擦除）
             val sensitiveChannel = FieldReferenceEngine.containsPasswordFaceReference(username)
             val copied = if (sensitiveChannel) {
-                writeToClipboard { copySensitiveText(title, resolved) }
+                clipboardSecurityManager.tryWrite { copySensitiveText(title, resolved) }
             } else {
-                writeToClipboard { copyPlainText(title, resolved) }
+                clipboardSecurityManager.tryWrite { copyPlainText(title, resolved) }
             }
             // ISSUE-P2-353 AC①：写入成功才报「已复制」，否则如实报失败
             // ISSUE-P3-360 AC③b：敏感通道附清空倒计时；普通通道不自动清空、如实不附
             showMessage(
                 when {
-                    !copied -> UiMessage(R.string.clipboard_copy_failed)
+                    !copied -> clipboardCopyFailedMessage()
                     sensitiveChannel -> UiMessage(R.string.detail_username_copied_short).withClearHint()
                     else -> UiMessage(R.string.detail_username_copied_short)
                 }
@@ -137,7 +128,7 @@ internal class EntryDetailCopyCoordinator(
             // TASK-10 + ISSUE-P2-15：仓库读取走 CharArray 独占副本，副本用毕清零
             val chars = vaultRepository.getEntryProtectedFieldChars(entryId, fieldKey)
             if (chars == null) {
-                showMessage(UiMessage(R.string.clipboard_copy_failed))
+                showMessage(clipboardCopyFailedMessage())
                 return@launch
             }
             val copied = try {
@@ -151,13 +142,13 @@ internal class EntryDetailCopyCoordinator(
                     entryId, raw,
                     FieldReferenceEngine.RefField.USER_NAME
                 ) ?: raw
-                writeToClipboard { copySensitiveText(fieldKey, expanded) }
+                clipboardSecurityManager.tryWrite { copySensitiveText(fieldKey, expanded) }
             } finally {
                 chars.fill('0')
             }
             showMessage(
                 when {
-                    !copied -> UiMessage(R.string.clipboard_copy_failed)
+                    !copied -> clipboardCopyFailedMessage()
                     // ISSUE-P3-360 AC③b：字段复制（含非保护字段同通道）附清空倒计时
                     else -> UiMessage(R.string.detail_field_copied, listOf(fieldKey)).withClearHint()
                 }
@@ -179,10 +170,10 @@ internal class EntryDetailCopyCoordinator(
                 is KdbxResult.Success -> {
                     val code = result.data.code
                     // ISSUE-P2-353 AC①：计数器已推进，但剪贴板写入失败时不得报「已复制」
-                    val copied = writeToClipboard { copySensitiveText(entryTitle(), code) }
+                    val copied = clipboardSecurityManager.tryWrite { copySensitiveText(entryTitle(), code) }
                     showMessage(
                         when {
-                            !copied -> UiMessage(R.string.clipboard_copy_failed)
+                            !copied -> clipboardCopyFailedMessage()
                             // ISSUE-P3-360 AC③b：HOTP 复制附清空倒计时
                             else -> UiMessage(R.string.detail_hotp_copied, listOf(code)).withClearHint()
                         }
@@ -221,7 +212,7 @@ internal class EntryDetailCopyCoordinator(
                 return@launch
             }
             // ISSUE-P2-353 AC①：通道缺失 / 写入异常时不得报「已复制」
-            val copied = writeToClipboard { copySensitiveText(entryTitle(), code) }
+            val copied = clipboardSecurityManager.tryWrite { copySensitiveText(entryTitle(), code) }
             // ISSUE-P3-360 AC③a：剩余 ≤5s 改发「即将过期」文案（0 = 节拍未起 / 未知，按常态处理）；
             // AC③b：敏感通道附清空倒计时
             val remaining = totpRemainingSeconds()
@@ -231,7 +222,7 @@ internal class EntryDetailCopyCoordinator(
                 UiMessage(R.string.detail_totp_copied)
             }
             showMessage(
-                if (copied) successMessage.withClearHint() else UiMessage(R.string.clipboard_copy_failed)
+                if (copied) successMessage.withClearHint() else clipboardCopyFailedMessage()
             )
         }
     }

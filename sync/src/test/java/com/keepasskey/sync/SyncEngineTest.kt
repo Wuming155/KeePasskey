@@ -10,12 +10,14 @@ import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.fail
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -745,6 +747,9 @@ class SyncEngineTest {
         var downloadError: Boolean = false
         var uploadAtomicCalls: Int = 0
 
+        /** ISSUE-P3-555：令上传抛出协程取消，用于验证引擎不把取消吞成 `Failed` */
+        var uploadCancellation: Boolean = false
+
         /** 最近一次 upload / uploadAtomic 收到的期望 ETag（用于断言预检参数真实传递） */
         var lastExpectedEtag: String? = null
             private set
@@ -761,6 +766,7 @@ class SyncEngineTest {
         ): Result<String> {
             uploadAtomicCalls++
             lastRemoteExists = remoteExists
+            if (uploadCancellation) throw CancellationException("cancelled")
             return upload(remotePath, data, expectedEtag)
         }
 
@@ -817,5 +823,28 @@ class SyncEngineTest {
             remoteFiles.remove(remotePath)
             return Result.success(Unit)
         }
+    }
+
+    /**
+     * ISSUE-P3-555：`markResolvedAndUpload` 遇协程取消必须**原样重抛**。
+     *
+     * `CancellationException` 在 JVM 上是 `IllegalStateException` 的子类，
+     * 整改前 `catch (t: Throwable) { SyncResolveUploadResult.Failed(t) }` 会把它一起吞掉 ⇒
+     * 上层把「用户退出 / 换库」导致的取消记录成一次上传失败（并可能写缓存 / 弹提示）。
+     */
+    @Test
+    fun `markResolvedAndUpload 遇协程取消必须重抛而非上报 Failed`() = runTest {
+        fakeProvider.uploadCancellation = true
+        var cancelled: CancellationException? = null
+        var reportedFailure: SyncResolveUploadResult? = null
+        try {
+            reportedFailure = engine.markResolvedAndUpload(remotePath, "merged".toByteArray(), expectedEtag = null)
+        } catch (e: CancellationException) {
+            cancelled = e
+        }
+        assertNotNull(
+            "协程取消必须重抛（实测返回了 $reportedFailure）",
+            cancelled
+        )
     }
 }

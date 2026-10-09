@@ -240,6 +240,12 @@ private suspend fun SyncConflictController.handleResolveUploadSuperseded(
             clearPendingConflictSession()
             SyncOutcome.Offline
         }
+        is SyncCommitResult.RemoteRejected -> {
+            // ISSUE-P2-548：裁决产物上传被鉴权 / 协议 / 服务端拒绝——不是「离线」
+            eraseSupersededPendingTrees(mergedDb)
+            clearPendingConflictSession()
+            strings.remoteFailureOutcome(fresh.cause)
+        }
         is SyncCommitResult.RollbackRejected -> {
             // ISSUE-P2-18：最新远端为设备侧曾接受过的历史版本（回放），拒绝其参与合并
             eraseSupersededPendingTrees(mergedDb)

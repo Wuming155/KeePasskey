@@ -24,6 +24,8 @@ import kotlinx.coroutines.ensureActive
  *
  * 失败语义：查询异常一律向上抛出 [BreachCheckException]，由调用方转为
  * [BreachCheckStatus.FAILED] 并如实上浮——绝不静默回落为「未泄露」。
+ * **但异常 `message` 不上浮 UI**（`ISSUE-P3-550`）：它可能内嵌端点 / 主机 / 响应细节且服务端可控，
+ * 只进日志，UI 侧出已本地化的固定文案。
  * 协程取消走 `CancellationException` 正常传播（**不是** FAILED）。
  *
  * 构造由 [com.keepasskey.app.di.BreachCheckModule] 显式装配（未标注 `@Inject`）。

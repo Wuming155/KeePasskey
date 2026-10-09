@@ -22,7 +22,8 @@ import com.keepasskey.app.ui.components.BentoCard
 @Composable
 internal fun ExpiryStatusCard(expiresAt: java.time.Instant) {
     val dateFormatter = androidx.compose.runtime.remember {
-        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")
+        // ISSUE-P3-552（同类）：日期 pattern 收敛为常量，避免同一字面量散落多处
+        java.time.format.DateTimeFormatter.ofPattern(com.keepasskey.app.ui.model.RelativeTimeFormatter.PATTERN_ISO_DATE)
             .withZone(java.time.ZoneId.systemDefault())
     }
     val isExpired = expiresAt.isBefore(java.time.Instant.now())

@@ -2,6 +2,7 @@ package com.keepasskey.app.data.repository
 
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.csv.KdbxCsvExporter
@@ -43,8 +44,11 @@ internal class VaultExportCoordinator(
             try {
                 KdbxResult.Success(KeePassXmlExporter.export(db))
             } catch (t: Throwable) {
+                // ISSUE-P3-550：`t.message` 会带出文件路径 / 协议细节，只进日志；
+                // UI 侧一律走错误码映射（未归类 ⇒ `err_unknown`）
+                AppLog.w(TAG, "导出 XML 失败", t)
                 KdbxResult.Failure(
-                    t, strings.get(R.string.repo_export_xml_failed, t.message ?: "")
+                    t, strings.get(R.string.repo_export_xml_failed, strings.get(R.string.err_unknown))
                 )
             }
         }
@@ -63,8 +67,10 @@ internal class VaultExportCoordinator(
             try {
                 KdbxResult.Success(KdbxCsvExporter.export(db))
             } catch (t: Throwable) {
+                // ISSUE-P3-550：细节只进日志，UI 走错误码映射
+                AppLog.w(TAG, "导出 CSV 失败", t)
                 KdbxResult.Failure(
-                    t, strings.get(R.string.repo_export_csv_failed, t.message ?: "")
+                    t, strings.get(R.string.repo_export_csv_failed, strings.get(R.string.err_unknown))
                 )
             }
         }
@@ -129,5 +135,10 @@ internal class VaultExportCoordinator(
                 entryTemplatesGroupChanged = Instant.now()
             )
         }
+    }
+
+    private companion object {
+        /** ISSUE-P3-550：异常细节（含文件路径）只进日志，UI 侧只留错误码映射。 */
+        const val TAG = "VaultExportCoordinator"
     }
 }

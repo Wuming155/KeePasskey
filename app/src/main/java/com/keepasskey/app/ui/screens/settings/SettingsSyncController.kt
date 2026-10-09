@@ -2,10 +2,12 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.sync.userText
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.sync.launchGuarded
+import com.keepasskey.app.ui.model.RelativeTimeFormatter
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.StringsProvider
 import kotlinx.coroutines.CoroutineScope
@@ -346,7 +348,8 @@ internal class SettingsSyncController(
                 // 设置页不提供第二处「整库覆盖」闸门
                 is SyncOutcome.VaultBindingMismatch -> UiMessage(R.string.sync_vault_binding_mismatch)
                 is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
-                is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.message))
+                // ISSUE-P3-550：经 [SyncOutcome.Error.userText] 命名出口取文案
+                is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.userText))
             }
             // H1 整改：syncLastTime 由真实同步完成时刻填充，不再展示写死的演示文案
             val syncedNow = outcome is SyncOutcome.UpToDate ||
@@ -378,18 +381,13 @@ internal class SettingsSyncController(
         }
     }
 
-    /** 将本次同步完成时刻格式化为「今天/昨天/M月d日 HH:mm」本地文案（文案经资源解析） */
-    fun formatSyncTimestamp(): String {
-        val dateTime = java.time.Instant.ofEpochMilli(System.currentTimeMillis())
-            .atZone(java.time.ZoneId.systemDefault())
-        val today = java.time.LocalDate.now()
-        val datePrefix = when (dateTime.toLocalDate()) {
-            today -> strings.get(R.string.time_today)
-            today.minusDays(1) -> strings.get(R.string.time_yesterday)
-            else -> dateTime.format(java.time.format.DateTimeFormatter.ofPattern(strings.get(R.string.date_pattern_month_day)))
-        }
-        return "$datePrefix ${dateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}"
-    }
+    /**
+     * 将本次同步完成时刻格式化为「今天/昨天/M月d日 HH:mm」本地文案（文案经资源解析）。
+     *
+     * ISSUE-P3-552：判据与文案统一收敛到 [RelativeTimeFormatter]（另两处同批收敛）。
+     */
+    fun formatSyncTimestamp(): String =
+        RelativeTimeFormatter.formatInstant(strings, java.time.Instant.now())
 
     /**
      * 测试连接。

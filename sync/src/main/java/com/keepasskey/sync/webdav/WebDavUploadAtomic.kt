@@ -1,8 +1,10 @@
 package com.keepasskey.sync.webdav
 
 import com.keepasskey.sync.model.SyncException
+import com.keepasskey.sync.network.runCatchingCancellable
 import com.keepasskey.sync.model.cleanEtag
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -27,7 +29,7 @@ internal object WebDavUploadAtomic {
         delete: suspend (String) -> Result<Unit>,
         execute: suspend (Boolean, () -> Request) -> Response
     ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val tmpPath = WebDavSyncProvider.atomicTmpPath(remotePath, UUID.randomUUID().toString())
             val tmpUploadResult = upload(tmpPath, data, null)
             if (tmpUploadResult.isFailure) {
@@ -124,6 +126,11 @@ internal object WebDavUploadAtomic {
                         break
                     }
                     resp.close()
+                } catch (e: CancellationException) {
+                    // ISSUE-P3-555：取消不参与「换形态重试」——`CancellationException` 是
+                    // `IllegalStateException` 子类，会被下面的 `catch (e: Exception)` 吞掉并按
+                    // 「第 2 次尝试失败」静默跳过，使结构化并发的取消契约在此失效。
+                    throw e
                 } catch (e: Exception) {
                     if (attempt == 1) throw e
                 }

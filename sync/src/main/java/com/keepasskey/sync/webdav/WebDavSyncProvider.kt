@@ -14,6 +14,7 @@ import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.SyncTransferOptions
 import com.keepasskey.sync.network.TransientHttpRetry
 import com.keepasskey.sync.provider.SyncProvider
+import com.keepasskey.sync.network.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -127,7 +128,7 @@ class WebDavSyncProvider(
     }
 
     override suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val url = serverUrl.trimEnd('/')
             val request = Request.Builder()
                 .url(url)
@@ -148,7 +149,7 @@ class WebDavSyncProvider(
     }
 
     override suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val fullUrl = WebDavUrlCodec.buildUrl(serverUrl, remotePath)
             val request = Request.Builder()
                 .url(fullUrl)
@@ -224,7 +225,7 @@ class WebDavSyncProvider(
 
     override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val fullUrl = WebDavUrlCodec.buildUrl(serverUrl, remotePath)
                 val request = Request.Builder()
                     .url(fullUrl)
@@ -259,7 +260,7 @@ class WebDavSyncProvider(
         data: ByteArray,
         expectedEtag: String?
     ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val fullUrl = WebDavUrlCodec.buildUrl(serverUrl, remotePath)
             val requestBuilder = Request.Builder()
                 .url(fullUrl)
@@ -360,7 +361,7 @@ class WebDavSyncProvider(
     )
 
     override suspend fun delete(remotePath: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val fullUrl = WebDavUrlCodec.buildUrl(serverUrl, remotePath)
             val request = Request.Builder()
                 .url(fullUrl)

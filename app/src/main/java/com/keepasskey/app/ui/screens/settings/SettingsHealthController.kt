@@ -6,6 +6,7 @@ import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.breach.BreachCheckStatus
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.audit.EntryHealthIssue
 import com.keepasskey.database.audit.HealthCheckEngine
 import com.keepasskey.database.audit.PasswordRiskLevel
@@ -155,10 +156,13 @@ internal class SettingsHealthController(
                 )
                 applyHealthScanSummary(summary)
             } catch (e: Exception) {
+                // ISSUE-P3-550：扫描异常可能来自文件通道 / 网络层，`message` 只进日志；
+                // UI 侧走错误码映射（未归类 ⇒ `err_unknown`）
+                AppLog.w(TAG, "健康扫描失败", e)
                 healthStateFlow.update {
                     it.copy(
                         isHealthScanning = false,
-                        healthMessage = strings.get(R.string.health_scan_failed, e.message ?: "")
+                        healthMessage = strings.get(R.string.health_scan_failed, strings.get(R.string.err_unknown))
                     )
                 }
             }
@@ -314,14 +318,20 @@ internal class SettingsHealthController(
             // ISSUE-P3-294：协程取消是「用户退出」而非查询失败——继续上抛，禁转 FAILED
             throw e
         } catch (e: Exception) {
+            // ISSUE-P3-550： breach 查询异常常来自 HTTP 层（端点 / 主机 / 状态码），
+            // 只进日志；UI 侧恒用已本地化的「未知错误」文案
+            AppLog.w(TAG, "密码泄露查询失败", e)
             BreachCheckOutcome(
                 status = BreachCheckStatus.FAILED,
-                errorMessage = e.message ?: strings.get(R.string.health_breach_error_unknown)
+                errorMessage = strings.get(R.string.health_breach_error_unknown)
             )
         }
     }
 
     companion object {
+        /** ISSUE-P3-550：异常细节只进日志，UI 侧只留错误码映射。 */
+        private const val TAG = "SettingsHealth"
+
         private const val HEALTH_SCORE_BASE = 100
         private const val HEALTH_PENALTY_WEAK = 5
         private const val HEALTH_PENALTY_REUSED = 10

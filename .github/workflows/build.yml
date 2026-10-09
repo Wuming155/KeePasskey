@@ -91,9 +91,21 @@ jobs:
   # 故按**与父提交比较**钉「归档只增不减」（索引批次号 + 批次正文均不得消失），
   # 与「闸门存在 ≠ 闸门被执行」（ISSUE-P3-305）成对——**闸门被静默拆除**同样要有人拦。
   # 该判据需要 `HEAD~1` ⇒ 本 job 的 checkout 必须 `fetch-depth: 0`（浅克隆下基线解析不到会**假绿**）。
+  # 第十三条（ISSUE-P2-549）`check_plaintext_carrier_to_string.py`：承载明文口令的 `data class`
+  # 必须覆写 `toString()`。`ISSUE-P2-68` 早就为 `Credentials` 覆写了，但同形态的
+  # `ExtractedSaveCredentials`（同样持有明文口令）**漏了**——它当前无日志消费点所以没出事故，
+  # 代价是新增一行 `AppLog.d(TAG, "$extracted")` 就明文出桶、编译期零护栏。
+  # 「暂时没有消费点」正是这类缺陷的潜伏形态，故按**声明形态**钉死而非人工普查
+  # （与第十一条同型：普查口径写死 ⇒ 形态性漏检）。首版实扫即抓出真命中
+  # `DetailCore.revealedPassword`（揭示出来的明文口令），同批已补覆写。
+  # 第十四条（ISSUE-P3-550）`check_message_not_in_user_text.py`：异常 `message` 不得进用户可见
+  # 文案槽。`KdbxResult.Failure` 的 KDoc 早就写了「error.message 属不可信外部输入，绝不上浮 UI」，
+  # 但纪律只在注释里时，普查仍抓出 11 处直出，且其中一处 `ex?.message` **逃过了上一轮 grep**——
+  # 普查口径写死为 `\.message ?:`，不带 `?:` 的形态匹配不到（与第十一条同型的形态性漏检）。
+  # 判据按「文案槽内出现 `.message` 即红」钉死；反校证据：以整改前（HEAD）版本跑本脚本命中 13 处。
   # ---------------------------------------------------------------------------
   hygiene-gate:
-    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring, projection read safety, raw coroutine scope, archive monotonicity)
+    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring, projection read safety, raw coroutine scope, archive monotonicity, plaintext carrier toString, exception message not in user text)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -111,7 +123,8 @@ jobs:
       # 同层兄弟互相叠放而非上下流动，编译期与 @Preview 都可能看不出来，故挂成闸门；
       # ISSUE-P3-457 扩面：框架文本框 `supportingText` 槽同在 Box 内 + 「多发射助手函数」入槽）→
       # 启动语言种子接线（ISSUE-P3-459 续）→ 投影读取安全（含两步式 / 口令 fail-open）→
-      # 裸 scope 收口（ISSUE-P1-538）→ 归档面不可回退（ISSUE-P2-546，读 HEAD~1）。
+      # 裸 scope 收口（ISSUE-P1-538）→ 归档面不可回退（ISSUE-P2-546，读 HEAD~1）→
+      # 明文口令载体的 `toString()` 护栏（ISSUE-P2-549）→ 异常 `message` 不进文案槽（ISSUE-P3-550）。
       # `long_functions` 用默认阈值 100（§280 收工线 functions_ge_100=0 不得回潮）；
       # 传更低阈值仅作本地普查。
       - name: 规模与卫生机检（fail-closed）
@@ -129,6 +142,8 @@ jobs:
           python3 tools/doc/check_projection_read_safety.py
           python3 tools/doc/check_raw_coroutine_scope.py
           python3 tools/doc/check_archive_monotonicity.py
+          python3 tools/doc/check_plaintext_carrier_to_string.py
+          python3 tools/doc/check_message_not_in_user_text.py
 
   # ---------------------------------------------------------------------------
   # 门禁 1：快速门禁（不构建原生）

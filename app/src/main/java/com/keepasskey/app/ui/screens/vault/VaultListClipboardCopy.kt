@@ -3,7 +3,9 @@ package com.keepasskey.app.ui.screens.vault
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityChannel
+import com.keepasskey.app.security.tryWrite
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.clipboardCopyFailedMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -27,20 +29,8 @@ internal class VaultListClipboardCopy(
     private val onMessage: (UiMessage) -> Unit
 ) {
 
-    /**
-     * ISSUE-P2-353 AC①：执行一次剪贴板写入并返回**实际结果**。
-     * 通道缺失返回 false；写入抛异常按失败处理（只判成败，异常消息不落日志——
-     * 通道异常不携带敏感载荷，且日志严禁敏感明文）。
-     */
-    private fun writeToClipboard(write: ClipboardSecurityChannel.() -> Unit): Boolean {
-        val channel = clipboard ?: return false
-        return try {
-            channel.write()
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
+    // ISSUE-P3-553：写入成败裁决收口为 [com.keepasskey.app.security.tryWrite]
+    // （详情页 `EntryDetailCopyCoordinator` 原本有一份逐字相同的私有实现，同批合并）
 
     /**
      * 复制密码：按需解密后写入受保护剪贴板。
@@ -52,17 +42,17 @@ internal class VaultListClipboardCopy(
         scope.launch {
             val chars = repository.getEntryPasswordChars(entry.id)
             if (chars == null) {
-                onMessage(UiMessage(R.string.clipboard_copy_failed))
+                onMessage(clipboardCopyFailedMessage())
                 return@launch
             }
             val copied = try {
-                writeToClipboard { copySensitiveChars(entry.title, chars) }
+                clipboard.tryWrite { copySensitiveChars(entry.title, chars) }
             } finally {
                 chars.fill('0')
             }
             onMessage(
                 if (copied) UiMessage(R.string.vault_copy_password_done, listOf(entry.title))
-                else UiMessage(R.string.clipboard_copy_failed)
+                else clipboardCopyFailedMessage()
             )
         }
     }
@@ -73,10 +63,10 @@ internal class VaultListClipboardCopy(
             onMessage(UiMessage(R.string.vault_copy_username_missing))
             return
         }
-        val copied = writeToClipboard { copyPlainText(entry.title, entry.username) }
+        val copied = clipboard.tryWrite { copyPlainText(entry.title, entry.username) }
         onMessage(
             if (copied) UiMessage(R.string.vault_copy_username_done, listOf(entry.username))
-            else UiMessage(R.string.clipboard_copy_failed)
+            else clipboardCopyFailedMessage()
         )
     }
 
@@ -94,10 +84,10 @@ internal class VaultListClipboardCopy(
                 onMessage(UiMessage(R.string.vault_copy_totp_missing))
                 return@launch
             }
-            val copied = writeToClipboard { copySensitiveText(entry.title, code) }
+            val copied = clipboard.tryWrite { copySensitiveText(entry.title, code) }
             onMessage(
                 if (copied) UiMessage(R.string.vault_copy_totp_done, listOf(entry.title))
-                else UiMessage(R.string.clipboard_copy_failed)
+                else clipboardCopyFailedMessage()
             )
         }
     }

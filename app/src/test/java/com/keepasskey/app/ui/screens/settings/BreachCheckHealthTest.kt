@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -41,7 +42,8 @@ import org.junit.Test
  * 验收要点：
  * 1. **关闭态零外联**：开关默认关闭，扫描不发起任何泄露查询请求，指标为 null（不以 0 冒充安全）；
  * 2. **开启态真实计数**：命中泄露库时计数与状态如实下发，并计入健康分扣减；
- * 3. **失败如实上浮**：查询失败转 FAILED 并透出原因，绝不静默回落为「未泄露」。
+ * 3. **失败如实上浮**：查询失败转 FAILED，绝不静默回落为「未泄露」；但**原因不取异常 message**
+ *    ——`ISSUE-P3-550` 起 UI 侧只出已本地化的固定文案（异常串可能含端点 / 主机 / 协议细节）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class BreachCheckHealthTest {
@@ -181,7 +183,7 @@ class BreachCheckHealthTest {
     }
 
     @Test
-    fun `查询失败时状态为 FAILED 且原因如实上浮，绝不回落为未泄露`() = runTest(testDispatcher) {
+    fun `查询失败时状态为 FAILED 且回落到本地化文案，绝不回落为未泄露`() = runTest(testDispatcher) {
         val rangeClient = RecordingRangeClient(failure = "模拟网络不可达")
         val viewModel = buildViewModel(rangeClient)
         val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -201,7 +203,14 @@ class BreachCheckHealthTest {
         val state = viewModel.uiState.value
         assertEquals(BreachCheckStatus.FAILED, state.breachCheckStatus)
         assertNull(state.compromisedPasswordCount)
-        assertEquals("模拟网络不可达", state.breachCheckMessage)
+        // ISSUE-P3-550 口径变更（**未放宽其余不变量**：状态仍为 FAILED、计数仍为 null）：
+        // 异常 `message` 属不可信外部输入（端点 / 主机 / 协议细节，服务端可控）⇒ 不上浮 UI，
+        // 回落到已本地化的固定文案；原断言「等于异常串」正是本批要消除的泄露面。
+        assertEquals("未知错误", state.breachCheckMessage)
+        assertFalse(
+            "异常 message 不得出现在 UI 文案里",
+            state.breachCheckMessage!!.contains("模拟网络不可达")
+        )
 
         job.cancel()
     }

@@ -13,6 +13,7 @@ import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.TransientHttpRetry
 import com.keepasskey.sync.provider.SyncProvider
+import com.keepasskey.sync.network.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -137,7 +138,7 @@ class S3SyncProvider(
         S3KeyCodec.buildUrl(endpoint, bucketName, usePathStyle, remotePath)
 
     override suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val url = buildUrl("")
             executeSignedRequest(
                 send = { signDate ->
@@ -159,7 +160,7 @@ class S3SyncProvider(
     }
 
     override suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val url = buildUrl(remotePath)
             executeSignedRequest(
                 send = { signDate ->
@@ -214,7 +215,7 @@ class S3SyncProvider(
 
     override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
         withContext(Dispatchers.IO) {
-            runCatching {
+            runCatchingCancellable {
                 val url = buildUrl(remotePath)
                 executeSignedRequest(
                     send = { signDate ->
@@ -270,7 +271,7 @@ class S3SyncProvider(
         data: ByteArray,
         expectedEtag: String?
     ): Result<String> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val isFirstUpload: Boolean
             var precheckEtag: String? = null
             if (expectedEtag.isNullOrBlank()) {
@@ -371,7 +372,7 @@ class S3SyncProvider(
     }
 
     override suspend fun delete(remotePath: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        runCatchingCancellable {
             val url = buildUrl(remotePath)
             executeSignedRequest(
                 send = { signDate ->

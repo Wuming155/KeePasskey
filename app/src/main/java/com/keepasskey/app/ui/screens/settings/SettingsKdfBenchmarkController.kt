@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.crypto.kdf.KdfBenchmark
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,9 +47,12 @@ internal class SettingsKdfBenchmarkController(
                     recommendedParallelism = recommendation.parallelism
                 )
             } catch (t: Throwable) {
+                // ISSUE-P3-550：原生 Argon2 的失败细节（内存 / 参数）只进日志，
+                // UI 侧恒用已本地化的固定文案
+                AppLog.w(TAG, "KDF 基准测试失败", t)
                 kdfBenchmarkFlow.value = KdfBenchmarkUiState(
                     isRunning = false,
-                    errorMessage = t.message ?: strings.get(R.string.kdf_benchmark_failed)
+                    errorMessage = strings.get(R.string.kdf_benchmark_failed)
                 )
             }
         }
@@ -64,5 +68,8 @@ internal class SettingsKdfBenchmarkController(
     private companion object {
         /** ActivityManager 不可得时的兜底应用堆上限（MiB） */
         const val DEFAULT_HEAP_MB = 128
+
+        /** ISSUE-P3-550：异常细节只进日志，UI 侧只留固定文案。 */
+        const val TAG = "KdfBenchmark"
     }
 }

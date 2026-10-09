@@ -438,11 +438,16 @@ class KeePasskeyAutofillService : AutofillService() {
             putExtra(PasswordSaveActivity.EXTRA_USERNAME, extracted.username)
             putExtra(PasswordSaveActivity.EXTRA_PASSWORD, extracted.password)
         }
+        // ISSUE-P2-549：`FLAG_MUTABLE` 在此处**无任何 fillIn 需求**（全仓 fillIn 仅用于
+        // 自动填充数据集与 Credential Manager 的回传注入，见 `AutofillDatasetBuilders` /
+        // `CredentialPendingIntents`），却让承载**明文口令**的 extras 可被接收方改写 ⇒ 收紧为
+        // `FLAG_IMMUTABLE`。已核实 `PasswordSaveActivity`（`AndroidManifest.xml:190` exported=false）
+        // 不读任何 fillIn 注入的 extras。
         val pendingIntent = PendingIntent.getActivity(
             this,
             REQUEST_CODE_SAVE,
             saveIntent,
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         callback.onSuccess(pendingIntent.intentSender)
     }

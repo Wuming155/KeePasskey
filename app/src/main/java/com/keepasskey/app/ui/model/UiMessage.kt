@@ -54,6 +54,17 @@ data class UiMessage(
 }
 
 /**
+ * 复制失败的**统一反馈**（ISSUE-P3-553）。
+ *
+ * 整改前 14 处调用点各自手写 `UiMessage(R.string.clipboard_copy_failed…)`，且两套口径不一致：
+ * 通知侧 3 处带了 `isError = true`，应用内（详情页 / 列表页）**全部漏传** ⇒
+ * 同一个「复制失败」在通知里是错误样式、在页面里却是普通样式（且漏传处数随新入口增长）。
+ * 收口后两侧同口径，新增复制入口只需引用本函数、不会再漏标记。
+ */
+fun clipboardCopyFailedMessage(): UiMessage =
+    UiMessage(R.string.clipboard_copy_failed, isError = true)
+
+/**
  * 在组合环境中将消息解析为当前语言的实际文案。
  * ISSUE-P3-360 AC③：[clipboardClearSeconds] 非 null 时追加「Ns 后自动清空」后缀
  * （≥120 秒改用分钟表述）；后缀只做拼接，不改写基础文案的资源与参数。

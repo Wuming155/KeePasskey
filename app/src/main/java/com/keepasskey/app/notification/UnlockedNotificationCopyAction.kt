@@ -8,6 +8,7 @@ import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.clipboardCopyFailedMessage
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -78,7 +79,7 @@ class UnlockedNotificationCopyAction @Inject constructor(
                 throw c
             } catch (t: Throwable) {
                 // 异常不携带敏感载荷；只如实回报「复制失败」，不落日志细节
-                notify(UiMessage(R.string.clipboard_copy_failed, isError = true))
+                notify(clipboardCopyFailedMessage())
             } finally {
                 onFinished()
             }
@@ -104,7 +105,7 @@ class UnlockedNotificationCopyAction @Inject constructor(
         val copied = runCatching { clipboard.copyPlainText(clipLabel(), username) }.isSuccess
         notify(
             if (copied) UiMessage(R.string.notification_copy_username_done)
-            else UiMessage(R.string.clipboard_copy_failed, isError = true)
+            else clipboardCopyFailedMessage()
         )
     }
 
@@ -117,7 +118,7 @@ class UnlockedNotificationCopyAction @Inject constructor(
         val copied = runCatching { clipboard.copySensitiveText(clipLabel(), code) }.isSuccess
         notify(
             if (copied) UiMessage(R.string.notification_copy_totp_done)
-            else UiMessage(R.string.clipboard_copy_failed, isError = true)
+            else clipboardCopyFailedMessage()
         )
     }
 

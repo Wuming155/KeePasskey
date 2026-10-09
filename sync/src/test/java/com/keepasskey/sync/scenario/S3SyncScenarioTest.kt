@@ -106,7 +106,8 @@ class S3SyncScenarioTest {
         // -> 412 后探测远端元数据再次 HEAD 404
         // ISSUE-P2-501：探测**失败**（Result.Failure）不得折成空 etag 的 ConflictError——
         // 401/403/5xx 等瞬时探测失败会被折空后沿 commitLocal 冲突分支剥除乐观锁、静默覆盖他端；
-        // 「远端已删」这一 404 同样走 fail-closed（如实上抛 FileNotFound，引擎归 RemoteUnreachable）。
+        // 「远端已删」这一 404 同样走 fail-closed（如实上抛 FileNotFound；引擎按起因分型后
+        // 归 `RemoteRejected`——ISSUE-P2-548：只有 NetworkError 才归 RemoteUnreachable）。
         // 不变量＝绝不静默覆盖、绝不伪造带空 etag 的冲突。
         server.enqueue(MockResponse().setResponseCode(404))
         server.enqueue(MockResponse().setResponseCode(412))

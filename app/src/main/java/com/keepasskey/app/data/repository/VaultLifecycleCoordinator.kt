@@ -269,7 +269,9 @@ internal class VaultLifecycleCoordinator(
             refresh()
             KdbxResult.Success(Unit)
         } catch (t: Throwable) {
-            KdbxResult.Failure(t, strings.get(R.string.repo_remove_failed, t.message ?: ""))
+            // ISSUE-P3-550：细节（含 `content://` URI 与文件路径）只进日志，UI 走错误码映射
+            AppLog.w(TAG, "移除密码库失败", t)
+            KdbxResult.Failure(t, strings.get(R.string.repo_remove_failed, strings.get(R.string.err_unknown)))
         }
     }
 
@@ -309,7 +311,9 @@ internal class VaultLifecycleCoordinator(
             refresh()
             KdbxResult.Success(Unit)
         } catch (t: Throwable) {
-            KdbxResult.Failure(t, strings.get(R.string.repo_import_failed, t.message ?: ""))
+            // ISSUE-P3-550：细节（含外部库路径）只进日志，UI 走错误码映射
+            AppLog.w(TAG, "登记外部库失败", t)
+            KdbxResult.Failure(t, strings.get(R.string.repo_import_failed, strings.get(R.string.err_unknown)))
         }
     }
 

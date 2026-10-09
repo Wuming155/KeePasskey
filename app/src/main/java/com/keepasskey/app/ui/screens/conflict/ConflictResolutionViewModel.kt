@@ -3,9 +3,11 @@ package com.keepasskey.app.ui.screens.conflict
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.sync.userText
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.sync.launchGuarded
+import com.keepasskey.app.ui.model.RelativeTimeFormatter
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.model.KdbxConstants
@@ -24,8 +26,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 sealed interface ConflictResolutionEvent {
@@ -90,15 +90,12 @@ class ConflictResolutionViewModel @Inject constructor(
         }
     }
 
-    private fun formatConflictTime(instant: Instant): String {
-        val local = instant.atZone(ZoneId.systemDefault())
-        val datePrefix = when (local.toLocalDate()) {
-            java.time.LocalDate.now() -> strings.get(R.string.time_today)
-            java.time.LocalDate.now().minusDays(1) -> strings.get(R.string.time_yesterday)
-            else -> local.format(DateTimeFormatter.ofPattern(strings.get(R.string.date_pattern_month_day)))
-        }
-        return "$datePrefix ${local.format(DateTimeFormatter.ofPattern("HH:mm"))}"
-    }
+    /**
+     * ISSUE-P3-552：判据与文案统一收敛到 [RelativeTimeFormatter]
+     * （另两处库列表页与设置页同批收敛，行为与文案不变）。
+     */
+    private fun formatConflictTime(instant: Instant): String =
+        RelativeTimeFormatter.formatInstant(strings, instant)
 
     /**
      * ISSUE-P3-360 AC①：敏感字段的安全差异线索——静态掩码两侧完全相同、无法区分差异，
@@ -320,7 +317,8 @@ class ConflictResolutionViewModel @Inject constructor(
                     } else {
                         UiMessage(
                             R.string.sync_feedback_error,
-                            listOf((outcome as? SyncOutcome.Error)?.message ?: strings.get(R.string.conflict_merge_failed))
+                            // ISSUE-P3-550：经 [SyncOutcome.Error.userText] 命名出口取文案
+                            listOf((outcome as? SyncOutcome.Error)?.userText ?: strings.get(R.string.conflict_merge_failed))
                         )
                     }
                 )

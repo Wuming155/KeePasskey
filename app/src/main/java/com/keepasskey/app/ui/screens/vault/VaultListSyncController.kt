@@ -1,9 +1,11 @@
 package com.keepasskey.app.ui.screens.vault
 
 import com.keepasskey.app.R
+import com.keepasskey.app.sync.userText
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncOutcome
 import com.keepasskey.app.sync.launchGuarded
+import com.keepasskey.app.ui.model.RelativeTimeFormatter
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.textArg
@@ -15,10 +17,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * 密码库列表页的**同步指示与下拉刷新编排**（ISSUE-P3-29：自 `VaultListViewModel.kt` 拆出）。
@@ -193,24 +191,19 @@ internal class VaultListSyncController(
                 onMessage(UiMessage(R.string.sync_feedback_offline))
             }
             is SyncOutcome.Error -> {
-                onMessage(UiMessage(R.string.sync_feedback_error, listOf(outcome.message)))
+                // ISSUE-P3-550：经 [SyncOutcome.Error.userText] 命名出口取文案
+                onMessage(UiMessage(R.string.sync_feedback_error, listOf(outcome.userText)))
             }
         }
     }
 
     /**
      * 将时间戳格式化为相对日期文案（今天 / 昨天 / 具体日期）+ HH:mm；
-     * 0 表示本会话尚未执行过同步
+     * 0 表示本会话尚未执行过同步。
+     *
+     * ISSUE-P3-552：判据与文案已统一收敛到 [RelativeTimeFormatter]（另两处同步页与冲突页
+     * 的三份逐字重复同批收敛），本处只保留「0 ⇒ 从未」这一条本页语义。
      */
-    private fun formatLastSyncTime(millis: Long): String {
-        if (millis <= 0L) return strings.get(R.string.sync_last_time_never)
-        val dateTime = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
-        val today = LocalDate.now()
-        val datePrefix = when (dateTime.toLocalDate()) {
-            today -> strings.get(R.string.time_today)
-            today.minusDays(1) -> strings.get(R.string.time_yesterday)
-            else -> dateTime.format(DateTimeFormatter.ofPattern(strings.get(R.string.date_pattern_month_day)))
-        }
-        return "$datePrefix ${dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
-    }
+    private fun formatLastSyncTime(millis: Long): String =
+        RelativeTimeFormatter.formatMillis(strings, millis, strings.get(R.string.sync_last_time_never))
 }

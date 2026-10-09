@@ -9,6 +9,7 @@ import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.app.security.VaultFileMetadataProbe
 import com.keepasskey.app.sync.eraseDiscardedDatabase
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.merge.KdbxDatabaseLite
@@ -16,6 +17,9 @@ import com.keepasskey.sync.merge.KdbxMerger
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+
+/** ISSUE-P3-550：异常细节（含库文件本地路径）只进日志，UI 侧只留错误码映射。 */
+private const val TAG = "VaultFileDriftResolve"
 
 /**
  * ISSUE-P2-378：漂移后的重载 / 合并执行体（自 `RealVaultRepository.reloadOrMergeAfterDrift` 拆出）。
@@ -59,10 +63,13 @@ internal class VaultFileDriftResolve(
             }
         } catch (t: Throwable) {
             driftCoordinator?.requestPrompt(pathId)
+            // ISSUE-P3-550：`t.message` 携带**库文件本地路径**（漂移处置的异常常来自
+            // 文件通道），只进日志；UI 侧统一走错误码映射（未归类 ⇒ `err_unknown`）
+            AppLog.w(TAG, "漂移处置失败: choice=$choice", t)
             val msg = if (choice == ExternalModificationChoice.RELOAD_FROM_DISK) {
-                strings.get(R.string.ext_mod_reload_failed, t.message ?: "")
+                strings.get(R.string.ext_mod_reload_failed, strings.get(R.string.err_unknown))
             } else {
-                strings.get(R.string.ext_mod_merge_failed, t.message ?: "")
+                strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_unknown))
             }
             KdbxResult.Failure(t, msg)
         }

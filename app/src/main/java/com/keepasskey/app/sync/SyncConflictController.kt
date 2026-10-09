@@ -174,8 +174,10 @@ class SyncConflictController @Inject constructor(
                         SyncOutcome.UploadedLocal
                     }
                 }
-                // 强制上传路径无冲突分支：上传失败只可能是远端不可达
+                // 强制上传路径无冲突分支：上传失败只可能是远端不可达或被拒绝
                 is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+                // ISSUE-P2-548：401/403、协议错误、5xx 不是「离线」，须出具体失败文案
+                is SyncCommitResult.RemoteRejected -> strings.remoteFailureOutcome(forcedCommit.cause)
                 is SyncCommitResult.ConflictNeedsMerge -> SyncOutcome.Offline
                 // commitLocalForce 不下载远端，理论不可达；穷尽分支如实映射为拒绝回退提示（ISSUE-P2-18）
                 is SyncCommitResult.RollbackRejected -> SyncOutcome.Error(

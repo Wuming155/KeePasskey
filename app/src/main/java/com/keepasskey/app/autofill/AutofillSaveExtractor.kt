@@ -9,7 +9,19 @@ internal data class ExtractedSaveCredentials(
     val username: String,
     val password: String,
     val webDomain: String?
-)
+) {
+    /**
+     * ISSUE-P2-549：**覆写默认 `toString()`**——本类型同时持有**明文口令**与用户名，
+     * 数据类默认实现会把两者整份展开（一次日志 / 异常插值即出桶，编译期无任何护栏）。
+     *
+     * 口径与同仓先例 [com.keepasskey.app.autofill.AutofillPickerViewModel.Credentials]
+     * （ISSUE-P2-68 审计 M6）一致：只呈现长度，内容一律不物化。
+     * 本处属**遗漏而非设计**：同形态的 `Credentials` 早已覆写，见 `tools/doc/check_plaintext_carrier_to_string.py` 机检。
+     */
+    override fun toString(): String =
+        "ExtractedSaveCredentials(username=<redacted len=${username.length}>, " +
+            "password=<redacted len=${password.length}>, webDomain=$webDomain)"
+}
 
 /**
  * 自动填充保存请求表单字段提取器（ISSUE-P1-224）。

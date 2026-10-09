@@ -89,13 +89,18 @@ internal class SessionPersistence(
                 // TASK-42 整改（P2-2）：Argon2 派生与流加密为 CPU 密集，序列化走 Default；
                 // 仅字节落盘（writeAtomic + fsync）走 IO——对齐 exportToBytes 的既有调度先例
                 val serialized = serializeToBytes(dbToSave, pwd, credentials.currentKeyFile(), progress)
-                writer(serialized)
-                // 序列化缓冲即整库密文（头部外全加密），写毕即擦，避免缓冲滞留
-                serialized.fill(0)
-                // ISSUE-P3-368：落盘完成即终态 1.0（序列化侧进度已在 KdbxFile.save 内发到 0.9）
-                progress(KdbxProgress.DONE)
-                core.state.value = DatabaseSession.SessionState.OPENED
-                KdbxResult.Success(Unit)
+                try {
+                    writer(serialized)
+                    // ISSUE-P3-368：落盘完成即终态 1.0（序列化侧进度已在 KdbxFile.save 内发到 0.9）
+                    progress(KdbxProgress.DONE)
+                    core.state.value = DatabaseSession.SessionState.OPENED
+                    KdbxResult.Success(Unit)
+                } finally {
+                    // ISSUE-P3-551：序列化缓冲即整库密文（头部外全加密），
+                    // **写盘异常路径同样必须清零**——整改前 `fill(0)` 在 `try` 体内，
+                    // `writer` 抛异常时整库密文副本滞留堆上等 GC（同文件换密路径同型）。
+                    serialized.fill(0)
+                }
             } catch (t: Throwable) {
                 // ISSUE-P3-368：失败清进度（不留半程残值）
                 progress(null)
@@ -185,16 +190,20 @@ internal class SessionPersistence(
         try {
             // ISSUE-P3-118：同型第三处（换密路径）——序列化缓冲同样须具名并在用毕后清零
             val serialized = serializeToBytes(db, newPasswordChars, newKeyFileData)
-            writer(serialized)
-            serialized.fill(0)
-            // ISSUE-P2-11 (ZT-16)：凭据轮换后旧密文快照必须失效——
-            // 本次写盘可能生成了用「旧凭据」加密的 .bak，历史遗留的 .bak 同理，
-            // 旧口令仍可将其解开，故成功换密后一律删除活动文件的滚动备份（失败仅告警）。
-            fileWriter.deleteBackupQuietly(core.activeFile)
-            core.state.value = DatabaseSession.SessionState.OPENED
-            oldPwd?.let { Arrays.fill(it, '0') }
-            oldKey?.let { Arrays.fill(it, 0.toByte()) }
-            KdbxResult.Success(Unit)
+            try {
+                writer(serialized)
+                // ISSUE-P2-11 (ZT-16)：凭据轮换后旧密文快照必须失效——
+                // 本次写盘可能生成了用「旧凭据」加密的 .bak，历史遗留的 .bak 同理，
+                // 旧口令仍可将其解开，故成功换密后一律删除活动文件的滚动备份（失败仅告警）。
+                fileWriter.deleteBackupQuietly(core.activeFile)
+                core.state.value = DatabaseSession.SessionState.OPENED
+                oldPwd?.let { Arrays.fill(it, '0') }
+                oldKey?.let { Arrays.fill(it, 0.toByte()) }
+                KdbxResult.Success(Unit)
+            } finally {
+                // ISSUE-P3-551：换密路径同型——写盘异常时整库密文缓冲不得滞留堆上
+                serialized.fill(0)
+            }
         } catch (t: Throwable) {
             // 失败时回滚既有凭据
             credentials.restoreCredentials(oldPwd, oldKey)

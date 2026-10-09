@@ -62,14 +62,25 @@ internal class EntryDetailStateAssembler(
         val extendedSettings: Flow<ExtendedSettings>
     )
 
-    /** combine 中间聚合体（避开 5 流以上的元组嵌套） */
+    /**
+     * combine 中间聚合体（避开 5 流以上的元组嵌套）。
+     *
+     * ISSUE-P2-549：本类持有**已揭示的明文口令**（[revealedPassword] 与 [revisionPasswords]），
+     * 数据类默认 `toString()` 会把两者整份展开 ⇒ 一次日志 / 异常插值即明文出桶。
+     * 覆写只呈现长度与条目 id，内容一律不物化（先例 `Credentials`，ISSUE-P2-68）。
+     */
     private data class DetailCore(
         val entry: UiVaultEntry?,
         val passwordMaskOverride: Boolean?,
         val revealedPassword: String?,
         val revisionPasswords: Map<String, String>,
         val isFavorite: Boolean
-    )
+    ) {
+        override fun toString(): String =
+            "DetailCore(entry=${entry?.id}, passwordMaskOverride=$passwordMaskOverride, " +
+                "revealedPassword=<redacted len=${revealedPassword?.length}>, " +
+                "revisionPasswords=<redacted size=${revisionPasswords.size}>, isFavorite=$isFavorite)"
+    }
 
     /**
      * ISSUE-P3-17：显示侧派生量聚合体。

@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import com.keepasskey.sync.engine.SyncCacheEvent
+import com.keepasskey.sync.model.SyncException
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -42,6 +43,48 @@ class SyncFailureSignalTest {
         assertFalse(
             SyncFailureSignal.isEngineFailure(
                 SyncCacheEvent.LoadedFromRemoteInSync(remotePath = "/vault.kdbx")
+            )
+        )
+    }
+
+    /**
+     * ISSUE-P2-548 AC②：真·网络不可达（`NetworkError`）是**设计内降级**，不得亮失败通知，
+     * 否则每个同步周期都会在断网时闪一次通知。鉴权 / 协议失败仍必须亮出。
+     */
+    @Test
+    fun `网络不可达起因不触发通知鉴权与协议失败仍触发`() {
+        assertFalse(
+            "真断网属设计内降级，不得亮失败通知",
+            SyncFailureSignal.isEngineFailure(
+                SyncCacheEvent.CouldntOpenFromRemote(
+                    remotePath = "/vault.kdbx",
+                    cause = SyncException.NetworkError("Network down")
+                )
+            )
+        )
+        assertFalse(
+            SyncFailureSignal.isEngineFailure(
+                SyncCacheEvent.CouldntSaveToRemote(
+                    remotePath = "/vault.kdbx",
+                    cause = SyncException.NetworkError("Network down")
+                )
+            )
+        )
+        assertTrue(
+            "鉴权失败用户必须改凭据才能恢复，必须亮通知",
+            SyncFailureSignal.isEngineFailure(
+                SyncCacheEvent.CouldntOpenFromRemote(
+                    remotePath = "/vault.kdbx",
+                    cause = SyncException.AuthenticationError("401")
+                )
+            )
+        )
+        assertTrue(
+            SyncFailureSignal.isEngineFailure(
+                SyncCacheEvent.CouldntSaveToRemote(
+                    remotePath = "/vault.kdbx",
+                    cause = SyncException.ProtocolError(503, "Service Unavailable")
+                )
             )
         )
     }

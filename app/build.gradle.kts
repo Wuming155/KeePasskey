@@ -257,6 +257,12 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":database"))
     implementation(project(":sync"))
+    // ISSUE-P3-554：app 有 11 个文件直接 `import com.keepasskey.crypto.*`
+    // （通行密钥载荷 / 熵估算 / KDF 基准等），却一直**未显式声明**本依赖——
+    // 能编译全靠 `database` 的 `api(project(":crypto"))` 透传（api 会外溢到消费方编译类路径）。
+    // 那是一条隐式脆点：`database` 若把该依赖改成 `implementation`，app 会立刻编译不过，
+    // 而错误现场与真实原因（依赖声明缺失）毫无关系。此处补声明，使声明反映真实依赖。
+    implementation(project(":crypto"))
 
     // TASK-07 整改：compileSdk 37 就位后 core-ktx 升至 1.19.0（1.19.0 起要求 API 37）
     implementation(libs.androidx.core.ktx)

@@ -29,8 +29,10 @@ import org.junit.rules.TemporaryFolder
  * 故 `getMetadata` 失败恰是「探测失败」，不是「无 ETag 服务器」。
  *
  * 本组用例覆盖三条：
- * ① 端到端（SyncEngine.commitLocal）：412 + PROPFIND 持续失败 ⇒ fail-closed 归 `RemoteUnreachable`，
- *    不发生无锁合并上传、他端内容不被覆盖；
+ * ① 端到端（SyncEngine.commitLocal）：412 + PROPFIND 持续失败（HTTP 500）⇒ fail-closed，
+ *    不发生无锁合并上传、他端内容不被覆盖。**ISSUE-P2-548 起降级结果按起因分型**：
+ *    500 属「远端可达但拒绝」⇒ `RemoteRejected`（`NetworkError` 才归 `RemoteUnreachable`），
+ *    fail-closed 与本条不变量本身未变；
  * ② Provider 层：同样的 412 + 探测失败 ⇒ 上抛**非** `ConflictError` 的探测失败（不折空）；
  * ③ 正确路径保留：无 ETag 服务器（Success + 空 etag）在 412 后仍须归 `ConflictError(remoteEtag="")`。
  */
@@ -65,7 +67,7 @@ class WebDavConflictProbeFailureTest {
         )
 
     @Test
-    fun `MOVE412后元数据重探持续失败 commitLocal归RemoteUnreachable且不静默覆盖他端`() = runTest {
+    fun `MOVE412后元数据重探持续失败 commitLocal归RemoteRejected且不静默覆盖他端`() = runTest {
         val state = StatefulDavDispatcher()
         server.dispatcher = state
         server.start()
@@ -93,11 +95,17 @@ class WebDavConflictProbeFailureTest {
         val result = engine.commitLocal("vault.kdbx", "local-v2".toByteArray())
         state.failAllPropfind.set(false)
 
-        // 不变量：探测失败 ⇒ fail-closed（不进入合并上传），如实归远端不可达
+        // 不变量：探测失败 ⇒ fail-closed（不进入合并上传），本地变更如实保留。
+        // ISSUE-P2-548 口径更正（**非放宽**）：起因是 HTTP 500「远端**可达**但拒绝」，
+        // 降级结果按起因分型——只有 `NetworkError` 才归 `RemoteUnreachable`；500 属
+        // `RemoteRejected`，UI 侧因此出「远端拒绝请求（500）」而不是伪装成「离线」。
+        // 本用例的 fail-closed 与「不静默覆盖他端」两条不变量**一字未改**，断言反而更具体
+        // （由「是某个降级结果」收紧为「是哪个降级结果」）。
         assertTrue(
-            "探测失败必须 fail-closed 归 RemoteUnreachable，实际: $result",
-            result is SyncCommitResult.RemoteUnreachable
+            "探测失败必须 fail-closed（不进入合并上传），实际: $result",
+            result is SyncCommitResult.RemoteRejected
         )
+        assertTrue("降级必须如实保留本地", (result as SyncCommitResult.RemoteRejected).keptLocal)
         assertTrue("本地缓存不得丢失（本地数据安全第一）", cache.isCached("vault.kdbx"))
         // 他端内容与 ETag 均未被无锁覆盖
         assertArrayEquals("他端写入不得被无锁覆盖", v1, state.files["/vault.kdbx"])

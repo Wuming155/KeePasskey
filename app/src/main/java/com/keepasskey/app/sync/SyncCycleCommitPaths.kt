@@ -50,6 +50,8 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
                 }
                 // 离线 / 远端不可达：如实报 Offline，不得误标成「上传云端失败」
                 is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+                // ISSUE-P2-548：首传被鉴权 / 协议 / 服务端拒绝——不是「离线」
+                is SyncCommitResult.RemoteRejected -> strings.remoteFailureOutcome(uploadResult.cause)
                 else -> SyncOutcome.Error(strings.get(R.string.sync_error_first_upload_failed))
             }
         } else {
@@ -60,19 +62,8 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
                 TAG,
                 "首传探测失败: type=${ex?.javaClass?.simpleName}, remotePath=$remotePath"
             )
-            return when (ex) {
-                is com.keepasskey.sync.model.SyncException.NetworkError -> SyncOutcome.Offline
-                is com.keepasskey.sync.model.SyncException.AuthenticationError -> SyncOutcome.Error(
-                    strings.get(R.string.sync_error_auth_failed)
-                )
-                else -> SyncOutcome.Error(
-                    strings.get(
-                        R.string.sync_error_remote_rejected,
-                        (ex as? com.keepasskey.sync.model.SyncException.ProtocolError)?.statusCode?.toString()
-                            ?: ex?.javaClass?.simpleName ?: "Unknown"
-                    )
-                )
-            }
+            // ISSUE-P2-548：与本仓其余远端失败路径共用同一归出口径（此前只有本处是三分法）
+            strings.remoteFailureOutcome(ex)
         }
     }
     return null
@@ -153,6 +144,8 @@ internal suspend fun SyncCycleRunner.tryFastCommitPath(
             )
         }
         is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+        // ISSUE-P2-548：上传被鉴权 / 协议 / 服务端拒绝——出具体失败文案，不再伪装成「离线」
+        is SyncCommitResult.RemoteRejected -> strings.remoteFailureOutcome(commitResult.cause)
         // ISSUE-P2-18：远端内容为设备侧曾接受过的旧版本（回退/重放）→ 拒绝应用并提示用户
         is SyncCommitResult.RollbackRejected -> SyncOutcome.Error(
             strings.get(R.string.sync_error_rollback_rejected)

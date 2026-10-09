@@ -289,6 +289,8 @@ class SyncCycleRunner @Inject constructor(
                         SyncOutcome.UploadedLocal
                     }
                     is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+                    // ISSUE-P2-548：整库覆盖被鉴权 / 协议 / 服务端拒绝——不是「离线」
+                    is SyncCommitResult.RemoteRejected -> strings.remoteFailureOutcome(takeoverCommit.cause)
                     else -> SyncOutcome.Error(strings.get(R.string.sync_error_vault_takeover_failed))
                 }
             }
@@ -352,6 +354,11 @@ class SyncCycleRunner @Inject constructor(
                 }
                 is SyncOpenResult.CacheHitOffline -> SyncOutcome.Offline
                 is SyncOpenResult.RemoteUnreachableUsingCache -> SyncOutcome.Offline
+                // ISSUE-P2-548：远端**可达但拒绝**（401/403、协议错误、5xx）此前与「真断网」
+                // 共用一个降级结果 ⇒ UI 显示「离线，已保留本地副本」、通知在同周期被 Offline 撤掉。
+                // 现按起因归类：NetworkError 才 Offline，其余出具体失败文案（口径与首传探测一致）。
+                is SyncOpenResult.RemoteRejectedUsingCache ->
+                    strings.remoteFailureOutcome(openResult.cause)
                 is SyncOpenResult.ConflictDetected -> handleConflictDetected(ctx, openResult)
                 // ISSUE-P2-18：远端内容为设备侧曾接受过的旧版本（回退/重放）→
                 // 保留本地/基准、不应用远端，并给出明确用户提示
