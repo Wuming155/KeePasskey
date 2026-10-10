@@ -40,8 +40,19 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 5. **无需中间计划文件**：严禁创建 plan 文档；背景与验收标准直接自包含在 `ACTIVE_ISSUES.md`。
 6. **极简闭环工作流（认领 → 整改+验证 → 流转归档 → 提交推送）**：
    1. **认领**：从 `ACTIVE_ISSUES.md` 顶部按优先级认领；发现新问题即时补登（**严禁只记聊天或脑中**），附「核实时间点 + 核实方式」。
-   2. **整改 + 验证**：`.\gradlew.bat test` 全绿（含相关回归）**且** `python tools/doc/gate_readings.py` **全 PASS** 方准入库；
-      批次文档须**原样粘贴该脚本输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
+   2. **整改 + 验证（测试分级：迭代按需、结案全量）**：
+      - **迭代期按需**：`.\gradlew.bat :<module>:testDebugUnitTest --tests "<FQCN>"` 快速反馈；**必须回读
+        `build/test-results/**/TEST-*.xml` 确认用例在册**——`--tests` 零匹配**是否报错取决于 `failOnNoMatchingTests`**
+        （Gradle 官方口径），本仓实测出现过**静默零覆盖 + `BUILD SUCCESSFUL`**（§201 漏跑一整套，第二次以正确包名才补上）；
+        「没跑」不得伪装成「通过」。
+      - **结案前全量一次**：`.\gradlew.bat test` 全绿**且** `python tools/doc/gate_readings.py` **全 PASS** 方准入库。
+        保留全量的两条理由：① CI 自 `ISSUE-P3-316` 起改为**每日定时 + 手动**触发（push 不再触发），本地这道是唯一即时兜底；
+        ② `test` 是唯一同时编译并运行五模块单测的入口，跨模块契约（`core` 全员依赖、`app → crypto`、`database → crypto` 透传）
+        只能由它证。
+      - **免全量白名单**：纯文档 / 纯注释 / 纯 `@Preview` 导出 / 仅门禁脚本注释的改动，跑 `gate_readings.py`
+        （改文档再加 `check_md_links.py`）即可，不必跑 `test`。
+      - **读数**：聚合计数以 `count_test_results.py` 为准，且**只在全量跑之后取**——定向跑后的 `test-results` 是残缺集（§276）。
+      批次文档须**原样粘贴 `gate_readings.py` 输出的读数块**（逐条 EXIT + 读数行），**禁止**只写「机检全绿 / EXIT 0」——
       「闸门存在 ≠ 闸门被执行」正是 `ISSUE-P3-305` 的根因（§308 立规）。**读数块只入批次文档**（结案证据的唯一载体，历史已贴者不追改）；
       报告 / 记录类文档**引用批次编号**即可。
       **首轮红取证（`ISSUE-P3-489`）**：`test` 非零退出时**先**跑 `python tools/doc/preserve_test_failures.py` 落盘肇事清单，**再**重跑。
@@ -99,7 +110,12 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
   走 Android CLI（须有运行中的 Studio，产物 `build/preview-export/`，限界见脚本文首）
 
 **测试与联调**
-- `.\gradlew.bat test --rerun-tasks --max-workers=1` — 单元测试（强制真实执行，单会话勿并发）
+- `.\gradlew.bat test --max-workers=1` — **结案前全量单测**（单会话勿并发）。**默认不加 `--rerun-tasks`**：Gradle 的
+  `UP-TO-DATE` 是「输入指纹未变 ⇒ 旧结果仍有效」的保证，不是「任务漏跑」；仅在「怀疑结果陈旧 / 需确凿证明任务真被执行」时加。
+  读数一律以 `count_test_results.py` 核验，且**只在全量跑之后取**（定向跑后的 `test-results` 是残缺集）
+- `.\gradlew.bat :<module>:testDebugUnitTest --tests "<FQCN>"` — **迭代期定向单测**；**必须回读
+  `build/test-results/**/TEST-*.xml` 确认用例在册**——过滤器零匹配**不一定**报错（取决于 `failOnNoMatchingTests`），
+  §201 实测漏跑一整套而回执仍绿
 - `.\gradlew.bat test -DliveSyncTest` — 追加真实联调（需先起 `tools/local-sync`）
 - `.\gradlew.bat :crypto:connectedDebugAndroidTest` / `:database:` / `:sync:` / `:app:` — instrumented 测试（需设备；
   **`:sync:` 那层含 `SyncCacheAndroidRuntimeTest`，即 0600 / 0700 仅属主权限不变量——宿主 JVM 恒走降级分支，只有真机可证**）
