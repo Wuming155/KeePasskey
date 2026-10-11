@@ -105,8 +105,17 @@ class SharedPrefsUnlockThrottleStore @Inject constructor(
 /**
  * 重试节流运行时配置（ISSUE-P3-68：用户可配置性）。
  *
+ * **两套默认值不得混谈**（`ISSUE-P3-579` 口径收敛，2026-10-11）：
+ * ① **用户设置的出厂默认 = `false`（关闭）**——2026-09-12 用户裁决「出厂关闭，需要暴力破解防护的用户
+ *    可在设置页显式开启」，承载于 `UserSettings.unlockThrottleEnabled` / `SettingsRepository`
+ *    （登记 `PD-84`，留痕批次 §29）；
+ * ② 本类**无参构造**的 `enabled = true` 是**未接配置源 / 冷启动窗口的 fail-closed 安全回落**，
+ *    **不是**出厂设置：它只在设置流抵达前生效（见 [UnlockThrottleConfigProvider]），抵达后一律按用户偏好
+ *    收敛（出厂未动设置 ⇒ 收敛为关闭）。
+ * 两者方向一致——出厂默认由用户裁决决定，回落值只保证「用户偏好尚未读到」这一瞬不放松。
+ *
  * @param enabled      节流总开关；`false` = 用户显式退出重试锁定（`gate` 放行、失败不再退避）。
- *                     **默认 `true`**——安全默认不得放松；
+ *                     无参构造默认 `true`（安全回落，见上；出厂用户设置为 `false`）；
  * @param maxBackoffMs 退避封顶时长（用户可自定义的最长锁定，毫秒），合法域 [60s, 24h]。
  *                     与 [UnlockThrottlePolicy.MAX_BACKOFF_MS] 的编译期常量解耦。
  */
@@ -175,16 +184,23 @@ interface ThrottleConfigSource {
  * 把当前 [ThrottleConfig] 缓存为 `@Volatile` 快照，供节流路径零挂起地同步读取——
  * 主解锁（`UnlockViewModel`）与子库挂载（`ChildDatabaseSessionManager`）两条路径自动同时生效。
  *
- * 进程启动初期设置尚未抵达的短窗内回落 [UserSettings] 出厂默认（2026-09-12 用户裁决：关闭 + 30 分钟封顶）。
- * （[ThrottleConfig] 无参构造的「开启」默认仅用于未接配置源的 JVM 单测场景。）
+ * **冷启动窗口回落值 = 安全默认「开启 + 30 分钟封顶」**（`ISSUE-P3-579` 收口，2026-10-11）：
+ * 设置流抵达前读不到用户偏好，此时唯一不放松的选择是**按既有锁定截止执行**——已开启节流的用户在锁定期内
+ * 强杀进程重启，不再于该短窗内被直接放行（旧实现回落 `enabled = false`，即条目所指的绕过窗口）。
+ * 设置流抵达后一律按用户偏好收敛：出厂未动设置 ⇒ `UserSettings.unlockThrottleEnabled = false` ⇒ 收敛为关闭
+ * （该出厂默认出自 2026-09-12 用户裁决，登记 `PD-84`）。
+ * 回落值**不改变出厂默认、也不改变未动设置用户的闸门结果**：出厂关闭态下
+ * [UnlockThrottlePolicy.backoffMillisFor] 恒返回 `0`，失败登记恒写 `lockoutUntilEpochMs = 0`
+ * ⇒ 已落盘记录不含锁定截止 ⇒ 即便回落值为「开启」，[UnlockThrottleManager.gate] 读到的仍是「未锁定 ⇒ 放行」。
  */
 @Singleton
 class UnlockThrottleConfigProvider @Inject constructor(
     settingsRepository: SettingsRepository
 ) : ThrottleConfigSource {
 
+    /** 冷启动初值：设置流抵达前按安全默认执行（见类 KDoc），抵达后由下方 collect 覆写为用户偏好 */
     @Volatile
-    override var current: ThrottleConfig = ThrottleConfig(enabled = false)
+    override var current: ThrottleConfig = ThrottleConfig(enabled = true)
         private set
 
     private val scope = guardedScope(Dispatchers.Default, "UnlockThrottle")
@@ -231,7 +247,10 @@ class UnlockThrottleManager @Inject constructor(
     private val configProvider: ThrottleConfigSource? = null
 ) {
 
-    /** 当前生效配置（source 缺省仅见于 JVM 单测，回落 ThrottleConfig 无参默认：开启 + 30 分钟封顶） */
+    /**
+     * 当前生效配置（source 缺省仅见于 JVM 单测，回落 [ThrottleConfig] 无参默认 = fail-closed 安全默认：
+     * 开启 + 30 分钟封顶；用户设置的**出厂默认是关闭**，见 `PD-84`——两套默认的区分见 [ThrottleConfig] KDoc）。
+     */
     private val config: ThrottleConfig
         get() = configProvider?.current ?: ThrottleConfig()
 

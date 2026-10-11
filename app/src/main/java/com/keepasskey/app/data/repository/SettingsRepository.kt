@@ -78,7 +78,9 @@ data class UserSettings(
     val lastKeyFileUri: String = "",
     val lastKeyFileName: String = "",
     // ISSUE-P3-68：解锁失败重试节流总开关（2026-09-12 用户裁决：默认**关闭**，
-    // 需要暴力破解防护的用户可在设置页显式开启）
+    // 需要暴力破解防护的用户可在设置页显式开启）。该出厂默认登记 `PD-84`（`ISSUE-P3-579` 补登）；
+    // 与 `unlockThrottle.ThrottleConfig` 无参构造的「开启」安全回落是两回事——后者只作用于
+    // 设置流抵达前的冷启动窗口，不改本键的出厂默认。
     val unlockThrottleEnabled: Boolean = false,
     // ISSUE-P3-68：重试退避的最长锁定时长（秒，默认 1800 = 30 分钟；合法域 [60, 86400]）
     val unlockLockoutMaxSeconds: Int = 1800,
@@ -161,7 +163,7 @@ interface SettingsRepository {
      */
     suspend fun clearRememberedKeyFile()
 
-    /** ISSUE-P3-68：解锁失败重试节流总开关（关闭后失败不再触发退避锁定） */
+    /** ISSUE-P3-68：解锁失败重试节流总开关（出厂默认 `false`，见 `PD-84`；关闭后失败不再触发退避锁定） */
     suspend fun setUnlockThrottleEnabled(enabled: Boolean)
 
     /** ISSUE-P3-68：重试退避的最长锁定时长（秒；仓库层负责 coerce 到合法域 [60, 86400]） */

@@ -306,7 +306,12 @@ class RealSettingsRepository @Inject constructor(
             .digest(databaseId.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
 
-    /** ISSUE-P3-68：重试节流总开关（默认开启，安全默认不放松） */
+    /**
+     * ISSUE-P3-68：重试节流总开关（写入用户偏好）。**出厂默认 `false`（关闭）**——2026-09-12 用户裁决
+     * 「出厂关闭，需要暴力破解防护的用户可在设置页显式开启」（登记 `PD-84`，留痕批次 §29）。
+     * 不得与 `com.keepasskey.app.security.ThrottleConfig` 无参构造的「开启」安全回落混谈：后者只作用于
+     * 设置流抵达前的冷启动窗口，不改本键的出厂默认（`ISSUE-P3-579` 口径收敛）。
+     */
     override suspend fun setUnlockThrottleEnabled(enabled: Boolean) = edit {
         it[KEY_UNLOCK_THROTTLE_ENABLED] = enabled
     }
