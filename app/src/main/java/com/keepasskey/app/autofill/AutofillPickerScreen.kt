@@ -118,6 +118,9 @@ fun AutofillPickerScreen(
     // 否则不呈现（PD-50：控件不许骗人）
     canCreateNew: Boolean = false,
     onCreateNew: () -> Unit = {},
+    // ISSUE-P3-571 方案A：「记住这个应用？」询问（交付链挂起等待处置；null = 无）
+    bindingWriteBackAsk: AppBindingWriteBackAsk? = null,
+    onBindingWriteBackResult: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var pendingBlockRole by remember { mutableStateOf<AutofillFieldRole?>(null) }
@@ -268,6 +271,11 @@ fun AutofillPickerScreen(
                 }
             }
         }
+    }
+
+    // ISSUE-P3-571 方案A：「记住这个应用与该条目的关联？」询问（任何取消路径一律按拒绝处置）
+    bindingWriteBackAsk?.let { ask ->
+        AppBindingWriteBackDialog(ask = ask, onResult = onBindingWriteBackResult)
     }
 
     // 屏蔽确认弹窗：如实说明「同一应用 + 同一网址 + 同一角色」不再填充，且可在设置中整体清除

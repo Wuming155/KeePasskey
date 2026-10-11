@@ -3,10 +3,13 @@ package com.keepasskey.app.autofill
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,6 +104,74 @@ class AutofillPickerViewModel @Inject constructor(
         runCatching { AutofillEntrySearch.filter(_entries.value, query) }
             .onFailure { AppLog.w(TAG, "选择器检索命中已清零条目，按空结果处理", it) }
             .getOrDefault(emptyList())
+
+    // ---------- ISSUE-P3-571 方案A：「记住这个应用？」询问（Kp2a 式，随库持久通道） ----------
+
+    private val _bindingWriteBackAsk = MutableStateFlow<AppBindingWriteBackAsk?>(null)
+
+    /** 待决询问；null = 无（选择器页渲染 [AppBindingWriteBackDialog]，按钮回调走 [completeBindingWriteBack]） */
+    val bindingWriteBackAsk: StateFlow<AppBindingWriteBackAsk?> = _bindingWriteBackAsk.asStateFlow()
+
+    private var pendingBindingDecision: CompletableDeferred<Boolean>? = null
+
+    /**
+     * 交付链内询问「是否把调用方应用关联写进条目 URL」（方案 A，用户 2026-10-11 裁决）。
+     *
+     * 判定口径见 [AutofillAppBindingWriteBackPolicy]（四否决与「仅空 URL」的推导在该 KDoc，
+     * 本机互动记忆 [AutofillCallerEntryMemory] 与本写回的分工亦然）。行为：
+     * - 不满足询问条件 → 不问，返回 true（照常交付）；
+     * - 满足 → 置起 [bindingWriteBackAsk] 并挂起等待用户处置；拒绝 → 不写回，返回 true
+     *   （拒绝不得持久化为「永久拒绝」）；同意 → 复核锁定后经
+     *   [VaultRepository.updateEntryUrl] 写回 `android://<包名>`（只改 URL 一个字段，
+     *   失败如实日志、**不阻断交付**）；
+     * - **询问期间会话可能自动锁定**（与交付链「回传前再次校验」同口径）：锁定即返回 false，
+     *   调用方须丢弃未决响应（不写回、不得回传 RESULT_OK）。
+     */
+    suspend fun offerAppBindingWriteBack(
+        callerDigests: CallerCertDigests,
+        callerPackage: String,
+        formWebDomain: String?,
+        entryId: String,
+        entryTitle: String
+    ): Boolean {
+        val currentUrl = runCatching { vaultRepository.getKdbxEntry(entryId)?.url }.getOrNull().orEmpty()
+        if (!AutofillAppBindingWriteBackPolicy.shouldOffer(
+                callingPackage = callerPackage,
+                callerDigestsReadable = !callerDigests.isEmpty,
+                webDomain = formWebDomain,
+                entryUrl = currentUrl,
+                sessionReadOnly = vaultRepository.isSessionReadOnly()
+            )
+        ) {
+            return true
+        }
+        val proposedUrl = AutofillAppBindingWriteBackPolicy
+            .proposedBindingUrl(callerPackage).orEmpty()
+        val decision = CompletableDeferred<Boolean>()
+        pendingBindingDecision = decision
+        _bindingWriteBackAsk.value =
+            AppBindingWriteBackAsk(entryId = entryId, entryTitle = entryTitle, proposedUrl = proposedUrl)
+        val agreed = try {
+            decision.await()
+        } finally {
+            _bindingWriteBackAsk.value = null
+            pendingBindingDecision = null
+        }
+        if (!vaultRepository.isLocked()) {
+            if (agreed) {
+                val written = vaultRepository.updateEntryUrl(entryId, proposedUrl)
+                AppLog.i(TAG, "应用关联写回条目 URL 结果=${written is KdbxResult.Success}（不阻断交付）")
+            }
+            return true
+        }
+        AppLog.w(TAG, "会话在关联询问期间被锁定，丢弃未决响应（不回传 RESULT_OK）")
+        return false
+    }
+
+    /** 对话框按钮回传用户处置（true＝写入 / false＝拒绝或对话框被取消） */
+    fun completeBindingWriteBack(agreed: Boolean) {
+        pendingBindingDecision?.complete(agreed)
+    }
 
     /**
      * 按需解密单个条目的用户名与密码（用户显式选中后调用）。

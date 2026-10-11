@@ -43,6 +43,8 @@ internal fun AutofillPickerLocalizedContent(
         var query by remember { mutableStateOf("") }
         val entries by viewModel.entries.collectAsStateWithLifecycle()
         val results = remember(query, entries) { AutofillEntrySearch.filter(entries, query) }
+        // ISSUE-P3-571 方案A：写回询问状态由 VM 持有（交付链经此挂起等待用户处置）
+        val bindingWriteBackAsk by viewModel.bindingWriteBackAsk.collectAsStateWithLifecycle()
 
         ApplyObscuredTouchFilter()
         AutofillPickerScreen(
@@ -51,6 +53,8 @@ internal fun AutofillPickerLocalizedContent(
             results = results,
             onPick = onPick,
             onCancel = onCancel,
+            bindingWriteBackAsk = bindingWriteBackAsk,
+            onBindingWriteBackResult = viewModel::completeBindingWriteBack,
             // ISSUE-P2-70：强制展示请求方身份（包名 / 应用名 / 签名摘要 / 表单自报域）
             requester = requester,
             // 仅在本次请求确实识别到对应框时提供屏蔽入口（否则是无对象的假按钮）

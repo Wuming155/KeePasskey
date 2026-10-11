@@ -172,6 +172,9 @@
     <string name="search_write_back_cancel">取消</string>
     <string name="search_write_back_done">已写入 URL：%1$s</string>
     <string name="search_write_back_failed">写入失败</string>
+    <!-- ISSUE-P3-571 方案A：自动填充交付链内「记住这个应用与该条目的关联」询问（Kp2a 式，仅空 URL 纯 App 表单） -->
+    <string name="autofill_app_binding_write_back_title">记住这个应用？</string>
+    <string name="autofill_app_binding_write_back_message">把应用关联 %1$s 写入条目「%2$s」的网址后，此应用下次填充即可直接自动匹配，并随库同步到其它设备。</string>
     <string name="vault_new_entry">新建凭据条目</string>
     <string name="vault_new_folder">新建文件夹</string>
     <string name="vault_folder_name">文件夹名称</string>

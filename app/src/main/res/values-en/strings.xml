@@ -160,6 +160,9 @@
     <string name="search_write_back_cancel">Cancel</string>
     <string name="search_write_back_done">URL updated: %1$s</string>
     <string name="search_write_back_failed">Failed to update URL</string>
+    <!-- ISSUE-P3-571 plan A: "remember this app" prompt inside the autofill delivery chain (Kp2a style, empty-URL pure-app forms only) -->
+    <string name="autofill_app_binding_write_back_title">Remember this app?</string>
+    <string name="autofill_app_binding_write_back_message">Write the app binding %1$s into entry \"%2$s\"\'s URL so it fills automatically next time and syncs with your database.</string>
     <string name="vault_empty_desc">No entries or folders found here. Tap the plus button below to add one</string>
     <string name="vault_new_entry">New Entry</string>
     <string name="vault_new_folder">New Folder</string>

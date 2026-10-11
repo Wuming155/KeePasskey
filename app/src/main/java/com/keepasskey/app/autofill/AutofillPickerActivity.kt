@@ -271,15 +271,7 @@ class AutofillPickerActivity : FragmentActivity() {
             }
             // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
             // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
-            // ISSUE-P3-298 ⑤：表单显式声明 OTP 框时按所选条目现算 TOTP 交付（仅 TOTP；
-            // HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值）
-            val otpId = intent.readAutofillId(EXTRA_OTP_ID)
-            val otpCode = if (otpId != null) {
-                vaultRepository.calculateEntryTotp(entryId)
-                    ?.takeIf { !it.isHotp }?.code.orEmpty()
-            } else {
-                ""
-            }
+            val (otpId, otpCode) = resolveOtpIfDeclared(entryId)
             // ISSUE-P3-330 A3：标题/副行分工——用户名为首选行；副行只在用户名非空且能取到
             // 条目标题时展示标题（用户名为空时标题行即条目标题，副行留空），杜绝两行同文
             val entryTitle = runCatching {
@@ -324,6 +316,11 @@ class AutofillPickerActivity : FragmentActivity() {
                 finish()
                 return@launch
             }
+            // ISSUE-P3-571 方案A：询问是否把应用关联写进条目 URL（锁定丢弃口径见 VM 方法 KDoc）
+            if (!viewModel.offerAppBindingWriteBack(callerDigests, callingPackage, formDomain, entryId, entryTitle)) {
+                discardPendingResult()
+                return@launch
+            }
             // ISSUE-P3-185：成功交付后按确认页同口径写入会话授权（30 秒 TTL），使同
             // 「包名 + 域」的重复填充免二次确认；不可归属域由存储自身拒绝（fail-closed）
             if (grantContext != null) {
@@ -335,6 +332,17 @@ class AutofillPickerActivity : FragmentActivity() {
             setResult(RESULT_OK, authenticationResultIntent(dataset))
             finish()
         }
+    }
+
+    /**
+     * ISSUE-P3-298 ⑤：表单显式声明 OTP 框时按所选条目现算 TOTP 交付（仅 TOTP；
+     * HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值）。
+     */
+    private suspend fun resolveOtpIfDeclared(entryId: String): Pair<AutofillId?, String> {
+        val otpId = intent.readAutofillId(EXTRA_OTP_ID) ?: return null to ""
+        val code = vaultRepository.calculateEntryTotp(entryId)
+            ?.takeIf { !it.isHotp }?.code.orEmpty()
+        return otpId to code
     }
 
     /**

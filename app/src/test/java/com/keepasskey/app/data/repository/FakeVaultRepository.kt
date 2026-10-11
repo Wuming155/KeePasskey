@@ -327,6 +327,10 @@ class FakeVaultRepository(
         entryId: String,
         url: String
     ): com.keepasskey.core.result.KdbxResult<Unit> {
+        // ISSUE-P3-571 观测点：记录调用入参（与 lastSavedTotpByEntry 同法）。必须记在条目
+        // 查找**之前**——mock 条目 id 非合法 32-hex 时 KdbxUuid 转换回退随机值，getKdbxEntry
+        // 的往返查找不可依赖，断言只能走本观测点。
+        lastWrittenUrlByEntry = lastWrittenUrlByEntry + (entryId to url)
         val current = entriesFlow.value.toMutableList()
         val index = current.indexOfFirst { it.id == entryId }
         if (index < 0) {
@@ -338,6 +342,10 @@ class FakeVaultRepository(
         entriesFlow.value = current
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
+
+    /** ISSUE-P3-571 观测点：`updateEntryUrl` 收到的入参（entryId → url），供询问流断言使用。 */
+    var lastWrittenUrlByEntry: Map<String, String> = emptyMap()
+        private set
 
     // TASK-16 Fake 语义：克隆 = 同字段复制 + 新 id + 清历史修订
     override suspend fun duplicateEntry(id: String): com.keepasskey.core.result.KdbxResult<String> {
