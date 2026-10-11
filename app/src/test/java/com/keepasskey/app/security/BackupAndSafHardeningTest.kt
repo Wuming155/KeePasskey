@@ -1,14 +1,16 @@
 package com.keepasskey.app.security
 
 import com.keepasskey.app.testutil.stripCommentsOnly
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
 /**
- * 「退路面」加固接线守护（ISSUE-P3-106 排除域穷举 + ISSUE-P3-112 SAF 删除归属判定）。
+ * 「退路面」加固接线守护（ISSUE-P3-106 排除域穷举 + ISSUE-P3-112 SAF 删除归属判定 +
+ * ISSUE-P3-583 备份第一道闸门 `allowBackup` 取值锁定）。
  *
- * 两处的失效形态都是**静默**的，故以静态守卫锁定：
+ * 三处的失效形态都是**静默**的，故以静态守卫锁定：
  * 1. **备份 / 迁移排除域**：`res/xml/data_extraction_rules.xml` 若漏掉某个 domain，
  *    该域会**静默**进入云备份或设备迁移面——本仓数据面只有密码库与设置，
  *    不含任何「换机需自动恢复」的义务，故必须**逐域穷举**而非按当前 API 使用情况取舍
@@ -16,6 +18,9 @@ import java.io.File
  * 2. **SAF 清理归属判定**：`SafDocumentCleanup.deleteCreatedDocument` 的调用契约是
  *    「只删本流程 `CreateDocument` 创建的文档」；若归属判定（`DocumentsContract.isDocumentUri`）
  *    被删或后移到删除调用之后，任意 URI 都会被无条件删除（用户既有文件可被误删）。
+ * 3. **系统备份第一道闸门**：`<application android:allowBackup="false">` 是备份面第一道闸门
+ *    （`false` 时云备份与设备迁移整体禁用、`dataExtractionRules` 不被系统读取）；若被改回 `true`
+ *    ——除本条外的既有断言（规则文件引用、九域排除、SAF 归属）全部仍绿——第一道闸门**静默重开**。
  *
  * 断言前剔除注释——整改说明自身会写出被断言的字面量。
  */
@@ -28,6 +33,24 @@ class BackupAndSafHardeningTest {
         assertTrue(
             "[$MANIFEST_SOURCE] 未引用 data-extraction-rules：备份 / 迁移排除规则不会生效",
             manifest.contains("android:dataExtractionRules=\"@xml/data_extraction_rules\"")
+        )
+    }
+
+    @Test
+    fun `清单必须以 allowBackup=false 关闭系统备份第一道闸门`() {
+        // 先剔除 XML 注释：整改说明 / 未来编辑可能在注释里写出被断言的字面量，
+        // 注释内的出现不得冒充 `<application>` 上的真实属性取值。
+        val manifest = readSource(MANIFEST_SOURCE).replace(XML_COMMENT, "")
+
+        // 按 `android:allowBackup="…"` 取值后比对，而非 contains 整串字面量：
+        // 前者对属性重排 / 同行异行 / 属性间空白量（`=` 两侧）都不敏感，且能区分
+        // `true` 与 `false` 两种取值；注释已在上一步剔除，故不会误取注释里的出现。
+        val allowBackup = ALLOW_BACKUP_ATTR.find(manifest)?.groupValues?.get(1)
+        assertEquals(
+            "[$MANIFEST_SOURCE] android:allowBackup 取值必须为 \"false\"（ISSUE-P3-583）：" +
+                "改回 true 后系统云备份 / 设备迁移通道整体重开，第一道闸门静默失效",
+            "false",
+            allowBackup
         )
     }
 
@@ -114,6 +137,9 @@ class BackupAndSafHardeningTest {
         )
 
         val XML_COMMENT = Regex("""<!--[\s\S]*?-->""")
+
+        /** 取 `<application>` 上 `android:allowBackup` 的**属性取值**（`=` 两侧空白容忍，ISSUE-P3-583）。 */
+        val ALLOW_BACKUP_ATTR = Regex("""android:allowBackup\s*=\s*"([^"]*)"""")
         val GUARD_EARLY_RETURN =
             Regex("""if\s*\(!DocumentsContract\.isDocumentUri\(context, targetUri\)\)\s*return""")
 

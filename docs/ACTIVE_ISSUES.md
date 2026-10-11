@@ -11,9 +11,17 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**4 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-579` ~
-> `ISSUE-P3-586`，六要素报告见
+> **在册批次**：**3 条**（2026-10-11 数据流安全审查整批登记 `ISSUE-P3-579` ~ `ISSUE-P3-586` 八条，
+> 其中 `ISSUE-P3-579` ~ `ISSUE-P3-583` 已逐一闭环，在册 `ISSUE-P3-584` ~ `ISSUE-P3-586`；六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
+> 上一批 `ISSUE-P3-583`（`android:allowBackup="false"` 备份面第一道闸门无任何静态守卫锁定——既有三例对
+> `allowBackup` 取值零断言，改回 `true` 后无断言变红）已于 **§498** 整条闭环归档——`BackupAndSafHardeningTest`
+> 新增一例，与既有「清单必须引用数据提取规则文件」同文件同 `readSource` 范式：先剔 XML 注释、再按
+> `android:allowBackup="…"` 取属性值后 `assertEquals("false", …)`（布局无关 / 可分辨 / 注释免疫，未选最小化的
+> `contains` 整串字面量）；反校把清单临时改 `true` 实测**仅该例红**（`expected:<[fals]e> but was:<[tru]e>`）后复原；
+> 既有三例断言逐字未动、零删除；正文见
+> [`resolved/batches/498-allowBackup第一道闸门静态守卫批次.md`](resolved/batches/498-allowBackup第一道闸门静态守卫批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
 > 上一批 `ISSUE-P3-582`（app 模块四点落盘面未做仅属主权限收敛且固定临时名，与 sync 模块 0600/0700 自声明口径漂移）
 > 已于 **§497** 整条闭环归档——按 AC① 采纳「**原语下沉 `core` 共享**」路线（未选「app 侧本地等价实现」：
 > `SyncCacheFiles` 为 `sync` 内部可见性 `internal`、app 不可复用，而再复制一份权限常量与唯一临时名逻辑等于
@@ -154,21 +162,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（4 项）
-
-### `ISSUE-P3-583`：`android:allowBackup="false"` 第一道闸门无任何静态守卫锁定
-
-**背景与影响**：`AndroidManifest.xml:93` `android:allowBackup="false"` 是备份面第一道闸门，但
-`BackupAndSafHardeningTest.kt:24-73` 三个测试只断言 dataExtractionRules 引用字面量、九域排除与 SAF 归属判定，
-**对 allowBackup 取值零断言**——未来改动（接入要求开启备份的 SDK、误编辑清单）把取值改回 true 后无任何断言变红。
-复核修正：九域排除的任何破坏形态会被既有 contains/内容断言抓红，故泄露需 allowBackup 误改与九域破坏同时静默成立，
-路径很窄，定性为回归防护缺口（纯静态、无数据随之出域）。
-
-**验收标准**：`BackupAndSafHardeningTest` 新增对 `allowBackup="false"` 取值的断言。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 11（verdict=adjusted）。
-来源攻击面：备份与本地存储。
+## P3 低危问题、特性接线与体验优化（3 项）
 
 ### `ISSUE-P3-584`：WebDAV/S3 Provider 的 `@VisibleForTesting` client 注入参数位于 public 主构造签名，单行传参即整体旁路网络防线
 
