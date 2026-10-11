@@ -37,6 +37,16 @@ python tools/passkey-interop/verify_interop.py --selftest
 
 摘要行只列**实际运行过**的实现（`ISSUE-P1-495`：旧版把未运行的 `keepassxc-cli`
 也写进「全部成立」的括号，并静默丢弃 28 条官方 CLI 判据仍 `exit 0`）。
+
+## 依赖版本钉定（`ISSUE-P3-585`）
+
+互操作闸门的权威性来自**非本仓实现**，其版本不得浮动：`build.yml` 侧对 `pykeepass` /
+`cryptography` 做 pip **精确 pin**（`pykeepass==4.2.0` / `cryptography==50.0.0`，与本机对拍
+留痕版本一致），对 apt 提供的 `keepassxc-cli` 改以**运行期区间断言**（下界 2.7.6 = CI 镜像
+登记版本、上界 2.8.0 排他）。本脚本内的 `verify_dependency_versions()` 对三个依赖的**实际版本**
+做同一区间断言，越界 / 不可解析即 fail-closed（`_failures` 计入 ⇒ 退 1），防「pin 被改 / 预装
+版本 already satisfied / 上游撤回重发」等漂移静默放行。区间常量与动因见 `PYKEEPASS_*` /
+`CRYPTOGRAPHY_*` / `KEEPASSXC_*` 定义处。
 """
 
 from __future__ import annotations
@@ -47,6 +57,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -102,6 +113,32 @@ EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_ENV_MISSING = 2  # 环境缺失，不得当绿
 
+# ── 依赖版本兼容性断言（ISSUE-P3-585 / 批次 §500）────────────────────────────
+# 动因：本脚本的**权威性**全部来自「非本仓实现」——`pykeepass`（独立 KDBX 解析）、
+# `cryptography`（OpenSSL 后端独立解析 PKCS#8 PEM）、`keepassxc-cli`（官方 CLI 交叉核对）。
+# 若这三者由 CI 每次**浮动拉取**（`pip install pykeepass cryptography` + `apt-get install
+# keepassxc` 均无版本约束），上游包被投毒或发布含行为变更的新版本时，可**伪造「对拍通过」输出
+# 与退出码、或吞掉判据失败**——全部判据都运行在浮动包所在的解释器进程内（`import` 即执行）。
+# 故与 Actions SHA 钉死、`cargo --locked` 同构：`build.yml` 侧 pip **精确 pin**（供给面锚定），
+# 本处对**运行期实际版本**做区间断言（消费面校验，防「pin 被改 / 预装版本 already satisfied /
+# 上游撤回重发」等漂移静默放行）。越界或无法解析版本即 fail-closed 计入 `_failures`。
+#
+# 留痕版本（本机对拍实测，与 docs/records/通行密钥互操作对拍记录_2026-09-19.md §1 一致）：
+#   pykeepass 4.2.0 / cryptography 50.0.0 / keepassxc-cli 2.7.12
+# 下界 = 留痕版本；上界取「下一主版本（排他）」——主版本漂移属未验证面，静默放行即失去闸门意义。
+# `keepassxc-cli` 无法精确 pip pin（apt 提供，版本随 Ubuntu 基础镜像漂移）：下界取 **2.7.6** =
+# CI 镜像（Ubuntu 24.04）登记版本（原 `build.yml` 注「apt 提供的 keepassxc-cli ≈ 2.7.6，与本机
+# 2.7.12 的差异未验证」——本批把该**未验证口径**转为运行期断言），上界 2.8.0（排他）防未验证的
+# 2.8.x 静默放行。**如实声明**：下界 2.7.6 本身未在本机实测（本机为 2.7.12），属**候选区间**，
+# 待 CI 首跑确认；若 CI 镜像实际提供更高/更低版本，本断言按 fail-closed 报红并据此复评。
+PYKEEPASS_MIN = (4, 2, 0)
+PYKEEPASS_MAX = (5, 0, 0)
+CRYPTOGRAPHY_MIN = (50, 0, 0)
+CRYPTOGRAPHY_MAX = (51, 0, 0)
+KEEPASSXC_MIN = (2, 7, 6)
+KEEPASSXC_MAX = (2, 8, 0)
+VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+
 _failures: list[str] = []
 _checks = 0
 # 实际运行过并计入判据的实现（摘要行的**唯一**来源）——绝不把未运行的实现计入通过口径。
@@ -130,6 +167,48 @@ def format_summary(checks: int, implementations: list[str]) -> str:
 
 def implementations_text() -> str:
     return " + ".join(_implementations) if _implementations else "（无）"
+
+
+def format_version(version: tuple[int, int, int]) -> str:
+    """`(4, 2, 0)` → `4.2.0`（用于断言文案）。"""
+    return ".".join(str(part) for part in version)
+
+
+def parse_version(text: str) -> tuple[int, int, int] | None:
+    """从版本字符串提取 `(major, minor, patch)`；无法解析返回 `None`（fail-closed：视为越界）。
+
+    容忍前缀噪声（如 `KeePassXC 2.7.12`）与两位段（`4.2` → `(4, 2, 0)`），只取首个 `X.Y[.Z]`。
+    """
+    match = VERSION_RE.search(text or "")
+    if match is None:
+        return None
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch or 0))
+
+
+def version_in_range(text: str, low: tuple[int, int, int], high: tuple[int, int, int]) -> bool:
+    """版本字符串是否落在 `[low, high)` 区间内？解析失败一律 `False`（fail-closed）。"""
+    parsed = parse_version(text)
+    return parsed is not None and low <= parsed < high
+
+
+def verify_dependency_versions() -> None:
+    """对拍依赖的运行期版本兼容性断言（ISSUE-P3-585）：越界 / 不可解析即计入 `_failures`。
+
+    与 `build.yml` 的 pip 精确 pin 同构——pin 锚定**供给面**（装什么版本），本断言校验**消费面**
+    （跑的确实是该版本）。任一侧漂移均 fail-closed，见上方常量段的动因说明。
+    """
+    for label, text, low, high in (
+        ("pykeepass", _version("pykeepass"), PYKEEPASS_MIN, PYKEEPASS_MAX),
+        ("cryptography", _version("cryptography"), CRYPTOGRAPHY_MIN, CRYPTOGRAPHY_MAX),
+        ("keepassxc-cli", _cli_version(), KEEPASSXC_MIN, KEEPASSXC_MAX),
+    ):
+        check(
+            version_in_range(text, low, high),
+            f"依赖版本越界（ISSUE-P3-585）：{label} {text!r} 不在已验证区间 "
+            f"[{format_version(low)}, {format_version(high)})——"
+            "浮动拉取或上游行为变更，本次对拍结论不可信（fail-closed）",
+        )
 
 
 def parse_show_output(text: str) -> dict[str, str]:
@@ -317,6 +396,9 @@ def selftest() -> int:
     `keepassxc-cli` 计入通过口径）。
 
     本反校刻意**不依赖** gradle 探针产物——环境缺失判定先于产物检查，故子进程用空目录即可。
+
+    另含 ③（`ISSUE-P3-585`）依赖**版本区间断言**的正 / 反样本反校：区间内放行、下界 / 上界越界
+    与不可解析（fail-closed）均须按预期判定——本仓经验：0 命中的判据若没抓过已知坏样本等于没测。
     """
     checks: list[tuple[str, bool]] = []
 
@@ -343,6 +425,17 @@ def selftest() -> int:
         checks.append(("PATH 无 keepassxc-cli ⇒ 退出码 2（非 0）", proc.returncode == EXIT_ENV_MISSING))
         checks.append(("输出显式说明环境缺失且指名缺什么", "环境缺失" in output and "keepassxc-cli" in output))
         checks.append(("不得打印「对拍通过」摘要行", "对拍通过" not in output))
+
+    # ③ 依赖版本区间断言（ISSUE-P3-585）：区间内放行 / 越界与不可解析抓红——正反两向都反校。
+    checks.append(("版本区间内放行（本机留痕 pykeepass 4.2.0）", version_in_range("4.2.0", PYKEEPASS_MIN, PYKEEPASS_MAX)))
+    checks.append(("版本下界越界抓红（4.1.1 < 4.2.0）", not version_in_range("4.1.1", PYKEEPASS_MIN, PYKEEPASS_MAX)))
+    checks.append(("版本上界越界抓红（5.0.0 排他）", not version_in_range("5.0.0", PYKEEPASS_MIN, PYKEEPASS_MAX)))
+    checks.append(("版本不可解析抓红（fail-closed）", not version_in_range("?", PYKEEPASS_MIN, PYKEEPASS_MAX)))
+    checks.append(
+        ("keepassxc-cli 2.7.12 在区间内（本机留痕版本）", version_in_range("2.7.12", KEEPASSXC_MIN, KEEPASSXC_MAX))
+    )
+    checks.append(("keepassxc-cli 2.8.0 越界抓红（未验证主版本）", not version_in_range("2.8.0", KEEPASSXC_MIN, KEEPASSXC_MAX)))
+    checks.append(("带前缀噪声仍可解析（KeePassXC 2.7.12）", parse_version("KeePassXC 2.7.12") == (2, 7, 12)))
 
     for name, passed in checks:
         print(f"  [{'ok' if passed else 'FAIL'}] {name}")
@@ -388,7 +481,13 @@ def main() -> int:
 
     print(f"产物：{db_path}")
     print(f"  SHA-256：{hashlib.sha256(db_path.read_bytes()).hexdigest()}")
-    print(f"  pykeepass {_version('pykeepass')} / keepassxc-cli {_cli_version()}")
+    # 三方实现的实际版本打进步骤日志（ISSUE-P3-585 fix③：供批次审计 / 复现对拍留痕）。
+    print(
+        f"  pykeepass {_version('pykeepass')} / cryptography {_version('cryptography')} / "
+        f"keepassxc-cli {_cli_version()}"
+    )
+    # ISSUE-P3-585：运行期版本区间断言（越界即 fail-closed 计入 _failures）。
+    verify_dependency_versions()
 
     kp = PyKeePass(str(db_path), password=manifest["password"])
     note_implementation("pykeepass")

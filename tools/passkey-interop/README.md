@@ -29,9 +29,13 @@ echo -n 'passkey-interop-probe-2026' | keepassxc-cli show -q --all -s \
   database/build/interop-probe/keepasskey-passkey-probe.kdbx 'Passkey ES256 (passkey-interop.example)'
 ```
 
-## 依赖（本机已实测可用）
+## 依赖（版本钉定，`ISSUE-P3-585`）
 
-`pykeepass >= 4.2`、`cryptography >= 41`、`keepassxc-cli`（KeePassXC 官方 CLI）。
+`pykeepass == 4.2.0`、`cryptography == 50.0.0`、`keepassxc-cli`（KeePassXC 官方 CLI，CI 断言版本 ∈ `[2.7.6, 2.8.0)`）。
+`pykeepass` / `cryptography` 由 CI 以 **pip 精确 pin** 安装（与本机对拍留痕版本一致，
+见 [`docs/records/通行密钥互操作对拍记录_2026-09-19.md`](../../docs/records/通行密钥互操作对拍记录_2026-09-19.md) §1）；
+`verify_interop.py` 对三者**运行期实际版本**做同一区间断言，越界即 fail-closed——互操作闸门的权威性
+来自**非本仓实现**，其版本不得浮动。
 任一缺失时脚本**显式失败**并说明缺什么，不做静默降级：缺 `keepassxc-cli` 退 **2 = 环境缺失**
 （**不得当绿**——缺了非本仓实现的对拍不构成互操作证据），摘要行只列**实际运行过**的实现，
 未运行的实现绝不进入通过口径（`ISSUE-P1-495`：此前该形态退 0 且摘要行自称含 `keepassxc-cli`，

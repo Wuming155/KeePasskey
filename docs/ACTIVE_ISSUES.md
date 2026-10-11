@@ -11,9 +11,24 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**2 条**（2026-10-11 数据流安全审查整批登记 `ISSUE-P3-579` ~ `ISSUE-P3-586` 八条，
-> 其中 `ISSUE-P3-579` ~ `ISSUE-P3-584` 已逐一闭环，在册 `ISSUE-P3-585` ~ `ISSUE-P3-586`；六要素报告见
+> **在册批次**：**1 条**（2026-10-11 数据流安全审查整批登记 `ISSUE-P3-579` ~ `ISSUE-P3-586` 八条，
+> 其中 `ISSUE-P3-579` ~ `ISSUE-P3-585` 已逐一闭环，在册 `ISSUE-P3-586`；六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
+> 上一批 `ISSUE-P3-585`（fast-gate 互操作对拍依赖每次**浮动拉取**——`pip install pykeepass cryptography`
+> 与 `apt-get install keepassxc` 均无版本 pin——而规则 8 的权威判据全运行在浮动包所在解释器进程内，
+> 上游投毒 / 行为变更可伪造「对拍通过」输出与退出码或吞掉判据失败，与本仓 Actions 全 SHA 钉死、
+> `cargo --locked` 纪律不一致）已于 **§500** 整条闭环归档——AC① **pip 精确 pin**
+> （`pykeepass==4.2.0 cryptography==50.0.0`，取值 = 本机对拍留痕版本，
+> 见 `docs/records/通行密钥互操作对拍记录_2026-09-19.md` §1，且本机实测同版本对拍 161 条判据全绿），
+> apt 侧**不精确 pin**（Ubuntu runner 的 keepassxc 版本随基础镜像漂移，写死版本号易随镜像刷新失效）
+> 改以**运行期断言**兜底；AC② `verify_interop.py` 新增 `verify_dependency_versions()`：对
+> `pykeepass` / `cryptography` / `keepassxc-cli` 三方**运行期实际版本**做区间断言（下界 = 留痕版本，
+> 上界取「下一主版本」排他；`keepassxc-cli` 下界 2.7.6 = CI 镜像登记版本、上界 2.8.0 排他），
+> 越界 / 不可解析即 fail-closed 计入 `_failures` ⇒ 退 1；`--selftest` 增 7 条版本区间正 / 反样本，
+> 并以注入越界版本实测 3/3 抓红、真实环境 164 条判据全绿。改该脚本已**同批**更新
+> `tools/doc/gate_scripts.sha256` 对应哈希（§489 基线）。正文见
+> [`resolved/batches/500-fast-gate对拍依赖版本钉定批次.md`](resolved/batches/500-fast-gate对拍依赖版本钉定批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
 > 上一批 `ISSUE-P3-584`（两个 Provider 的 `@VisibleForTesting` client 注入参数位于 public 主构造签名，
 > 任一生产构造点按名传 `client` 即整体跳过 TLS-only 连接规格、SSRF 连接期两层守卫与构造期 HTTPS 强制，
 > 属绕过网络防线的最短单行改动路径）已于 **§499** 整条闭环归档——按 AC① **优先采纳 (a)「把注入通道移出
@@ -175,24 +190,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（2 项）
-
-### `ISSUE-P3-585`：fast-gate 互操作对拍依赖浮动拉取（pip/apt 均无版本 pin），与本仓供应链纪律不一致
-
-**背景与影响**：`build.yml:189-192` 在 fast-gate 内 `apt-get install keepassxc` 与
-`pip install pykeepass cryptography` **均无版本 pin**，`:194-197` 调用的 `verify_interop.py` 对拍判据
-（cryptography 独立解析 PEM `:155-173`、keepassxc-cli 交叉读 `:176-200`、pykeepass 字段与保护位判据 `:208-308`）
-完全运行在浮动拉取包所在解释器进程内（`tools/passkey-interop/verify_interop.py:55-60` import 即执行；
-`:391` 仅打印版本、无兼容性断言）——上游包被投毒或发布含行为变更的新版本时，可伪造「对拍通过」输出与退出码，
-或吞掉判据失败。前提（上游投毒）当前无证据且不在威胁模型能力清单内；与本仓既有纪律
-（`build.yml:14` Actions 全 SHA 钉死、`cargo --locked`）显式不一致。
-
-**验收标准**：① `pykeepass` / `cryptography` / `keepassxc` 版本 pin（含留痕的升级流程），与 Actions SHA 钉死纪律同构；
-② `verify_interop.py` 的版本兼容性断言口径一并补齐或登记。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 13（verdict=confirmed）。
-来源攻击面：CI/CD 与供应链。
+## P3 低危问题、特性接线与体验优化（1 项）
 
 ### `ISSUE-P3-586`：PD-04 登记口径与代码漂移——「工作流照常在 push/PR 上运行」自 ISSUE-P3-316 起已失真
 

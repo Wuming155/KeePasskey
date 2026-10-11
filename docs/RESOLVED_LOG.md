@@ -597,3 +597,4 @@
 | §497 | app 四点落盘面仅属主权限收敛批次 | `ISSUE-P3-582`（整条闭环；P3 5 → 4；原语下沉 core，限界 §43 登记设备侧 stat 未取证） | [497-app四点落盘面权限收敛批次.md](resolved/batches/497-app四点落盘面权限收敛批次.md) |
 | §498 | 备份第一道闸门 allowBackup 静态守卫批次 | `ISSUE-P3-583`（整条闭环；P3 4 → 3；拒重言，反校改 true 实测红） | [498-allowBackup第一道闸门静态守卫批次.md](resolved/batches/498-allowBackup第一道闸门静态守卫批次.md) |
 | §499 | Provider 注入通道移出 public 主构造批次 | `ISSUE-P3-584`（整条闭环；P3 3 → 2；注入通道移出 public 主构造，负向编译对照封死单行旁路） | [499-Provider注入通道移出主构造批次.md](resolved/batches/499-Provider注入通道移出主构造批次.md) |
+| §500 | fast-gate 对拍依赖版本钉定批次 | `ISSUE-P3-585`（整条闭环；P3 2 → 1；pip 精确 pin `pykeepass==4.2.0`/`cryptography==50.0.0` + `verify_interop.py` 运行期版本区间断言；同批更新 `gate_scripts.sha256`） | [500-fast-gate对拍依赖版本钉定批次.md](resolved/batches/500-fast-gate对拍依赖版本钉定批次.md) |
