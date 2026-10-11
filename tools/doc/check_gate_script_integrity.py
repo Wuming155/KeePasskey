@@ -17,6 +17,12 @@
 **任一脚本被改动而其清单未同步更新即红**。于是「削弱判据」不再是无结构信号的单行 diff——
 它必须**同时**改动脚本与清单（两处敏感面），在评审中获得结构性可见性。
 
+**行尾归一（必须）**：哈希按**行尾归一后**的字节（CRLF / CR → LF）计算，而非原始字节。缘由：
+本仓 `.gitattributes` 约定 `* text=auto eol=lf`，CI 与全新检出恒为 LF；但个别脚本在开发机工作区可能
+是 CRLF（`text=auto` 下 git 视为未改动、不重写工作区）——按原始字节哈希会让同一脚本在本地与 CI
+算出**不同**值，造成本机假绿 / CI 假红（§489 实测三个脚本 `count_line_tiers.py` /
+`check_launch_language_seed.py` / `verify_interop.py` 工作区为 CRLF、索引为 LF）。归一后两种检出一致。
+
 ## 判据（四条，任一命中即退出码 1）
 
 1. **清单存在性**：`tools/doc/gate_scripts.sha256` 必须存在且可解析（缺失 / 行格式非法即红）；
@@ -96,11 +102,16 @@ def expected_scripts(root: pathlib.Path) -> set[str]:
 
 
 def sha256_file(path: pathlib.Path) -> str:
-    """按**原始字节**计算 SHA-256（.gitattributes 保证全仓 LF 入库，无需规范化行尾）。"""
+    """按**行尾归一后**的字节计算 SHA-256（CRLF / CR → LF）。
+
+    归一而非按原始字节，是为了让本地（工作区可能是 CRLF）与 CI（恒 LF）对同一脚本算出一致哈希
+    ——见模块 docstring「行尾归一（必须）」。`.gitattributes` 的 `text=auto eol=lf` 只保证**入库 /
+    检出**为 LF，不保证任何时刻的工作区字节都是 LF。
+    """
     digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 16), b""):
-            digest.update(chunk)
+        data = handle.read()
+    digest.update(data.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
     return digest.hexdigest()
 
 
@@ -202,12 +213,22 @@ def selftest() -> int:
         if not any("[清单格式非法]" in v for v in bv):
             failures.append("清单行格式非法未被抓红：%s" % bv)
 
+        # 正样本 2（行尾归一）：同一内容的 CRLF 与 LF 两种字节必须算出同一哈希
+        # ——否则本地（工作区可能 CRLF）与 CI（恒 LF）会对同一脚本得到不同哈希，
+        # 造成本机假绿 / CI 假红（§489 实测三个脚本即此形态）。
+        crlf = root / "tools/doc/eol_crlf.py"
+        lf = root / "tools/doc/eol_lf.py"
+        crlf.write_bytes(b"a = 1\r\nb = 2\r\n")
+        lf.write_bytes(b"a = 1\nb = 2\n")
+        if sha256_file(crlf) != sha256_file(lf):
+            failures.append("行尾归一失效：CRLF 与 LF 同内容算出不同哈希（本机假绿 / CI 假红）")
+
     if failures:
         print("[selftest] FAIL：判据与样本不符（闸门读数不可信）")
         for item in failures:
             print("  [selftest] " + item)
         return 1
-    print("[selftest] PASS：正样本放行，哈希漂移 / 脚本缺失 / 清单缺项 / 清单多项 / 清单缺失 / 清单格式非法 六反样本均被抓红")
+    print("[selftest] PASS：正样本（含 CRLF/LF 同哈希的行尾归一）放行，哈希漂移 / 脚本缺失 / 清单缺项 / 清单多项 / 清单缺失 / 清单格式非法 六反样本均被抓红")
     return 0
 
 
