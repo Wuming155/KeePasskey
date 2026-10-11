@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 import java.util.Properties
 import org.gradle.api.GradleException
 
@@ -11,7 +12,8 @@ plugins {
 }
 
 // 自动签名的发布密钥库配置：口令解析顺序＝环境变量 → Windows 凭证管理器 → keystore.properties
-// （ISSUE-P3-418：凭证管理器通道经 DPAPI 按当前用户加密，本机不再需要口令明文落盘）
+// （ISSUE-P3-418：凭证管理器通道经 DPAPI 按当前用户加密，本机不再需要口令明文落盘；
+//  ISSUE-P2-573：该通道的 PR 可改脚本受「release 产物闸门 + SHA-256 完整性基线」两道约束，见下）
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
@@ -19,14 +21,85 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+// =============================================================================================
+// ISSUE-P2-573：凭证管理器通道（仓库内、**PR 可改**脚本）的两道闸门。
+//
+// 缺陷背景：`tools/signing/read-cred.ps1` 是 PR 可改文件，此前在**配置阶段**被**任意** gradle 任务
+// （test / lint / help / IDE 同步……）无条件执行。攻击者 PR 只需在保持「退出码 0/1/2 + stdout 语义」
+// （脚本头部契约、调用方依赖）不变的前提下插入外传调用即可伪装；PR 被人工合并后（main 无分支保护，
+// `PD-04`），Windows 维护者本机跑任意 gradlew 即静默外传口令，且同一次执行可连带读取 keystore 文件
+// 本身——「口令 + 密钥库 = 伪造官方更新」的组合前提单次攻击即满足。三个 workflow 全在 ubuntu
+// （永不执行该脚本），无第二道检测。
+//
+// 闸门一（执行面收窄，默认拒绝）：仅当**命令行显式请求 release 分发产物**时才启用该通道；
+//   test / lint / help / assembleDebug / IDE 同步一律不触碰该脚本。判据取
+//   `gradle.startParameter.taskNames`——口令必须在**配置阶段**进入 signingConfig（AGP 读取
+//   signingConfig 的时机不受本仓控制），而任务图要到配置结束才可知，故只能取命令行任务名判定。
+//   漏判的兜底是下方 ISSUE-P3-422 的 taskGraph 就绪断言（fail-closed：拒绝产出未签名包）。
+// 闸门二（完整性基线，fail-closed）：执行前对脚本做 SHA-256 白名单校验，与 `credManReadScriptSha256`
+//   常量不一致（或脚本缺失）即中止构建。这是唯一覆盖「Windows 维护者本机构建」这一攻击路径的手段
+//   （CI 在 ubuntu 上永不执行该脚本，无法代劳）；脚本**任何**字节改动都必须在同一批同步更新哈希
+//   （两文件同时被改仍是可在评审中识别的两处敏感面 diff，残余取舍见限界表 §41）。
+// 锁定面：`SigningCredentialChainHardeningTest`（纯 JVM）钉住「基线 ↔ 脚本字节一致」与
+//   「先过闸门一 / 闸门二、后 `ProcessBuilder`」的调用顺序。
+// =============================================================================================
+
+val credManReadScript = rootProject.file("tools/signing/read-cred.ps1")
+
+/** read-cred.ps1 的 SHA-256 基线（全仓 LF 行尾由 .gitattributes 保证，按原始字节计算即可）。 */
+val credManReadScriptSha256 = "99b0d2ba7ae7ca49382b191e2d5abc788bca296bd13ec318060869d19a4240a0"
+
+/** 聚合任务别名：其依赖图必然包含 release 产物（`build` ⊃ `assemble` ⊃ `assembleRelease`）。 */
+val releaseArtifactTaskAliases = setOf("build", "assemble", "bundle")
+
+/** release 产物任务名前缀族：与 `Release` 后缀联合判定（如 assembleRelease / installRelease）。 */
+val releaseArtifactTaskPrefixes = listOf("assemble", "bundle", "install", "package", "publish")
+
+/** ISSUE-P2-573 闸门一：本次构建是否显式请求 release 分发产物（默认拒绝）。 */
+val releaseArtifactRequested: Boolean = gradle.startParameter.taskNames.any { requested ->
+    val simpleName = requested.substringAfterLast(':')
+    simpleName in releaseArtifactTaskAliases ||
+        (simpleName.endsWith("Release") && releaseArtifactTaskPrefixes.any(simpleName::startsWith))
+}
+
+/**
+ * ISSUE-P2-573 闸门二：完整性基线校验——脚本缺失或哈希漂移即 `GradleException` 中止构建。
+ * 有意不做「告警后继续」：那等于把基线降级为注释。
+ */
+fun verifyCredManReadScriptIntegrity() {
+    if (!credManReadScript.isFile) {
+        throw GradleException(
+            "签名口令链完整性基线失效：找不到 ${credManReadScript.absolutePath}——" +
+                "拒绝执行未校验的凭证读取脚本（ISSUE-P2-573）。",
+        )
+    }
+    val actual = MessageDigest.getInstance("SHA-256")
+        .digest(credManReadScript.readBytes())
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+    if (actual != credManReadScriptSha256) {
+        throw GradleException(
+            "签名口令链完整性基线失配：tools/signing/read-cred.ps1 实际 SHA-256=$actual，" +
+                "与 app/build.gradle.kts 钉定值 $credManReadScriptSha256 不一致——" +
+                "拒绝在**未经审阅变更**的脚本上读取发布签名口令（ISSUE-P2-573）。" +
+                "若确为有意的脚本变更：先经评审与批次登记，再同步更新本文件中的基线常量。",
+        )
+    }
+    logger.lifecycle("凭证管理器通道：tools/signing/read-cred.ps1 SHA-256 基线校验通过（ISSUE-P2-573）")
+}
+
 // ISSUE-P3-418：从 Windows 凭证管理器读「普通凭据」口令（tools/signing/read-cred.ps1，CredRead）。
 // 凭证目标名：KeePasskey/Keystore/StorePassword、KeePasskey/Keystore/KeyPassword。
 // 退出码语义由脚本约定：0=读到 / 1=未配置（静默降级）/ 2=通道异常（告警后降级）。
-// 非 Windows（CI/Linux）或脚本缺失时不启用本通道。
-val credManReadScript = rootProject.file("tools/signing/read-cred.ps1")
-
+// 非 Windows（CI/Linux）或脚本缺失时不启用本通道；ISSUE-P2-573 起另受上面两道闸门约束。
 fun readWindowsCredentialPassword(target: String): String? {
     if (!org.gradle.internal.os.OperatingSystem.current().isWindows || !credManReadScript.exists()) return null
+    // 闸门一（ISSUE-P2-573）：非 release 产物构建不执行 PR 可改脚本——静默降级到后续通道。
+    if (!releaseArtifactRequested) {
+        logger.info("凭证管理器通道已跳过（本次命令行未请求 release 分发产物，ISSUE-P2-573）")
+        return null
+    }
+    // 闸门二（ISSUE-P2-573）：执行 PR 可改脚本前先过完整性基线，漂移即 fail-closed。
+    verifyCredManReadScriptIntegrity()
     return try {
         val proc = ProcessBuilder(
             "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
@@ -104,6 +177,8 @@ val releasePasswordPlaceholderMarker = "__REPLACE_WITH"
 // 判定时机：taskGraph 就绪时检查实际调度的任务——仅当调度了 :app 的 assemble*/bundle*
 // Release 分发产物任务且 hasReleaseSigning=false 时 error(...) 中止；`test` /
 // `tasks` / `testReleaseUnitTest` / lint 等不产分发产物的任务不受影响（不误伤日常开发）。
+// ISSUE-P2-573 起本断言还是「凭据通道闸门一」的兜底：凭证管理器通道仅在命令行显式请求
+// release 产物时启用，若经非标准入口构建而未被任务名判据覆盖，此处 fail-closed 报错并给出引导。
 // =============================================================================================
 gradle.taskGraph.whenReady {
     if (hasReleaseSigning) return@whenReady
@@ -117,7 +192,10 @@ gradle.taskGraph.whenReady {
             "release 签名未配置（hasReleaseSigning=false）却调度了 " +
                 "${releaseArtifactTasks.map { it.name }}——拒绝产出未签名包。" +
                 "口令通道（按优先级）：Windows 凭证管理器（tools/signing/write-cred.ps1）/" +
-                "CI Secret 环境变量/keystore.properties；密钥文件路径见 storeFile（ISSUE-P3-422）。",
+                "CI Secret 环境变量/keystore.properties；密钥文件路径见 storeFile（ISSUE-P3-422）。" +
+                "注：凭证管理器通道自 ISSUE-P2-573 起仅在命令行显式请求 release 产物" +
+                "（assemble*/bundle*/install*Release 等）时启用；经非标准入口构建时，可改用 " +
+                "KEYSTORE_PASSWORD / KEY_PASSWORD 环境变量注入口令。",
         )
     }
 }

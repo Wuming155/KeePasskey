@@ -11,10 +11,16 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**14 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P2-573` / `ISSUE-P2-574` /
+> **在册批次**：**13 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P2-574` /
 > `ISSUE-P3-575` ~ `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P2-572`（WebDAV 409/423 兜底「DELETE 后无预条件 MOVE 重试」并发覆盖窗口）已于 **§487** 整条闭环归档——
+> 上一批 `ISSUE-P2-573`（Gradle 配置期执行 PR 可改脚本读取签名口令）已于 **§488** 整条闭环归档——
+> 凭证管理器通道收窄为「仅命令行显式请求 release 分发产物时启用」，执行前对 `tools/signing/read-cred.ps1`
+> 做 SHA-256 完整性基线校验（漂移 / 缺失即 fail-closed 中止构建），并以 `SigningCredentialChainHardeningTest`
+> 静态锁定；残余取舍登记限界表 §41；正文见
+> [`resolved/batches/488-签名口令链构建期闸门与完整性基线批次.md`](resolved/batches/488-签名口令链构建期闸门与完整性基线批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P2-572`（WebDAV 409/423 兜底「DELETE 后无预条件 MOVE 重试」并发覆盖窗口）已于 **§487** 整条闭环归档——
 > 兜底 DELETE 前重探目标元数据（ETag 漂移 ⇒ ConflictError 不 DELETE；探测失败 fail-closed；相同 / 缺失放行），
 > 限界表 §28 补记「409/423 服务器类」未实测样本；正文见
 > [`resolved/batches/487-WebDAV覆盖兜底重探守卫批次.md`](resolved/batches/487-WebDAV覆盖兜底重探守卫批次.md)，
@@ -66,32 +72,7 @@
 
 > **暂无开放项**（`ISSUE-P1-537` / `ISSUE-P1-538` 已于 §477 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（2 项）
-
-### `ISSUE-P2-573`：Gradle 配置期执行 PR 可改脚本读取签名口令，恶意 PR 合并后可在维护者本机静默外传口令与 keystore 文件
-
-**背景与影响**：`app/build.gradle.kts:54-56` 在未设 `KEYSTORE_PASSWORD` 环境变量时，经 `:31-34`
-`ProcessBuilder("powershell.exe",…,"-File",credManReadScript,…)` 在 **Gradle 配置阶段**执行仓库内脚本
-`tools/signing/read-cred.ps1`（`CredReadW` 取凭证管理器中 `KeePasskey/Keystore/StorePassword` 明文，`:64-81`；
-`releaseKeyPassword` 链 `:59-61` 同理触发第二目标）。该脚本是 **PR 可改文件**：攻击者 PR 在保持「退出码 0/1/2 +
-stdout 语义」调用方契约（`:16-19`）不变的前提下插入外传调用即可伪装；PR 被人工合并后（`PD-04` 登记 main 无分支保护），
-Windows 维护者本机运行**任意** gradlew 任务即触发（无 configuration-cache，配置阶段每次全量执行），
-口令与 **keystore 文件本身**（同一次执行可连带读取）静默外传——伪造官方更新通道的前提被打开。
-三个 workflow 均 `runs-on: ubuntu-latest`（`build.yml:109/155/252/585` 等），CI 永不执行该脚本，无第二道检测。
-前置为多条件叠加（恶意 PR 被合并 + Windows 维护者本机构建 + 未设口令环境变量），故 medium。
-
-**整改依据**：构建期读取秘密的代码路径不得依赖 PR 可改的仓库内可变面；与本仓既有供应链纪律
-（Actions 全 SHA 钉死、`cargo --locked`）同构。
-
-**验收标准**：
-1. 口令/keystore 读取链不再执行 PR 可改的仓库内脚本，或执行前有可核验的完整性基线
-   （哈希白名单校验 / 脚本移出仓库可变面 / 由 CI 侧注入），并以机检或测试锁定；
-2. 残余取舍如保留，登记进 `产品裁决登记.md` 或 `已知工程限界.md`（`find_decision.py` 可检索）。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（9 攻击面并行 + 每条发现由独立复核员换人读码逐跳复核，
-11 confirmed + 3 adjusted、0 rejected），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 1（verdict=confirmed）。
-来源攻击面：CI/CD 与供应链。
+## P2 中危缺陷与协议/测试缺口（1 项）
 
 ### `ISSUE-P2-574`：CI 全部门禁的判定本体（机检脚本 / CVSS 断言 / workflow yml 自身）无完整性护栏，单行削弱判据后持续假绿
 
