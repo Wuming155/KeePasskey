@@ -327,7 +327,9 @@ class WebDavSyncProvider(
      *
      * **ISSUE-P2-381**：部分服务器对 MOVE 覆盖已有目标报 409/423（仅靠 `Overwrite:T` 不可靠；
      * keepass2android `WebDavStorage.java:235` 注释 + 提交 `9c8ee243` 实证）。
-     * 收到 409/423 时先 DELETE 目标（404 容忍，与 `delete()` 同语义）再单次重试 MOVE
+     * 收到 409/423 时先重探目标元数据做兜底守卫（**ISSUE-P2-572**：远端 ETag 非空且 ≠ 预期 ⇒
+     * ConflictError 不 DELETE——防销毁 / 覆盖他端并发写入；探测失败如实上抛 fail-closed；
+     * 相同 / 缺失才放行），再 DELETE 目标（404 容忍，与 `delete()` 同语义）并单次重试 MOVE
      * （无 If 预条件、`Overwrite:T`——目标已被删除，预条件恒失败无意义），
      * 409/423 与 412 分开报错文案。
      *

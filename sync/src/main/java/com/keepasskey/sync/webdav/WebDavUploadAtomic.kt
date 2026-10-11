@@ -118,6 +118,30 @@ internal object WebDavUploadAtomic {
                         resp.close()
                         if (attempt == 0) {
                             WebDavMoveOverwritePolicy.logOverwriteConflict(conflictCode)
+                            // ISSUE-P2-572：兜底 DELETE 前先重探目标元数据——无条件 DELETE 删除的是
+                            // 「此刻远端」，他端在本端上传临时文件期间（大库可达数十秒）写入的新版本
+                            // 会被直接删除（窗口 A），其后的无预条件重试又会静默覆盖 DELETE 与重试之间
+                            // 他端新建的目标（窗口 B）。重探失败 fail-closed 如实上抛（ISSUE-P2-501 同口径）；
+                            // 远端 ETag 漂移转 ConflictError 不 DELETE；相同 / 缺失（无 ETag 服务器）才
+                            // 放行既有兜底（维持 Kp2a 兼容收益）。
+                            val metaResult = getMetadata(remotePath)
+                            when (val guard = WebDavMoveOverwritePolicy
+                                .fallbackGuard(metaResult.getOrNull(), expectedEtag)) {
+                                is OverwriteFallbackGuard.Drifted -> {
+                                    conflictError = SyncException.ConflictError(
+                                        remoteEtag = guard.currentRemoteEtag,
+                                        localExpectedEtag = expectedEtag.orEmpty(),
+                                        message = WebDavMoveOverwritePolicy.overwriteDriftMessage(conflictCode)
+                                    )
+                                    break
+                                }
+                                OverwriteFallbackGuard.ProbeFailed -> {
+                                    probeFailure = metaResult.exceptionOrNull()
+                                        ?: SyncException.NetworkError("WebDAV 原子写入覆盖兜底前元数据重探失败")
+                                    break
+                                }
+                                OverwriteFallbackGuard.Proceed -> Unit
+                            }
                             delete(remotePath)
                             // 目标已删，预条件恒失败且无意义——重试改走无 `If` 形态
                             withPrecondition = false

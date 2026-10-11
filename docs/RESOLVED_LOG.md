@@ -584,3 +584,4 @@
 | §484 | 协程 catch 取消语义逐处收口批次 | `ISSUE-P3-569`（整条闭环）+ `ISSUE-P3-570`（同批新登记，**未闭环**） | [484-协程catch取消语义逐处收口批次.md](resolved/batches/484-协程catch取消语义逐处收口批次.md) |
 | §485 | 自动填充「记住应用关联」询问式写回批次 | `ISSUE-P3-571`（整条闭环；交互口径裁决 `PD-83`） | [485-自动填充记住应用关联询问写回批次.md](resolved/batches/485-自动填充记住应用关联询问写回批次.md) |
 | §486 | 协程 `runCatching` 取消语义收口并机检批次 | `ISSUE-P3-570`（整条闭环；机检并入 `check_cancellation_semantics.py`，`LaunchedEffect` 构造补入） | [486-协程runCatching取消语义并入机检批次.md](resolved/batches/486-协程runCatching取消语义并入机检批次.md) |
+| §487 | WebDAV 覆盖兜底 DELETE 前重探守卫批次 | `ISSUE-P2-572`（整条闭环；限界 §28 补记 409/423 服务器类未实测） | [487-WebDAV覆盖兜底重探守卫批次.md](resolved/batches/487-WebDAV覆盖兜底重探守卫批次.md) |

@@ -308,9 +308,18 @@ class WebDavSyncScenarioTest {
         // 恰好绕开缺陷组合。本条以**非空 expectedEtag** 命中真实缺陷面：兜底先 DELETE 目标、
         // 再重试——重试若仍携带 `If`（目标已不存在，预条件恒失败）会 412，兜底退化为「先删目标 → 必败」。
         // 判据同时看**请求头**（重试 MOVE 不带 If）与**结果码**（重试成功）。
+        // ISSUE-P2-572 增补：兜底 DELETE 前先重探目标元数据（重探得与预期一致的 ETag ⇒ 放行兜底），
+        // 故请求序为 PUT → MOVE(409) → PROPFIND 重探 → DELETE → MOVE(重试)。
         startQueued()
         server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"tmp-1\"")) // PUT 临时文件
         server.enqueue(MockResponse().setResponseCode(409).setBody("destination exists"))   // MOVE 首试 409
+        server.enqueue(                                                                     // ISSUE-P2-572 重探
+            MockResponse().setResponseCode(207).setBody(
+                """<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:">
+                   <d:response><d:propstat><d:prop><d:getetag>"base-etag"</d:getetag></d:prop>
+                   </d:propstat></d:response></d:multistatus>"""
+            )
+        )
         server.enqueue(MockResponse().setResponseCode(204))                                 // DELETE 目标
         server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"final-1\"")) // MOVE 兜底重试
 
@@ -328,6 +337,12 @@ class WebDavSyncScenarioTest {
             moves[1].getHeader("If")
         )
         assertEquals("兜底重试仍须保持 Overwrite: T", "T", moves[1].getHeader("Overwrite"))
+        val probeIndex = recorded.indexOfFirst { it.method == "PROPFIND" }
+        val deleteIndex = recorded.indexOfFirst { it.method == "DELETE" }
+        assertTrue(
+            "兜底 DELETE 前必须先重探目标元数据（ISSUE-P2-572）",
+            probeIndex in 0 until deleteIndex
+        )
         val delete = recorded.first { it.method == "DELETE" }
         assertEquals("DELETE 必须针对目标而非临时文件", "/vault.kdbx", delete.path)
     }
