@@ -1408,6 +1408,7 @@
     <string name="repo_no_active_database">请先选择或创建密码库</string>
     <string name="repo_file_missing_with_keyfile">数据库文件不存在，无法以复合密钥打开</string>
     <string name="repo_cloud_vault_not_downloaded">云端库尚未下载到本机，无法解锁。请重新经「打开已有密码库」的云端入口完成连接，或检查同步配置</string>
+    <string name="repo_unsupported_db_path">已登记的密码库路径形态不受支持，无法解锁。请重新经「打开已有密码库」登记该库</string>
     <string name="repo_db_locked">数据库未解锁</string>
     <string name="repo_invalid_group_id">无效的分组 ID</string>
     <string name="repo_group_not_found">分组不存在</string>
@@ -1506,6 +1507,10 @@
     <!-- ===== ISSUE-P3-298 ①：「打开方式」外部打开入口（固定通用文案，不含文件路径等） ===== -->
     <string name="external_open_invalid">未识别到 KDBX 密码库文件，请在应用内通过「选择文件」打开</string>
     <string name="external_open_failed">打开密码库失败，请确认文件可读后在应用内重试</string>
+    <string name="external_open_confirm_title">添加这个密码库？</string>
+    <string name="external_open_confirm_message">即将把外部文件「%1$s」登记为新的密码库并切换为当前库，请确认来源可信</string>
+    <string name="external_open_confirm_ok">添加</string>
+    <string name="external_open_confirm_cancel">取消</string>
 
     <!-- ===== ISSUE-P3-21：建库密钥文件的一次性交付（丢失即无法解锁，必须明示） ===== -->
     <!-- ISSUE-P3-524：与批次 416「私有加密副本兜底」对齐——永久丢失仅在导出件与设备内副本同时丢失时成立 -->

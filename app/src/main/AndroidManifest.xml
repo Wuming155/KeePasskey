@@ -136,8 +136,10 @@
              「打开方式」时承接 ACTION_VIEW / ACTION_SEND。导入到既有  `importExternalDatabase`
              链路（与页内 SAF 选择器同一入口）后拉起主界面进入解锁流程。
              安全边界：本页是有意新增的受控数据消费入口（与 MainActivity 的「不消费任何外部
-             intent 数据」裁决互不冲突）——只接受 VIEW/SEND、只接受 content/file、只接受
-             `.kdbx` 文件名，非法输入一律拒绝回落；白名单登记见 ExportedComponentHygieneTest。 -->
+             intent 数据」裁决互不冲突）——只接受 VIEW/SEND、只接受 content:// scheme
+             （file:// 与其它 scheme 一律拒绝，ISSUE-P3-575）、只接受纯文件名的 `.kdbx`，
+             非法输入一律拒绝回落；登记前须用户确认（ISSUE-P3-575 AC②）；
+             白名单登记见 ExportedComponentHygieneTest。 -->
         <activity
             android:name=".OpenVaultEntryActivity"
             android:exported="true"

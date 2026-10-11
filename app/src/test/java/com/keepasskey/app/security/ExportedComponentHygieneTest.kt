@@ -155,9 +155,10 @@ class ExportedComponentHygieneTest {
             EXTERNAL_OPEN_ACTIVITY to
                 "ISSUE-P3-298 ①：「打开方式」外部打开入口——承接 ACTION_VIEW / ACTION_SEND " +
                 "的 .kdbx 库文件（文件管理器 / 云盘「打开方式」直达）。属有意新增的受控数据" +
-                "消费入口：仅接受 content/file scheme 且文件名以 .kdbx 结尾的对象，非法输入" +
-                "拒绝回落主界面；导入复用页内 SAF 同一 importExternalDatabase 链路（持久化" +
-                "授权尝试 + 脱敏告警），库可用性仍由主密码解密 fail-closed 裁决"
+                "消费入口：仅接受 content:// scheme（file:// 与其它 scheme 一律拒绝，" +
+                "ISSUE-P3-575）且显示名为纯文件名并以 .kdbx 结尾的对象，非法输入拒绝回落主界面；" +
+                "登记前须用户确认（ISSUE-P3-575 AC②），导入复用页内 SAF 同一 importExternalDatabase " +
+                "链路（持久化授权尝试 + 脱敏告警），库可用性仍由主密码解密 fail-closed 裁决"
         )
 
         /** ISSUE-P3-298 ①：外部打开入口（无权限可用的导出组件，理由见白名单） */

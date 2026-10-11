@@ -6,6 +6,7 @@ import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.security.VaultFileBaselineHolder
 import com.keepasskey.app.security.VaultFileMetadataProbe
+import com.keepasskey.app.security.VaultOpenUriPolicy
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultRemovalKind
@@ -56,12 +57,12 @@ internal class VaultLifecycleCoordinator(
         keyFileData: ByteArray?,
         readOnly: Boolean
     ): KdbxResult<Unit> {
-        val activeDb = candidates.firstOrNull { it.isActive }
-            ?: candidates.firstOrNull()
-            ?: return KdbxResult.Failure(
-                IllegalStateException("无活动数据库"),
-                strings.get(R.string.repo_no_active_database)
-            )
+        val activeDb = candidates.firstOrNull { it.isActive } ?: candidates.firstOrNull()
+            ?: return KdbxResult.Failure(IllegalStateException("无活动数据库"), strings.get(R.string.repo_no_active_database))
+
+        // ISSUE-P3-575 建议②：只接受 content:// 或裸绝对路径；scheme 前缀（file:/…）/相对路径会落进「新建空库」
+        if (!VaultOpenUriPolicy.isUnlockableStoredPath(activeDb.path)) return KdbxResult.Failure(
+            IllegalArgumentException("已登记库路径形态不受支持"), strings.get(R.string.repo_unsupported_db_path))
 
         val result = if (activeDb.path.startsWith("content://")) {
             val uri = Uri.parse(activeDb.path)

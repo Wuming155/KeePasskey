@@ -1379,6 +1379,10 @@
     <!-- ===== ISSUE-P3-298 ①: "Open with" external open entry (fixed generic copy, no file paths) ===== -->
     <string name="external_open_invalid">Could not identify a KDBX vault file. Please open it in the app via "Select file"</string>
     <string name="external_open_failed">Failed to open the vault. Make sure the file is readable and retry inside the app</string>
+    <string name="external_open_confirm_title">Add this vault?</string>
+    <string name="external_open_confirm_message">\"%1$s\" will be registered as a new vault and set as the current vault. Make sure you trust the source</string>
+    <string name="external_open_confirm_ok">Add</string>
+    <string name="external_open_confirm_cancel">Cancel</string>
 
     <!-- ===== ISSUE-P3-21: one-time key file delivery when creating a database ===== -->
     <!-- ISSUE-P3-524: aligned with batch 416 in-app encrypted copy; permanent loss only when both copies are gone -->
@@ -1545,6 +1549,7 @@
     <string name="repo_no_active_database">Select or create a vault first</string>
     <string name="repo_file_missing_with_keyfile">Database file not found; cannot open with a composite key</string>
     <string name="repo_cloud_vault_not_downloaded">This cloud vault has not been downloaded to this device and cannot be unlocked. Reconnect it via the cloud tab of \"Open an existing vault\", or check the sync configuration</string>
+    <string name="repo_unsupported_db_path">The registered vault path is unsupported and cannot be unlocked. Re-register it via \"Open an existing vault\"</string>
     <string name="repo_db_locked">Database is locked</string>
     <string name="repo_invalid_group_id">Invalid group ID</string>
     <string name="repo_group_not_found">Group not found</string>

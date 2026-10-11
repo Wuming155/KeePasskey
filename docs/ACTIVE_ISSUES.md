@@ -11,9 +11,14 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**12 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-575` ~
+> **在册批次**：**11 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-576` ~
 > `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
+> 上一批 `ISSUE-P3-575`（`OpenVaultEntryActivity` 对 URI 无 scheme 校验并静默覆写活动库指针，任意普通 App 零前置可达）已于 **§490** 整条闭环归档——
+> 外部打开入口收敛为「仅接受 `content://` scheme（`file://` 等一律拒绝）+ 纯文件名 `.kdbx` 显示名」，登记前**必须用户确认**（外部输入不再静默改状态），
+> 且 `unlockActiveDatabase` 对含 scheme 前缀 / 相对路径 fail-closed；白名单理由与代码同步修正；正文见
+> [`resolved/batches/490-外部打开URI准入与登记确认批次.md`](resolved/batches/490-外部打开URI准入与登记确认批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
 > 上一批 `ISSUE-P2-574`（CI 全部门禁判定本体无完整性护栏、单行削弱判据后持续假绿）已于 **§489** 整条闭环归档——
 > `hygiene-gate` **首步**以受审清单 `tools/doc/gate_scripts.sha256` 钉定 19 个门禁脚本（现列 16 条机检 + 跨
 > workflow 三脚本 `.github/check_dependency_cvss.py` / `tools/device/check_connected_device_results.py` /
@@ -84,27 +89,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（12 项）
-
-### `ISSUE-P3-575`：`OpenVaultEntryActivity` 对 URI 无 scheme 校验并静默覆写活动库指针，任意普通 App 零前置可达
-
-**背景与影响**：`OpenVaultEntryActivity` exported 且无权限保护（`AndroidManifest.xml:142-157`）；
-`extractKdbxUri`（`OpenVaultEntryActivity.kt:78-84`）对 URI **全程无 scheme 校验**（比
-`ExportedComponentHygieneTest.kt:151-164` 白名单理由声称的「仅接受 content/file scheme」更宽），唯一校验为显示名
-`endsWith(".kdbx")`（`:59`）。任意普通 App（无需任何权限）显式 Intent 携带 `file://` 任意路径（无需 FLAG_GRANT）
-→ `:67` `importExternalDatabase` → `VaultLifecycleCoordinator.kt:301-312` **无确认覆写活动库指针** `saveActiveDbId`
-→ 解锁分支 `:66-80` `File(path)` 按**相对路径**解析 → `:102-108` 文件不存在即走「以主密码新建空库」分支。
-影响为库列表污染 / 顶掉活动库 / UI 混淆，无凭据外泄路径；**本轮 14 条发现中唯一普通恶意 App 零前置可达**。
-
-**验收标准**：
-1. `extractKdbxUri` 增加 scheme 白名单（`content://` 与受 FLAG_GRANT 的 URI；`file://` 收敛到可预期来源或拒绝）；
-2. 登记新库 / 覆写活动库指针前引入用户确认，不以外部输入静默改状态；
-3. 纯 JVM 单测锁定（攻击者 scheme / 相对路径 / 伪装后缀用例），并同步修正
-   `ExportedComponentHygieneTest` 白名单理由表述（与代码不符）。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 3（verdict=confirmed，
-复核确认三处攻击面 safeNote 与代码不符，以复核为准）。来源攻击面：其他攻击面兜底。
+## P3 低危问题、特性接线与体验优化（11 项）
 
 ### `ISSUE-P3-576`：自定义图标上传通道对 SAF 流无大小闸门，与同文件附件通道防护不对等
 
