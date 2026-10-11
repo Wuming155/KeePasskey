@@ -59,4 +59,22 @@ class KdbxResultTest {
 
         assertEquals(KdbxError.UNKNOWN, observed)
     }
+
+    @Test
+    fun `runCatching 不吞协程取消，CancellationException 原样重抛`() {
+        // ISSUE-P3-570：JVM 上 kotlinx.coroutines.CancellationException 即
+        // java.util.concurrent.CancellationException 的别名——取消被归一为 Failure 会
+        // 破坏结构化并发的收敛契约（与 sync 的 runCatchingCancellable 同口径）。
+        // core 无协程依赖，测试直接用 JVM 别名类断言同型语义。
+        val cancelled = java.util.concurrent.CancellationException("cancelled")
+
+        var rethrown: Throwable? = null
+        try {
+            KdbxResult.runCatching<String> { throw cancelled }
+        } catch (t: Throwable) {
+            rethrown = t
+        }
+
+        assertTrue("取消必须沿链重抛而非归一为 Failure", rethrown === cancelled)
+    }
 }

@@ -4,6 +4,7 @@ import com.keepasskey.app.autofill.DuplicateEntryScanner
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -40,7 +41,9 @@ internal class SettingsDatabaseMetaController(
                     defaultUserNameChanged = if (defaultUserName != null && defaultUserName != cur.defaultUserName) now else cur.defaultUserNameChanged
                 )
             }
+            // ISSUE-P3-570：save 为挂起调用（mutex.withLock 写盘），取消须沿链重抛，不得归一为静默失败
             runCatching { session.save() }
+                .onFailure { if (it is CancellationException) throw it }
         }
     }
 

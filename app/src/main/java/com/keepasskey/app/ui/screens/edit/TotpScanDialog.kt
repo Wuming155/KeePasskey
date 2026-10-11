@@ -64,6 +64,7 @@ import com.google.zxing.common.HybridBinarizer
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.security.dialogWindowOrNull
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -292,7 +293,7 @@ private fun TotpCameraPreview(
                 var decoded: String? = null
                 try {
                     decoded = decodeQrFrame(image, reader)
-                } catch (t: Throwable) {
+                } catch (t: Throwable) { // cancel-n/a: 本 catch 在非挂起 Analyzer 回调（decodeExecutor 线程），decodeQrFrame 纯 CPU，取消不可达
                     // 单帧解不出 / 帧格式异常属常态，吞掉保证分析线程存活
                 } finally {
                     image.close()
@@ -313,6 +314,8 @@ private fun TotpCameraPreview(
                 analysis
             )
         } catch (t: Throwable) {
+            // ISSUE-P3-570：awaitOn 为挂起等待，取消须沿链重抛，不得记成「相机不可用」
+            if (t is CancellationException) throw t
             // 相机不可用（被系统 / 其它应用占用等）：如实提示，不静默黑屏
             cameraError = true
         }

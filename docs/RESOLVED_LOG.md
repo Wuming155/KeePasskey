@@ -583,3 +583,4 @@
 | §483 | 存量十三条 | `ISSUE-P2-556` / `P2-557` / `P3-558` / `P3-559` / `P3-560` / `P3-561` / `P3-562` / `P3-563` / `P3-564` / `P3-565` / `P3-566` / `P3-567` / `P3-568`（十三条整条闭环）+ `ISSUE-P3-569`（同批新登记，**未闭环**） | [483-存量十三条整改批次.md](resolved/batches/483-存量十三条整改批次.md) |
 | §484 | 协程 catch 取消语义逐处收口批次 | `ISSUE-P3-569`（整条闭环）+ `ISSUE-P3-570`（同批新登记，**未闭环**） | [484-协程catch取消语义逐处收口批次.md](resolved/batches/484-协程catch取消语义逐处收口批次.md) |
 | §485 | 自动填充「记住应用关联」询问式写回批次 | `ISSUE-P3-571`（整条闭环；交互口径裁决 `PD-83`） | [485-自动填充记住应用关联询问写回批次.md](resolved/batches/485-自动填充记住应用关联询问写回批次.md) |
+| §486 | 协程 `runCatching` 取消语义收口并机检批次 | `ISSUE-P3-570`（整条闭环；机检并入 `check_cancellation_semantics.py`，`LaunchedEffect` 构造补入） | [486-协程runCatching取消语义并入机检批次.md](resolved/batches/486-协程runCatching取消语义并入机检批次.md) |

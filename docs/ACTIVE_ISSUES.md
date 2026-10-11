@@ -11,9 +11,12 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**1 条**（`ISSUE-P3-570`，来源＝`ISSUE-P3-569`（§484）闭环时「`runCatching` 面不属本判据」
-> 的边界声明）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P3-571`（自动填充「关联记忆」无感知 / 不随库迁移）已于 **§485** 整条闭环归档——方案 A
+> **在册批次**：**0 条**。新条目附「核实时间点 + 核实方式」。
+> 上一批 `ISSUE-P3-570`（`runCatching` 的协程取消语义与 `catch` 面同型、未逐一收口）已于 **§486** 整条闭环归档——
+> 机检并入 `check_cancellation_semantics.py`（runCatching 面 + `LaunchedEffect` 构造补入），红 23 → 绿 0；
+> 正文见 [`resolved/batches/486-协程runCatching取消语义并入机检批次.md`](resolved/batches/486-协程runCatching取消语义并入机检批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P3-571`（自动填充「关联记忆」无感知 / 不随库迁移）已于 **§485** 整条闭环归档——方案 A
 > （Kp2a 式询问写回条目 URL）落地，交互口径裁决登记 `PD-83`；正文见
 > [`resolved/batches/485-自动填充记住应用关联询问写回批次.md`](resolved/batches/485-自动填充记住应用关联询问写回批次.md)，
 > 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
@@ -60,25 +63,7 @@
 
 > **暂无开放项**（`ISSUE-P2-556` / `ISSUE-P2-557` 已于 §483 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（**1 项**）
+## P3 低危问题、特性接线与体验优化（0 项）
 
-> ### ISSUE-P3-570：`runCatching` 的协程取消语义与 `catch` 面同型、**未逐一收口**（`ISSUE-P3-569` 闭环时的判据边界）
->
-> - **现象**：`kotlinx.coroutines.CancellationException` 在 JVM 上是
->   `java.util.concurrent.CancellationException` 的别名、继承 `IllegalStateException` ⇒ 裸 `runCatching { }`
->   与裸 `catch (Throwable)` **同型**地吞掉取消。`ISSUE-P3-569`（§484）的机检判据只钉 `catch (…)` 子句，
->   已在脚本文档串显式声明 **`runCatching` 不属本判据面**；`sync` 模块侧的 `runCatchingCancellable`
->   （`ISSUE-P3-555`，§482）只覆盖了 provider / 上传重试与 `markResolvedAndUpload` 数处。
-> - **核实时间点 / 方式**：2026-10-09，**静态启发式普查**（临时脚本，一次性分析、未入库）：五模块 `src/main`
->   的 `runCatching` 内联调用共 **80 处**，其中 **30 处**落在协程上下文；按「保护段内出现 `suspend fun`
->   名（排除同名非挂起者）或 `.first(` / `.collect` 等已知挂起调用」进一步筛出 **16 处**——**该数字含已知误报**
->   （例：`sync/.../S3SyncProvider.kt` / `WebDavSyncProvider.kt` 的命中实为已收口的
->   `runCatchingCancellable`，被脚本的子串匹配误计；`SafKeyFileAccess.kt:79` 的保护段只是
->   `Uri.parse`），**故不得当缺陷清单**。
-> - **影响**：与 `ISSUE-P3-569` 同——取消被归一为业务失败 / 默认值后，上层按失败处置。
-> - **涉及文件**：`app/src/main/**`、`database/src/main/**`、`sync/src/main/**`、`core/src/main/**`（候选以现跑为准）
-> - **验收标准**：① 逐处判定并为协程上下文中「保护段含挂起点」的 `runCatching` 换用**等价的不吞取消**写法
->   （可复用 `runCatchingCancellable` 的口径，或就地补 `is CancellationException` 判定）；
->   ② 对判为不适用者登记理由（不得静默跳过）；③ 评估把该面并入 `check_cancellation_semantics.py`
->   （或另立机检），**判据须与 `catch` 面同款避开「前置取消分支」误报**，并以 `--selftest` 正反样本反校。
+> **暂无开放项**（`ISSUE-P3-570` 已于 §486 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 

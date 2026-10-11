@@ -152,7 +152,8 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。
 - `python tools/doc/check_projection_read_safety.py` — **投影 / 解析 / 交付面敏感读取安全**（五条判据，任一命中即红）
 - `python tools/doc/check_plaintext_carrier_to_string.py` — **明文口令载体 `toString()` 护栏**（**改 `*/src/main/**` 的 `data class` 声明后必跑**）
 - `python tools/doc/check_message_not_in_user_text.py` — **异常 `message` 不得进用户可见文案槽**（**改 `*/src/main/**` 的文案装配后必跑**）
-- `python tools/doc/check_cancellation_semantics.py` — **协程 `catch` 取消语义**（`ISSUE-P3-569`；**改 `*/src/main/**` 的 `catch` 后必跑**）
+- `python tools/doc/check_cancellation_semantics.py` — **协程取消语义两面机检**（`ISSUE-P3-569` / `P3-570`：
+  `catch` 子句与裸 `runCatching` 同判据；**改 `*/src/main/**` 的 `catch` 或 `runCatching` 后必跑**）
 - `python tools/audit/check_recheck_consistency.py` — 复核报告一致性扫描（**改审计 / 复核报告后必跑**；`.sh` 仅薄封装）
 - `python tools/audit/check_tautological_assertions.py` — **「永远为真的断言」机检**（§275 立规；**改 `*/src/test/**` 的任何断言后必跑**）
 - 逐字搬移复核 `python tools/doc/check_verbatim_move.py <原文件> <本体> [段落文件…]`；重复代码块是否真逐字相同

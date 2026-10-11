@@ -4,6 +4,7 @@ import com.keepasskey.sync.model.RemoteListEntry
 import com.keepasskey.sync.model.RemoteListPage
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.network.SyncDownloadLimits
+import com.keepasskey.sync.network.runCatchingCancellable
 import java.net.URLDecoder
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -35,7 +36,9 @@ internal object WebDavDirectoryList {
         pageSize: Int,
         execute: suspend (Request) -> Response
     ): Result<RemoteListPage> = withContext(Dispatchers.IO) {
-        runCatching {
+        // ISSUE-P3-570：execute 为挂起 lambda（provider 的瞬时重试封装含挂起点），
+        // 裸 runCatching 会把协程取消归一为 Result.failure——换用不吞取消的同型包装
+        runCatchingCancellable {
             val dirPath = normalizeBrowsePath(remotePath)
             val fullUrl = WebDavUrlCodec.buildUrl(serverUrl, dirPath)
             val request = Request.Builder()

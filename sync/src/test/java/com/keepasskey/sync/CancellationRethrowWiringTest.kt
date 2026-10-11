@@ -22,8 +22,10 @@ import java.io.IOException
  *
  * 本文件两层：
  * 1. **行为级**：[runCatchingCancellable] 的口径（取消重抛 / 普通异常仍归一 / 成功值原样）；
- * 2. **静态接线**：两个 provider 与上传原子写**不得**再出现裸 `runCatching {` 形态，
+ * 2. **静态接线**：两个 provider、上传原子写与 WebDAV 目录列举**不得**再出现裸 `runCatching {` 形态，
  *    重试 `catch` 必须先接住 `CancellationException`。
+ *    （`S3DirectoryList` 的 `runCatching` 不在本列：其 `execute` 实参是非挂起的阻塞 OkHttp 调用，
+ *    保护段无挂起点，已按 `ISSUE-P3-570` 判定标注 `cancel-n/a:`。）
  */
 class CancellationRethrowWiringTest {
 
@@ -50,7 +52,7 @@ class CancellationRethrowWiringTest {
 
     @Test
     fun `provider 与上传原子写不得再出现裸 runCatching`() {
-        listOf(WEBDAV_PROVIDER, S3_PROVIDER, WEBDAV_UPLOAD_ATOMIC).forEach { path ->
+        listOf(WEBDAV_PROVIDER, S3_PROVIDER, WEBDAV_UPLOAD_ATOMIC, WEBDAV_DIRECTORY_LIST).forEach { path ->
             val source = readSource(path)
             assertFalse(
                 "$path 不得再出现裸 `runCatching {`（会吞协程取消，改用 runCatchingCancellable）",
@@ -84,6 +86,8 @@ class CancellationRethrowWiringTest {
             "sync/src/main/java/com/keepasskey/sync/s3/S3SyncProvider.kt"
         const val WEBDAV_UPLOAD_ATOMIC =
             "sync/src/main/java/com/keepasskey/sync/webdav/WebDavUploadAtomic.kt"
+        const val WEBDAV_DIRECTORY_LIST =
+            "sync/src/main/java/com/keepasskey/sync/webdav/WebDavDirectoryList.kt"
         const val ROOT_SEARCH_DEPTH = 6
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

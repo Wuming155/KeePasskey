@@ -169,6 +169,7 @@ private fun rememberAttachmentPicker(
                     // ISSUE-P3-295 AC②：单附件尺寸上界——**先按 ContentResolver 申报长度拦一次**，
                     // 再把整份字节读进内存；顺序反过来就等于「读爆内存之后才判超限」。
                     // 上界与解析侧预算同源（`AttachmentSizeLimits.MAX_ATTACHMENT_BYTES`），禁两套数字。
+                    // cancel-n/a: 保护段 openAssetFileDescriptor 为阻塞式 SAF 调用，无挂起点
                     val declaredLength = runCatching {
                         context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
                     }.getOrNull()

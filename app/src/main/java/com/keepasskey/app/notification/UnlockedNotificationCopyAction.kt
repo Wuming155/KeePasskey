@@ -102,6 +102,7 @@ class UnlockedNotificationCopyAction @Inject constructor(
             notify(UiMessage(R.string.vault_copy_username_missing, isError = true))
             return
         }
+        // cancel-n/a: clipboard.copyPlainText 为非挂起接口方法，无挂起点
         val copied = runCatching { clipboard.copyPlainText(clipLabel(), username) }.isSuccess
         notify(
             if (copied) UiMessage(R.string.notification_copy_username_done)
@@ -115,6 +116,7 @@ class UnlockedNotificationCopyAction @Inject constructor(
             notify(UiMessage(R.string.vault_copy_totp_missing, isError = true))
             return
         }
+        // cancel-n/a: clipboard.copySensitiveText 为非挂起接口方法，无挂起点
         val copied = runCatching { clipboard.copySensitiveText(clipLabel(), code) }.isSuccess
         notify(
             if (copied) UiMessage(R.string.notification_copy_totp_done)

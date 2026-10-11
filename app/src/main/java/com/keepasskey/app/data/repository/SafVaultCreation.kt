@@ -62,6 +62,7 @@ internal object SafVaultCreation {
     ): KdbxResult<Unit> = withContext(Dispatchers.IO) {
         val displayName = name.removeSuffix(".kdbx")
 
+        // cancel-n/a: 保护段 takePersistableUriPermission 为阻塞式 SAF 调用，无挂起点
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 targetUri,
@@ -90,6 +91,7 @@ internal object SafVaultCreation {
             }
 
             val bytes = tempFile.readBytes()
+            // cancel-n/a: 保护段 openOutputStream + write/flush 为阻塞式写盘，无挂起点
             val written = runCatching {
                 context.contentResolver.openOutputStream(targetUri, "w")?.use { os ->
                     os.write(bytes)
@@ -129,7 +131,7 @@ internal object SafVaultCreation {
             )
             register(name, targetUri.toString())
         } finally {
-            runCatching { tempFile.delete() }
+            runCatching { tempFile.delete() } // cancel-n/a: finally 清理段 delete() 为阻塞式，无挂起点
         }
     }
 

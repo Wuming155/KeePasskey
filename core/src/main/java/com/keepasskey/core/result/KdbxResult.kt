@@ -80,6 +80,10 @@ sealed interface KdbxResult<out T> {
             return try {
                 Success(block())
             } catch (t: Throwable) {
+                // ISSUE-P3-570：协程取消不得归一为 Failure——JVM 上 kotlinx.coroutines.CancellationException
+                // 即 java.util.concurrent.CancellationException 的别名，须沿链重抛
+                // （与 sync 的 runCatchingCancellable 同口径；core 无协程依赖，故用全限定名判型）
+                if (t is java.util.concurrent.CancellationException) throw t
                 Failure(t)
             }
         }

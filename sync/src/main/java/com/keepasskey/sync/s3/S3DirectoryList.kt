@@ -40,6 +40,9 @@ internal object S3DirectoryList {
         sign: (method: String, url: String, payloadHash: String, queryString: String) -> Map<String, String>,
         execute: (Request) -> Response
     ): Result<RemoteListPage> = withContext(Dispatchers.IO) {
+        // 保护段 buildBucketRootUrl / sign / readBounded / parseListObjects 全为非挂起调用，
+        // execute 实参是非挂起的阻塞式 OkHttp newCall().execute()（ISSUE-P3-570 逐处判定）
+        // cancel-n/a: 保护段无挂起点
         runCatching {
             val dirPath = remotePath.trim().trim('/')
             val prefix = if (dirPath.isEmpty()) "" else "$dirPath/"

@@ -134,7 +134,10 @@ class AutofillPickerViewModel @Inject constructor(
         entryId: String,
         entryTitle: String
     ): Boolean {
-        val currentUrl = runCatching { vaultRepository.getKdbxEntry(entryId)?.url }.getOrNull().orEmpty()
+        // ISSUE-P3-570：getKdbxEntry 为挂起调用，取消须沿链重抛（不归一为「空 URL」）
+        val currentUrl = runCatching { vaultRepository.getKdbxEntry(entryId)?.url }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrNull().orEmpty()
         if (!AutofillAppBindingWriteBackPolicy.shouldOffer(
                 callingPackage = callerPackage,
                 callerDigestsReadable = !callerDigests.isEmpty,
@@ -195,6 +198,8 @@ class AutofillPickerViewModel @Inject constructor(
         // （readString 抛 IllegalStateException），按空用户名降级而非崩溃
         // ISSUE-P3-371 ②：用户名侧补 {REF:} 展开（与同函数 password 侧口径统一）——
         // 非口令消费点声明 USER_NAME 面，{REF:P@…} 经引擎掩码输出，口令明文不走用户名通道
+        // ISSUE-P3-570：保护段含 getKdbxEntry / resolveFieldReferences 两个挂起调用，
+        // 取消须沿链重抛（与下方 password 侧 catch 守卫同口径），不归一为空用户名
         val username = runCatching {
             val raw = cachedUsername(entryId)
                 ?: vaultRepository.getKdbxEntry(entryId)?.userName.orEmpty()
@@ -202,7 +207,7 @@ class AutofillPickerViewModel @Inject constructor(
                 entryId, raw,
                 com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME
             ) ?: raw
-        }.getOrDefault("")
+        }.onFailure { if (it is CancellationException) throw it }.getOrDefault("")
 
         val chars = try {
             vaultRepository.getEntryPasswordChars(entryId)

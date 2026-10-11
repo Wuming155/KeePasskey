@@ -294,6 +294,7 @@ internal fun UnlockPasswordRowFocusedPreview() {
 private fun UnlockPasswordRowStatePreview(focused: Boolean) {
     val focusRequester = remember { FocusRequester() }
     if (focused) {
+        // cancel-n/a: 保护段 requestFocus() 为非挂起 UI 调用，取消在本保护段不可观测
         LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     }
     com.keepasskey.app.ui.theme.KeePasskeyTheme {

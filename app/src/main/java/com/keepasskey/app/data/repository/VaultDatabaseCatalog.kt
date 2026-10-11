@@ -170,9 +170,11 @@ internal class VaultDatabaseCatalog(
         // 云端卡片成为该库唯一展示，本地副本只是它的落地实现细节。
         val registeredLocalPaths = knownExternal
             .filter { !it.path.startsWith("content://") }
+            // cancel-n/a: File.canonicalPath 为阻塞式路径解析，无挂起点
             .mapNotNull { ext -> runCatching { File(ext.path).canonicalPath }.getOrNull() }
             .toSet()
         val internalEntries = kdbxFiles
+            // cancel-n/a: File.canonicalPath 为阻塞式路径解析，无挂起点
             .filter { file -> runCatching { file.canonicalPath }.getOrNull() !in registeredLocalPaths }
             .map { file ->
                 val sizeKb = (file.length() / 1024).coerceAtLeast(1)

@@ -41,6 +41,7 @@ class SafKeyFileAccess @Inject constructor(
 
     override suspend fun isRememberEnabled(): Boolean = withContext(Dispatchers.IO) {
         // 偏好读取异常按关闭处理（fail-closed）：不记忆只是体验降级，越权留存才是事故
+        // cancel-n/a: extendedSettingsStore.load() 为非挂起同步读取，无挂起点
         runCatching { extendedSettingsStore.load().rememberKeyFileLocation }
             .getOrElse {
                 debugLog.warn(TAG, "密钥文件记忆偏好读取失败，按关闭处理")
@@ -49,6 +50,7 @@ class SafKeyFileAccess @Inject constructor(
     }
 
     override suspend fun read(uri: String): KeyFileReadResult = withContext(Dispatchers.IO) {
+        // cancel-n/a: Uri.parse 为纯 CPU 解析，无挂起点（persistReadPermission / hasPersistedReadPermission 同）
         val target = runCatching { Uri.parse(uri) }.getOrNull()
         if (target == null || uri.isBlank()) {
             debugLog.warn(TAG, "密钥文件 Uri 非法，拒绝读取")
@@ -76,6 +78,7 @@ class SafKeyFileAccess @Inject constructor(
     }
 
     override suspend fun persistReadPermission(uri: String): Boolean = withContext(Dispatchers.IO) {
+        // cancel-n/a: Uri.parse 为纯 CPU 解析，无挂起点
         val target = runCatching { Uri.parse(uri) }.getOrNull() ?: return@withContext false
         try {
             context.contentResolver.takePersistableUriPermission(
@@ -98,7 +101,9 @@ class SafKeyFileAccess @Inject constructor(
 
     override suspend fun hasPersistedReadPermission(uri: String): Boolean =
         withContext(Dispatchers.IO) {
+            // cancel-n/a: Uri.parse 为纯 CPU 解析，无挂起点
             val target = runCatching { Uri.parse(uri) }.getOrNull() ?: return@withContext false
+            // cancel-n/a: persistedUriPermissions 查询为阻塞式 Binder 调用，无挂起点
             runCatching {
                 context.contentResolver.persistedUriPermissions.any { permission ->
                     permission.isReadPermission && permission.uri == target

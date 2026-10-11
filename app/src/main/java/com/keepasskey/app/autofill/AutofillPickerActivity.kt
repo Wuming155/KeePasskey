@@ -19,6 +19,7 @@ import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.app.ui.localizedContextForAppLanguage
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -274,9 +275,8 @@ class AutofillPickerActivity : FragmentActivity() {
             val (otpId, otpCode) = resolveOtpIfDeclared(entryId)
             // ISSUE-P3-330 A3：标题/副行分工——用户名为首选行；副行只在用户名非空且能取到
             // 条目标题时展示标题（用户名为空时标题行即条目标题，副行留空），杜绝两行同文
-            val entryTitle = runCatching {
-                vaultRepository.getKdbxEntry(entryId)?.title.orEmpty()
-            }.getOrDefault("")
+            val entryTitle = runCatching { vaultRepository.getKdbxEntry(entryId)?.title.orEmpty() }
+                .onFailure { if (it is CancellationException) throw it }.getOrDefault("")
             val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
             // ISSUE-P2-384 AC①：认证回传构造 Dataset 前复检字段级屏蔽（fail-closed）。
             // 屏蔽写入可发生在「onFillRequest 下发 → 用户打开选择器」之间的任意时刻；

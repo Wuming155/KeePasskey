@@ -64,6 +64,7 @@ fun AppPickerDialog(
     // null = 枚举中（Binder IPC + 图标解码，必须在 IO 线程）
     val apps by produceState<Result<List<InstalledAppOption>>?>(initialValue = null) {
         value = withContext(Dispatchers.IO) {
+            // cancel-n/a: 保护段 launchableApps 为阻塞式 PackageManager 枚举 + 图标解码，无挂起点
             runCatching { InstalledAppsCatalog.launchableApps(context) }
         }
     }
