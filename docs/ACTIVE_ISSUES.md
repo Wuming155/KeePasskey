@@ -11,10 +11,23 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**7 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-579` ~
+> **在册批次**：**6 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-579` ~
 > `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P3-579`（主密码解锁失败节流出厂默认关闭、三处 KDoc 口径互相矛盾、支撑出厂关闭的
+> 上一批 `ISSUE-P3-580`（KDBX 并入凭据链「原件清零」契约落空：`KdbxMergeController.submitCredentials`
+> 的 KDoc 声称「借用语义：本方法消费后在 finally 清零」，实际正常路径只清 `copyOf` 副本、调用方持有的
+> 第二库主密码 `CharArray` 与密钥文件字节在正常路径不清零，且同函数仅两个早退分支代擦原件，语义自相矛盾）
+> 已于 **§495** 整条闭环归档——按 AC① 采纳「**改契约**」路线：契约收敛为「**控制器只清副本、原件由调用方清零**」
+> （控制器对两入参为 B 类**只读借用**，全路径不清原件，早退分支的顺手代擦一并移除）；
+> 原件清零**收口点唯一**落在链首 `SettingsImportPresenter.submitMergeCredentials` 的 `finally`
+> （正常 / 异常 / 控制器缺失三路径一致清 `passwordChars` 与 `keyBytes`），三层 KDoc 与
+> `ImportMergeCredentialSheet` KDoc 按实现逐处更正；新增纯 JVM 用例 5 例
+> （`KdbxMergeCredentialOwnershipTest`，含两层借用负向锁），反校两式均实测红；所有权契约文档
+> `architecture/敏感缓冲所有权契约.md` 同步补 §4 #20 收口点登记行与 §8.1 机检行（AC②）；
+> 正文见
+> [`resolved/batches/495-并入凭据链原件清零收口批次.md`](resolved/batches/495-并入凭据链原件清零收口批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P3-579`（主密码解锁失败节流出厂默认关闭、三处 KDoc 口径互相矛盾、支撑出厂关闭的
 > 「2026-09-12 用户裁决」未按纪律登记）已于 **§494** 整条闭环归档——口径**收敛为一套**：出厂默认 `false`
 > 由用户裁决承载（补登 `PD-84`，`find_decision.py` 可检索）、`ThrottleConfig` 无参构造 / 冷启动窗口的 `true`
 > 明示为**安全回落**而非出厂设置；冷启动窗口按 AC③ **收口**（回落值改 `enabled = true`，已开启节流者锁定期内
@@ -118,23 +131,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（7 项）
-
-### `ISSUE-P3-580`：KDBX 并入凭据链「原件清零」契约落空，第二库主密码与密钥文件字节正常路径不清零
-
-**背景与影响**：`KdbxMergeController.submitCredentials`（`KdbxMergeController.kt:106-107`）KDoc 声称
-「借用语义：本方法消费后在 finally 清零」，但正常路径 `:128-129` `copyOf` 出副本交 `runMerge`、
-`finally :209-210` 只清**副本**——调用方持有的**原件**（第二库主密码 CharArray 与密钥文件字节，均为 KDF 密钥材料）
-在正常路径不清零，驻留 GC 堆至回收；同函数仅两个早退分支（`:112-113` / `:119-120`）才清原件，语义自相矛盾。
-上层 `SettingsImportPresenter.kt:55-65`（`:59` 读出的 keyBytes 同样从不 fill(0)）与
-`VaultImportController.kt:112-115`（KDoc 同款失实声明）两层透传。威胁模型下堆内存不可达，属纪律合规缺口。
-
-**验收标准**：① 正常路径对调用方原件清零，或契约改为「调用方负责清零」并同步三层 KDoc + 调用方补 `fill(0)`；
-② 对照 `architecture/敏感缓冲所有权契约.md` 复核所有权标注（O/B/S/P）与收口点登记表。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 8（verdict=confirmed）。
-来源攻击面：导入导出与解析。
+## P3 低危问题、特性接线与体验优化（6 项）
 
 ### `ISSUE-P3-581`：1PUX 导入解析的 export.data 明文副本（整份口令 JSON）用毕不清零
 

@@ -27,9 +27,11 @@ import com.keepasskey.app.ui.components.SecurePasswordField
 /**
  * ISSUE-P3-384：第二库凭据补录对话框（`.kdbx` 并入）。
  *
- * 敏感纪律：主密码以 CharArray 借用语义提交；密钥文件只上行 **Uri**，
- * 字节读取由宿主（设置页 / ViewModel）在提交时经 ContentResolver 完成并负责清零。
- * 取消时由调用方清零密码数组。
+ * 敏感纪律（ISSUE-P3-580 校正，原「借用语义 / 取消时由调用方清零」表述失实）：本组件自身状态中的
+ * 主密码数组在**提交与取消两条路径**都即时清零（提交时 `copyOf()` 交出后清自身状态，数组所有权随
+ * `onSubmit` 转移；本组件不再持有、也不再清零交出的那一份）。**交出的数组由宿主提交链收口清零**——
+ * 生产链首环 `SettingsImportPresenter.submitMergeCredentials` 在提交返回后统一 `fill(0)`。
+ * 密钥文件只上行 **Uri**，字节读取与清零同在宿主侧该收口点完成。
  */
 @Composable
 fun ImportMergeCredentialSheet(

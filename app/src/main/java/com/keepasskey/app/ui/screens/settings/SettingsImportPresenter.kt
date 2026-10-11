@@ -43,14 +43,30 @@ internal class SettingsImportPresenter(
         controller?.cancelImport()
     }
 
-    /** ISSUE-P3-384：提交第二库凭据（密码 + 已读出的密钥文件字节）。 */
+    /**
+     * ISSUE-P3-384：提交第二库凭据（密码 + 已读出的密钥文件字节）。
+     *
+     * **原件清零收口点（ISSUE-P3-580）**：提交即消费（数组所有权随向下透传转移），本方法在
+     * **返回前**（正常 / 异常 / 控制器缺失三条路径一致）对两原件 `fill(0)`——这是本链**唯一**的
+     * 原件清零点：下游 `VaultImportController.submitMergeCredentials` 与
+     * `KdbxMergeController.submitCredentials` 均为只读借用（后者只清自身 `copyOf` 副本，见其 KDoc），
+     * 故此处清零不触及后台消费用的副本。
+     */
     fun submitMergeCredentials(passwordChars: CharArray, keyFileData: ByteArray? = null) {
-        controller?.submitMergeCredentials(passwordChars, keyFileData)
+        try {
+            controller?.submitMergeCredentials(passwordChars, keyFileData)
+        } finally {
+            passwordChars.fill('0')
+            keyFileData?.fill(0)
+        }
     }
 
     /**
      * ISSUE-P3-384：UI 入口——密码 + 可选密钥文件 Uri。
-     * 字节读取与清零在本方法完成；无 Context / 读取失败时仅用密码。
+     *
+     * 字节读取在本方法完成；无 Context / 读取失败时仅用密码提交。读出的 `keyBytes` 与
+     * `passwordChars` 一并交给上一重载，由其 `finally` 统一清零（本链唯一原件清零收口点，
+     * 见其 KDoc；ISSUE-P3-580）——本方法自身不再二次清零。
      */
     fun submitMergeCredentials(passwordChars: CharArray, keyFileUri: Uri?) {
         val ctx = appContext
@@ -61,7 +77,7 @@ internal class SettingsImportPresenter(
                 null
             }
         }
-        controller?.submitMergeCredentials(passwordChars, keyBytes)
+        submitMergeCredentials(passwordChars, keyBytes)
     }
 
     /** ISSUE-P3-384：取消等待凭据 / 进行中的并入。 */

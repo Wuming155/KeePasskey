@@ -103,21 +103,26 @@ class KdbxMergeController @Inject constructor(
     /**
      * 提交第二库凭据并执行并入。
      *
-     * @param passwordChars 第二库主密码（借用语义：本方法消费后在 finally 清零）
-     * @param keyFileData 第二库密钥文件（可选；借用语义，消费后清零）
+     * **所有权与清零（ISSUE-P3-580 立契约，对齐 `docs/architecture/敏感缓冲所有权契约.md` R2）**：
+     * 两入参均为 **B 类借用引用**——本方法在**任何路径**（含 `pendingUri == null` 与状态不匹配两个
+     * 早退分支）都**不清零原件**；只在本方法内**同步** `copyOf()` 出独立副本交后台 `runMerge` 消费，
+     * 副本由 `runMerge` 的 `finally` 清零（副本是**有意**设计：后台消费期不受调用方并发改写影响）。
+     * **原件清零责任在调用方**——生产链首环 `SettingsImportPresenter.submitMergeCredentials`
+     * 于提交返回后统一 `fill(0)`（本方法返回时副本已独立，与原件无别名面，清零不会波及消费）。
+     * 原 KDoc「借用语义：本方法消费后在 finally 清零」为失实声明，本批按实现更正。
+     *
+     * @param passwordChars 第二库主密码（借用：本方法只读，不清零、不驻留）
+     * @param keyFileData 第二库密钥文件字节（可选；借用：同上）
      */
     fun submitCredentials(passwordChars: CharArray, keyFileData: ByteArray? = null) {
         val uri = pendingUri
         if (uri == null) {
-            passwordChars.fill('0')
-            keyFileData?.fill(0)
+            // ISSUE-P3-580：借用引用——原件清零由调用方收口，早退分支同样不代擦
             mutableUiState.value = ImportUiState.Idle
             return
         }
         val current = mutableUiState.value
         if (current !is ImportUiState.AwaitingMergeCredentials && current !is ImportUiState.Parsing) {
-            passwordChars.fill('0')
-            keyFileData?.fill(0)
             return
         }
         val gen = ++generation

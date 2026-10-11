@@ -109,7 +109,14 @@ class VaultImportController @Inject constructor(
         }
     }
 
-    /** ISSUE-P3-384：提交第二库凭据并启动 `.kdbx` 并入（借用语义：本方法透传后由合并控制器清零）。 */
+    /**
+     * ISSUE-P3-384：提交第二库凭据并启动 `.kdbx` 并入。
+     *
+     * **所有权与清零（ISSUE-P3-580）**：纯透传的**借用引用**（只读、不驻留、不清零）——本方法与
+     * 下游 `KdbxMergeController.submitCredentials` 都不清零原件；原件清零责任归调用方，生产链
+     * 首环 `SettingsImportPresenter.submitMergeCredentials` 在提交返回后统一 `fill(0)`。
+     * 原 KDoc「透传后由合并控制器清零」为失实声明，本批按实现更正。
+     */
     fun submitMergeCredentials(passwordChars: CharArray, keyFileData: ByteArray? = null) {
         kdbxMergeController.submitCredentials(passwordChars, keyFileData)
     }
