@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.ResponseBody
+import java.io.ByteArrayOutputStream
 import java.util.Locale
 
 /**
@@ -19,6 +21,15 @@ import java.util.Locale
  *
  * 失败语义：非 2xx 或响应体不可解析一律抛 [BreachCheckException]，绝不回落为空集合
  * （空集合的语义是「该前缀下无泄露」，谎报即等于伪造安全结论）。
+ *
+ * 响应体封顶（`ISSUE-P3-578`，对齐 sync 侧 `ISSUE-P0-09` 的 `SyncDownloadLimits` 双重封顶口径）：
+ * 响应体内容完全由 TLS 对端控制（含取得系统信任 CA 者），OkHttp 的 `ResponseBody.string()` 会把
+ * 任意大小的响应**整体物化**为 String ⇒ 超大响应直接 OOM。本类改为**有界读取**并施加两道判据：
+ * ① **申报尺寸预检**（`Content-Length` 如实声明且超 [MAX_RESPONSE_BYTES] 时**不读体**直接拒绝）；
+ * ② **读后兜底**（声明缺失 / chunked 或声明小于实际时，按块累积，累计越界立即拒绝）。
+ * 正常 Add-Padding 响应（对齐 800–1000 条记录）远小于 100 KiB，上限留足余量。
+ * 注意：本类是 app 模块，**不**复用 sync 的 `SyncDownloadLimits.readBounded`（那会抛 sync 侧
+ * `SyncException.ProtocolError`）——按其语义**等价实现**后统一转抛 [BreachCheckException]。
  *
  * 隐私增强（HIBP 官方 v3「Introducing padding」）：恒发 `Add-Padding: true`，服务端把响应
  * 对齐到 800–1000 条记录，使能截获密文长度者无法据响应大小反推查询了哪个前缀；填充行的
@@ -46,12 +57,48 @@ class HibpRangeClient(
             .build()
 
         httpClient.newCall(request).execute().use { response ->
-            val body = response.body.string()
             if (!response.isSuccessful) {
                 throw BreachCheckException("泄露库返回 HTTP ${response.code}")
             }
-            parseRangeBody(body)
+            val body = response.body
+            // 闸门①：申报尺寸预检——Content-Length（-1 = 未声明 / chunked）超限则不读体直接拒绝
+            val declaredLength = body.contentLength()
+            if (exceedsRangeBodyLimit(declaredLength)) {
+                throw BreachCheckException(
+                    "泄露库响应体超出上限（声明 $declaredLength 字节 > 上限 $MAX_RESPONSE_BYTES 字节），已拒绝接收"
+                )
+            }
+            // 闸门②：有界流式读取——声明缺失或撒谎时按块累积封顶，堆占用恒被上限约束
+            val bytes = readBounded(body)
+            parseRangeBody(bytes.toString(Charsets.UTF_8))
         }
+    }
+
+    /**
+     * 按块有界读取 [body]：累计字节越过 [MAX_RESPONSE_BYTES] 立即抛 [BreachCheckException]（不 OOM）。
+     *
+     * 与 sync 侧 SyncDownloadLimits.copyBounded 语义等价（声明缺失 / chunked / 声明值撒谎均在
+     * 读取中途被拒，堆占用恒为常量缓冲），差异仅在异常类型：本类是 app 模块，转抛
+     * [BreachCheckException] 而非 sync 的 `SyncException.ProtocolError`。
+     */
+    private fun readBounded(body: ResponseBody): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(BUFFER_SIZE)
+        body.byteStream().use { input ->
+            var total = 0L
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                total += n
+                if (exceedsRangeBodyLimit(total)) {
+                    throw BreachCheckException(
+                        "泄露库响应体超出上限（> $MAX_RESPONSE_BYTES 字节），已拒绝接收"
+                    )
+                }
+                out.write(buffer, 0, n)
+            }
+        }
+        return out.toByteArray()
     }
 
     /**
@@ -90,6 +137,22 @@ class HibpRangeClient(
 
         internal const val PREFIX_LENGTH = BreachHasher.PREFIX_LENGTH
 
+        /**
+         * 范围查询响应体上限：1 MiB（`ISSUE-P3-578`）。
+         *
+         * 取值依据：HIBP v3 Add-Padding 把响应对齐到 800–1000 条 `<35 位后缀>:<次数>` 记录
+         * （约 40–50 KiB），合法响应远小于 100 KiB ⇒ 本上限留约 10 倍余量；同时把
+         * 「TLS 对端单方面灌大响应」的物化峰值约束在 MiB 量级，远低于 Android 常见堆界。
+         * 与 sync 侧 `SyncDownloadLimits` 同型，仅按本出口的合法响应量级单独定值（不跨模块共用）。
+         */
+        internal const val MAX_RESPONSE_BYTES: Long = 1L * 1024 * 1024
+
+        /** 有界读取的块缓冲大小（64 KiB，与 sync 侧同量级） */
+        private const val BUFFER_SIZE = 64 * 1024
+
+        /** 长度未知（`Payload` / `Content-Length` 缺失或不可解析；OkHttp 以 `-1` 表示） */
+        internal const val UNKNOWN_LENGTH: Long = -1L
+
         private const val HEADER_USER_AGENT = "User-Agent"
         private const val USER_AGENT = "KeePasskey-Android"
 
@@ -101,5 +164,21 @@ class HibpRangeClient(
 
         /** `<35 位十六进制后缀>:<非负整数次数>`（后缀长度 = 40 - 5） */
         private val LINE_PATTERN = Regex("^([0-9A-Fa-f]{35}):([0-9]+)$")
+
+        /**
+         * 响应体尺寸是否越界（纯判定，无 Android / IO 依赖，供纯 JVM 单测直测）。
+         *
+         * 同一函数同口径服务两道闸门：
+         * - 闸门①传**申报长度**（`Content-Length`，`null` / [UNKNOWN_LENGTH] 视为未知 ⇒ 放行给读后兜底）；
+         * - 闸门②传**已读累计长度**（恒非负、恒非 `null`）。
+         *
+         * @param bytes 待判定的字节数：`null` 与 [UNKNOWN_LENGTH] 均视为「未知」不拦
+         * @param maxBytes 上限，默认 [MAX_RESPONSE_BYTES]（单测可传小值）
+         * @return `true` = 越界（调用方须拒绝且不物化）
+         */
+        internal fun exceedsRangeBodyLimit(
+            bytes: Long?,
+            maxBytes: Long = MAX_RESPONSE_BYTES
+        ): Boolean = bytes != null && bytes != UNKNOWN_LENGTH && bytes > maxBytes
     }
 }

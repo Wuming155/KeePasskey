@@ -11,10 +11,18 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**9 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-578` ~
+> **在册批次**：**8 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-578` ~
 > `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P3-577`（自动填充会话授权宽限的豁免判据只排除「携带口令值」的数据集、未把当前 TOTP 直填值计入敏感值，
+> 上一批 `ISSUE-P3-578`（HIBP 泄露库查询响应体经 `response.body.string()` 整体物化、无尺寸封顶，与 sync 侧
+> `ISSUE-P0-09` 已整改的「无界读取」同型）已于 **§493** 整条闭环归档——响应体读取改为**有界流式**：
+> 闸门①申报 `Content-Length` 超限即**不读体**拒绝、闸门②读后累计越界即拒（chunked / 声明失真兜底），
+> 两者同用纯函数 `exceedsRangeBodyLimit` 判定，上限 `MAX_RESPONSE_BYTES = 1 MiB`（不跨模块复用 sync 侧
+> `SyncDownloadLimits`，按其语义等价实现后转抛 `BreachCheckException`）；纯函数 + MockWebServer 端到端 +
+> 源码接线守卫三层锁定；正文见
+> [`resolved/batches/493-HIBP响应体尺寸封顶批次.md`](resolved/batches/493-HIBP响应体尺寸封顶批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P3-577`（自动填充会话授权宽限的豁免判据只排除「携带口令值」的数据集、未把当前 TOTP 直填值计入敏感值，
 > 宽限期内「仅用户名 + OTP 框、无口令框」表单免确认直填当前验证码）已于 **§492** 整条闭环归档——
 > 敏感值判据由 `datasetCarriesPassword` 扩义为 `datasetCarriesSensitiveValue`（口令 **或** 当前 TOTP 直填值），
 > 新增纯函数 `carriesSensitiveValue` / `totpIsDeliverable`（与交付面同口径、排除 HOTP）并令
@@ -102,20 +110,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（9 项）
-
-### `ISSUE-P3-578`：HIBP 泄露库查询响应体无界物化，与 sync 侧已整改的「无界读取」同型未对齐
-
-**背景与影响**：`HibpRangeClient.kt:48-49,53` 对服务端响应体 `response.body.string()` **整体物化为 String、
-无尺寸封顶**（`BreachCheckModule.kt:36-43` 的客户端无响应体上限、未定制信任锚）——与 sync 侧 `ISSUE-P0-09`
-已整改面同型（sync 以 `SyncDownloadLimits` 双重封顶，此出口未对齐）。触发前置：须先取得设备系统信任的 CA
-（纯网络 MitM 因信任锚仅系统 CA 不可达），影响为进程 OOM；缓解因素 `callTimeout 30s` 已由复核确认（佐证 low）。
-
-**验收标准**：响应体读取按 sync 侧同型口径做尺寸封顶（申报上限 + 读后兜底）；单测锁定。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 6（verdict=confirmed）。
-来源攻击面：网络与 TLS。
+## P3 低危问题、特性接线与体验优化（8 项）
 
 ### `ISSUE-P3-579`：主密码解锁节流出厂默认关闭且三处 KDoc 口径矛盾，「2026-09-12 用户裁决」未按纪律登记
 
