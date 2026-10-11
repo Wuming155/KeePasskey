@@ -20,6 +20,11 @@ import com.keepasskey.database.file.InnerHeader
  * 写出字段长 `64 MiB + 1` 超过读侧单字段上限（64 MiB，`>` 判），下次打开整库判损坏——
  * 写读两侧对同一常量口径互斥正是本条缺陷的根因，故取值关系本身必须由派生保证。
  * （堆界论证与旧值 64 MiB 一致：64 MiB − 1 同样远低于低端机堆界，见 [AttachmentBudget] 类 KDoc。）
+ *
+ * 另承载**自定义图标上传侧原始字节上界** [MAX_CUSTOM_ICON_UPLOAD_BYTES]（`ISSUE-P3-576`）：与上述三项
+ * **不共用**取值（约束对象不同——本项约束的是「图标原始输入的物化上界」），但要与附件上限同源可比，
+ * 故由 `MAX_ATTACHMENT_BYTES / 4` 派生而非另写字面量，使「文件大小上界只认本对象一处」的口径不破；
+ * 取值依据见该常量 KDoc。
  */
 object AttachmentSizeLimits {
 
@@ -28,4 +33,21 @@ object AttachmentSizeLimits {
      * 由写侧单字段上限派生，非独立字面量）。
      */
     val MAX_ATTACHMENT_BYTES: Long = InnerHeader.MAX_INNER_FIELD_BYTES.toLong() - 1
+
+    /**
+     * **自定义图标上传侧原始字节上界** = [MAX_ATTACHMENT_BYTES] / 4（约 16 MiB，`ISSUE-P3-576`）。
+     *
+     * 图标通道与附件通道共用「申报长度先拦、实读后兜底」的双闸门形态（`EntryEditPickers` 的两个选择器），
+     * 但本上界**远小于**附件上限（恰为其 1/4），依据：
+     * - 图标产物被 `decodeAndScaleToPng` 固定降采样为 ≤128px PNG（入库体积另受
+     *   `CustomIconCoordinator.MAX_ICON_BYTES`（256 KB）约束），原始字节只是**有界位图解码**的输入，
+     *   合法需求（Photo Picker 原图：12–48 MP JPEG / HEIC 约 3–15 MB）远达不到附件量级；
+     * - `readBytes()` 的峰值约流大小 2 倍（`ByteArrayOutputStream` 倍增 + `toByteArray()` 副本），
+     *   本上限封顶使原始物化峰值 ≤ ~32 MiB，与附件上限同口径地远低于低端机 192 MiB 堆界
+     *   （真机实测见 [AttachmentBudget] 类 KDoc）。
+     *
+     * 超限在读取字节**之前**即拒（申报长度可用时）；申报长度不可得（描述符为 null 或
+     * `UNKNOWN_LENGTH` = -1）时由读后实读大小兜底并 `fill(0)` 清零 —— 与附件通道逐字同型。
+     */
+    val MAX_CUSTOM_ICON_UPLOAD_BYTES: Long = MAX_ATTACHMENT_BYTES / 4
 }

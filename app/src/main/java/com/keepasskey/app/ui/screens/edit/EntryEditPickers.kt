@@ -56,6 +56,14 @@ internal data class EntryEditPickers(
 private val MAX_ATTACHMENT_BYTES: Long =
     com.keepasskey.database.xml.AttachmentSizeLimits.MAX_ATTACHMENT_BYTES
 
+/**
+ * `ISSUE-P3-576`：图标上传通道的原始字节上界——与附件上限**同源**（由
+ * [com.keepasskey.database.xml.AttachmentSizeLimits.MAX_CUSTOM_ICON_UPLOAD_BYTES]
+ * 派生为附件上限的 1/4），仅用于「读前申报长度 / 读后实读大小」双闸门的拒绝阈值。
+ */
+private val MAX_CUSTOM_ICON_UPLOAD_BYTES: Long =
+    com.keepasskey.database.xml.AttachmentSizeLimits.MAX_CUSTOM_ICON_UPLOAD_BYTES
+
 /** 超限提示：数值经参数注入，避免在文案里再写一份上限。
  *  ISSUE-P2-311：上界值（64 MiB − 1）按 1 MiB **向上取整**显示为 64——floor 会显示 63，
  *  与「附件不超过 64 MiB 即可添加」的实际语义相悖。 */
@@ -64,6 +72,31 @@ private fun attachmentTooLargeMessage(): UiMessage =
         R.string.edit_attachment_too_large,
         listOf((MAX_ATTACHMENT_BYTES + 1024L * 1024L - 1) / (1024L * 1024L))
     )
+
+/** 图标超限提示（`ISSUE-P3-576`）：与附件通道 [attachmentTooLargeMessage] 同型——数值经参数注入
+ *  （不在文案里再写一份上限），按 1 MiB 向上取整显示。 */
+private fun iconTooLargeMessage(): UiMessage =
+    UiMessage(
+        R.string.edit_icon_too_large,
+        listOf((MAX_CUSTOM_ICON_UPLOAD_BYTES + 1024L * 1024L - 1) / (1024L * 1024L))
+    )
+
+/**
+ * 图标上传通道的尺寸拒绝判定（`ISSUE-P3-576`；纯函数、无 Android 依赖，供纯 JVM 单测锁定）。
+ *
+ * [sizeBytes] 语义二选一，均为「已申报 / 已实读到的大小」：
+ * - **读前闸门**：传 `ContentResolver.openAssetFileDescriptor(uri, "r")?.length`；`null`（描述符
+ *   不可得）与 `-1`（`AssetFileDescriptor.UNKNOWN_LENGTH`）都视为「长度未知」放行，交读后闸门兜底；
+ * - **读后闸门**：传 `readBytes()` 得到的大小（恒非负）。
+ *
+ * null / 负值一律放行：闸门的 fail-closed 面是「实读之后必判」，而非「申报可疑即拒」。
+ */
+internal fun exceedsCustomIconUploadLimit(sizeBytes: Long?): Boolean =
+    sizeBytes != null && sizeBytes > MAX_CUSTOM_ICON_UPLOAD_BYTES
+
+/** 读后闸门重载：实读大小恒为非负 `Int`（`ByteArray.size`），直吃无需调用方转换。 */
+internal fun exceedsCustomIconUploadLimit(sizeBytes: Int): Boolean =
+    exceedsCustomIconUploadLimit(sizeBytes.toLong())
 
 /**
  * 装配编辑页的三个选择器。
@@ -222,7 +255,9 @@ private fun rememberDecodedCustomIcons(viewModel: EntryEditViewModel): List<Cust
     return decodedCustomIcons
 }
 
-/** 相册 Photo Picker（TASK-15：选图降采样为 ≤128px PNG 后上传，解码失败如实提示）。 */
+/** 相册 Photo Picker（TASK-15：选图降采样为 ≤128px PNG 后上传，解码失败如实提示）。
+ *  `ISSUE-P3-576`：与 [rememberAttachmentPicker] 同型的**双闸门**——先按申报长度拦一次
+ *  （超大盘外文件根本不读进内存），读后再对实读大小兜底判一次，超限 `fill(0)` 后如实提示。 */
 @Composable
 private fun rememberCustomIconPicker(
     viewModel: EntryEditViewModel,
@@ -233,7 +268,24 @@ private fun rememberCustomIconPicker(
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 try {
+                    // ISSUE-P3-576 闸门①：读前按 ContentResolver 申报长度拦一次——顺序与附件通道
+                    // 一致（先拦后读；反过来就是「读爆内存之后才判超限」）。
+                    // cancel-n/a: 保护段 openAssetFileDescriptor 为阻塞式 SAF 调用，无挂起点
+                    val declaredLength = runCatching {
+                        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+                    }.getOrNull()
+                    if (exceedsCustomIconUploadLimit(declaredLength)) {
+                        withContext(Dispatchers.Main) { viewModel.showMessage(iconTooLargeMessage()) }
+                        return@launch
+                    }
                     val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    // ISSUE-P3-576 闸门②：申报长度不可得（UNKNOWN_LENGTH / 描述符为 null）或流实际
+                    // 更长时按实读大小二次判定，超限先把字节清零再拒绝（不把超限字节留在堆上）。
+                    if (rawBytes != null && exceedsCustomIconUploadLimit(rawBytes.size)) {
+                        rawBytes.fill(0)
+                        withContext(Dispatchers.Main) { viewModel.showMessage(iconTooLargeMessage()) }
+                        return@launch
+                    }
                     val pngBytes = rawBytes?.let { decodeAndScaleToPng(it) }
                     withContext(Dispatchers.Main) {
                         if (pngBytes != null) {
