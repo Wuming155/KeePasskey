@@ -196,7 +196,14 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
                 ArrayList(structuredTargetIds.values)
             )
         },
-        skipRepeatConfirmation = unlockedConfirmationPolicy(callingPkg, candidates, passwordId)
+        // ISSUE-P3-577：敏感值判据须同时统计候选 TOTP 直填值，故 OTP 框 id 一并传入
+        // （passwordId / otpId 同为 AutofillId?，用命名参数防位置对调静默错接）
+        skipRepeatConfirmation = unlockedConfirmationPolicy(
+            callingPkg = callingPkg,
+            candidates = candidates,
+            passwordId = passwordId,
+            otpId = otpId
+        )
     )
 
     // ISSUE-P2-73 AC③：设备侧核对「已解锁分支命中了几个自动匹配候选」的调试留痕
@@ -292,7 +299,9 @@ private suspend fun KeePasskeyAutofillService.buildCandidateDataset(
     // 直填会给出与服务端不同步的旧值，故 HOTP 条目不参与直填（复制 / 通知路径不受影响）。
     if (ctx.otpId != null) {
         val otpSnapshot = vaultRepository.calculateEntryTotp(entryIdHex)
-        if (otpSnapshot != null && !otpSnapshot.isHotp && otpSnapshot.code.isNotEmpty()) {
+        // ISSUE-P3-577：直填口径收敛为单一事实源——与豁免判据（unlockedConfirmationPolicy）
+        // 共用 `AutofillAuthenticationPolicy.totpIsDeliverable`（非 HOTP 且码非空），杜绝漂移。
+        if (otpSnapshot != null && AutofillAuthenticationPolicy.totpIsDeliverable(otpSnapshot)) {
             dsBuilder.setField(
                 ctx.otpId,
                 Field.Builder().setValue(AutofillValue.forText(otpSnapshot.code)).build()

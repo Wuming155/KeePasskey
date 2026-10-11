@@ -1,6 +1,7 @@
 package com.keepasskey.app.autofill
 
 import android.os.SystemClock
+import com.keepasskey.app.data.repository.EntryTotpSnapshot
 import com.keepasskey.app.passkey.DomainMatcher
 import java.util.Locale
 
@@ -107,14 +108,45 @@ object AutofillSessionGrants {
  * ISSUE-P1-24 AC③：**口令字段不得经无 UI 的自动途径下发**——即使授权宽限命中，
  * 只要本次数据集将携带口令值，仍必须走显式确认（`setAuthentication`）；用户名字段
  * 可例外（授权宽限对纯用户名表单继续生效）。
+ *
+ * ISSUE-P3-577：**当前 TOTP 直填值与口令同属敏感值**（见 [carriesSensitiveValue]）——
+ * 交付不含口令但含 `calculateEntryTotp` 当前码的数据集时，框架会把用户名 + 当前验证码
+ * 直填表单、无确认 UI；而「仅用户名 + OTP 框、无口令框」的表单可独立成立
+ * （见 `AutofillTargetFieldResolver` 的 OTP 框识别）。故敏感值判据必须把 TOTP 直填值
+ * 一并计入，与 ISSUE-P1-24 AC③ 同源：值经无 UI 自动途径下发即构成用户无感知泄露。
  */
 object AutofillAuthenticationPolicy {
+
+    /**
+     * 交付面敏感值判定（纯函数，便于单测，ISSUE-P3-577）：本轮数据集是否将携带敏感值。
+     *
+     * 敏感值 = **口令值** 或 **当前 TOTP 直填值**。纳入 TOTP 的理由与口令同源：两者的值
+     * 经无 UI 的自动途径（数据集直填 / `EXTRA_AUTHENTICATION_RESULT` 回传）下发即构成
+     * 用户无感知泄露——当前验证码在被直填后 30~90 秒内仍可被恶意调用方读走并用于登录。
+     */
+    fun carriesSensitiveValue(
+        hasDeliverablePassword: Boolean,
+        hasDeliverableTotp: Boolean
+    ): Boolean = hasDeliverablePassword || hasDeliverableTotp
+
+    /**
+     * 单条 TOTP 快照是否构成本轮**直填值**（纯函数，ISSUE-P3-577）。
+     *
+     * 口径与交付面逐字一致（ISSUE-P3-298 ⑤）：非 HOTP 且当前码非空才直填——HOTP 的当前码
+     * 不推进计数器，直填会给出与服务端不同步的旧值，故不参与直填。判定与
+     * [com.keepasskey.app.autofill.AutofillDatasetBuilders] 的 `setField(otpId, …)` 共用本
+     * 函数，杜绝「豁免判据」与「交付面」两处口径漂移。
+     */
+    fun totpIsDeliverable(snapshot: EntryTotpSnapshot?): Boolean =
+        snapshot != null && !snapshot.isHotp && snapshot.code.isNotEmpty()
+
     fun skipRepeatConfirmation(
         sessionGrantEnabled: Boolean,
         vaultLocked: Boolean,
         grantActive: Boolean,
-        datasetCarriesPassword: Boolean
-    ): Boolean = sessionGrantEnabled && !vaultLocked && grantActive && !datasetCarriesPassword
+        datasetCarriesSensitiveValue: Boolean
+    ): Boolean =
+        sessionGrantEnabled && !vaultLocked && grantActive && !datasetCarriesSensitiveValue
 
     /**
      * ISSUE-P3-185：手动选择器路径是否因会话授权宽限**跳过本次生物识别**。

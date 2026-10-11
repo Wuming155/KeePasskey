@@ -91,6 +91,9 @@ internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
  * 开关关闭时不查询授权存储，行为与既有「每次强制确认」完全一致。
  * ISSUE-P1-24 AC③：宽限**不得**作用于携带口令值的数据集——口令仅在显式确认后下发，
  * 用户名字段可例外（见 [AutofillAuthenticationPolicy.skipRepeatConfirmation]）。
+ * ISSUE-P3-577：宽限同样**不得**作用于携带当前 TOTP 直填值的数据集——交付面「仅用户名 +
+ * OTP 框」的数据集（无口令框）不挂 `setAuthentication` 时，框架会把当前验证码直填表单且
+ * 无确认 UI。故敏感值判据（口令 **或** TOTP）由本函数同口径统计后交策略裁决。
  *
  * ISSUE-P3-528：关联记忆命中的条目**不**据此豁免——是否跳过二次确认仍完全由本函数裁决
  * （与会话授权开关同口径），记忆只影响「该条目是否成为候选」。
@@ -98,7 +101,8 @@ internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
 internal suspend fun KeePasskeyAutofillService.unlockedConfirmationPolicy(
     callingPkg: String,
     candidates: UnlockedCandidates,
-    passwordId: AutofillId?
+    passwordId: AutofillId?,
+    otpId: AutofillId?
 ): Boolean {
     val sessionGrantEnabled = settingsStore.isAutofillSessionGrantEnabled()
     val grantActive = sessionGrantEnabled && AutofillSessionGrants.isGranted(
@@ -108,14 +112,25 @@ internal suspend fun KeePasskeyAutofillService.unlockedConfirmationPolicy(
         sessionGrantEnabled = sessionGrantEnabled,
         vaultLocked = vaultRepository.isLocked(),
         grantActive = grantActive,
-        // 首个候选即代表本批数据集的口令承载面（同批候选口径一致：口令通道同为
-        // passwordId + 非空口令才携带值），逐数据集计算无增量信息。
-        // ISSUE-P2-539：本探测决定「能否跳过二次确认」，故**必须保守**——实例已清零
-        // （正被并发擦除）时一律判「携带口令」⇒ 不跳过确认；绝不因擦除把它误判成
-        // 「不携带」而放宽确认。判据落在 `cleared` 观测位（不物化明文）。
-        datasetCarriesPassword = passwordId != null && candidates.ranked.any { ranked ->
-            val password = ranked.entry.password
-            password != null && (password.cleared || password.readStringForDisplay().isNotEmpty())
-        }
+        datasetCarriesSensitiveValue = AutofillAuthenticationPolicy.carriesSensitiveValue(
+            // 首个候选即代表本批数据集的口令承载面（同批候选口径一致：口令通道同为
+            // passwordId + 非空口令才携带值），逐数据集计算无增量信息。
+            // ISSUE-P2-539：本探测决定「能否跳过二次确认」，故**必须保守**——实例已清零
+            // （正被并发擦除）时一律判「携带口令」⇒ 不跳过确认；绝不因擦除把它误判成
+            // 「不携带」而放宽确认。判据落在 `cleared` 观测位（不物化明文）。
+            hasDeliverablePassword = passwordId != null && candidates.ranked.any { ranked ->
+                val password = ranked.entry.password
+                password != null && (password.cleared || password.readStringForDisplay().isNotEmpty())
+            },
+            // ISSUE-P3-577：显式声明 OTP 框且任一候选将直填当前 TOTP 码时，同样判「携带敏感值」。
+            // 快照判定与交付面共用 [AutofillAuthenticationPolicy.totpIsDeliverable]（非 HOTP 且
+            // 码非空），杜绝两处口径漂移；未配 OTP / 计算失败（快照 null）一律不判携带——与交付面
+            // `setField(otpId, …)` 的触发条件逐字一致，不作额外放宽。
+            hasDeliverableTotp = otpId != null && candidates.ranked.any { ranked ->
+                AutofillAuthenticationPolicy.totpIsDeliverable(
+                    vaultRepository.calculateEntryTotp(ranked.entry.id.toHexString())
+                )
+            }
+        )
     )
 }

@@ -11,10 +11,17 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**10 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-577` ~
+> **在册批次**：**9 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-578` ~
 > `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P3-576`（自定义图标上传通道对 SAF 流无大小闸门、与附件通道防护不对等）已于 **§491** 整条闭环归档——
+> 上一批 `ISSUE-P3-577`（自动填充会话授权宽限的豁免判据只排除「携带口令值」的数据集、未把当前 TOTP 直填值计入敏感值，
+> 宽限期内「仅用户名 + OTP 框、无口令框」表单免确认直填当前验证码）已于 **§492** 整条闭环归档——
+> 敏感值判据由 `datasetCarriesPassword` 扩义为 `datasetCarriesSensitiveValue`（口令 **或** 当前 TOTP 直填值），
+> 新增纯函数 `carriesSensitiveValue` / `totpIsDeliverable`（与交付面同口径、排除 HOTP）并令
+> `unlockedConfirmationPolicy` 接收 `otpId` 同口径统计；纯策略面用例 + 静态接线守卫双锁定；正文见
+> [`resolved/batches/492-自动填充宽限豁免判据纳入TOTP批次.md`](resolved/batches/492-自动填充宽限豁免判据纳入TOTP批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P3-576`（自定义图标上传通道对 SAF 流无大小闸门、与附件通道防护不对等）已于 **§491** 整条闭环归档——
 > 图标通道接入「申报长度先拦（超限不读流）+ 读后实读兜底（超限 `fill(0)` 清零后拒绝）」双闸门；上界由附件上限
 > **同源派生**（1/4，≈ 16 MiB − 1，`AttachmentSizeLimits.MAX_CUSTOM_ICON_UPLOAD_BYTES`），判定抽纯函数 +
 > 源码接线静态守卫双锁定；正文见
@@ -95,25 +102,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（10 项）
-
-### `ISSUE-P3-577`：自动填充会话授权宽限豁免判据不含 TOTP，宽限期内用户名+当前验证码免确认直填
-
-**背景与影响**：会话授权宽限（30 秒 TTL，`AutofillSessionGrantStore.kt:82`）豁免二次确认的判据
-`datasetCarriesPassword`（`AutofillUnlockedCandidates.kt:116-119`）只统计**口令字段**：交付不含口令但含
-`calculateEntryTotp` 当前码的数据集时（`AutofillDatasetBuilders.kt:199 → 293-301`，排除 HOTP `:295`），
-`:302-304` 因 skip 跳过 `attachConfirmationAuth`，框架把用户名+当前 TOTP 直填表单、无确认 UI；
-「仅用户名+OTP 框、无口令框」表单可独立成立（`AutofillTargetFieldResolver.kt:20,79,109`）。
-前置三重叠加：用户显式开启非默认宽限开关（`ExtendedSettingsStore.kt:259-260` 默认 false）+
-30 秒内对该「包名+可归属域」确认过一次 + 库解锁态；调用方须已通过归属校验。
-
-**验收标准**：① 豁免判据把 TOTP 直填值计入敏感值（含 TOTP 的数据集在宽限期内仍挂 `setAuthentication`）；
-② `AutofillSessionGrantStoreTest` 补 TOTP 场景用例（既有 `:129-181` 无此场景，缺口未被测试锁定）。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 5（verdict=confirmed，
-策略表达式实际在 `AutofillSessionGrantStore.kt:112-117`，原引 118-121 为 KDoc 偏移已修正）。
-来源攻击面：自动填充与通行密钥目标验证。
+## P3 低危问题、特性接线与体验优化（9 项）
 
 ### `ISSUE-P3-578`：HIBP 泄露库查询响应体无界物化，与 sync 侧已整改的「无界读取」同型未对齐
 

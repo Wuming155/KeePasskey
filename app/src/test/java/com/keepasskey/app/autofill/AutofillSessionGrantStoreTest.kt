@@ -1,5 +1,6 @@
 package com.keepasskey.app.autofill
 
+import com.keepasskey.app.data.repository.EntryTotpSnapshot
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -130,28 +131,28 @@ class AutofillSessionGrantStoreTest {
         assertTrue(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
                 sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
-                datasetCarriesPassword = false
+                datasetCarriesSensitiveValue = false
             )
         )
         // 开关关闭：不跳过（保持每次强制确认）
         assertFalse(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
                 sessionGrantEnabled = false, vaultLocked = false, grantActive = true,
-                datasetCarriesPassword = false
+                datasetCarriesSensitiveValue = false
             )
         )
         // 库锁定：授权一律不适用（必须先解锁）
         assertFalse(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
                 sessionGrantEnabled = true, vaultLocked = true, grantActive = true,
-                datasetCarriesPassword = false
+                datasetCarriesSensitiveValue = false
             )
         )
         // 无有效授权：不跳过
         assertFalse(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
                 sessionGrantEnabled = true, vaultLocked = false, grantActive = false,
-                datasetCarriesPassword = false
+                datasetCarriesSensitiveValue = false
             )
         )
     }
@@ -163,14 +164,75 @@ class AutofillSessionGrantStoreTest {
         assertTrue(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
                 sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
-                datasetCarriesPassword = false
+                datasetCarriesSensitiveValue = false
             )
         )
         assertFalse(
             AutofillAuthenticationPolicy.skipRepeatConfirmation(
                 sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
-                datasetCarriesPassword = true
+                datasetCarriesSensitiveValue = true
             )
+        )
+    }
+
+    /**
+     * ISSUE-P3-577：**当前 TOTP 直填值计入敏感值**——授权宽限内「仅用户名 + OTP 框、
+     * 无口令框」的数据集仍不得跳过二次确认。
+     *
+     * 缺陷形态（整改前）：豁免判据只统计口令字段 ⇒ 交付不含口令但含 `calculateEntryTotp`
+     * 当前码的数据集时，框架把用户名 + 当前验证码**直填表单且无确认 UI**；「仅用户名 +
+     * OTP 框、无口令框」的表单可独立成立，攻击者（已过归属校验的调用方）在 30 秒宽限窗口内
+     * 即可静默取得当前验证码（30~90 秒有效）。故 TOTP 与口令同属敏感值，任一命中即不豁免。
+     */
+    @Test
+    fun `ISSUE-P3-577 数据集仅携带当前 TOTP 直填值时授权宽限不生效`() {
+        // 交付面：无口令框、有 OTP 框、候选将直填当前 TOTP 码 ⇒ 携带敏感值 ⇒ 不跳过确认
+        assertFalse(
+            "含当前 TOTP 直填值的数据集在宽限期内仍必须挂 setAuthentication",
+            AutofillAuthenticationPolicy.skipRepeatConfirmation(
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
+                datasetCarriesSensitiveValue = AutofillAuthenticationPolicy.carriesSensitiveValue(
+                    hasDeliverablePassword = false,
+                    hasDeliverableTotp = true
+                )
+            )
+        )
+        // 纯用户名通道（口令 / TOTP 均无）：既有「用户名字段可例外」意图逐字保留，宽限照常生效
+        assertTrue(
+            AutofillAuthenticationPolicy.skipRepeatConfirmation(
+                sessionGrantEnabled = true, vaultLocked = false, grantActive = true,
+                datasetCarriesSensitiveValue = AutofillAuthenticationPolicy.carriesSensitiveValue(
+                    hasDeliverablePassword = false,
+                    hasDeliverableTotp = false
+                )
+            )
+        )
+    }
+
+    /**
+     * ISSUE-P3-577：TOTP 直填口径为「**非 HOTP 且当前码非空**」，与交付面
+     * `AutofillDatasetBuilders.buildCandidateDataset` 共用同一谓词（单一事实源）。
+     *
+     * HOTP 排除理由（ISSUE-P3-298 ⑤）：HOTP 的当前码不推进计数器，直填会给出与服务端
+     * 不同步的旧值，故 HOTP 条目根本不参与直填 ⇒ 也不计入敏感值。
+     */
+    @Test
+    fun `ISSUE-P3-577 TOTP 直填口径为非 HOTP 且当前码非空`() {
+        val totp = EntryTotpSnapshot(
+            code = "123456", periodSeconds = 30, digits = 6, algorithm = "SHA1"
+        )
+        assertTrue("非 HOTP 且码非空 ⇒ 构成直填值", AutofillAuthenticationPolicy.totpIsDeliverable(totp))
+        assertFalse(
+            "无 OTP / 计算失败（快照为 null）不判携带",
+            AutofillAuthenticationPolicy.totpIsDeliverable(null)
+        )
+        assertFalse(
+            "HOTP 条目不参与直填 ⇒ 不计入敏感值",
+            AutofillAuthenticationPolicy.totpIsDeliverable(totp.copy(isHotp = true))
+        )
+        assertFalse(
+            "空码不构成直填值",
+            AutofillAuthenticationPolicy.totpIsDeliverable(totp.copy(code = ""))
         )
     }
 
