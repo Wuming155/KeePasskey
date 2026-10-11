@@ -1,6 +1,5 @@
 package com.keepasskey.app.data.importer
 
-import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
@@ -51,29 +50,34 @@ internal object PuxArchiveReader {
         if (archive.size.toLong() > limits.maxArchiveBytes) {
             throw ImportLimitExceededException("1PUX 归档体积超出上限（${limits.maxArchiveBytes} 字节）")
         }
-        ZipInputStream(archive.inputStream()).use { zip ->
-            val buffer = ByteArray(READ_BUFFER_BYTES)
-            val budget = ByteBudget(limits.maxTotalUncompressedBytes)
-            var entryCount = 0
-            while (true) {
-                val entry = zip.nextEntry ?: break
-                entryCount++
-                if (entryCount > limits.maxEntries) {
-                    throw ImportLimitExceededException("1PUX 归档条目数超出上限（${limits.maxEntries}）")
+        // 解压分片读缓冲逐段承载明文（条目缓冲之外的另一份）：用毕在 finally 中擦除（ISSUE-P3-581）
+        val buffer = ByteArray(READ_BUFFER_BYTES)
+        try {
+            ZipInputStream(archive.inputStream()).use { zip ->
+                val budget = ByteBudget(limits.maxTotalUncompressedBytes)
+                var entryCount = 0
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    entryCount++
+                    if (entryCount > limits.maxEntries) {
+                        throw ImportLimitExceededException("1PUX 归档条目数超出上限（${limits.maxEntries}）")
+                    }
+                    val name = entry.name ?: throw ImportFormatException("1PUX 归档存在无名条目")
+                    if (!isSafeEntryName(name)) {
+                        throw ImportFormatException("1PUX 归档存在非法条目名（疑似路径穿越），已拒绝整包")
+                    }
+                    if (entry.isDirectory) continue
+                    if (name == entryName) {
+                        val payload = readBounded(zip, entry, limits.maxEntryBytes, buffer)
+                        budget.add(payload.size)
+                        return payload
+                    }
+                    drainBounded(zip, budget, buffer)
                 }
-                val name = entry.name ?: throw ImportFormatException("1PUX 归档存在无名条目")
-                if (!isSafeEntryName(name)) {
-                    throw ImportFormatException("1PUX 归档存在非法条目名（疑似路径穿越），已拒绝整包")
-                }
-                if (entry.isDirectory) continue
-                if (name == entryName) {
-                    val payload = readBounded(zip, entry, limits.maxEntryBytes, buffer)
-                    budget.add(payload.size)
-                    return payload
-                }
-                drainBounded(zip, budget, buffer)
+                throw ImportFormatException("1PUX 归档缺少 $entryName")
             }
-            throw ImportFormatException("1PUX 归档缺少 $entryName")
+        } finally {
+            buffer.fill(0)
         }
     }
 
@@ -88,21 +92,29 @@ internal object PuxArchiveReader {
         return name.length <= DRIVE_LETTER_INDEX || name[DRIVE_LETTER_INDEX] != DRIVE_SEPARATOR
     }
 
-    /** 读取目标条目，累计超过 [maxBytes] 立即中止（不把超限字节继续留在堆上）。 */
+    /**
+     * 读取目标条目，累计超过 [maxBytes] 立即中止（不把超限字节继续留在堆上）；
+     * 内部缓冲改由 [ErasableByteSink] 承载——成功返回与超限抛异常两路径都在 `finally` 中擦除，
+     * 替代内部缓冲对调用方不可达的 `ByteArrayOutputStream`（ISSUE-P3-581）。
+     */
     private fun readBounded(
         zip: ZipInputStream,
         entry: ZipEntry,
         maxBytes: Long,
         buffer: ByteArray
     ): ByteArray {
-        val sink = ByteArrayOutputStream(initialCapacity(entry.size, maxBytes))
-        while (true) {
-            val read = zip.read(buffer, 0, buffer.size)
-            if (read < 0) return sink.toByteArray()
-            if (sink.size().toLong() + read > maxBytes) {
-                throw ImportLimitExceededException("1PUX 条目体积超出上限（$maxBytes 字节）")
+        val sink = ErasableByteSink(initialCapacity(entry.size, maxBytes))
+        try {
+            while (true) {
+                val read = zip.read(buffer, 0, buffer.size)
+                if (read < 0) return sink.copyOut()
+                if (sink.size.toLong() + read > maxBytes) {
+                    throw ImportLimitExceededException("1PUX 条目体积超出上限（$maxBytes 字节）")
+                }
+                sink.write(buffer, 0, read)
             }
-            sink.write(buffer, 0, read)
+        } finally {
+            sink.wipe()
         }
     }
 

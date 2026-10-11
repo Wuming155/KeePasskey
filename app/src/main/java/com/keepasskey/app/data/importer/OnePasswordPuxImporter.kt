@@ -41,6 +41,10 @@ import javax.inject.Inject
  * 与 Bitwarden 解析器同源：JSON 文本必须先整体解码为 String 才能做语法分析，密码 / TOTP 在解析
  * 阶段不可避免地以 String 形态短暂驻留；本类在字段映射的第一现场即 `toCharArray()`，
  * 此后不再参与拼接、比较、日志与异常消息。
+ *
+ * 可擦的**字节副本**则一处不留（`ISSUE-P3-581`）：`export.data` 的字节数组在 [parseOrThrow] 的
+ * `finally` 中 `fill(0)`（成功与失败路径一致）；`PuxArchiveReader` 侧的条目缓冲（[ErasableByteSink]）
+ * 与解压分片起始读缓冲亦各在其 `finally` 中擦除。
  */
 class OnePasswordPuxImporter @Inject constructor() : EntryImporter {
 
@@ -78,32 +82,38 @@ class OnePasswordPuxImporter @Inject constructor() : EntryImporter {
 
     /** 解析主体：结构性非法一律抛 [ImportFormatException] 派生异常，由 [parse] 归一为 Failure。 */
     private fun parseOrThrow(bytes: ByteArray): ImportBatch {
+        // 整份含明文口令的 export.data 字节副本（自 PuxArchiveReader.readEntry 取得）用毕必须清零：
+        // 成功 return 与解析失败两条路径都由 finally 覆盖（ISSUE-P3-581，与 accumulator.clearEntries 同纪律）。
         val exportData = PuxArchiveReader.readEntry(bytes, ENTRY_EXPORT_DATA, archiveLimits)
-        // 文本解码统一交给同批的严格 UTF-8 解码器（剥 BOM、拒绝 UTF-16/32 与 NUL 伪文本），
-        // 非法字节序列直接 fail-closed（绝不替换为 U+FFFD——那会静默篡改密码原文）
-        val root = ImportJson.asObject(ImportJson.parse(ImportUtf8Decoder.decodeStrictUtf8(exportData)))
-            ?: throw ImportFormatException("1PUX 的 $ENTRY_EXPORT_DATA 根节点不是 JSON 对象")
-        val accounts = ImportJson.asArray(root[KEY_ACCOUNTS])
-            ?: throw ImportFormatException("1PUX 的 $ENTRY_EXPORT_DATA 缺少 accounts 数组")
-        val accumulator = Accumulator()
         try {
-            accounts.forEachIndexed { index, rawAccount ->
-                readAccount(rawAccount, "$LOCATION_ACCOUNTS[$index]", accumulator)
+            // 文本解码统一交给同批的严格 UTF-8 解码器（剥 BOM、拒绝 UTF-16/32 与 NUL 伪文本），
+            // 非法字节序列直接 fail-closed（绝不替换为 U+FFFD——那会静默篡改密码原文）
+            val root = ImportJson.asObject(ImportJson.parse(ImportUtf8Decoder.decodeStrictUtf8(exportData)))
+                ?: throw ImportFormatException("1PUX 的 $ENTRY_EXPORT_DATA 根节点不是 JSON 对象")
+            val accounts = ImportJson.asArray(root[KEY_ACCOUNTS])
+                ?: throw ImportFormatException("1PUX 的 $ENTRY_EXPORT_DATA 缺少 accounts 数组")
+            val accumulator = Accumulator()
+            try {
+                accounts.forEachIndexed { index, rawAccount ->
+                    readAccount(rawAccount, "$LOCATION_ACCOUNTS[$index]", accumulator)
+                }
+            } catch (failure: Throwable) {
+                // 失败路径：已解析出的敏感序列立即清零，避免半成品明文继续驻留堆上
+                accumulator.clearEntries()
+                throw failure
             }
-        } catch (failure: Throwable) {
-            // 失败路径：已解析出的敏感序列立即清零，避免半成品明文继续驻留堆上
-            accumulator.clearEntries()
-            throw failure
+            return ImportBatch(
+                report = ImportReport(
+                    source = source,
+                    parsed = accumulator.entries.size,
+                    skipped = accumulator.skipped,
+                    warnings = accumulator.warningsSnapshot()
+                ),
+                entries = accumulator.entries
+            )
+        } finally {
+            exportData.fill(0)
         }
-        return ImportBatch(
-            report = ImportReport(
-                source = source,
-                parsed = accumulator.entries.size,
-                skipped = accumulator.skipped,
-                warnings = accumulator.warningsSnapshot()
-            ),
-            entries = accumulator.entries
-        )
     }
 
     /** 账户节点：取账户名后下钻保险库；节点形态非法时记警告并跳过整棵子树。 */

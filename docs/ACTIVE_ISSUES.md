@@ -11,10 +11,20 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**6 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-579` ~
+> **在册批次**：**5 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-579` ~
 > `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P3-580`（KDBX 并入凭据链「原件清零」契约落空：`KdbxMergeController.submitCredentials`
+> 上一批 `ISSUE-P3-581`（1PUX 导入解析的 `export.data` 中间副本——整份含全部明文口令的 JSON 字节——用毕不清零）
+> 已于 **§496** 整条闭环归档——按 AC②**优先采纳「改造接口使可擦除」**路线（未选「登记限界」）：
+> `PuxArchiveReader.readBounded` 弃用内部缓冲对调用方不可达的 `ByteArrayOutputStream`，改用自持可擦缓冲
+> `ErasableByteSink`（容量增长切换旧缓冲前先 `fill(0)`，`finally` 中 `wipe()` 覆盖成功 / 超限两路径）；
+> 解压分片起始读缓冲同步在 `readEntry` 的 `finally` 擦除；`parseOrThrow` 的 `exportData` 由 `try/finally`
+> 包裹、成功与失败路径一致 `fill(0)`（AC①）。故**无需新增限界条目**——原「不可达副本」已由接口改造消除。
+> 新增用例 6 例（`PuxIntermediateWipeTest`：3 例 `ErasableByteSink` 行为断言 + 3 例源码接线守卫），
+> 反校 5 处变异实测红；正文见
+> [`resolved/batches/496-1PUX解析中间副本清零批次.md`](resolved/batches/496-1PUX解析中间副本清零批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P3-580`（KDBX 并入凭据链「原件清零」契约落空：`KdbxMergeController.submitCredentials`
 > 的 KDoc 声称「借用语义：本方法消费后在 finally 清零」，实际正常路径只清 `copyOf` 副本、调用方持有的
 > 第二库主密码 `CharArray` 与密钥文件字节在正常路径不清零，且同函数仅两个早退分支代擦原件，语义自相矛盾）
 > 已于 **§495** 整条闭环归档——按 AC① 采纳「**改契约**」路线：契约收敛为「**控制器只清副本、原件由调用方清零**」
@@ -131,23 +141,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（6 项）
-
-### `ISSUE-P3-581`：1PUX 导入解析的 export.data 明文副本（整份口令 JSON）用毕不清零
-
-**背景与影响**：`OnePasswordPuxImporter.parseOrThrow`（`OnePasswordPuxImporter.kt:81-84`）从
-`PuxArchiveReader.readEntry`（`PuxArchiveReader.kt:49-78`，经 `:98-106` `readBounded` 返回全新独立数组）取得
-`export.data`——**整份含全部明文口令的 JSON 字节**——解码解析后失去引用但全程无 `fill(0)`（成功路径 `:98-106`
-直接 return、失败路径 `:93-97` 只清 ImportedEntry）；`VaultImportController.runImport` 的 `finally :220-223`
-清的是原始 ZIP 容器与解析条目，覆盖不到这份解析器内部的中间副本（复核确认实为三份：exportData +
-`readBounded` 的 ByteArrayOutputStream 内部缓冲均无人管）。需堆取证方可利用，威胁模型内不可达。
-
-**验收标准**：① `exportData` 成功 / 失败路径均清零；② `readBounded` 内部缓冲等调用方不可达的副本如实登记进
-`已知工程限界.md` 或改造接口使可擦除；③ 单测/走查锁定。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 9（verdict=confirmed）。
-来源攻击面：导入导出与解析。
+## P3 低危问题、特性接线与体验优化（5 项）
 
 ### `ISSUE-P3-582`：app 模块四点落盘面未做仅属主权限收敛且固定临时名，与 sync 模块 0600/0700 自声明口径漂移
 
