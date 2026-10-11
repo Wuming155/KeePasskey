@@ -38,7 +38,11 @@ import java.util.Date
  * 签名、对象键编码、HTTP 日期解析、时钟偏斜自愈分别下沉至同包协作单元
  * [S3RequestSigner]、[S3KeyCodec]、[S3HttpDateCodec]、[S3ClockSkewGuard]。
  */
-class S3SyncProvider(
+class S3SyncProvider private constructor(
+    // 测试注入口（ISSUE-P3-584）：注入即跳过 TLS-only / SSRF / 构造期 HTTPS 校验。已移出 public 主构造
+    // 签名——主构造 private，生产侧仅经下方 public 二级构造进入；internal 二级构造仅同模块测试可见。
+    @VisibleForTesting
+    private val client: OkHttpClient?,
     private val endpoint: String,
     private val bucketName: String,
     private val region: String = "us-east-1",
@@ -70,13 +74,38 @@ class S3SyncProvider(
     private val initialClockOffsetMillis: Long = 0L,
     // 偏移量刷新后的持久化回调（敏感度低，随同步凭据文件落盘即可，见 SyncCredentialsStore）。
     // 持久化失败静默容忍：本会话内存偏移仍即时生效，仅丢失跨进程记忆（KDoc 声明尽力而为）。
-    private val clockOffsetUpdater: ((Long) -> Unit)? = null,
-    // 测试注入口：HTTP 回环（MockWebServer）需显式传入默认规格客户端；生产恒为 null（走 TLS-only 工厂）。
-    // ISSUE-P3-56 子项 3：本注入一经传入即跳过 TLS-only 与 SSRF 构造期校验，属潜在回归面，
-    // 故显式标注 @VisibleForTesting 且收敛为 private，杜绝被生产代码引用。
-    @VisibleForTesting
-    private val client: OkHttpClient? = null
+    private val clockOffsetUpdater: ((Long) -> Unit)? = null
 ) : SyncProvider {
+
+    /** 生产构造（ISSUE-P3-584）：不暴露 `client`，杜绝 TLS-only / SSRF / 构造期 HTTPS 强制旁路。 */
+    constructor(
+        endpoint: String,
+        bucketName: String,
+        region: String = "us-east-1",
+        accessKeyId: CharArray,
+        secretAccessKey: CharArray,
+        usePathStyle: Boolean = false,
+        networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+        initialClockOffsetMillis: Long = 0L,
+        clockOffsetUpdater: ((Long) -> Unit)? = null
+    ) : this(null, endpoint, bucketName, region, accessKeyId, secretAccessKey,
+        usePathStyle, networkOptions, initialClockOffsetMillis, clockOffsetUpdater)
+
+    /** 测试专用构造（ISSUE-P3-584，`internal`）：仅同模块 `src/test` / `src/androidTest` 可见。 */
+    @VisibleForTesting
+    internal constructor(
+        endpoint: String,
+        bucketName: String,
+        region: String = "us-east-1",
+        accessKeyId: CharArray,
+        secretAccessKey: CharArray,
+        usePathStyle: Boolean = false,
+        networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+        initialClockOffsetMillis: Long = 0L,
+        clockOffsetUpdater: ((Long) -> Unit)? = null,
+        client: OkHttpClient
+    ) : this(client, endpoint, bucketName, region, accessKeyId, secretAccessKey,
+        usePathStyle, networkOptions, initialClockOffsetMillis, clockOffsetUpdater)
 
     // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），
     // 仅 HTTP 回环测试需显式注入明文客户端。生产路径在 init 中随构造期校验一并构建：

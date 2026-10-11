@@ -11,9 +11,22 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**3 条**（2026-10-11 数据流安全审查整批登记 `ISSUE-P3-579` ~ `ISSUE-P3-586` 八条，
-> 其中 `ISSUE-P3-579` ~ `ISSUE-P3-583` 已逐一闭环，在册 `ISSUE-P3-584` ~ `ISSUE-P3-586`；六要素报告见
+> **在册批次**：**2 条**（2026-10-11 数据流安全审查整批登记 `ISSUE-P3-579` ~ `ISSUE-P3-586` 八条，
+> 其中 `ISSUE-P3-579` ~ `ISSUE-P3-584` 已逐一闭环，在册 `ISSUE-P3-585` ~ `ISSUE-P3-586`；六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
+> 上一批 `ISSUE-P3-584`（两个 Provider 的 `@VisibleForTesting` client 注入参数位于 public 主构造签名，
+> 任一生产构造点按名传 `client` 即整体跳过 TLS-only 连接规格、SSRF 连接期两层守卫与构造期 HTTPS 强制，
+> 属绕过网络防线的最短单行改动路径）已于 **§499** 整条闭环归档——按 AC① **优先采纳 (a)「把注入通道移出
+> public 主构造签名」**：两 Provider 主构造改 `private`（`client` 置于首位以区别于二级构造形参），生产侧仅经
+> 无 `client` 形参的 public 二级构造进入，测试注入经 `internal` 二级构造（仅同模块 `src/test` / `src/androidTest`
+> 可见，`app` 不可见）；3 个生产构造点 6 处与 androidTest 两处注入点**源码零改动**（androidTest 未改动 ⇒ 依测试
+> 资产纪律无需真机实跑，本环境亦禁跑设备）。以**负向编译对照**实测举证：在 `app/src/main` 按名传 `client`
+> 由「可编译」变为编译错误（`Cannot access 'constructor(…, client: OkHttpClient)': it is internal`），单行旁路被
+> 结构性封死。AC② 以 `:sync:lintDebug` + 临时探针实测：lint **不**报错于 `private val` / 普通构造参数上的
+> `@VisibleForTesting`（0 issue），且 `VisibleForTests` 检测器对**跨模块生产源集按名传该构造参数**亦不触发
+> （app lint 报告中探针零命中）⇒ lint 对本面**无拦截力**，结构移除是必要而非冗余。正文见
+> [`resolved/batches/499-Provider注入通道移出主构造批次.md`](resolved/batches/499-Provider注入通道移出主构造批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
 > 上一批 `ISSUE-P3-583`（`android:allowBackup="false"` 备份面第一道闸门无任何静态守卫锁定——既有三例对
 > `allowBackup` 取值零断言，改回 `true` 后无断言变红）已于 **§498** 整条闭环归档——`BackupAndSafHardeningTest`
 > 新增一例，与既有「清单必须引用数据提取规则文件」同文件同 `readSource` 范式：先剔 XML 注释、再按
@@ -162,24 +175,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（3 项）
-
-### `ISSUE-P3-584`：WebDAV/S3 Provider 的 `@VisibleForTesting` client 注入参数位于 public 主构造签名，单行传参即整体旁路网络防线
-
-**背景与影响**：`WebDavSyncProvider.kt:56-60,73-92` 与 `S3SyncProvider.kt:77-78,94-117` 的
-`@VisibleForTesting` client 注入参数位于 **public 主构造签名**上（`private val` 修饰的仅是属性而非参数）：
-一旦任何生产构造点按名传 `client`，`client==null` 分支整体跳过——TLS-only 连接规格、SSRF 连接期两层守卫
-（`SsrfGuardDns`/`SsrfGuardSocketFactory`）与构造期 HTTPS 强制全部失效，Authorization/SigV4 头注入攻击者指定客户端
-——绕过网络防线的最短单行改动路径。当前 3 个生产构造点 6 处（`SyncProviderResolver.kt:45,70`；
-`CloudVaultImporter.kt:251,265`；`RemoteBrowseController.kt:81,114`）逐一读实均未传参，运行期不可达，
-属结构性回归面（`ISSUE-P3-56` 子项 3 的整改未关闭调用点传参路径）。
-
-**验收标准**：① 注入通道移出 public 主构造签名（internal 工厂 / secondary constructor / 单独测试构造），
-或以机检锁定生产源集零传参；② lint 对构造参数上 `@VisibleForTesting` 的拦截行为核实并留痕。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 12（verdict=confirmed）。
-来源攻击面：网络与 TLS。
+## P3 低危问题、特性接线与体验优化（2 项）
 
 ### `ISSUE-P3-585`：fast-gate 互操作对拍依赖浮动拉取（pip/apt 均无版本 pin），与本仓供应链纪律不一致
 

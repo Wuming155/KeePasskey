@@ -38,7 +38,11 @@ import java.util.UUID
  * 纯结构性拆分（零行为变更）：XML(multistatus) 解析委托 [WebDavPropfindParser]、路径 ↔ URL
  * 编码纯函数委托 [WebDavUrlCodec]、Basic 认证头构造委托 [WebDavAuthHeader]；本类保留接口实现与编排。
  */
-class WebDavSyncProvider(
+class WebDavSyncProvider private constructor(
+    // 测试注入口（ISSUE-P3-584）：注入即跳过 TLS-only / SSRF / 构造期 HTTPS 校验。已移出 public 主构造
+    // 签名——主构造 private，生产侧仅经下方 public 二级构造进入；internal 二级构造仅同模块测试可见。
+    @VisibleForTesting
+    private val client: OkHttpClient?,
     private val serverUrl: String,
     private val username: String,
     passwordChars: CharArray,
@@ -46,19 +50,34 @@ class WebDavSyncProvider(
      * Wave 14 传输安全网络选项（TLS-only 恒定 + 显式超时；证书固定已移除，走系统默认 CA 链）。
      * 由 app 层组装传入（纯数据契约，维持 sync 不依赖 app 的单向依赖）。
      */
-    private val networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+    private val networkOptions: SyncNetworkOptions,
     /**
      * ISSUE-P3-03 (43a)：分块上传传输选项。由 app 层把 `webdavChunkedUpload` /
      * `webdavChunkSizeMb` 偏好归一为 [SyncTransferOptions] 传入（依赖倒置，
      * sync 不读取 app 偏好）。默认关闭 = 与接线前逐字节一致的单次定长 PUT。
      */
-    private val transferOptions: SyncTransferOptions = SyncTransferOptions.DISABLED,
-    // 测试注入口：HTTP 回环（MockWebServer）需显式传入默认规格客户端；生产恒为 null（走 TLS-only 工厂）。
-    // ISSUE-P3-56 子项 3：本注入一经传入即跳过 TLS-only 与 SSRF 构造期校验，属潜在回归面，
-    // 故显式标注 @VisibleForTesting 且收敛为 private，杜绝被生产代码引用。
-    @VisibleForTesting
-    private val client: OkHttpClient? = null
+    private val transferOptions: SyncTransferOptions
 ) : SyncProvider {
+
+    /** 生产构造（ISSUE-P3-584）：不暴露 `client`，杜绝 TLS-only / SSRF / 构造期 HTTPS 强制旁路。 */
+    constructor(
+        serverUrl: String,
+        username: String,
+        passwordChars: CharArray,
+        networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+        transferOptions: SyncTransferOptions = SyncTransferOptions.DISABLED
+    ) : this(null, serverUrl, username, passwordChars, networkOptions, transferOptions)
+
+    /** 测试专用构造（ISSUE-P3-584，`internal`）：仅同模块 `src/test` / `src/androidTest` 可见。 */
+    @VisibleForTesting
+    internal constructor(
+        serverUrl: String,
+        username: String,
+        passwordChars: CharArray,
+        networkOptions: SyncNetworkOptions = SyncNetworkOptions(),
+        transferOptions: SyncTransferOptions = SyncTransferOptions.DISABLED,
+        client: OkHttpClient
+    ) : this(client, serverUrl, username, passwordChars, networkOptions, transferOptions)
 
     // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），
     // 仅 HTTP 回环测试需显式注入明文客户端。生产路径在 init 中随构造期校验一并构建：
