@@ -29,6 +29,8 @@ CI 侧 `hygiene-gate` 的 checkout 已配 `fetch-depth: 0`（浅克隆下 `HEAD~
 ② 只覆盖 `docs/RESOLVED_LOG.md` 与 `docs/resolved/batches/`（`BATCH_*.md` 分册与
 `resolved/README.md` 编号行不在本判据内）；
 ③ 门禁脚本集合**有意**不纳入：脚本可被有意退役，纳入会产生假红（本判据只钉**归档面**）。
+   脚本集合的完整性由 `tools/doc/check_gate_script_integrity.py` 独立承载（SHA-256 基线清单，
+   `ISSUE-P2-574` / §489），两者口径互补、互不替代。
 
 用法：`python tools/doc/check_archive_monotonicity.py [--base <rev>] [--head <rev>] [--root 目录] [--selftest]`；
 `--head` 指另一 rev（默认读工作区）——仅用于**判据反校**（如 `--base 33a8b86b --head bc7f187a` 应报红）。

@@ -11,10 +11,18 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**13 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P2-574` /
-> `ISSUE-P3-575` ~ `ISSUE-P3-586`，六要素报告见
+> **在册批次**：**12 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-575` ~
+> `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P2-573`（Gradle 配置期执行 PR 可改脚本读取签名口令）已于 **§488** 整条闭环归档——
+> 上一批 `ISSUE-P2-574`（CI 全部门禁判定本体无完整性护栏、单行削弱判据后持续假绿）已于 **§489** 整条闭环归档——
+> `hygiene-gate` **首步**以受审清单 `tools/doc/gate_scripts.sha256` 钉定 19 个门禁脚本（现列 16 条机检 + 跨
+> workflow 三脚本 `.github/check_dependency_cvss.py` / `tools/device/check_connected_device_results.py` /
+> `tools/passkey-interop/verify_interop.py`）的 SHA-256（脚本漂移 / 缺失 / 清单缺项 / 清单多项任一即 fail-closed
+> 报红），机检条数 15 → 16；残余取舍（清单 + 校验脚本自身同处 PR 可改面、workflow yml 自身与触发面未纳入基线）
+> 登记限界表 §42；正文见
+> [`resolved/batches/489-门禁脚本完整性基线批次.md`](resolved/batches/489-门禁脚本完整性基线批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P2-573`（Gradle 配置期执行 PR 可改脚本读取签名口令）已于 **§488** 整条闭环归档——
 > 凭证管理器通道收窄为「仅命令行显式请求 release 分发产物时启用」，执行前对 `tools/signing/read-cred.ps1`
 > 做 SHA-256 完整性基线校验（漂移 / 缺失即 fail-closed 中止构建），并以 `SigningCredentialChainHardeningTest`
 > 静态锁定；残余取舍登记限界表 §41；正文见
@@ -72,31 +80,9 @@
 
 > **暂无开放项**（`ISSUE-P1-537` / `ISSUE-P1-538` 已于 §477 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P2 中危缺陷与协议/测试缺口（1 项）
+## P2 中危缺陷与协议/测试缺口（0 项）
 
-### `ISSUE-P2-574`：CI 全部门禁的判定本体（机检脚本 / CVSS 断言 / workflow yml 自身）无完整性护栏，单行削弱判据后持续假绿
-
-**背景与影响**：hygiene-gate 15 个机检脚本、CVSS 硬断言 `.github/check_dependency_cvss.py:37`
-（`THRESHOLD = 7.0`，被 `dependency-scan.yml:122-123` 直接调用）、connected 非空转断言、互操作对拍
-`verify_interop.py` 与三个 workflow yml 自身**都是 PR 可改文件**，且无任何自我完整性护栏（无脚本 hash 基线）；
-`check_archive_monotonicity.py:29-31` docstring 明文「门禁脚本集合有意不纳入」；本地 `gate_readings.py:31,43-51`
-直接解析 `build.yml` 执行同批脚本，与 CI 同源同盲。三个 workflow 均仅 `schedule`+`workflow_dispatch`
-（`build.yml:36-43` 等），**合并前零 CI 自动检测**：单行削弱判据的「脚本维护」PR（无结构信号）被人工合并后，
-自下次定时巡检（build 每日 UTC 21:00、dependency-scan 每周一）起以被削判据**持续假绿**——`fail-closed`
-只拦非 0 退出码、不校验判据语义，此后该面回归不再被 CI 拦截。前置为 PR 被合并，损害上限与直接放后门等价，故 medium。
-
-**整改依据**：门禁的检测语义不能由被审对象自身承载；`ISSUE-P3-316` 移除 push/PR 触发后该残余风险未登记
-（登记漂移由 `ISSUE-P3-586` 承载，本条 fix 与其汇合同一动作但不合并）。
-
-**验收标准**：
-1. 门禁脚本集合有可核验的完整性基线——如 CI 以独立于被审 PR 的 ref/仓库拉取门禁脚本，或 workflow 内先校验
-   脚本 SHA-256 清单再执行——使「单行削弱判据」的 PR 在 CI 可检出；
-2. 基线覆盖不到的盲区如实登记进 `已知工程限界.md`，不得写为已证。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同上口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 2（verdict=adjusted，
-脚本实测 50 个 / CI 直接引用 29 个，corrected 已并入）。
-来源攻击面：CI/CD 与供应链。
+> **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
 ## P3 低危问题、特性接线与体验优化（12 项）
 

@@ -586,3 +586,4 @@
 | §486 | 协程 `runCatching` 取消语义收口并机检批次 | `ISSUE-P3-570`（整条闭环；机检并入 `check_cancellation_semantics.py`，`LaunchedEffect` 构造补入） | [486-协程runCatching取消语义并入机检批次.md](resolved/batches/486-协程runCatching取消语义并入机检批次.md) |
 | §487 | WebDAV 覆盖兜底 DELETE 前重探守卫批次 | `ISSUE-P2-572`（整条闭环；限界 §28 补记 409/423 服务器类未实测） | [487-WebDAV覆盖兜底重探守卫批次.md](resolved/batches/487-WebDAV覆盖兜底重探守卫批次.md) |
 | §488 | 签名口令链构建期闸门与完整性基线批次 | `ISSUE-P2-573`（整条闭环；限界 §41 登记残余取舍） | [488-签名口令链构建期闸门与完整性基线批次.md](resolved/batches/488-签名口令链构建期闸门与完整性基线批次.md) |
+| §489 | 门禁脚本 SHA-256 完整性基线批次 | `ISSUE-P2-574`（整条闭环；限界 §42 登记残余取舍；hygiene-gate 条数 15 → 16） | [489-门禁脚本完整性基线批次.md](resolved/batches/489-门禁脚本完整性基线批次.md) |

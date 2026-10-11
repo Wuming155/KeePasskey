@@ -105,7 +105,7 @@ jobs:
   # 判据按「文案槽内出现 `.message` 即红」钉死；反校证据：以整改前（HEAD）版本跑本脚本命中 13 处。
   # ---------------------------------------------------------------------------
   hygiene-gate:
-    name: Hygiene gate (line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring, projection read safety, raw coroutine scope, archive monotonicity, plaintext carrier toString, exception message not in user text, cancellation semantics)
+    name: Hygiene gate (gate script integrity baseline, line tiers, long functions, docs index, tautological asserts, recheck, type names, box-slot children, launch-language seed wiring, projection read safety, raw coroutine scope, archive monotonicity, plaintext carrier toString, exception message not in user text, cancellation semantics)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -117,7 +117,7 @@ jobs:
           fetch-depth: 0
 
       # 以下机检均为 fail-closed（非 0 即红）；**条数不写死**——清单以本 run 块为唯一真相源，
-      # 写死条数必与 CI 漂移。顺序：规模闸门 → 文档链接 →
+      # 写死条数必与 CI 漂移。顺序：**门禁脚本完整性基线（第 0 条）** → 规模闸门 → 文档链接 →
       # 归档索引双向一致 → 重言断言 → 复核报告禁用短语 → 类型名有界性（PD-34）→
       # Box 内容槽同层兄弟叠放（ISSUE-P3-337 编辑页 Q1 按钮叠字：`BentoCard` 内容槽是 Box，
       # 同层兄弟互相叠放而非上下流动，编译期与 @Preview 都可能看不出来，故挂成闸门；
@@ -131,6 +131,16 @@ jobs:
       - name: 规模与卫生机检（fail-closed）
         run: |
           set -euo pipefail
+          # 第 0 条（ISSUE-P2-574 / §489）：**最先**校验「门禁脚本集合 ↔ SHA-256 基线清单」一致。
+          # 动因：hygiene-gate 机检脚本 + .github/check_dependency_cvss.py + connected 非空转断言
+          # + verify_interop.py **都是 PR 可改文件**，而三个 workflow 均仅 schedule/workflow_dispatch
+          # （ISSUE-P3-316 有意移除 push/PR 触发）⇒ 合并前零 CI 检测，单行削弱判据的「脚本维护」PR
+          # 被合并后即以被削判据**持续假绿**（fail-closed 只拦非 0 退出码、不校验判据语义）。
+          # 本步以 tools/doc/gate_scripts.sha256 钉定各脚本 SHA-256：脚本改动而清单未同步即红，
+          # 迫使「削弱判据」必须**同时**改动脚本与清单（两处敏感面，评审可见）。
+          # 盲区如实声明：清单与本校验脚本自身亦处 PR 可改面，同改「脚本 + 清单」仍只靠评审信号识别——
+          # 已登记 docs/architecture/已知工程限界.md §42，不得写为已证。
+          python3 tools/doc/check_gate_script_integrity.py
           python3 tools/doc/count_line_tiers.py
           python3 tools/doc/long_functions.py
           python3 tools/doc/check_md_links.py
