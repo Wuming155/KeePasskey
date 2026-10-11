@@ -1,7 +1,7 @@
 package com.keepasskey.app.data.repository
 
+import com.keepasskey.core.security.SecureFileWrite
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -65,6 +65,10 @@ internal object VaultCopyNaming {
  * 只做「读源 → 写临时件 → 原子改名」一段：失败返回 `null` 且**绝不动源文件**——
  * 调用方（另存后移除的破坏性动作）据此**中止**，绝不出现「副本没落地、原件已删」的形态。
  * 写盘沿用本仓原子写纪律（临时件 → `flush` + `fd.sync()` → `renameTo`）。
+ *
+ * `ISSUE-P3-582`：临时件走 core [SecureFileWrite.uniqueTmpFor]（**唯一临时名**
+ * `<目标名>.<UUID>.tmp`）与 [SecureFileWrite.openOwnerOnlyOutput]（打开流即收敛 0600），
+ * 落地副本文件由 [SecureFileWrite.moveAtomically] 收敛——与 sync 模块落盘口径对齐、不依赖 umask。
  */
 internal object VaultFileCopy {
 
@@ -72,19 +76,20 @@ internal object VaultFileCopy {
     fun copyBeside(source: File, at: LocalDateTime = LocalDateTime.now()): File? {
         if (!source.isFile) return null
         val target = VaultCopyNaming.uniqueCopyTarget(source, at)
-        val tmp = File(target.parentFile, "${target.name}.tmp")
+        val tmp = SecureFileWrite.uniqueTmpFor(target)
         return try {
             source.inputStream().use { input ->
-                tmp.outputStream().use { output ->
+                SecureFileWrite.openOwnerOnlyOutput(tmp).use { output ->
                     input.copyTo(output)
                     output.flush()
-                    (output as? FileOutputStream)?.fd?.sync()
+                    output.fd.sync()
                 }
             }
-            if (tmp.renameTo(target)) target else null
+            if (SecureFileWrite.moveAtomically(tmp, target)) target else null
         } catch (_: IOException) {
             null
         } finally {
+            // 唯一临时名 ⇒ 只删自己的 tmp（成功交付后该路径已不存在，幂等）
             if (tmp.exists()) tmp.delete()
         }
     }

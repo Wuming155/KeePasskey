@@ -110,6 +110,9 @@ class DatabasePickerViewModel @Inject constructor(
         }
     )
 
+    // ISSUE-P3-582 AC③：来源导入的提交互斥（busy 守卫；§497 自本类再拆出薄控制器）
+    private val importDispatch = DatabasePickerImportController(viewModelScope, openVaultImporter)
+
     // ISSUE-P2-424 AC③：「打开已有库」对话框的凭据预填消费面（§396 起新建向导不再有云端档，
     // 可用性快照消费面随「云端直建」整条退役，本控制器只剩预填）；凭据数组所有权口径见该类 KDoc
     private val cloudAccount = DatabasePickerCloudAccountController(
@@ -126,7 +129,8 @@ class DatabasePickerViewModel @Inject constructor(
         vaultRepository.getDatabases(),
         userMessageFlow,
         combine(showCreateDialogFlow, showOpenSourceDialogFlow) { c, o -> Pair(c, o) },
-        isCreatingFlow
+        // ISSUE-P3-582 AC③：建库与来源导入共用 isLoading（任一在途即 busy）
+        combine(isCreatingFlow, importDispatch.busy) { creating, importing -> creating || importing }
     ) { databases, userMessage, (showCreateDialog, showOpenSourceDialog), isLoading ->
         DatabasePickerUiState(
             databases = databases,
@@ -315,15 +319,10 @@ class DatabasePickerViewModel @Inject constructor(
      * `popBackStack()` 退栈（Snackbar 来不及渲染），而「交给落点代为提示」并不成立：
      * 选择器路径只走本文件 [importLocalDatabase]，从不写 `UnlockUiState.infoMessage`。
      * 该残余已登记 `docs/architecture/已知工程限界.md` §8（不是修复，是留痕）。
+     *
+     * ISSUE-P3-582 AC③：提交互斥与 busy 投影见 [DatabasePickerImportController]。
      */
-    fun importDatabaseFromSource(submission: OpenVaultSubmission) {
-        viewModelScope.launch {
-            when (submission) {
-                is OpenVaultSubmission.Local -> openVaultImporter.importLocal(submission)
-                is OpenVaultSubmission.Cloud -> openVaultImporter.importCloud(submission.request)
-            }
-        }
-    }
+    fun importDatabaseFromSource(submission: OpenVaultSubmission) = importDispatch.submit(submission)
 
     /**
      * 移除密码库。

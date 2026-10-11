@@ -11,10 +11,23 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**5 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-579` ~
+> **在册批次**：**4 条**（2026-10-11 数据流安全审查整批登记：`ISSUE-P3-579` ~
 > `ISSUE-P3-586`，六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P3-581`（1PUX 导入解析的 `export.data` 中间副本——整份含全部明文口令的 JSON 字节——用毕不清零）
+> 上一批 `ISSUE-P3-582`（app 模块四点落盘面未做仅属主权限收敛且固定临时名，与 sync 模块 0600/0700 自声明口径漂移）
+> 已于 **§497** 整条闭环归档——按 AC① 采纳「**原语下沉 `core` 共享**」路线（未选「app 侧本地等价实现」：
+> `SyncCacheFiles` 为 `sync` 内部可见性 `internal`、app 不可复用，而再复制一份权限常量与唯一临时名逻辑等于
+> 再造可漂移拷贝、与本条根因相悖）：新增 `core` 的 `SecureFileWrite`（唯一临时名 / `fsync` 写入 / 原子替换 /
+> 仅属主 0600、目录 0700），`SyncCacheFiles` 退化为薄委托（缓存域专有逻辑留 sync，行为零变更）；四点
+> （`CloudVaultImporter` / `SyncRemoteVaultCopy` / `VaultFileCopy` / `KeyFileVaultCopyStore`）统一改用原语
+> （固定名 → 唯一名、打开流即 0600、失败只删自己的 tmp、两下载链补 `fsync`），AC③ 以新拆出的
+> `DatabasePickerImportController` 补云端导入提交互斥（busy 同步置位 + `finally` 复位 + `isLoading` 投影）。
+> AC② 设备侧 stat 用户裁决走**如实登记**分支：本环境禁跑设备侧且新增 `androidTest` 须真机实跑，二者互斥，
+> 故不新增等价 stat 断言，缺口登记 [`architecture/已知工程限界.md`](architecture/已知工程限界.md) **§43**。
+> 新增用例 8 例（core 原语 5 + 导入互斥 1 + `CloudVaultImporterTest` 2），既有用例零删除；正文见
+> [`resolved/batches/497-app四点落盘面权限收敛批次.md`](resolved/batches/497-app四点落盘面权限收敛批次.md)，
+> 索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P3-581`（1PUX 导入解析的 `export.data` 中间副本——整份含全部明文口令的 JSON 字节——用毕不清零）
 > 已于 **§496** 整条闭环归档——按 AC②**优先采纳「改造接口使可擦除」**路线（未选「登记限界」）：
 > `PuxArchiveReader.readBounded` 弃用内部缓冲对调用方不可达的 `ByteArrayOutputStream`，改用自持可擦缓冲
 > `ErasableByteSink`（容量增长切换旧缓冲前先 `fill(0)`，`finally` 中 `wipe()` 覆盖成功 / 超限两路径）；
@@ -141,24 +154,7 @@
 
 > **暂无开放项**（`ISSUE-P2-574` 已于 §489 闭环归档，见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)）。
 
-## P3 低危问题、特性接线与体验优化（5 项）
-
-### `ISSUE-P3-582`：app 模块四点落盘面未做仅属主权限收敛且固定临时名，与 sync 模块 0600/0700 自声明口径漂移
-
-**背景与影响**：两条云端下载落地链 + 两处同族落盘点全程未做仅属主权限收敛、临时名固定可并发互踩：
-`CloudVaultImporter.kt:148-163`（固定名 `<name>.kdbx.importing` → 裸 `outputStream()` → `renameTo`；失败路径
-`:166` 还会删掉并发者正在写的 tmp）、`SyncRemoteVaultCopy.kt:52-55`（固定名 `.backup`）、
-`VaultFileCopy.kt:75-84`、`KeyFileVaultCopyStore.kt:86-95`。与 sync 模块自 `ISSUE-P1-07`/`P3-202` 起
-「所有落盘面显式 0600/0700、不依赖 umask」的自声明口径漂移（对照 `SyncCacheFiles.kt:30-35,88-100`：
-`restrictToOwnerOnly` + UUID 唯一临时名）。权限面利用需 root/同 UID（不在威胁模型），互踩为本地完整性问题；
-`DatabasePickerViewModel.kt:319-326` 云端导入为裸 `viewModelScope.launch` 无提交互斥。
-
-**验收标准**：① 四点接入 `restrictToOwnerOnly` + 唯一临时名，与 `SyncCacheFiles` 口径对齐；
-② 设备侧 stat 断言（参照 `SyncCacheAndroidRuntimeTest` 形态）或如实登记；③ 云端导入入口补提交互斥。
-
-**核实时间点 + 核实方式**：2026-10-11，数据流安全审查工作流（同 P2-573 口径），基准提交 `cd223701`；六要素详情见
-[`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md) 发现 10（verdict=adjusted，
-同族未接入点由 1 处扩大为 4 处，corrected 已并入）。来源攻击面：同步层对抗恶意云端（合并「备份与本地存储」面 safeNote 重叠表述）。
+## P3 低危问题、特性接线与体验优化（4 项）
 
 ### `ISSUE-P3-583`：`android:allowBackup="false"` 第一道闸门无任何静态守卫锁定
 

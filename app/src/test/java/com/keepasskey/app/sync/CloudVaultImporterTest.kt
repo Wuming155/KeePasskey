@@ -266,4 +266,56 @@ class CloudVaultImporterTest {
         assertNull(storage["webdav_url"])
         assertTrue(request.password.all { it == '0' })
     }
+
+    /**
+     * `ISSUE-P3-582` AC①：下载临时件必须是**唯一临时名**（`<目标名>.<UUID>.importing`），
+     * 而非整改前的固定名 `<name>.kdbx.importing`——固定名在两次同名导入交错时会互踩、
+     * 失败清理还会删掉并发者正在写的 tmp。本项在下载**窗口期**（`onDownload` 钩子）观测落点。
+     */
+    @Test
+    fun `下载期临时件为唯一名而非固定名且成功后无残留`() = runTest {
+        var namesDuringDownload: List<String> = emptyList()
+        val provider = FakeProvider(onDownload = {
+            namesDuringDownload = filesDir.listFiles()?.map { it.name } ?: emptyList()
+        })
+        importer.providerFactory = CloudVaultProviderFactory { provider }
+
+        val result = importer.import(webDavRequest())
+
+        assertTrue(result is CloudVaultImportResult.Success)
+        val importings = namesDuringDownload.filter { it.endsWith(".importing") }
+        assertEquals("下载窗口期应恰有一个临时件: $importings", 1, importings.size)
+        assertTrue(
+            "临时件必须是唯一名 <目标名>.<UUID>.importing: ${importings.single()}",
+            importings.single().startsWith("cloud_vault.kdbx.")
+        )
+        assertFalse(
+            "不得再使用整改前的固定临时名: ${importings.single()}",
+            importings.single() == "cloud_vault.kdbx.importing"
+        )
+        assertTrue(filesDir.listFiles()?.none { it.name.endsWith(".importing") } == true)
+    }
+
+    /**
+     * `ISSUE-P3-582` AC①：失败清理只删**自己的**唯一名临时件，绝不误删他者（此处以历史遗留 /
+     * 并发者的固定名临时件为替身）——这正是整改前 `finally { tmp.delete() }` 删掉并发者正在
+     * 写入的 tmp 的缺陷形态，现以唯一临时名 + 精确删除消除。
+     */
+    @Test
+    fun `导入失败清理只删自己的临时件不误删他者`() = runTest {
+        val foreign = File(filesDir, "cloud_vault.kdbx.importing").apply { writeText("OTHER-IN-FLIGHT") }
+        val provider = FakeProvider(failDownload = true)
+        importer.providerFactory = CloudVaultProviderFactory { provider }
+
+        val result = importer.import(webDavRequest())
+
+        assertTrue(result is CloudVaultImportResult.Failure)
+        assertTrue("失败清理不得误删他者的临时件", foreign.isFile)
+        assertEquals("他者内容一字不动", "OTHER-IN-FLIGHT", foreign.readText())
+        assertEquals(
+            "自己的唯一名临时件须清理干净，目录内只剩下他者那一份",
+            listOf(foreign.name),
+            filesDir.listFiles()?.map { it.name }
+        )
+    }
 }

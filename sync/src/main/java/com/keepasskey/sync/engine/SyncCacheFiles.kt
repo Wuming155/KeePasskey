@@ -1,12 +1,7 @@
 package com.keepasskey.sync.engine
 
+import com.keepasskey.core.security.SecureFileWrite
 import java.io.File
-import java.io.FileOutputStream
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-import java.nio.file.attribute.PosixFilePermission
-import java.util.UUID
 
 /**
  * 同步缓存的**文件层原语**（ISSUE-P3-188 自 [SyncCache] 下沉为同包协作类）。
@@ -15,7 +10,10 @@ import java.util.UUID
  * 仅属主权限收敛、有界重试删除」；三哈希语义（cache / version / basecache / meta）
  * 与防回滚状态例外（F-23）仍由 [SyncCache] 裁决。
  *
- * 逐字迁移原实现，**行为与权限口径零变更**。
+ * `ISSUE-P3-582`：唯一临时名 / fsync 写入 / 原子替换 / 仅属主权限收敛四项**通用原语**
+ * 已下沉到 core 的 [SecureFileWrite]（使权限位与唯一临时名口径全仓单一，不再有第二份拷贝
+ * 可漂移）；本类退化为对它的薄委托，并保留缓存域专有逻辑（规范键定位、通配清理、
+ * 有界重试删除）。**行为与权限口径零变更**。
  */
 internal class SyncCacheFiles(private val cacheDir: File) {
 
@@ -26,24 +24,15 @@ internal class SyncCacheFiles(private val cacheDir: File) {
     }
 
     /**
-     * 生成唯一临时文件路径。
+     * 生成唯一临时文件路径（`ISSUE-P3-582` 起委托 core [SecureFileWrite.uniqueTmpFor]）。
      * 固定名 tmp 在并发写同一 remotePath 时会互相覆盖，造成 A 的 rename 交付 B 的
      * 内容（交叉污染）；对齐 Wave 9 WebDAV uploadAtomic 临时名唯一化的同类整改语义。
      * 当前 SyncCoordinator 以 mutex 串行化同步周期，唯一名作为并发防御纵深兜底。
      */
-    fun tmpFileFor(targetFile: File): File =
-        File(cacheDir, "${targetFile.name}.${UUID.randomUUID()}$SUFFIX_TMP")
+    fun tmpFileFor(targetFile: File): File = SecureFileWrite.uniqueTmpFor(targetFile, SUFFIX_TMP)
 
-    /** 写入 tmp 文件并 fsync 落盘（不含 rename 交付步骤，供多文件合并原子写复用） */
-    fun writeTmpSynced(tmpFile: File, bytes: ByteArray) {
-        FileOutputStream(tmpFile).use { fos ->
-            fos.write(bytes)
-            fos.flush()
-            fos.fd.sync()
-        }
-        // 密文自落盘第一刻起即为仅属主可见，绝不在窗口期内以默认 umask 权限暴露
-        restrictToOwnerOnly(tmpFile, isDirectory = false)
-    }
+    /** 写入 tmp 文件并 fsync 落盘 + 收敛 0600（不含 rename 交付步骤，供多文件合并原子写复用） */
+    fun writeTmpSynced(tmpFile: File, bytes: ByteArray) = SecureFileWrite.writeSynced(tmpFile, bytes)
 
     /** 唯一临时名写入 + 原子替换交付（tmp 文件无论如何处置都被删除） */
     fun writeStringSafely(targetFile: File, content: String) {
@@ -57,47 +46,20 @@ internal class SyncCacheFiles(private val cacheDir: File) {
     }
 
     /**
-     * 原子替换移动：POSIX rename 对已存在目标执行原子替换（无窗口、无半写状态）；
-     * renameTo 失败的平台（如桌面 Windows 调试环境）回退 Files.move，
-     * 优先 ATOMIC_MOVE，不支持时降级 REPLACE_EXISTING，绝不做非原子 copyTo。
+     * 原子替换移动（委托 core [SecureFileWrite.moveAtomically]）：POSIX rename 对已存在目标
+     * 执行原子替换（无窗口、无半写状态）；`renameTo` 失败的平台（如桌面 Windows 调试环境）
+     * 回退 `Files.move`，优先 ATOMIC_MOVE，不支持时降级 REPLACE_EXISTING，绝不做非原子 copyTo。
      */
     fun moveAtomically(tmpFile: File, targetFile: File) {
-        if (tmpFile.renameTo(targetFile)) {
-            restrictToOwnerOnly(targetFile, isDirectory = false)
-            return
-        }
-        try {
-            Files.move(
-                tmpFile.toPath(), targetFile.toPath(),
-                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING
-            )
-        } catch (_: AtomicMoveNotSupportedException) {
-            Files.move(tmpFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        }
-        restrictToOwnerOnly(targetFile, isDirectory = false)
+        SecureFileWrite.moveAtomically(tmpFile, targetFile)
     }
 
     /**
-     * 收敛文件权限为「仅属主可访问」（ISSUE-P1-07 验收标准 2）。
-     *
-     * 缓存文件承载完整 KDBX 密文快照，即便位于应用私有目录也必须显式降权：
-     * 默认 umask 通常给出 0644，同 UID（`sharedUserId`、调试备份、root 场景）之外
-     * 的读取面应被彻底关闭。优先走 POSIX 精确置位（0600 / 0700）；
-     * 非 POSIX 文件系统（如 Windows 开发机 / FAT 分区）降级为 `java.io` 语义尽力而为。
+     * 收敛文件权限为「仅属主可访问」（`ISSUE-P1-07` 验收标准 2；委托 core
+     * [SecureFileWrite.restrictToOwnerOnly]，口径注释见彼处）。
      */
-    fun restrictToOwnerOnly(file: File, isDirectory: Boolean) {
-        runCatching {
-            Files.setPosixFilePermissions(
-                file.toPath(),
-                if (isDirectory) DIRECTORY_OWNER_ONLY else FILE_OWNER_ONLY
-            )
-        }.onFailure {
-            // 降级路径：仅属主可读可写；目录额外需要属主可执行（进入权限）
-            file.setReadable(true, true)
-            file.setWritable(true, true)
-            if (isDirectory) file.setExecutable(true, true) else file.setExecutable(false, false)
-        }
-    }
+    fun restrictToOwnerOnly(file: File, isDirectory: Boolean) =
+        SecureFileWrite.restrictToOwnerOnly(file, isDirectory)
 
     /**
      * 通配清理本规范键的全部残留 tmp 文件（ISSUE-P3-308）。
@@ -148,18 +110,14 @@ internal class SyncCacheFiles(private val cacheDir: File) {
         if (child.isDirectory) child.deleteRecursively() else child.delete()
 
     companion object {
-        /** 临时文件后缀（唯一临时名与通配清理共用；[SyncCache] 的后缀清单同引此处） */
-        internal const val SUFFIX_TMP = ".tmp"
+        /**
+         * 临时文件后缀（唯一临时名与通配清理共用；[SyncCache] 的后缀清单同引此处）。
+         * `ISSUE-P3-582`：取值收敛到 core [SecureFileWrite.SUFFIX_TMP] 单一真相源。
+         */
+        internal const val SUFFIX_TMP = SecureFileWrite.SUFFIX_TMP
 
         /** ISSUE-P3-108：瞬时删除失败的有界重试次数与间隔（见 [deleteChild]） */
         private const val DELETE_RETRIES = 3
         private const val DELETE_RETRY_GAP_MS = 15L
-
-        private val FILE_OWNER_ONLY = setOf(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE
-        )
-
-        private val DIRECTORY_OWNER_ONLY = FILE_OWNER_ONLY + PosixFilePermission.OWNER_EXECUTE
     }
 }

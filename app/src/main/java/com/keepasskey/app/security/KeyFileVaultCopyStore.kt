@@ -3,8 +3,10 @@ package com.keepasskey.app.security
 import android.content.Context
 import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.security.SecureFileWrite
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -32,7 +34,8 @@ import kotlinx.coroutines.withContext
  * - 文件布局：`[12B sealIv][2B sealCtLen][sealCt][12B dataIv][dataCt]`；`dataCt` 明文为
  *   `[2B 显示名长][显示名 UTF-8][密钥文件字节]`（显示名随载荷加密，孤儿副本仍可回显）。
  * - 读写全程 `ByteArray` 且整体移至 `Dispatchers.IO`（Keystore 与文件 IO 绝不上主线程）；
- *   写入为临时文件 + 原子改名（工程规则「原子写盘」）。
+ *   写入为**唯一临时名**临时文件 + 原子改名（工程规则「原子写盘」），且副本目录 / 文件经
+ *   core `SecureFileWrite` 显式收敛为仅属主（目录 0700 / 文件 0600，不依赖 umask，`ISSUE-P3-582`）。
  *
  * 清除时机（AC②）：解绑 / 换绑（`SettingsMasterKeyChangeController`）、偏好关闭、
  * 解锁成功但未使用密钥文件（`KeyFileSessionCoordinator`）、删除库（`DatabasePickerViewModel`）。
@@ -82,9 +85,12 @@ class KeyFileVaultCopyStore @Inject constructor(
                 val dataIv = ByteArray(IV_LENGTH_BYTES).also { random.nextBytes(it) }
                 val dataCt = softAesGcm(dek, dataIv, payload)
                 if (!dir.exists()) dir.mkdirs()
+                // ISSUE-P3-582：副本目录收敛 0700（不依赖 umask），与 sync 模块落盘口径对齐
+                SecureFileWrite.restrictToOwnerOnly(dir, isDirectory = true)
                 val target = fileFor(dir, databaseId)
-                val tmp = File(target.parentFile, target.name + ".tmp")
-                tmp.outputStream().use { os ->
+                // ISSUE-P3-582：唯一临时名 + 打开流即收敛 0600；失败清理只删自己的 tmp
+                val tmp = SecureFileWrite.uniqueTmpFor(target)
+                SecureFileWrite.openOwnerOnlyOutput(tmp).use { os ->
                     os.write(sealIv)
                     writeShort(os, sealCt.size)
                     os.write(sealCt)
@@ -92,7 +98,12 @@ class KeyFileVaultCopyStore @Inject constructor(
                     os.write(dataCt)
                     os.fd.sync()
                 }
-                if (!tmp.renameTo(target)) {
+                val delivered = try {
+                    SecureFileWrite.moveAtomically(tmp, target)
+                } catch (e: IOException) {
+                    false
+                }
+                if (!delivered) {
                     tmp.delete()
                     debugLog?.warn(TAG, "副本原子改名失败")
                     return@withContext false

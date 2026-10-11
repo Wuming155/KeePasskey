@@ -3,12 +3,17 @@ package com.keepasskey.app.sync
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultCopyNaming
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.SecureFileWrite
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.time.LocalDateTime
+
+/** ISSUE-P3-582：云端副本另存的下载临时件后缀（唯一临时名为 `<目标名>.<UUID>.backup`） */
+private const val SUFFIX_BACKUP = ".backup"
 
 /**
  * `ISSUE-P2-529` AC①：「整库覆盖」前的**云端副本另存**。
@@ -21,6 +26,9 @@ import java.time.LocalDateTime
  * `filesDir/<远端名> (副本 yyyyMMdd-HHmm).kdbx`（命名与落点见 `VaultCopyNaming`；副本仍是密文
  * `.kdbx`，以其自身凭据可解，且落在应用私有目录故按目录扫描的密码库列表即可见，AC②）。
  * 本方法**只下载、不改动云端任何字节**，供「整库覆盖并改绑」前的保留动作使用。
+ *
+ * `ISSUE-P3-582`：下载临时件与落地副本文件均经 core `SecureFileWrite` 收敛为仅属主 0600
+ * （唯一临时名 `<目标名>.<UUID>.backup`），与 sync 模块落盘口径对齐、不依赖 umask。
  *
  * fail-closed：无活动库 / 无凭据 / 无 filesDir / 下载或落盘失败一律 `Failure`，
  * 调用方（`SyncCoordinator.backupCloudVaultCopy` → `VaultListSyncController`）据此**中止覆盖**。
@@ -49,10 +57,28 @@ internal suspend fun SyncCycleRunner.backupRemoteVaultCopy(): KdbxResult<String>
             val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
             val remoteName = remotePath.substringAfterLast('/').ifBlank { vaultFileName }
             val target = VaultCopyNaming.uniqueCopyTarget(File(filesDir, remoteName), LocalDateTime.now())
-            val tmp = File(filesDir, "${target.name}.backup")
+            // ISSUE-P3-582：唯一临时名 + 打开流即收敛 0600（对齐 sync `SyncCacheFiles` 口径，
+            // 不依赖 umask）；失败清理只删自己的 tmp，绝不误删并发写者
+            val tmp = SecureFileWrite.uniqueTmpFor(target, SUFFIX_BACKUP)
             try {
-                val downloaded = tmp.outputStream().use { sink -> provider.download(remotePath, sink).isSuccess }
-                if (!downloaded || !tmp.renameTo(target)) {
+                val downloaded = SecureFileWrite.openOwnerOnlyOutput(tmp).use { sink ->
+                    provider.download(remotePath, sink).isSuccess.also { ok ->
+                        if (ok) {
+                            sink.flush()
+                            sink.fd.sync()
+                        }
+                    }
+                }
+                val delivered = if (!downloaded) {
+                    false
+                } else {
+                    try {
+                        SecureFileWrite.moveAtomically(tmp, target)
+                    } catch (e: IOException) {
+                        false
+                    }
+                }
+                if (!delivered) {
                     return@withContext KdbxResult.Failure(
                         IllegalStateException("云端副本下载或落盘失败"),
                         strings.get(R.string.sync_error_vault_copy_backup_failed)

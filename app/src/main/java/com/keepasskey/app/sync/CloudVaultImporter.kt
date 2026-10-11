@@ -7,12 +7,14 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultCopyNaming
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
+import com.keepasskey.core.security.SecureFileWrite
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.IOException
 import java.time.LocalDateTime
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -79,6 +81,9 @@ fun interface CloudVaultProviderFactory {
  * 2. **先下载后落凭据**——用所填凭据直接下载远端库文件到应用私有目录，下载失败即整体失败，
  *    **绝不**先写 `SyncCredentialsStore`（否则错凭据会覆盖用户既有的可用同步配置）；
  * 3. 下载成功才提交凭据（封印落盘 + 置当前 Provider），再把临时件原子改名为目标库文件；
+ *    下载临时件走 core [SecureFileWrite] 原语——**唯一临时名**（`<目标名>.<UUID>.importing`）
+ *    且在写入第一字节前收敛为仅属主 0600，落地库文件同样收敛（`ISSUE-P3-582`：
+ *    与 sync 模块「所有落盘面显式 0600、不依赖 umask」的自声明口径对齐）；
  * 4. 上层据 `Success.localPath` 走仓库既有 `importExternalDatabase` 单一登记出口——
  *    此后该库就是一条**本地库 + 已保存同步配置**的常规链路（解锁、自动同步、浏览远端目录全部复用既有机制）。
  *
@@ -145,12 +150,16 @@ class RealCloudVaultImporter @Inject constructor(
                     }
                     is CloudVaultImportRequest.S3 -> request.objectKey.trim()
                 }
-                val tmp = File(filesDir, "$sanitized.importing")
+                val tmp = SecureFileWrite.uniqueTmpFor(target, SUFFIX_IMPORTING)
                 try {
-                    tmp.outputStream().use { sink ->
+                    // ISSUE-P3-582：唯一临时名 + 打开流即收敛 0600（对齐 sync `SyncCacheFiles`
+                    // 口径，不依赖 umask）；下载完成即 flush + fsync，rename 交付前必须落盘
+                    SecureFileWrite.openOwnerOnlyOutput(tmp).use { sink ->
                         provider.download(remotePath, sink).getOrElse {
                             return CloudVaultImportResult.Failure(downloadFailed())
                         }
+                        sink.flush()
+                        sink.fd.sync()
                     }
                     // 先提交凭据再改名：凭据封印失败时不留下「库已登记但同步配置缺失」的半状态
                     if (!commitCredentials(request, passwordSnapshot, accessKeySnapshot, secretKeySnapshot, target.absolutePath)) {
@@ -158,11 +167,17 @@ class RealCloudVaultImporter @Inject constructor(
                             UiMessage(R.string.sync_config_save_failed, isError = true)
                         )
                     }
-                    if (!tmp.renameTo(target)) {
+                    val delivered = try {
+                        SecureFileWrite.moveAtomically(tmp, target)
+                    } catch (e: IOException) {
+                        false
+                    }
+                    if (!delivered) {
                         return CloudVaultImportResult.Failure(downloadFailed())
                     }
                     return CloudVaultImportResult.Success(target.absolutePath, notice)
                 } finally {
+                    // ISSUE-P3-582：唯一临时名 ⇒ 失败清理只删自己的 tmp，绝不误删并发导入者正写的 tmp
                     tmp.delete()
                 }
             } finally {
@@ -234,6 +249,9 @@ class RealCloudVaultImporter @Inject constructor(
         UiMessage(R.string.picker_cloud_download_failed, isError = true)
 
     private companion object {
+
+        /** ISSUE-P3-582：下载临时件后缀（唯一临时名为 `<目标名>.<UUID>.importing`） */
+        const val SUFFIX_IMPORTING = ".importing"
 
         /**
          * 生产 Provider 构建：与 `SyncProviderResolver.resolveProvider` 同口径
