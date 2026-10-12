@@ -47,7 +47,9 @@ Coroutines + Flow；**文档与代码注释使用简体中文**。平台：minSd
      **读数块只入批次文档**，报告 / 记录类文档引用批次编号即可。`test` 非零退出时**先**跑 `preserve_test_failures.py`（`ISSUE-P3-489`），
      装机走查**先**跑 `check_installed_build.py --expect-symbol <本批新增符号>`（§434）——设备上跑的**不一定**是你刚打的那份包。
    - **流转归档**：整条**剪切**出 `ACTIVE_ISSUES.md` → `RESOLVED_LOG.md` 加一行 → `docs/resolved/batches/`
-     新增 `<NN>-<中文短名>.md`（原样收录，编号续用不复用）。
+     新增 `<NN>-<中文短名>.md`（原样收录，编号续用不复用）。**严禁在 `ACTIVE_ISSUES.md` 堆积已闭环批次流水或历史摘要**
+     （如「在册批次：0 条；上一批...再上一批...」）；`ACTIVE_ISSUES.md` 只保留当前存活的待办条目，零开放项时仅留占位符，
+     历史全貌与验收证据以归档体系为单一真相源。
    - **提交到 GitHub**：文档与代码**同一次 `git commit`**，随后**立即 `git push`** 推送到 GitHub 远端；信息以 `TASK-xx` /
      `ISSUE-xx` 引用并简述主题。**代理直接执行，无须再征询**（2026-09-17 用户明示约定）。**按本次任务的路径清单显式
      `git add`**——`git add -A` / `git add .` 会卷进同一工作区里**别人的在途改动**；同一工作区**不并行**两条代理工作线
