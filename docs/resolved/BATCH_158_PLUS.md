@@ -366,3 +366,5 @@
 | §500 | fast-gate 对拍依赖版本钉定批次 | `ISSUE-P3-585`（整条闭环；P3 2 → 1；pip 精确 pin `pykeepass==4.2.0`/`cryptography==50.0.0` + `verify_interop.py` 运行期版本区间断言；同批更新 `gate_scripts.sha256`） | [500-fast-gate对拍依赖版本钉定批次.md](batches/500-fast-gate对拍依赖版本钉定批次.md) |
 | §501 | PD-04 触发面登记漂移补记批次 | `ISSUE-P3-586`（整条闭环；P3 1 → 0；PD-04 两处失真原文改为 `schedule`+`workflow_dispatch` 现状并补记「合并前零自动检测 / 合并后延迟巡检」残余，残余指向限界 §42） | [501-PD-04触发面登记漂移补记批次.md](batches/501-PD-04触发面登记漂移补记批次.md) |
 | §502 | VisibleForTests 架构收口与 Compose 修饰符规范批次 | ISSUE-P3-587（整条闭环；P3 0 → 0；收敛测试注解，VisibleForTests 告警归零，规范 Modifier 顺序） | [502-VisibleForTests架构收口与Compose修饰符规范批次.md](batches/502-VisibleForTests架构收口与Compose修饰符规范批次.md) |
+| §503 | 搜索框误唤自动填充弹窗整改批次 | ISSUE-P2-588（整条闭环；P2 1 → 0） | [503-搜索框误唤自动填充弹窗整改批次.md](batches/503-搜索框误唤自动填充弹窗整改批次.md) |
+

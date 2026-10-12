@@ -72,7 +72,19 @@ internal fun KeePasskeyAutofillService.resolveTargetFields(
         indexStr.toIntOrNull()?.let { parsedNodes.getOrNull(it) }?.autofillId?.let { role to it }
     }.toMap()
 
-    val scannedUsernameId: AutofillId? = usernameParsed?.autofillId
+    // ISSUE-P2-588：单账号框（无密码框且无结构化数据）准入门槛：
+    // 若表单中无密码框，账号目标必须具备高置信度（HIGH，显式 autofillHints 如 username/email/phone）
+    // 或明确的账号 inputType（邮箱/电话），防止孤立弱信号文本框误当登录表单下发填充响应。
+    val effectiveUsernameParsed = if (passwordParsed == null && structuredParsed.isEmpty()) {
+        usernameParsed?.takeIf {
+            scanResult.usernameConfidence == FieldConfidence.HIGH ||
+                AutofillFieldScanner.isAccountInputType(it.inputType)
+        }
+    } else {
+        usernameParsed
+    }
+
+    val scannedUsernameId: AutofillId? = effectiveUsernameParsed?.autofillId
     val scannedPasswordId: AutofillId? = passwordParsed?.autofillId
     val scannedOtpId: AutofillId? = otpParsed?.autofillId
     // ISSUE-P3-375：三类目标全空才判定「无可填充目标」（结构化表单可独立成立）

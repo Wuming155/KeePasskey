@@ -97,6 +97,18 @@ class AutofillAuthResultRecheckWiringTest {
         assertTrue(policySource.contains("AutofillFieldBlockPolicy.decide"))
     }
 
+    @Test
+    fun `TargetFieldResolver 必须对单账号字段施加高置信度或账号输入类型门控`() {
+        val resolverSource = readSource(RESOLVER_PATH)
+        assertTrue(
+            "TargetFieldResolver 必须对单账号字段施加门控（ISSUE-P2-588）",
+            resolverSource.contains("effectiveUsernameParsed") &&
+                resolverSource.contains("passwordParsed == null") &&
+                resolverSource.contains("FieldConfidence.HIGH") &&
+                resolverSource.contains("isAccountInputType")
+        )
+    }
+
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源文件不存在（是否被重命名/移动）：$path", file.isFile)

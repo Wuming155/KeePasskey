@@ -376,4 +376,77 @@ class AutofillFieldScannerTest {
             AutofillFieldScanner.scan(nodes, respectImportantForAutofill = false).usernameId
         )
     }
+
+    // ===== ISSUE-P2-588：搜索框多维识别与排除 + 非密码词排除 =====
+
+    @Test
+    fun `带有 TYPE_TEXT_VARIATION_FILTER 的输入框被识别为搜索框并排除`() {
+        val nodes = listOf(
+            ScanNode(id = "filter_input", inputType = 0x000000b1, label = "输入商品名称"),
+            ScanNode(id = "pwd", inputType = 0x00000081)
+        )
+        val result = AutofillFieldScanner.scan(nodes)
+        assertNull("过滤器/搜索框不得被识别为账号框", result.usernameId)
+    }
+
+    @Test
+    fun `类名为 SearchView 或 SearchAutoComplete 的输入框被识别为搜索框并排除`() {
+        val nodes = listOf(
+            ScanNode(
+                id = "search_widget",
+                inputType = 1,
+                className = "androidx.appcompat.widget.SearchView\$SearchAutoComplete",
+                label = "苹果 iPhone 16 系列"
+            ),
+            ScanNode(id = "pwd", inputType = 0x00000081)
+        )
+        val result = AutofillFieldScanner.scan(nodes)
+        assertNull("SearchView 组件不得被识别为账号框", result.usernameId)
+    }
+
+    @Test
+    fun `contentDescription 包含搜索关键词的输入框被识别为搜索框并排除`() {
+        val nodes = listOf(
+            ScanNode(
+                id = "search_desc",
+                inputType = 1,
+                contentDescription = "搜索框",
+                label = "苹果 iPhone 16 系列"
+            ),
+            ScanNode(id = "pwd", inputType = 0x00000081)
+        )
+        val result = AutofillFieldScanner.scan(nodes)
+        assertNull("contentDescription 标有搜索的输入框不得被识别为账号框", result.usernameId)
+    }
+
+    @Test
+    fun `中文动词搜与查找在 label 或 htmlName 中被识别为搜索框并排除`() {
+        val nodes = listOf(
+            ScanNode(id = "s1", label = "上京东 搜回收"),
+            ScanNode(id = "s2", label = "查找用户与动态"),
+            ScanNode(id = "s3", htmlName = "find_input", label = "全站好物"),
+            ScanNode(id = "pwd", inputType = 0x00000081)
+        )
+        val result = AutofillFieldScanner.scan(nodes)
+        assertNull(result.usernameId)
+    }
+
+    @Test
+    fun `包含 passport 或 passenger 等常见非密码词的 htmlName 不被误判为密码框`() {
+        val nodes = listOf(
+            ScanNode(id = "passport_view", htmlName = "layout_passport_login_container", isVisible = false),
+            ScanNode(id = "passenger_view", htmlName = "passenger_name_edit"),
+            ScanNode(id = "compass_view", htmlName = "compass_heading")
+        )
+        val result = AutofillFieldScanner.scan(nodes)
+        assertNull("包含 passport 的控件不得被误判为密码框", result.passwordId)
+    }
+
+    @Test
+    fun `真实的 password 与 passwd 仍正常识别为密码框`() {
+        assertTrue(AutofillFieldScanner.isPasswordHtmlName("user_password"))
+        assertTrue(AutofillFieldScanner.isPasswordHtmlName("edt_passwd"))
+        assertTrue(AutofillFieldScanner.isPasswordHtmlName("login_pwd"))
+        assertTrue(AutofillFieldScanner.isPasswordHtmlName("app_secret"))
+    }
 }

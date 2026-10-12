@@ -276,4 +276,36 @@ class AutofillFieldFallbackTest {
                 .usernameId
         )
     }
+
+    // ===== ISSUE-P2-588：密码框不可见时绝对禁止聚焦合成 =====
+
+    @Test
+    fun `密码框不可见时聚焦普通文本框绝对不合成账号目标`() {
+        val nodes = listOf(
+            node("2", inputType = INPUT_TYPE_PASSWORD, visible = false),
+            node("3", inputType = INPUT_TYPE_TEXT, focused = true, visible = true, label = "苹果 iPhone 16 系列")
+        )
+        val result = AutofillFieldFallback.synthesizeFocusedUsername(
+            passwordOnly(),
+            nodes,
+            respectImportantForAutofill = true
+        )
+        assertNull("密码框不可见时前台聚焦文本框绝对不得被合成为账号目标", result.usernameId)
+        assertTrue(result.isPasswordOnlyLogin)
+    }
+
+    @Test
+    fun `密码框可见时聚焦普通文本框可正常合成账号目标`() {
+        val nodes = listOf(
+            node("2", inputType = INPUT_TYPE_PASSWORD, visible = true),
+            node("3", inputType = INPUT_TYPE_TEXT, focused = true, visible = true)
+        )
+        val result = AutofillFieldFallback.synthesizeFocusedUsername(
+            passwordOnly(),
+            nodes,
+            respectImportantForAutofill = true
+        )
+        assertEquals("3", result.usernameId)
+        assertEquals(FieldConfidence.MEDIUM, result.usernameConfidence)
+    }
 }

@@ -101,6 +101,11 @@ internal object AutofillFieldFallback {
     ): ScanResult {
         if (result.usernameId != null || result.passwordId == null) return result
 
+        // ISSUE-P2-588：密码框本身必须可见，才允许从前台聚焦文本框合成账号目标；
+        // 绝不允许不可见的后台控件将前台聚焦的搜索框/普通文本框合成进来
+        val passwordNode = nodes.firstOrNull { it.id == result.passwordId }
+        if (passwordNode == null || !passwordNode.isVisible) return result
+
         val chosen = nodes.firstOrNull { node ->
             node.isFocused &&
                 node.isVisible &&

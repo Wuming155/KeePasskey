@@ -30,13 +30,20 @@ internal object AutofillFieldLexicon {
     /** OTP hint 白名单（归一化比较） */
     val OTP_HINTS = setOf("onetimecode", "smsotpcode", "2faappotpcode")
 
-    /** 搜索框排除词（子串） */
+    /** 搜索框排除词（子串，ISSUE-P2-588 扩充中英动词与查找词） */
     val SEARCH_SUBSTRING_TERMS = listOf(
-        "搜索", "搜尋", "查询", "查詢", "筛选", "篩選", "search", "query", "keyword"
+        "搜索", "搜尋", "查询", "查詢", "筛选", "篩選", "搜", "查找", "寻找", "尋找", "检索", "檢索",
+        "search", "query", "keyword", "find", "lookup", "seek", "filter"
     )
 
     /** 搜索框排除词（token） */
-    val SEARCH_TOKEN_TERMS = setOf("search", "query", "find", "filter", "keyword")
+    val SEARCH_TOKEN_TERMS = setOf("search", "query", "find", "filter", "keyword", "lookup", "seek")
+
+    /** 常见搜索控件类名特征（ISSUE-P2-588：系统/AndroidX及通用搜索类） */
+    val SEARCH_CLASS_NAMES = listOf("searchview", "searchautocomplete", "searchedittext", "searchinput")
+
+    /** 虽含 pass 但绝非密码框的非密码子串（ISSUE-P2-588：排除大厂通行证 SDK / 乘客等） */
+    val NON_PASSWORD_SUBSTRINGS = listOf("passport", "passenger", "compass", "bypass", "passage")
 
     /** 非凭据字段排除词（token） */
     val NON_CREDENTIAL_TOKEN_TERMS = setOf(

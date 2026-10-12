@@ -23,6 +23,10 @@ internal data class ParsedAutofillNode(
     val importantForAutofill: Boolean,
     /** ISSUE-P3-375 AC①：HTML `autocomplete` 属性（WebView 结构化字段源；原生控件为 null） */
     val autocomplete: String?,
+    /** ISSUE-P2-588：视图控件类名（用于识别 SearchView 等系统/第三方搜索组件） */
+    val className: String? = null,
+    /** ISSUE-P2-588：视图无障碍描述（用于识别标注为「搜索」但 hint 为推荐词的搜索框） */
+    val contentDescription: String? = null,
     val text: String
 ) {
     /**
@@ -37,6 +41,7 @@ internal data class ParsedAutofillNode(
             "inputType=$inputType, isFocused=$isFocused, hasHtmlName=${htmlName != null}, " +
             "hasLabel=${label != null}, webDomain=$webDomain, isVisible=$isVisible, " +
             "importantForAutofill=$importantForAutofill, hasAutocomplete=${autocomplete != null}, " +
+            "hasClassName=${className != null}, hasContentDesc=${contentDescription != null}, " +
             "textLength=${text.length})"
 }
 
@@ -80,7 +85,9 @@ internal object AutofillStructureScanner {
                     packageName = callingPackage,
                     isVisible = node.isVisible,
                     importantForAutofill = node.importantForAutofill,
-                    autocomplete = node.autocomplete
+                    autocomplete = node.autocomplete,
+                    className = node.className,
+                    contentDescription = node.contentDescription
                 )
             )
         }
@@ -107,7 +114,10 @@ internal object AutofillStructureScanner {
         if (autofillId != null) {
             val hints = node.autofillHints?.toList().orEmpty()
             val textVal = node.autofillValue?.textValue?.toString() ?: node.text?.toString().orEmpty()
-            val htmlName = node.idEntry ?: node.hint
+            // ISSUE-P2-588：原生控件取 idEntry；WebView 提取 HTML name/id 属性；绝不以 hint 污染 htmlName
+            val htmlName = node.idEntry ?: extractHtmlName(node)
+            val className = node.className
+            val contentDesc = node.contentDescription?.toString()
             onNode(
                 ParsedAutofillNode(
                     autofillId = autofillId,
@@ -120,6 +130,8 @@ internal object AutofillStructureScanner {
                     isVisible = node.visibility == android.view.View.VISIBLE,
                     importantForAutofill = isImportantForAutofill(node),
                     autocomplete = htmlAutocomplete(node),
+                    className = className,
+                    contentDescription = contentDesc,
                     text = textVal
                 )
             )
@@ -129,6 +141,19 @@ internal object AutofillStructureScanner {
             val child = node.getChildAt(i) ?: continue
             traverseViewNode(child, onNode)
         }
+    }
+
+    /**
+     * ISSUE-P2-588：从 WebView HTML 属性中读取 name 或 id 作为 htmlName（原生控件为 null）。
+     */
+    private fun extractHtmlName(node: AssistStructure.ViewNode): String? {
+        val attributes = node.htmlInfo?.attributes ?: return null
+        for (attr in attributes) {
+            if (attr.first.equals("name", ignoreCase = true) || attr.first.equals("id", ignoreCase = true)) {
+                return attr.second?.takeIf { it.isNotBlank() }
+            }
+        }
+        return null
     }
 
     /**
