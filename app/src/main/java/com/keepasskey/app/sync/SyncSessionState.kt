@@ -1,6 +1,5 @@
 package com.keepasskey.app.sync
 
-import androidx.annotation.VisibleForTesting
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.provider.SyncProvider
@@ -50,11 +49,9 @@ class SyncSessionState @Inject constructor() {
     var lastRemoteEtag: String = ""
 
     // 允许单元测试注入模拟 Provider 与测试路径（禁止生产代码赋值）
-    @VisibleForTesting
     var testSyncProvider: SyncProvider? = null
         internal set
 
-    @VisibleForTesting
     var testRemotePath: String? = null
         internal set
 

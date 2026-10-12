@@ -42,9 +42,10 @@ fun AutofillSettingsScreen(
     uiState: SettingsUiState,
     onBackClick: () -> Unit,
     onAutofillServiceToggle: (Boolean) -> Unit,
+    onAutoClearClipboardToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
     // ISSUE-P3-324：旧版无障碍自动填充通道开关
     onAutofillLegacyAccessibilityToggle: (Boolean) -> Unit = {},
-    onAutoClearClipboardToggle: (Boolean) -> Unit,
     // KP2A 扩展自动填充操作
     onOfferSaveCredentialsToggle: (Boolean) -> Unit = {},
     onInlineSuggestionsToggle: (Boolean) -> Unit = {},
@@ -84,8 +85,7 @@ fun AutofillSettingsScreen(
             appEnabled = uiState.autofillServiceEnabled,
             legacyAccessibilityAppEnabled = uiState.autofillLegacyAccessibilityEnabled
         )
-    },
-    modifier: Modifier = Modifier
+    }
 ) {
     var showBlacklistDialog by remember { mutableStateOf(false) }
     var showSaveBlacklistDialog by remember { mutableStateOf(false) }

@@ -11,11 +11,12 @@
 > 并执行 `git commit & push`。
 > **认领前复核前提**：条目正文的 `文件:行号` 一律是**核实时刻的快照**，认领时须先复核前提再开工（规则 6.1②）。
 
-> **在册批次**：**0 条**（2026-10-11 数据流安全审查整批登记 `ISSUE-P3-579` ~ `ISSUE-P3-586` 八条**已全部闭环**，
-> 连同该审查报告的中危两条 `ISSUE-P2-573` / `ISSUE-P2-574` ⇒ **该审查报告的 14 条发现已全部闭环**；
+> **在册批次**：**0 条**（2026-10-12 Android Studio 审查登记 `ISSUE-P3-587` **已整条闭环**；2026-10-11 数据流安全审查整批登记 `ISSUE-P3-579` ~ `ISSUE-P3-586` 八条**已全部闭环**，
+> 连同该审查报告的中危两条 `ISSUE-P2-573` / `ISSUE-P2-574` ⇒ **前序审查报告的 14 条发现已全部闭环**；
 > 六要素报告见
 > [`security/数据流安全审查_2026-10-11.md`](security/数据流安全审查_2026-10-11.md)）。新条目附「核实时间点 + 核实方式」。
-> 上一批 `ISSUE-P3-586`（PD-04 登记口径与代码漂移：裁决明文声称「工作流照常在 `push{main}` 与 `pull_request` 上运行」
+> 上一批 `ISSUE-P3-587`（VisibleForTests 架构收口与 Compose 修饰符规范：收敛 `DebugLogBuffer`、`SyncSessionState`、`SyncCycleRunner` 测试注解使 Lint VisibleForTests 告警归零，规范 `AuthenticatorScreen` / `AutofillSettingsScreen` Modifier 首可选参数）已于 **§502** 整条闭环归档——正文见 [`resolved/batches/502-VisibleForTests架构收口与Compose修饰符规范批次.md`](resolved/batches/502-VisibleForTests架构收口与Compose修饰符规范批次.md)，索引见 [`RESOLVED_LOG.md`](RESOLVED_LOG.md)。
+> 再上一批 `ISSUE-P3-586`（PD-04 登记口径与代码漂移：裁决明文声称「工作流照常在 `push{main}` 与 `pull_request` 上运行」
 > 作为「检测语义仍有效」的依据，但三个 workflow 已于 `ISSUE-P3-316`（2026-09-25，晚于 PD-04 的 2026-09-17 登记 8 天）
 > 全部改为 `schedule` + `workflow_dispatch`，登记未同步 ⇒ PD-04 理由 3 依赖的「闸门即时运行」面已不存在、
 > 合并前零自动检测 / 合并后延迟巡检的残余未被任何登记承载）已于 **§501** 整条闭环归档——按 AC① 取

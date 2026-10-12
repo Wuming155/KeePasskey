@@ -1,7 +1,6 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
-import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.R
 import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
@@ -110,7 +109,6 @@ class SyncCycleRunner @Inject constructor(
      * 之所以需要注入点：本类在 `setupCycleContext` 内**自行**构造 `SyncCache`（落点与
      * `SyncCache.CACHE_DIR_NAME` 绑定），而记录型子类只有经此入口才能进入周期。
      */
-    @VisibleForTesting
     internal var syncCacheFactory: ((File) -> SyncCache)? = null
 
     /**

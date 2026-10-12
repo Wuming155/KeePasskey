@@ -1,6 +1,5 @@
 package com.keepasskey.app.data.logger
 
-import androidx.annotation.VisibleForTesting
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Singleton
@@ -37,7 +36,6 @@ class DebugLogBuffer(
      * 平台 Log 类在 JVM 不存在）。输出内容与缓冲行**同源同约束**（先过诊断闸门，
      * 同受「仅非敏感事件」铁律），使真机取证可直接 `adb logcat -s KpLog`。
      */
-    @VisibleForTesting
     internal var logcatEchoEnabled: Boolean = false
 
     /** 普通诊断事件入口：受 [DiagnosticLogGate] 约束（关闭时整条丢弃，不占缓冲容量）。 */

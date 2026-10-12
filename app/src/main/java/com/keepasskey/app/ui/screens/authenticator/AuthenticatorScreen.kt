@@ -76,8 +76,8 @@ import com.keepasskey.core.otp.OtpEngine
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuthenticatorScreen(
-    onEntryClick: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    onEntryClick: (String) -> Unit = {},
     viewModel: AuthenticatorViewModel = hiltViewModel()
 ) {
     // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
