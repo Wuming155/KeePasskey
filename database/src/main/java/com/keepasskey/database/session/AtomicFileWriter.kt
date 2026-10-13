@@ -69,7 +69,24 @@ object AtomicFileWriter {
         createBackup: Boolean = true,
         directorySync: DirectorySync,
         writer: (OutputStream) -> Unit
+    ) = writeAtomicInternal(targetFile, createBackup, directorySync, null, writer)
+
+    /** 凭据轮换专用证据：替换完成即回报，不等 writer 返回或切回调用调度器。 */
+    internal fun writeAtomicTracked(
+        targetFile: File,
+        createBackup: Boolean,
+        receipt: SessionWriteReceipt,
+        writer: (OutputStream) -> Unit
+    ) = writeAtomicInternal(targetFile, createBackup, DirectorySync.default, receipt, writer)
+
+    private fun writeAtomicInternal(
+        targetFile: File,
+        createBackup: Boolean,
+        directorySync: DirectorySync,
+        receipt: SessionWriteReceipt?,
+        writer: (OutputStream) -> Unit
     ) {
+        receipt?.writing()
         val parentDir = targetFile.parentFile ?: File(".")
         if (!parentDir.exists()) {
             parentDir.mkdirs()
@@ -99,12 +116,14 @@ object AtomicFileWriter {
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING
                 )
+                receipt?.committed()
                 // 步骤 5: rename 后 fsync 父目录（钩子②），确保新目录项在崩溃/断电前已落盘
                 syncDirectory(parentDir, directorySync)
             } catch (e: Exception) {
-                fallbackReplace(tmpFile, targetFile, backupAvailable, e, directorySync)
+                fallbackReplace(tmpFile, targetFile, backupAvailable, e, directorySync, receipt)
             }
         } catch (t: Throwable) {
+            receipt?.notCommitted()
             // 异常退出时清理临时垃圾，绝不损坏原文件
             if (tmpFile.exists()) {
                 tmpFile.delete()
@@ -197,10 +216,12 @@ object AtomicFileWriter {
         targetFile: File,
         backupAvailable: Boolean,
         cause: Exception,
-        directorySync: DirectorySync = DirectorySync.default
+        directorySync: DirectorySync = DirectorySync.default,
+        receipt: SessionWriteReceipt? = null
     ) {
         val parentDir = targetFile.parentFile ?: tmpFile.parentFile ?: File(".")
         if (tmpFile.renameTo(targetFile)) {
+            receipt?.committed()
             // ISSUE-P2-05：rename 成功后 fsync 父目录，固化被替换的目录项（钩子③）
             syncDirectory(parentDir, directorySync)
             return
@@ -212,11 +233,14 @@ object AtomicFileWriter {
             )
         }
         try {
+            // 非原子 copy 可能部分改变目标；失败时不能再声称原件保持完整。
+            receipt?.uncertain()
             Files.copy(
                 tmpFile.toPath(),
                 targetFile.toPath(),
                 StandardCopyOption.REPLACE_EXISTING
             )
+            receipt?.committed()
         } catch (copyEx: Exception) {
             logger.log(Level.WARNING, "原子写盘降级 copy 覆盖失败: ${targetFile.absolutePath}", copyEx)
             throw IOException("无法将临时文件 ${tmpFile.name} 安全替换至 ${targetFile.name}", copyEx)

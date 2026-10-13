@@ -37,7 +37,7 @@ class DatabaseSessionBackupPreferenceTest {
         session.createBackupBeforeSave = false
         val pwd = "Fake#BackupOff".toCharArray()
         assertTrue(session.create(target, "Vault", pwd, useArgon2 = false).isSuccess)
-        assertFalse("关闭偏好时首次写入应清理历史遗留 .bak", bak.exists())
+        assertTrue("排他新建不得触碰原有 .bak；普通保存再按偏好清理", bak.exists())
 
         assertTrue(session.save().isSuccess)
         assertFalse("关闭备份偏好时保存不得生成 .bak", bak.exists())

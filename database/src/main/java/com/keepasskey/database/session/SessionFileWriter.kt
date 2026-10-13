@@ -31,6 +31,13 @@ internal class SessionFileWriter(private val createBackupProvider: () -> Boolean
         }
     }
 
+    /** 凭据事务使用的提交证据通道；回执在真实替换处同步更新，不依赖协程返回交付。 */
+    fun writeAtomicTracked(targetFile: File, receipt: SessionWriteReceipt, writer: (OutputStream) -> Unit) {
+        val createBackup = createBackupProvider()
+        AtomicFileWriter.writeAtomicTracked(targetFile, createBackup, receipt, writer)
+        if (!createBackup) deleteBackupQuietly(targetFile)
+    }
+
     /**
      * 静默删除滚动备份。
      *

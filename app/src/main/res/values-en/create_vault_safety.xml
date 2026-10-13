@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="err_create_collision">A vault with this name already exists. Choose another name.</string>
+    <string name="err_create_unsupported">This location does not support safe vault creation.</string>
+    <string name="err_create_invalid_name">Use a valid file name without path separators.</string>
+</resources>

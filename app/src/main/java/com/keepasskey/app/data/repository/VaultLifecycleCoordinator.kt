@@ -11,6 +11,8 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.VaultDatabaseInfo
 import com.keepasskey.app.ui.model.VaultRemovalKind
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.files.NewVaultNames
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
@@ -18,6 +20,7 @@ import com.keepasskey.database.file.KdbxKeyFileGenerator
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -73,6 +76,7 @@ internal class VaultLifecycleCoordinator(
                         ?: throw IOException("无法打开数据库文件流: ${activeDb.name}")
                 },
                 saveWriter = SafVaultCreation.saveWriter(context, uri, activeDb.name),
+                trackedSaveWriter = SafVaultCreation.trackedSaveWriter(context, uri, activeDb.name),
                 passwordChars = passwordChars,
                 keyFileData = keyFileData,
                 readOnly = readOnly
@@ -100,15 +104,17 @@ internal class VaultLifecycleCoordinator(
                 // ISSUE-P2-85：本入口**无用户预设**（库已在目录中登记、只是文件缺失），
                 // 故显式取 KDBX4 官方默认算法 AES-256-CBC + Argon2id；
                 // 带预设的建库路径见 [createDatabaseWithKeyFile]（必须显式传算法）。
-                val createResult = databaseSession.create(
-                    file = targetFile,
-                    name = activeDb.name.removeSuffix(".kdbx"),
-                    passwordChars = passwordChars,
-                    useArgon2 = true,
-                    cipherUuid = KdbxConstants.Cipher.AES_256_CBC
-                )
-                refresh()
-                return createResult
+                return withContext(NonCancellable) {
+                    val createResult = databaseSession.create(
+                        file = targetFile,
+                        name = activeDb.name.removeSuffix(".kdbx"),
+                        passwordChars = passwordChars,
+                        useArgon2 = true,
+                        cipherUuid = KdbxConstants.Cipher.AES_256_CBC
+                    )
+                    if (createResult is KdbxResult.Success) refresh()
+                    createResult
+                }
             }
             databaseSession.open(targetFile, passwordChars, keyFileData, readOnly)
         }
@@ -123,19 +129,9 @@ internal class VaultLifecycleCoordinator(
     }
 
     /**
-     * 以显式密钥文件因子建库——复合密钥第二因子真实落地。
-     *
-     * 生成型密钥文件由 database 模块的**唯一生成器** [KdbxKeyFileGenerator] 产出
-     * （app 层严禁重写 KeyFile 规范实现），随 [DatabaseSession.create] 的 `keyFileData`
-     * 形参进入 `KdbxFile.save → deriveKeys` 的官方解析梯子（`KdbxKeyFile`，internal）；
-     * 会话成功建库后按借用语义克隆持有该因子，使后续 `save()` 以同一复合密钥重加密、
-     * 且既有导出通道 `exportKeyFileBytes()` 能把这份密钥文件交付用户。
-     *
-     * ISSUE-P2-85：[preset] 为**类型化的整组选择**（外层算法 + KDF），两者都真实落到文件头。
-     * 此前它只是字符串且仅用 `contains("AES-KDF")` 反推 KDF，外层算法被整段丢弃。
-     *
-     * ISSUE-P2-229：[targetUri] 非空即「经系统文件选择器自选位置」建库（此前新建一律静默落在
-     * 应用私有目录，用户既看不到也无法选）；为 null 时维持既有的 `filesDir` 路径与全部行为。
+     * 以显式密钥文件因子排他建库；生成因子由唯一生成器产出，用毕在 finally 擦除。
+     * preset 同时决定外层算法和 KDF。targetUri 非空只接受本流程 CreateDocument 产物；
+     * 内部名称统一规范，失败不切换活动库或登记列表，成功才刷新。
      */
     suspend fun createDatabaseWithKeyFile(
         name: String,
@@ -195,20 +191,29 @@ internal class VaultLifecycleCoordinator(
             IllegalStateException("No filesDir"),
             strings.get(R.string.repo_files_dir_unavailable)
         )
-        val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
-        val result = databaseSession.create(
-            file = File(filesDir, fileName),
-            name = name.removeSuffix(".kdbx"),
-            passwordChars = masterPassword,
-            useArgon2 = preset.useArgon2,
-            keyFileData = keyFileData,
-            cipherUuid = preset.cipherUuid
-        )
-        if (result is KdbxResult.Success) {
-            selectDatabase(fileName)
+        val targetFile = try {
+            withContext(Dispatchers.IO) { NewVaultNames.target(filesDir, name) }
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            return KdbxResult.Failure(t, code = KdbxError.CREATE_INVALID_NAME)
         }
-        refresh()
-        return result
+        val fileName = targetFile.name
+        // 提交及必要的列表登记同属有限收尾；调用方取消不能跳过 select/refresh。
+        return withContext(NonCancellable) {
+            val result = databaseSession.create(
+                file = targetFile,
+                name = fileName.dropLast(NewVaultNames.EXTENSION.length),
+                passwordChars = masterPassword,
+                useArgon2 = preset.useArgon2,
+                keyFileData = keyFileData,
+                cipherUuid = preset.cipherUuid
+            )
+            if (result is KdbxResult.Success) {
+                selectDatabase(fileName)
+                refresh()
+            }
+            result
+        }
     }
 
 
@@ -333,9 +338,8 @@ internal class VaultLifecycleCoordinator(
 
     /**
      * 更换主凭据：会话层重加密写盘（`DatabaseSession.changeCredentials`），
-     * **仅成功时**刷新库列表（ISSUE-P3-305 自 `RealVaultRepository` 逐行搬出）。
-     *
-     * ISSUE-P3-428：[keyFileIntent] 三态映射 database 层两个重载——`Keep` 走单参
+     * 仅成功时刷新库列表。
+     * [keyFileIntent] 三态映射会话重载：`Keep` 走单参
      * （沿用会话当前绑定的密钥文件快照），`Remove` 显式双参 `null`（解绑），
      * `Use` 传用户选定字节（绑定或更换；借用语义，本层只读不擦除，清零归调用方）。
      */
@@ -374,7 +378,7 @@ internal class VaultLifecycleCoordinator(
         return result
     }
 
-    /** 锁定当前库并刷新库列表（顺序与拆分前一致：先 `lock()` 再刷新）。 */
+    /** 锁库后刷新列表。 */
     suspend fun lockDatabase() {
         databaseSession.lock()
         refresh()
@@ -388,11 +392,7 @@ internal class VaultLifecycleCoordinator(
     companion object {
         private const val TAG = "VaultLifecycle"
 
-        /**
-         * `syncType` 的两个「本机」取值（ISSUE-P2-229 收敛为常量：此前它们是散落在
-         * `isRemote` 判定里的裸字面量，新增分支时极易写成第三个变体而被判成远端库）。
-         * 值与设置页 / 打开对话框的既有字符串保持一致，**不得**改动字面量本身。
-         */
+        /** 本机库类型口径；与设置页/打开对话框保持同值，不能改动字面量。 */
         const val SYNC_TYPE_LOCAL_DEVICE = "本地设备存储"
         const val SYNC_TYPE_FILE_PICKER = "系统文件选择器"
     }

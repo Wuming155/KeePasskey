@@ -11,10 +11,13 @@ import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.keepasskey.database.io.WipableByteArrayOutputStream
+import java.nio.file.FileAlreadyExistsException
 import java.io.FileInputStream
 import java.io.InputStream
 
@@ -23,7 +26,7 @@ import java.io.InputStream
  *
  * 自 [DatabaseSession] 原样抽出「新建 / 打开 / 打开流」三条入口：统一在 [mutex] 临界区内
  * 完成解密或建库、装配 [SessionCore]（活动文件、写盘通道、只读标志）、缓存凭据并置 OPENED。
- * 失败一律返回 [KdbxResult.Failure]，异常消息文案与拆分前逐字一致。
+ * 失败一律返回 [KdbxResult.Failure]；新建失败保留旧会话。
  */
 internal class SessionOpener(
     private val core: SessionCore,
@@ -40,7 +43,7 @@ internal class SessionOpener(
     /**
      * ISSUE-P2-77：换库前置释放（由 `DatabaseSession` 注入，语义与 `lock()` 的清理部分对齐）。
      *
-     * **顺序硬约束**：必须在 `KdbxFile.load` / 落盘新库**之前**调用——否则
+     * **顺序硬约束**：打开时必须在 `KdbxFile.load` **之前**调用；新建空库在排他提交成功后调用——否则
      * `FileBinaryStore.onSessionLocked()` 会把刚为新库落盘的附件一并删除（静默数据损坏）。
      * 由调用方在 [mutex] 临界区内同步执行（不取锁，避免 `lock()` 的互斥重入）。
      */
@@ -66,59 +69,124 @@ internal class SessionOpener(
         useArgon2: Boolean = true,
         keyFileData: ByteArray? = null,
         cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
-    ): KdbxResult<Unit> = mutex.withLock {
-        withContext(Dispatchers.Default) {
-            // ISSUE-P2-77：建库即换库——先释放旧会话（擦除旧库明文树 + 驱逐派生缓存，
-            // 与 `lock()` 语义对齐），再落盘新库。顺序不可颠倒：`FileBinaryStore.onSessionLocked()`
-            // 会清空 `cacheDir/attachments`，若在新库附件落盘之后通知即造成静默数据损坏。
-            releaseCurrentSession()
+    ): KdbxResult<Unit> = createNew(
+        name, passwordChars, useArgon2, keyFileData, cipherUuid,
+        pathIdentifier = file.absolutePath,
+        associatedFile = file,
+        saveWriter = { bytes ->
+            withContext(Dispatchers.IO) {
+                fileWriter.writeAtomicByBackupPreference(file) { it.write(bytes) }
+            }
+        },
+        trackedSaveWriter = { bytes, receipt ->
+            withContext(Dispatchers.IO) {
+                fileWriter.writeAtomicTracked(file, receipt) { it.write(bytes) }
+            }
+        },
+        writeNew = { db ->
+            val bytes = serializeCreated(db, passwordChars, keyFileData)
             try {
-                val header = KdbxHeader.createDefault(
-                    cipherUuid = cipherUuid,
-                    useArgon2 = useArgon2
-                )
-                val rootGroup = KdbxGroup(
-                    name = name.ifBlank { "Root" },
-                    iconId = 48
-                )
-                val db = KdbxDatabase(
-                    header = header,
-                    databaseName = name,
-                    databaseDescription = "Created by KeePasskey",
-                    rootGroup = rootGroup
-                )
+                withContext(Dispatchers.IO) { NewDatabaseFileWriter.write(file) { it.write(bytes) } }
+            } finally {
+                bytes.fill(0)
+            }
+        }
+    )
 
-                // 原子写盘落盘（ISSUE-P2-11：按会话备份偏好决定是否生成 .bak）
-                withContext(Dispatchers.IO) {
-                    fileWriter.writeAtomicByBackupPreference(file) { os ->
-                        KdbxFile.save(os, db, passwordChars, keyFileData)
+    /** SAF 新建：调用方只允许写入本流程 CreateDocument 产物，并须在返回前验证读回。 */
+    suspend fun createStream(
+        pathIdentifier: String,
+        name: String,
+        passwordChars: CharArray,
+        useArgon2: Boolean,
+        keyFileData: ByteArray?,
+        cipherUuid: KdbxUuid,
+        writeNew: suspend (ByteArray) -> Unit,
+        saveWriter: suspend (ByteArray) -> Unit,
+        trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null
+    ): KdbxResult<Unit> = createNew(
+        name, passwordChars, useArgon2, keyFileData, cipherUuid,
+        pathIdentifier, null, saveWriter, trackedSaveWriter
+    ) { db ->
+        val bytes = serializeCreated(db, passwordChars, keyFileData)
+        try {
+            withContext(Dispatchers.IO) { writeNew(bytes) }
+        } finally {
+            bytes.fill(0)
+        }
+    }
+
+    /** 同步返回独立副本；调用者在任何挂起点之前建立 finally 所有者。 */
+    private fun serializeCreated(db: KdbxDatabase, passwordChars: CharArray, keyFileData: ByteArray?): ByteArray {
+        val output = WipableByteArrayOutputStream()
+        return try {
+            KdbxFile.save(output, db, passwordChars, keyFileData)
+            output.toByteArray()
+        } finally {
+            output.wipe()
+            output.close()
+        }
+    }
+
+    /** 不发布半成品会话；新建空树不解析附件，旧会话释放可安全延后至提交成功。 */
+    private suspend fun createNew(
+        name: String,
+        passwordChars: CharArray,
+        useArgon2: Boolean,
+        keyFileData: ByteArray?,
+        cipherUuid: KdbxUuid,
+        pathIdentifier: String,
+        associatedFile: File?,
+        saveWriter: suspend (ByteArray) -> Unit,
+        trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null,
+        writeNew: suspend (KdbxDatabase) -> Unit
+    ): KdbxResult<Unit> = mutex.withLock {
+        // 落盘与会话切换是同一临界操作，提交后不能因调用方取消留下未登记的成功产物。
+        withContext(NonCancellable) {
+            withContext(Dispatchers.Default) {
+                var candidate: KdbxDatabase? = null
+                var ownedPassword: CharArray? = null
+                var ownedKeyFile: ByteArray? = null
+                try {
+                    // 先分配候选副本；clone 失败时旧会话尚未释放，已分配副本由 finally 擦除。
+                    ownedPassword = passwordChars.copyOf()
+                    ownedKeyFile = keyFileData?.copyOf()
+                    val db = KdbxDatabase(
+                        header = KdbxHeader.createDefault(cipherUuid = cipherUuid, useArgon2 = useArgon2),
+                        databaseName = name,
+                        databaseDescription = "Created by KeePasskey",
+                        rootGroup = KdbxGroup(name = name.ifBlank { "Root" }, iconId = 48)
+                    )
+                    candidate = db
+                    writeNew(db)
+                    releaseCurrentSession()
+                    core.activeFile = associatedFile
+                    core.activePathIdentifier = pathIdentifier
+                    core.saveWriter = saveWriter
+                    core.trackedSaveWriter = trackedSaveWriter
+                    core.credentialWriteUncertain.value = false
+                    core.readOnlyMode = false
+                    // adoptOwnedCredentials 接收拥有型数组，无分配移交；与 ISSUE-P1-593 共用。
+                    credentials.adoptOwnedCredentials(ownedPassword, ownedKeyFile)
+                    ownedPassword = null
+                    ownedKeyFile = null
+                    core.database.value = db
+                    core.state.value = DatabaseSession.SessionState.OPENED
+                    candidate = null // 明文树移交会话，失败分支不能擦除旧树。
+                    KdbxResult.Success(Unit)
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    val code = when (t) {
+                        is FileAlreadyExistsException -> KdbxError.CREATE_COLLISION
+                        is UnsupportedOperationException -> KdbxError.CREATE_UNSUPPORTED
+                        else -> KdbxError.CREATE_FAILED
                     }
+                    KdbxResult.Failure(t, code = code)
+                } finally {
+                    candidate?.clearSensitiveData()
+                    ownedPassword?.fill('0')
+                    ownedKeyFile?.fill(0)
                 }
-
-                // 缓存主凭据供会话期写回使用
-                core.activeFile = file
-                core.activePathIdentifier = file.absolutePath
-                core.saveWriter = { bytes ->
-                    withContext(Dispatchers.IO) {
-                        fileWriter.writeAtomicByBackupPreference(file) { os ->
-                            os.write(bytes)
-                        }
-                    }
-                }
-                core.readOnlyMode = false
-                credentials.cachePassword(passwordChars)
-                // ISSUE-P3-21：把建库时使用的密钥文件因子纳入会话缓存——保存时必须用同一
-                // 复合密钥重新派生（否则写出的库永远打不开），同时使既有导出通道
-                // （exportKeyFileBytes）能把这份密钥文件交付用户。
-                // 顺序不可颠倒：cachePassword 内部会先清空全部旧缓存。
-                credentials.cacheKeyFile(keyFileData)
-                core.database.value = db
-                core.state.value = DatabaseSession.SessionState.OPENED
-
-                KdbxResult.Success(Unit)
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                KdbxResult.Failure(t, code = KdbxError.CREATE_FAILED)
             }
         }
     }
@@ -149,7 +217,12 @@ internal class SessionOpener(
         passwordChars = passwordChars,
         keyFileData = keyFileData,
         readOnly = readOnly,
-        associatedFile = file
+        associatedFile = file,
+        trackedSaveWriter = { bytes, receipt ->
+            withContext(Dispatchers.IO) {
+                fileWriter.writeAtomicTracked(file, receipt) { it.write(bytes) }
+            }
+        }
     )
 
     /**
@@ -164,7 +237,8 @@ internal class SessionOpener(
         passwordChars: CharArray?,
         keyFileData: ByteArray? = null,
         readOnly: Boolean = false,
-        associatedFile: File? = null
+        associatedFile: File? = null,
+        trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null
     ): KdbxResult<Unit> = mutex.withLock {
         withContext(Dispatchers.Default) {
             // ISSUE-P2-77：换库前置释放（顺序硬约束见 [releaseCurrentSession] KDoc）——
@@ -183,6 +257,8 @@ internal class SessionOpener(
                 core.activeFile = associatedFile
                 core.activePathIdentifier = pathIdentifier
                 core.saveWriter = saveWriter
+                core.trackedSaveWriter = trackedSaveWriter
+                core.credentialWriteUncertain.value = false
                 core.readOnlyMode = readOnly
                 credentials.cachePassword(passwordChars)
                 credentials.cacheKeyFile(keyFileData)

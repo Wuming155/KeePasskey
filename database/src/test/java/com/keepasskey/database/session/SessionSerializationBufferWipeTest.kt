@@ -108,8 +108,9 @@ class SessionSerializationBufferWipeTest {
 
     @Test
     fun `两处清零必须位于 finally 内`() {
-        val source = readSource(SESSION_PERSISTENCE_PATH)
-        val occurrences = Regex("serialized\\.fill\\(0\\)").findAll(source).toList()
+        val source = readSource(SESSION_PERSISTENCE_PATH) + "\n" +
+            readSource("database/src/main/java/com/keepasskey/database/session/SessionCredentialRotation.kt")
+        val occurrences = Regex("serialized\\??\\.fill\\(0\\)").findAll(source).toList()
         assertTrue(
             "两处 serialized.fill(0) 都必须存在（保存 / 换密），实测 ${occurrences.size} 处",
             occurrences.size == 2

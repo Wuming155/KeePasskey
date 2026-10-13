@@ -19,12 +19,7 @@ import java.io.File
  * 活动数据库会话状态机与生命周期管理者。
  * 维护内存中活动密码库的生命周期：CLOSED ↔ LOCKED ↔ OPENED ↔ DIRTY
  *
- * ISSUE-P3-31 批次 D 结构拆分：本类收敛为会话门面，具体职责下沉到同包协作类——
- * 状态容器 [SessionCore]、凭据缓存 [SessionCredentialCache]、原子写盘 [SessionFileWriter]、
- * 树变换 [SessionTreeEditor]、内容变更 [SessionContentMutations]、会话建立 [SessionOpener]。
- *
- * ISSUE-P3-305：整库序列化写盘（保存 / 导出字节流 / 换密重加密）下沉同包
- * [SessionPersistence]——本类只保留门面转发，锁与凭据擦除语义不变。
+ * 实现下沉同包协作类；会话建立见 [SessionOpener]，持久化见 [SessionPersistence]。
  */
 class DatabaseSession(
     /**
@@ -43,13 +38,14 @@ class DatabaseSession(
     }
 
     private val core = SessionCore()
-
     val state: StateFlow<SessionState> = core.state.asStateFlow()
 
     val databaseFlow: StateFlow<KdbxDatabase?> = core.database.asStateFlow()
 
-    private val mutex = Mutex()
+    /** 流式/降级写入结果不确定：当前会话禁止继续保存，须重新打开核实或恢复文件。 */
+    val credentialWriteUncertain: StateFlow<Boolean> = core.credentialWriteUncertain.asStateFlow()
 
+    private val mutex = Mutex()
     private val credentials = SessionCredentialCache()
 
     /**
@@ -129,11 +125,11 @@ class DatabaseSession(
      * （擦除旧库明文树与二进制池、清空凭据缓存、置 `LOCKED`、通知锁观察者驱逐派生数据），
      * 但不取互斥锁（由 [SessionOpener] 在其临界区内调用，避免重入死锁）。
      *
-     * 触发点：`SessionOpener.create` / `openStream` 在装载新库**之前**调用，
+     * 触发点：`SessionOpener.openStream` 在解析之前调用，新建空库在排他提交成功之后调用，
      * 使「切换 / 新建密码库」与「锁库」在数据生命周期上取得一致——旧库的
      * `ProtectedString` 密文、`cacheDir/sync` 快照与明文附件缓存不再滞留至 GC。
      *
-     * **顺序硬约束**：必须在 `KdbxFile.load` / 落盘新库之前执行，否则
+     * **顺序硬约束**：打开必须在 `KdbxFile.load` 之前执行；新建空库不解析附件，可提交后释放，否则
      * `FileBinaryStore.onSessionLocked()` 会删除刚为新库落盘的附件（静默数据损坏）。
      */
     private fun releaseSessionStateForReplacement() {
@@ -156,31 +152,16 @@ class DatabaseSession(
     fun <T> useCredentials(block: (CharArray?, ByteArray?) -> T): T = credentials.useCredentials(block)
 
     /**
-     * ISSUE-P2-67：以**本会话同一个**附件存储解析外来 KDBX 字节（同步远端 / 缓存快照 / 合并底版）。
-     *
-     * 存在意义：同步路径此前直接调 `KdbxFile.load(...)` 而**未传** `binaryStore`，导致远端库里
-     * 超过落盘阈值的附件无论多大都内联进堆（`InnerHeader` 池持有全部明文），随后仅置空引用、
-     * 从不零化。把解析收口到会话层后，「与主会话一致」由**构造关系**保证，
-     * 任何新增调用方都不可能再忘记传 store。
-     *
-     * 语义边界（**改动前必读**）：
-     * 1. **不获取会话互斥锁**——同步周期的调用方（`SyncCycleRunner` / `SyncConflictController`）
-     *    本就持有 `SyncSessionState.mutex`，此处再加锁必然自死锁；本方法只借用凭据克隆，
-     *    不改动任何会话状态（不替换当前库、不写凭据缓存、不改 [state]）；
-     * 2. 凭据克隆在 `finally` 中显式清零，与 [useCredentials] 的契约一致；
-     * 3. **返回值所有权归调用方**：除「采用为会话库」的情形外，调用方在丢弃返回的
-     *    [KdbxDatabase] 之前**必须**调用 `clearSensitiveData()`（≤ 落盘阈值的附件仍为内联明文——
-     *    自 `ISSUE-P3-258` 起该调用一并清零其二进制池）。
+     * 用会话附件存储解析外部密文；不取会话 mutex，凭据副本由 useCredentials 擦除。
+     * 返回树归调用者；未采用前丢弃须 clearSensitiveData，避免附件明文滞留。
      */
     suspend fun parseExternalDatabase(bytes: ByteArray): KdbxResult<KdbxDatabase> =
         parseExternalKdbxBytes(bytes, ::useCredentials, binaryStore)
 
     /**
-     * 创建全新密码库文件并打开会话（ISSUE-P3-21 复合密钥三分支）。
+     * 排他创建不存在的密码库文件并打开会话；碰撞或写入失败保留原活动会话及备份。
      * 详见 [SessionOpener.create]。
-     *
-     * ISSUE-P2-85：[cipherUuid] 为外层加密算法——此前该值在会话层被硬编码为 AES-256-CBC，
-     * 使建库向导选择的 ChaCha20 / Twofish 静默失效（详见 `CreateVaultPreset`）。
+     * [cipherUuid] 为外层加密算法，带用户预设时必须显式传入。
      */
     suspend fun create(
         file: File,
@@ -190,6 +171,17 @@ class DatabaseSession(
         keyFileData: ByteArray? = null,
         cipherUuid: KdbxUuid = KdbxConstants.Cipher.AES_256_CBC
     ): KdbxResult<Unit> = opener.create(file, name, passwordChars, useArgon2, keyFileData, cipherUuid)
+
+    /** SAF 新建：writeNew 仅写本次文档且返回前验证读回；失败保留旧会话。 */
+    suspend fun createStream(
+        pathIdentifier: String, name: String, passwordChars: CharArray,
+        useArgon2: Boolean, keyFileData: ByteArray?, cipherUuid: KdbxUuid,
+        writeNew: suspend (ByteArray) -> Unit, saveWriter: suspend (ByteArray) -> Unit,
+        trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null
+    ): KdbxResult<Unit> = opener.createStream(
+        pathIdentifier, name, passwordChars, useArgon2, keyFileData, cipherUuid, writeNew, saveWriter,
+        trackedSaveWriter
+    )
 
     /**
      * 打开并解密已有 KDBX 文件（支持直接传入 File）。
@@ -213,7 +205,8 @@ class DatabaseSession(
         passwordChars: CharArray?,
         keyFileData: ByteArray? = null,
         readOnly: Boolean = false,
-        associatedFile: File? = null
+        associatedFile: File? = null,
+        trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null
     ): KdbxResult<Unit> = opener.openStream(
         pathIdentifier = pathIdentifier,
         inputStreamProvider = inputStreamProvider,
@@ -221,7 +214,8 @@ class DatabaseSession(
         passwordChars = passwordChars,
         keyFileData = keyFileData,
         readOnly = readOnly,
-        associatedFile = associatedFile
+        associatedFile = associatedFile,
+        trackedSaveWriter = trackedSaveWriter
     )
 
     /**
@@ -347,17 +341,14 @@ class DatabaseSession(
         core.activeFile = null
         core.activePathIdentifier = null
         core.saveWriter = null
+        core.trackedSaveWriter = null
+        core.credentialWriteUncertain.value = false
         core.state.value = SessionState.CLOSED
         // ISSUE-P1-07：关闭隐含锁定，派生敏态产物同样必须清理
         lockRegistry.notifySessionLocked()
     }
 
-    /**
-     * P0-3 更改主凭据：更新内存中的主密码/密钥文件缓存，并立即触发全量重加密写盘。
-     *
-     * ISSUE-P3-305：实现下沉 [SessionPersistence.changeCredentials]（逐行搬运，含
-     * ISSUE-P3-99 的密钥文件快照自持与 finally 清零语义）。
-     */
+    /** 凭据事务由 SessionPersistence 持锁执行，提交证据决定缓存采用及取消收尾。 */
     suspend fun changeCredentials(newPasswordChars: CharArray?): KdbxResult<Unit> =
         persistence.changeCredentials(newPasswordChars)
 

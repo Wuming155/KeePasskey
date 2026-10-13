@@ -66,24 +66,30 @@ internal class SessionCredentialCache {
     }
 
     /**
-     * 轮换凭据（对应拆分前 `changeCredentials` 内的同步替换块）：先清零旧主密码，
-     * 置入新主密码；仅当新密钥文件非空时清零并替换密钥文件缓存。
+     * 精确采用两个新因子：null 表示移除对应因子，不表示保留旧缓存。
+     * 调用方数组只读借用；先准备完整的独立副本，再擦除旧缓存并发布新缓存。
      */
     fun rotateCredentials(newPassword: CharArray?, newKeyFileData: ByteArray?) = synchronized(credentialLock) {
-        passwordCache?.let { Arrays.fill(it, '0') }
-        passwordCache = newPassword?.clone()
-        if (newKeyFileData != null) {
-            keyFileCache?.let { Arrays.fill(it, 0.toByte()) }
-            keyFileCache = newKeyFileData.clone()
-        }
+        replaceCredentialsInternal(newPassword, newKeyFileData)
     }
 
-    /** 轮换失败时回滚为旧凭据（对应拆分前 `changeCredentials` 的 catch 回滚块）。 */
+    /**
+     * 轮换失败时克隆恢复旧凭据；快照仍归事务所有，事务须在 finally 擦除。
+     * 不接管入参数组，避免事务擦快照时同时破坏已恢复的活动缓存。
+     */
     fun restoreCredentials(oldPassword: CharArray?, oldKeyFile: ByteArray?) = synchronized(credentialLock) {
-        passwordCache?.let { Arrays.fill(it, '0') }
-        passwordCache = oldPassword
-        keyFileCache?.let { Arrays.fill(it, 0.toByte()) }
-        keyFileCache = oldKeyFile
+        replaceCredentialsInternal(oldPassword, oldKeyFile)
+    }
+
+    /**
+     * 提交后的无分配发布：接管事务预先创建的独占副本，旧缓存当场擦除。
+     * 入参数组的所有权转移到缓存；事务此后不得读取或清零，必须撤销自己的清理责任。
+     * 仅限凭据轮换的提交收尾，禁止传入借用数组或当前缓存的别名。
+     */
+    fun adoptOwnedCredentials(password: CharArray?, keyFile: ByteArray?) = synchronized(credentialLock) {
+        clearSensitiveCacheInternal()
+        passwordCache = password
+        keyFileCache = keyFile
     }
 
     /** 清零并置空全部凭据缓存（对应拆分前 `clearSensitiveCache`）。 */
@@ -94,6 +100,25 @@ internal class SessionCredentialCache {
     /** 导出密钥文件原始字节克隆（对应拆分前 `exportKeyFileBytes`）。 */
     fun exportKeyFileBytes(): ByteArray? = synchronized(credentialLock) {
         keyFileCache?.clone()
+    }
+
+    /** 仅在 credentialLock 内调用；副本准备失败时保留当前缓存并擦除准备中的副本。 */
+    private fun replaceCredentialsInternal(password: CharArray?, keyFile: ByteArray?) {
+        val passwordCopy = password?.clone()
+        var keyFileCopy: ByteArray? = null
+        var adopted = false
+        try {
+            keyFileCopy = keyFile?.clone()
+            clearSensitiveCacheInternal()
+            passwordCache = passwordCopy
+            keyFileCache = keyFileCopy
+            adopted = true
+        } finally {
+            if (!adopted) {
+                passwordCopy?.fill('0')
+                keyFileCopy?.fill(0)
+            }
+        }
     }
 
     private fun clearSensitiveCacheInternal() {

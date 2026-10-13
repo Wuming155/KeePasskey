@@ -7,12 +7,20 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.result.KdbxError
+import com.keepasskey.database.session.CredentialRotationCancellationException
+import com.keepasskey.database.session.SessionWriteReceipt
+import com.keepasskey.core.log.AppLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import com.keepasskey.app.ui.model.textArg
 import com.keepasskey.app.ui.model.StringsProvider
@@ -33,17 +41,16 @@ internal data class MasterKeyChangeTaskState(
  * 更换主密钥任务执行体（`ISSUE-P2-354 AC③` 自 `SettingsViewModel.changeMasterPassword` 下沉；
  * 行数分档闸门 tier1≤500 倒逼同批下沉，守卫与擦除语义逐字未改）。
  *
- * - **作用域**：全库 Argon2 重派生 + 重加密是临界写，任务挂注入的 [scope]
- *   （生产即 `SettingsViewModel.viewModelScope`）——不再跑在 UI 层 `rememberCoroutineScope` 上，
- *   切 Tab / 组合销毁都不会取消（底栏 `saveState` 下 ViewModel 存活）；
+ * - **作用域**：生产任务由应用单例 [CredentialRotationRuntime] 持有，页面只订阅状态。
+ *   页面与 ViewModel 销毁均不会取消已受理的写入；[scope] 仅供纯 JVM 测试注入。
  * - **忙守卫**：[MasterKeyChangeTaskState.isChanging] 为 true 时并发第二次**直接拒绝**，
- *   且入参数组照样清零——数组所有权自 `submit` 调用起移交本类，忙 / 闲、成败、异常路径
+ *   且入参数组照样清零——受理时复制密码与因子并即时擦除调用方输入；任务只读自己的副本，忙 / 闲、成败、异常路径
  *   都由本类的 `finally` 负责擦除；
  * - **回执**：结果经 [state] 的 `feedback` 下发（`SettingsContent` 既有 Snackbar 路径展示后
  *   由 `clearFeedback` 清除），对话框据 busy 回落自行关闭。
  *
  * ISSUE-P2-398：**改密成功后**追加生物识别封印凭据重封印（[resealAfterChange]，可空 =
- * 未装配 / 单测），同任务内串行执行——此时新密码仍在入参数组中存活（`finally` 才清零），
+ * 未装配 / 单测），同任务内串行执行——此时新密码仍在任务私有副本中存活（`finally` 才清零），
  * 是唯一能以新密码重封印的窗口；重封印任何失败都 fail-safe（不影响已成功的改密回执），
  * 且不改变 busy 语义（对话框在 BiometricPrompt 收起后才回落）。
  *
@@ -72,7 +79,9 @@ internal fun masterKeyChangeControllerOf(
     vaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore?,
     strings: StringsProvider,
     residualBackupProbe: suspend () -> Boolean,
-    onCredentialsRotated: suspend () -> Unit
+    onCredentialsRotated: suspend () -> Unit,
+    runtime: CredentialRotationRuntime? = null,
+    completion: CredentialRotationCompletion? = null
 ): SettingsMasterKeyChangeController = SettingsMasterKeyChangeController(
     repository = repository,
     scope = scope,
@@ -81,7 +90,11 @@ internal fun masterKeyChangeControllerOf(
     vaultCopyStore = vaultCopyStore,
     strings = strings,
     residualBackupProbe = residualBackupProbe,
-    onCredentialsRotated = onCredentialsRotated
+    onCredentialsRotated = onCredentialsRotated,
+    runtime = runtime,
+    completion = completion?.let { owner -> owner::complete },
+    captureSyncTarget = completion?.let { owner -> owner::captureTarget },
+    onUncertainWrite = completion?.let { owner -> owner::invalidate }
 )
 
 internal class SettingsMasterKeyChangeController(
@@ -126,20 +139,24 @@ internal class SettingsMasterKeyChangeController(
      * 而「本库已用新凭据重新加密、云端副本待替换」这一事实在写盘成功时就已成立。
      * 契约：实现自身不得抛出（失败以返回值表达）；换密已成功这一结果不因登记失败而改变。
      */
-    private val onCredentialsRotated: (suspend () -> Unit)? = null
+    private val onCredentialsRotated: (suspend () -> Unit)? = null,
+    private val runtime: CredentialRotationRuntime? = null,
+    private val completion: (suspend (String?, FragmentActivity?, CharArray?, String?) -> Unit)? = null,
+    private val captureSyncTarget: (suspend () -> String?)? = null,
+    private val onUncertainWrite: ((String?) -> Unit)? = null
 ) {
 
-    private val mutableState = MutableStateFlow(MasterKeyChangeTaskState())
+    private val mutableState = runtime?.state ?: MutableStateFlow(MasterKeyChangeTaskState())
 
     /** busy + 结果反馈（投影层订阅它并入 [SettingsUiState]）。 */
     val state: StateFlow<MasterKeyChangeTaskState> = mutableState.asStateFlow()
 
     /**
-     * 提交凭据变更（[newPasswordChars] 所有权移交本方法，见类 KDoc 的擦除契约）。
+     * 提交凭据变更；复制输入后即时擦除调用方数组，任务完成后擦除自有副本。
      *
      * ISSUE-P3-428：[keyFileIntent] 透传对密钥文件第二因子的意图（默认 Keep 沿用
      * 既有语义）；`Use` 携带的字节同为借用语义——仓库侧只读不擦除，**清零责任在本
-     * 方法的 `finally`**（与密码数组同一收尾窗口），成败与异常路径均不遗留。
+     * 任务完成钩子与 `finally`**（与密码数组同一收尾窗口），成败与异常路径均不遗留。
      * ISSUE-P3-430：[newPasswordChars] 为**空数组** = 密码分量不变，走
      * [VaultRepository.changeKeyFileOnly]（仅改绑密钥文件；此时 [keyFileIntent] 必须非
      * `Keep`，否则无任何改动——同步拒绝并留痕，不产生假回执）；重封印入参对应传 null。
@@ -152,61 +169,100 @@ internal class SettingsMasterKeyChangeController(
         activity: FragmentActivity? = null
     ) {
         val keepPassword = newPasswordChars.isEmpty()
-        if (keepPassword && keyFileIntent == ChangeKeyFileIntent.Keep) {
-            // 无任何改动（对话框闸门本应拦住）：原样清零，不进任务、不报错
+        val previous = mutableState.value
+        if ((keepPassword && keyFileIntent == ChangeKeyFileIntent.Keep) || previous.isChanging ||
+            !mutableState.compareAndSet(previous, previous.copy(isChanging = true))
+        ) {
             newPasswordChars.fill('0')
             keyFileIntent.eraseBorrowedBytes()
             return
         }
-        if (mutableState.value.isChanging) {
-            newPasswordChars.fill('0')
-            keyFileIntent.eraseBorrowedBytes()
-            return
+        val input = try {
+            CredentialRotationInput.copyAndEraseCaller(newPasswordChars, keyFileIntent)
+        } catch (error: Throwable) { // cancel-n/a: 保护段仅复制数组，无挂起点
+            mutableState.update { it.copy(isChanging = false) }
+            throw error
         }
-        mutableState.update { it.copy(isChanging = true) }
-        scope.launch {
+        val job = (runtime?.scope ?: scope).launch {
             try {
-                val result = if (keepPassword) {
-                    repository.changeKeyFileOnly(keyFileIntent)
-                } else {
-                    repository.changeMasterPassword(newPasswordChars, keyFileIntent)
-                }
-                val feedback = when (val r = result) {
-                    is KdbxResult.Success<*> -> {
-                        // ISSUE-P2-520：成功回执按残余面追加说明——① 云端旧版本（同步绑定库才有）
-                        // 在下次同步被替换、期间仍可用旧口令解开；② .bak 删除失败时旧口令可解的
-                        // 残留仍在私有目录（下次成功保存自动清理）。两项都缺席时占位为空串，
-                        // 渲染文本与旧口径逐字一致。
-                        val cloudNote =
-                            if (syncBound()) strings.get(R.string.set_master_key_cloud_old_version_note) else ""
-                        val backupNote =
-                            if (residualBackupProbe?.invoke() == true) {
-                                strings.get(R.string.set_master_key_backup_cleanup_failed_note)
-                            } else {
-                                ""
-                            }
-                        UiMessage(R.string.set_master_key_updated, listOf(cloudNote, backupNote))
-                    }
-                    is KdbxResult.Failure -> UiMessage(R.string.op_failed, listOf(r.textArg(strings)))
-                }
-                mutableState.update {
-                    it.copy(feedback = feedback)
-                }
-                if (result is KdbxResult.Success) {
-                    // ISSUE-P3-434：记忆记录必须与新绑定的密钥文件一致（先于重封印）；
-                    // §411（P3-448）：副本随同一裁决收编 / 清除
-                    syncRememberedKeyFile(keyFileIntent)
-                    // ISSUE-P3-528：本地库已用新凭据重新加密 ⇒ 登记「云端副本待替换」，
-                    // 下一次同步周期据此强制重序列化并上传（否则云端长期保留旧口令可解版本）。
-                    onCredentialsRotated?.invoke()
-                    resealAfterChange?.invoke(activity, newPasswordChars.takeIf { !keepPassword })
-                }
+                val action: suspend () -> Unit = { performRotation(input, activity) }
+                if (runtime != null) runtime.run(action) else action()
             } finally {
-                newPasswordChars.fill('0')
-                keyFileIntent.eraseBorrowedBytes()
-                mutableState.update { it.copy(isChanging = false) }
+                input.close()
             }
         }
+        // 忙态仅在完成钩子释放：finally 提前释放会让下一任务受理后又被旧钩子覆盖成空闲。
+        // DEFAULT launch 在已取消作用域中可能一次都未进入体；完成钩子仍负责擦除与忙态回落。
+        job.invokeOnCompletion {
+            input.close()
+            mutableState.update { it.copy(isChanging = false) }
+        }
+    }
+
+    private suspend fun performRotation(input: CredentialRotationInput, activity: FragmentActivity?) {
+        val databaseId = activeDbId()
+        val syncTarget = captureSyncTarget?.invoke()
+        val password = input.password.takeIf { it.isNotEmpty() }
+        val result = try {
+            if (password == null) repository.changeKeyFileOnly(input.keyFile)
+            else repository.changeMasterPassword(password, input.keyFile)
+        } catch (error: CredentialRotationCancellationException) {
+            if (error.writeStatus == SessionWriteReceipt.Status.COMMITTED) {
+                finishCommitted(input.keyFile, databaseId, null, password, syncTarget)
+                withContext(NonCancellable) { publishFeedback(KdbxResult.Success(Unit)) }
+            } else {
+                onUncertainWrite?.invoke(databaseId)
+                publishFeedback(KdbxResult.Failure(error, code = KdbxError.CREDENTIALS_WRITE_UNCERTAIN))
+            }
+            throw error
+        }
+        if (result is KdbxResult.Success) {
+            finishCommitted(input.keyFile, databaseId, activity, password, syncTarget)
+        } else if (result is KdbxResult.Failure && result.code == KdbxError.CREDENTIALS_WRITE_UNCERTAIN) {
+            onUncertainWrite?.invoke(databaseId)
+        }
+        publishFeedback(result)
+    }
+
+    private suspend fun finishCommitted(
+        intent: ChangeKeyFileIntent,
+        databaseId: String?,
+        activity: FragmentActivity?,
+        password: CharArray?,
+        syncTarget: String?
+    ) {
+        try {
+            withContext(NonCancellable) {
+                withTimeoutOrNull(10_000L) { syncRememberedKeyFile(intent, databaseId) }
+            }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            AppLog.w("CredentialRotation", "记忆密钥文件维护失败", error)
+        } finally {
+            val owner = completion
+            if (owner != null) owner(databaseId, activity, password, syncTarget)
+            else {
+                try {
+                    onCredentialsRotated?.invoke()
+                } finally {
+                    resealAfterChange?.invoke(activity, password)
+                }
+            }
+        }
+    }
+
+    private suspend fun publishFeedback(result: KdbxResult<Unit>) {
+        val feedback = when (result) {
+            is KdbxResult.Success -> {
+                val cloudNote = if (syncBound()) strings.get(R.string.set_master_key_cloud_old_version_note) else ""
+                val backupNote = if (residualBackupProbe?.invoke() == true) {
+                    strings.get(R.string.set_master_key_backup_cleanup_failed_note)
+                } else ""
+                UiMessage(R.string.set_master_key_updated, listOf(cloudNote, backupNote))
+            }
+            is KdbxResult.Failure -> UiMessage(R.string.op_failed, listOf(result.textArg(strings)))
+        }
+        mutableState.update { it.copy(feedback = feedback) }
     }
 
     /**
@@ -222,9 +278,8 @@ internal class SettingsMasterKeyChangeController(
      *
      * 全程只触碰 Uri / 显示名（非密钥元数据）；任何失败都不影响已成功的改密回执。
      */
-    private suspend fun syncRememberedKeyFile(intent: ChangeKeyFileIntent) {
+    private suspend fun syncRememberedKeyFile(intent: ChangeKeyFileIntent, dbId: String?) {
         val access = keyFileAccess ?: return
-        val dbId = activeDbId()
         val rememberEnabled = access.isRememberEnabled()
         when (intent) {
             is ChangeKeyFileIntent.Use -> {

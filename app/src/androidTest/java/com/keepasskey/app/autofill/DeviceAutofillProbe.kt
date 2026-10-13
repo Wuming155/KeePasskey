@@ -10,6 +10,7 @@ import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.platform.app.InstrumentationRegistry
+import com.keepasskey.app.R
 import java.io.FileInputStream
 
 /**
@@ -97,6 +98,10 @@ internal class DeviceAutofillProbe {
 
     /** 递归收集节点（带上限，避免异常树导致长循环） */
     fun collect(): List<AccessibilityNodeInfo> {
+        return roots().flatMap { collectTree(it) }.take(MAX_NODES)
+    }
+
+    private fun collectTree(root: AccessibilityNodeInfo?): List<AccessibilityNodeInfo> {
         val out = mutableListOf<AccessibilityNodeInfo>()
         fun walk(node: AccessibilityNodeInfo?, depth: Int) {
             if (node == null || depth > MAX_DEPTH || out.size >= MAX_NODES) return
@@ -105,7 +110,7 @@ internal class DeviceAutofillProbe {
                 walk(node.getChild(index), depth + 1)
             }
         }
-        roots().forEach { walk(it, 0) }
+        walk(root, 0)
         return out
     }
 
@@ -134,9 +139,71 @@ internal class DeviceAutofillProbe {
         return null
     }
 
-    /** 文本包含给定子串的节点（跨全部窗口） */
-    fun awaitText(needle: String, timeoutMs: Long): AccessibilityNodeInfo? =
-        awaitNode("文本包含「$needle」", timeoutMs) { textOf(it).contains(needle) }
+    /** 客户端锚点：只认指定包的可见节点与精确文字，不扫描后台窗口的相似标题。 */
+    fun awaitAppText(packageName: String, text: String, timeoutMs: Long): AccessibilityNodeInfo? =
+        awaitForegroundAppNode("$packageName 的「$text」", packageName, timeoutMs) {
+            AutofillNodeIdentity.appNode(it, packageName) && AutofillNodeIdentity.exactText(it, text)
+        }
+
+    /** 状态前缀是合成客户端的结构化协议；仍严格限制在该客户端活动窗口。 */
+    fun awaitClientStatus(packageName: String, prefix: String, timeoutMs: Long): AccessibilityNodeInfo? =
+        awaitForegroundAppNode("客户端状态 $prefix", packageName, timeoutMs) {
+            AutofillNodeIdentity.appNode(it, packageName) && textOf(it).startsWith("$prefix ")
+        }
+
+    /** 框架填充弹窗可夺取活动窗口；客户端必须仍是最高层应用窗口，不能退到任意可见后台库。 */
+    private fun awaitForegroundAppNode(
+        label: String, packageName: String, timeoutMs: Long,
+        predicate: (AccessibilityNodeInfo) -> Boolean
+    ): AccessibilityNodeInfo? {
+        prepare()
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            val windows = automation.windows.filter {
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                    it.root?.packageName?.toString() !in setOf("android", "com.android.systemui")
+            }
+            val topLayer = windows.maxOfOrNull { it.layer }
+            val roots = windows.filter { it.layer == topLayer }.mapNotNull { it.root }
+                .filter { it.packageName?.toString() == packageName }
+            val matches = roots.flatMap { collectTree(it) }.filter(predicate)
+            if (matches.size > 1) error("客户端前台定位歧义: $label")
+            matches.singleOrNull()?.let { return it }
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        Log.w(TAG, "前台应用窗口定位超时: $label；快照:\n${snapshot()}")
+        return null
+    }
+
+    /** 数据集不是 app 活动窗口：只查框架/IME 承载且在当前客户端窗口之上的 UI。 */
+    fun awaitDatasetText(packageName: String, text: String, timeoutMs: Long): AccessibilityNodeInfo? {
+        prepare()
+        val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+        check(packageName == targetContext.packageName) { "数据集资源必须来自被测 APK" }
+        val titleResourceName = targetContext.resources.getResourceName(R.id.tv_username)
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            val windows = automation.windows.orEmpty()
+            val focusedLayer = windows.firstOrNull { it.isFocused }?.layer
+            val matches = mutableListOf<AccessibilityNodeInfo>()
+            for (window in windows) {
+                val root = window.root ?: continue
+                if (!AutofillNodeIdentity.datasetWindow(
+                        window.type, root.packageName?.toString(), window.layer, focusedLayer
+                    )) continue
+                matches += collectTree(root).filter {
+                    AutofillNodeIdentity.datasetTitle(
+                        it, titleResourceName, text, window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
+                    )
+                }
+            }
+            // 多窗/同窗多个精确匹配也属身份歧义，不以 firstOrNull 猜测。
+            if (matches.size == 1) return matches.single()
+            SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        Log.w(TAG, "数据集身份定位超时: $text；快照:\n${snapshot()}")
+        return null
+    }
 
     /**
      * 只在**活动窗口**内查找节点。
@@ -149,17 +216,12 @@ internal class DeviceAutofillProbe {
         timeoutMs: Long,
         predicate: (AccessibilityNodeInfo) -> Boolean
     ): AccessibilityNodeInfo? {
+        prepare()
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
             val root = runCatching { automation.rootInActiveWindow }.getOrNull()
-            val nodes = mutableListOf<AccessibilityNodeInfo>()
-            fun walk(node: AccessibilityNodeInfo?, depth: Int) {
-                if (node == null || depth > MAX_DEPTH || nodes.size >= MAX_NODES) return
-                nodes.add(node)
-                for (index in 0 until node.childCount) walk(node.getChild(index), depth + 1)
-            }
-            walk(root, 0)
-            nodes.firstOrNull(predicate)?.let { return it }
+            val matches = collectTree(root).filter(predicate)
+            if (matches.size == 1) return matches.single()
             SystemClock.sleep(POLL_INTERVAL_MS)
         }
         Log.w(TAG, "活动窗口内等待节点超时: $label；快照:\n${snapshot()}")
@@ -215,12 +277,14 @@ internal class DeviceAutofillProbe {
             builder.append("  [窗口 $index] type=").append(window.type)
                 .append(" focused=").append(window.isFocused)
                 .append(" active=").append(window.isActive)
+                .append(" layer=").append(window.layer)
+                .append(" locales=").append(window.locales.toLanguageTags())
                 .append('\n')
-            window.root?.let { builder.append(describe(listOf(it), indent = "    ")) }
+            window.root?.let { builder.append(describe(collectTree(it), indent = "    ")) }
         }
         builder.append("活动窗口节点:\n")
         runCatching { automation.rootInActiveWindow }.getOrNull()
-            ?.let { builder.append(describe(collect(), indent = "    ")) }
+            ?.let { builder.append(describe(collectTree(it), indent = "    ")) }
         return builder.toString()
     }
 
@@ -235,6 +299,9 @@ internal class DeviceAutofillProbe {
             append(" clickable=").append(node.isClickable)
             append(" editable=").append(node.isEditable)
             append(" password=").append(node.isPassword)
+            append(" visible=").append(node.isVisibleToUser)
+            append(" enabled=").append(node.isEnabled)
+            append(" package=").append(node.packageName)
             append(" resourceId=").append(node.viewIdResourceName)
             append('\n')
         }

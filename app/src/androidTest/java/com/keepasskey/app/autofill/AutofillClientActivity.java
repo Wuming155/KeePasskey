@@ -4,6 +4,10 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Process;
+import android.content.Intent;
+import java.util.Arrays;
+import java.util.UUID;
 import android.text.InputType;
 import android.util.Log;
 import android.view.View;
@@ -54,6 +58,19 @@ public class AutofillClientActivity extends Activity {
     /** 重新触发填充的按钮文本（测试侧必要时可点击） */
     public static final String REQUEST_BUTTON_TEXT = "重新请求自动填充";
 
+    /** 仅合成测试进程使用的运行协议；每轮以及每个表单实例均有新身份。 */
+    public static final String EXTRA_RUN_ID = "ac3.runId";
+    public static final String EXTRA_EXPECTED_USERNAME = "ac3.expectedUsername";
+    public static final String EXTRA_EXPECTED_PASSWORD = "ac3.expectedPassword";
+    public static final String ACTION_FINISH_RUN = "com.keepasskey.test.autofill.FINISH_RUN";
+
+    private String runId;
+    private final String instanceId = UUID.randomUUID().toString();
+    private char[] expectedUsername = new char[0];
+    private char[] expectedPassword = new char[0];
+    private int requestCount;
+    private boolean closing;
+
     private static final long FIRST_REQUEST_DELAY_MS = 1500L;
     private static final long TICK_INTERVAL_MS = 1000L;
     private static final int TICK_LIMIT = 150;
@@ -91,6 +108,21 @@ public class AutofillClientActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        runId = getIntent().getStringExtra(EXTRA_RUN_ID);
+        if (runId == null || !runId.matches("[a-zA-Z0-9-]{1,100}")) {
+            finishAndRemoveTask();
+            return;
+        }
+        if (ACTION_FINISH_RUN.equals(getIntent().getAction())) {
+            closeRun();
+            finishAndRemoveTask();
+            return;
+        }
+        expectedUsername = getIntent().getCharArrayExtra(EXTRA_EXPECTED_USERNAME);
+        expectedPassword = getIntent().getCharArrayExtra(EXTRA_EXPECTED_PASSWORD);
+        getIntent().removeExtra(EXTRA_EXPECTED_USERNAME);
+        getIntent().removeExtra(EXTRA_EXPECTED_PASSWORD);
+        Log.i(TAG, "created runId=" + runId + " instanceId=" + instanceId + " pid=" + Process.myPid());
         float density = getResources().getDisplayMetrics().density;
         int pad = (int) (16 * density);
         int top = (int) (64 * density);
@@ -144,6 +176,7 @@ public class AutofillClientActivity extends Activity {
     @Override
     protected void onPostResume() {
         super.onPostResume();
+        if (closing || isFinishing()) return;
         // 等首帧布局完成后再请求（autofillId 需视图已附着到窗口）；每个实例只请求一次，见 requestedOnce
         if (!requestedOnce) {
             requestedOnce = true;
@@ -160,31 +193,71 @@ public class AutofillClientActivity extends Activity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (ACTION_FINISH_RUN.equals(intent.getAction())
+                && runId != null && runId.equals(intent.getStringExtra(EXTRA_RUN_ID))) {
+            closeRun();
+            finishAndRemoveTask();
+        }
+        // 同身份重复启动不重发；新身份由测试前置冷停后新建实例，禁止以 onResume 无限重发。
+    }
+
+    @Override
     protected void onDestroy() {
-        handler.removeCallbacksAndMessages(null);
+        closeRun();
         super.onDestroy();
     }
 
+    private void closeRun() {
+        if (closing) return;
+        closing = true;
+        handler.removeCallbacksAndMessages(null);
+        AutofillManager manager = getSystemService(AutofillManager.class);
+        if (manager != null) manager.cancel();
+        if (expectedUsername != null) Arrays.fill(expectedUsername, '\0');
+        if (expectedPassword != null) Arrays.fill(expectedPassword, '\0');
+        if (usernameField != null) usernameField.getText().clear();
+        if (passwordField != null) passwordField.getText().clear();
+        Log.i(TAG, "cancelled runId=" + runId + " instanceId=" + instanceId);
+    }
+
     private void requestAutofillNow(String reason) {
+        if (closing || isFinishing()) return;
         AutofillManager manager = getSystemService(AutofillManager.class);
         if (manager == null) {
             Log.w(TAG, "AutofillManager 不可用，无法请求填充");
             return;
         }
-        Log.i(TAG, "requestAutofill(" + reason + ") 调用");
         try {
             manager.requestAutofill(usernameField);
+            requestCount++;
+            Log.i(TAG, "requestAutofill(" + reason + ") runId=" + runId
+                    + " instanceId=" + instanceId + " pid=" + Process.myPid() + " requestCount=" + requestCount);
         } catch (Throwable t) {
             Log.w(TAG, "requestAutofill 抛出 " + t.getClass().getSimpleName());
         }
     }
 
-    /** 当前表单状态摘要（口令只出长度） */
+    /** 当前表单状态摘要（仅长度及与合成种子的比较结果，不输出字段明文）。 */
     private String describeState() {
         return STATUS_PREFIX
-                + " username=[" + usernameField.getText() + "]"
+                + " runId=" + runId + " instanceId=" + instanceId + " requestCount=" + requestCount
+                + " usernameLength=" + usernameField.getText().length()
                 + " passwordLength=" + passwordField.getText().length()
                 + " usernameFilled=" + (usernameField.getText().length() > 0)
-                + " passwordFilled=" + (passwordField.getText().length() > 0);
+                + " passwordFilled=" + (passwordField.getText().length() > 0)
+                + " usernameMatchesSeed=" + matchesSeed(usernameField.getText(), expectedUsername)
+                + " passwordMatchesSeed=" + matchesSeed(passwordField.getText(), expectedPassword);
+    }
+
+    /** 按字符比对，避免将输入框内口令转换为 String 或写入日志。 */
+    private boolean matchesSeed(CharSequence actual, char[] expected) {
+        if (expected == null || expected.length == 0 || actual.length() != expected.length) return false;
+        int mismatch = 0;
+        for (int index = 0; index < expected.length; index++) {
+            mismatch |= actual.charAt(index) ^ expected[index];
+        }
+        return mismatch == 0;
     }
 }

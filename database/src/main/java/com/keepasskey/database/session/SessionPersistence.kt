@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.util.Arrays
 
 /**
  * 会话落盘与凭据轮换（ISSUE-P3-305 结构拆分，逐行搬运）。
@@ -37,11 +36,20 @@ internal class SessionPersistence(
      */
     private val progress: (Float?) -> Unit = {}
 ) {
+    private val rotation = SessionCredentialRotation(core, credentials, fileWriter) { db, pwd, key ->
+        serializeToBytes(db, pwd, key)
+    }
 
     /**
      * 保存当前内存中的活动数据库并写入文件/URI 通道
      */
     suspend fun save(): KdbxResult<Unit> = mutex.withLock {
+        if (core.credentialWriteUncertain.value) {
+            return@withLock KdbxResult.Failure(
+                IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),
+                code = KdbxError.CREDENTIALS_WRITE_UNCERTAIN
+            )
+        }
         if (core.readOnlyMode) {
             return@withLock KdbxResult.Failure(
                 IllegalStateException("数据库以只读模式打开"),
@@ -148,10 +156,10 @@ internal class SessionPersistence(
      * 现改为显式重载：快照由本方法自持，并在返回前 `finally` 清零。
      * **顺序硬约束**：清零只发生在**写盘与可能回滚之后**——写前擦会静默写出「用全零密钥文件加密」的库。
      */
-    suspend fun changeCredentials(newPasswordChars: CharArray?): KdbxResult<Unit> {
+    suspend fun changeCredentials(newPasswordChars: CharArray?): KdbxResult<Unit> = mutex.withLock {
         val keyFileSnapshot = credentials.keyFileSnapshot()
-        return try {
-            changeCredentials(newPasswordChars, keyFileSnapshot)
+        try {
+            rotation.execute(newPasswordChars, keyFileSnapshot)
         } finally {
             keyFileSnapshot?.fill(0)
         }
@@ -169,49 +177,7 @@ internal class SessionPersistence(
         newPasswordChars: CharArray?,
         newKeyFileData: ByteArray?
     ): KdbxResult<Unit> = mutex.withLock {
-        if (core.readOnlyMode) {
-            return@withLock KdbxResult.Failure(
-                IllegalStateException("数据库处于只读模式，无法修改主凭据"),
-                code = KdbxError.CREDENTIALS_READ_ONLY
-            )
-        }
-        val writer = core.saveWriter ?: return@withLock KdbxResult.Failure(
-            IllegalStateException("无活动数据库保存通道"),
-            code = KdbxError.CREDENTIALS_NO_WRITER
-        )
-        val db = core.database.value ?: return@withLock KdbxResult.Failure(
-            IllegalStateException("活动数据库为空"),
-                code = KdbxError.CREDENTIALS_NO_DATABASE
-        )
-
-        val oldPwd = credentials.passwordSnapshot()
-        val oldKey = credentials.keyFileSnapshot()
-
-        credentials.rotateCredentials(newPasswordChars, newKeyFileData)
-
-        try {
-            // ISSUE-P3-118：同型第三处（换密路径）——序列化缓冲同样须具名并在用毕后清零
-            val serialized = serializeToBytes(db, newPasswordChars, newKeyFileData)
-            try {
-                writer(serialized)
-                // ISSUE-P2-11 (ZT-16)：凭据轮换后旧密文快照必须失效——
-                // 本次写盘可能生成了用「旧凭据」加密的 .bak，历史遗留的 .bak 同理，
-                // 旧口令仍可将其解开，故成功换密后一律删除活动文件的滚动备份（失败仅告警）。
-                fileWriter.deleteBackupQuietly(core.activeFile)
-                core.state.value = DatabaseSession.SessionState.OPENED
-                oldPwd?.let { Arrays.fill(it, '0') }
-                oldKey?.let { Arrays.fill(it, 0.toByte()) }
-                KdbxResult.Success(Unit)
-            } finally {
-                // ISSUE-P3-551：换密路径同型——写盘异常时整库密文缓冲不得滞留堆上
-                serialized.fill(0)
-            }
-        } catch (t: Throwable) {
-            if (t is CancellationException) throw t
-            // 失败时回滚既有凭据
-            credentials.restoreCredentials(oldPwd, oldKey)
-            KdbxResult.Failure(t, code = KdbxError.CREDENTIALS_CHANGE_FAILED)
-        }
+        rotation.execute(newPasswordChars, newKeyFileData)
     }
 
     /**
@@ -223,16 +189,10 @@ internal class SessionPersistence(
      *
      * @param newKeyFileData 新密钥文件字节（null = 解绑）；借用语义同双参 [changeCredentials]。
      */
-    suspend fun changeKeyFileOnly(newKeyFileData: ByteArray?): KdbxResult<Unit> {
+    suspend fun changeKeyFileOnly(newKeyFileData: ByteArray?): KdbxResult<Unit> = mutex.withLock {
         val pwdSnapshot = credentials.passwordSnapshot()
-        if (pwdSnapshot == null && newKeyFileData == null) {
-            return KdbxResult.Failure(
-                IllegalStateException("会话无主密码分量，解绑密钥文件将不剩任何解锁因子"),
-                code = KdbxError.CREDENTIALS_KEYFILE_ONLY_UNBIND
-            )
-        }
-        return try {
-            changeCredentials(pwdSnapshot, newKeyFileData)
+        try {
+            rotation.execute(pwdSnapshot, newKeyFileData)
         } finally {
             pwdSnapshot?.fill('0')
         }
@@ -267,12 +227,15 @@ internal class SessionPersistence(
         onProgress: ((Float?) -> Unit)? = null
     ): ByteArray {
         val buffer = WipableByteArrayOutputStream()
+        var pending: ByteArray? = null
         return try {
             withContext(Dispatchers.Default) {
                 KdbxFile.save(buffer, db, pwd, keyFile, onProgress)
-                buffer.toByteArray()
+                pending = buffer.toByteArray()
             }
+            pending!!.also { pending = null }
         } finally {
+            pending?.fill(0)
             buffer.wipe()
         }
     }

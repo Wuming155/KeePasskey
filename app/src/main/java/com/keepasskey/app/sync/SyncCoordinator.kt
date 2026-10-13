@@ -210,28 +210,28 @@ open class SyncCoordinator @Inject constructor(
         session.isOfflineMode = enabled
     }
 
-    /**
-     * `ISSUE-P3-528`：主凭据变更**成功后**的事实登记——把「本地库已用新凭据重新加密」
-     * 落成持久标记，令下一次同步周期强制以当前凭据重新序列化并上传（替换云端仍持旧口令的副本）。
-     *
-     * 空操作口径：未注入标记表 / 无活动库文件 / 解析不出远端路径 ⇒ 返回 false
-     * （未配置同步时本就没有云端副本可替换）；任何异常**不上抛**——事实登记失败
-     * **不得**影响「换密已成功」这一既成结果，故只落脱敏日志（不含远端路径，防凭据面 PII 入日志）。
-     *
-     * @return true = 标记已落盘，下次同步周期将重传本地新凭据版本
-     */
-    suspend fun markLocalVaultRecrypted(): Boolean = withContext(Dispatchers.IO) {
-        val store = credentialRotation ?: return@withContext false
+    /** 成功换密后登记本地重加密事实；未配置同步则空操作，不触发网络。 */
+    suspend fun markLocalVaultRecrypted(): Boolean = markCredentialRotationTarget(captureCredentialRotationTarget())
+
+    /** 轮换前固定远端身份，提交后不能按已切换的活动库登记同步事实。 */
+    suspend fun captureCredentialRotationTarget(): String? = withContext(Dispatchers.IO) {
+        if (credentialRotation == null) return@withContext null
         val fileName = databaseSession.currentFile?.name
             ?: databaseSession.databaseFlow.value?.let { "${it.databaseName}.kdbx" }
-            ?: return@withContext false
+            ?: return@withContext null
+        session.testRemotePath ?: providers.resolveRemotePath(fileName)
+    }
+
+    /** 仅写入已捕获目标的本地标记，不触发网络或重读活动库。 */
+    suspend fun markCredentialRotationTarget(remotePath: String?): Boolean = withContext(Dispatchers.IO) {
+        val store = credentialRotation ?: return@withContext false
+        if (remotePath == null) return@withContext false
         try {
-            val remotePath = session.testRemotePath ?: providers.resolveRemotePath(fileName)
             store.markRecrypted(remotePath)
             debugLog.info(SYNC_LOG_TAG, "主凭据已轮换：已登记云端副本待替换")
             true
-        } catch (e: Exception) { // cancel-n/a: 保护段为非挂起登记（resolveRemotePath / markRecrypted）
-            debugLog.warn(SYNC_LOG_TAG, "登记云端副本待替换失败，按未登记继续: ${e.javaClass.simpleName}")
+        } catch (e: Exception) { // cancel-n/a: 非挂起偏好登记
+            debugLog.warn(SYNC_LOG_TAG, "登记云端副本待替换失败: ${e.javaClass.simpleName}")
             false
         }
     }

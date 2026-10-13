@@ -37,13 +37,13 @@ class CreateVaultLocationWiringTest {
     private val wizardSource: String
         get() = readSource(
             "app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardDialog.kt"
-        )
+        ) + readSource("app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardNameState.kt")
 
     @Test
     fun `持久化授权先于任何建库与写盘动作`() {
         val consent = creatorSource.indexOf("takePersistableUriPermission")
-        val create = creatorSource.indexOf("databaseSession.create(")
-        val write = creatorSource.indexOf("openOutputStream(targetUri")
+        val create = creatorSource.indexOf("databaseSession.createStream(")
+        val write = creatorSource.indexOf("writeOwnedDocument(context, targetUri, bytes)")
 
         assertTrue("SAF 建库路径必须申请持久化授权", consent >= 0)
         assertTrue("授权必须在临时库创建之前裁决", consent < create)
@@ -64,40 +64,26 @@ class CreateVaultLocationWiringTest {
 
     @Test
     fun `三条失败出口均回滚刚创建的文档`() {
-        listOf(
-            "created !is KdbxResult.Success",
-            "written.isFailure",
-            "opened !is KdbxResult.Success"
-        ).forEach {
-            assertTrue("缺失败判定：$it", creatorSource.contains(it))
-        }
-        assertTrue(
-            "每个失败分支都须删除本次创建的文档（至少三处调用）",
-            Regex("SafDocumentCleanup\\.deleteCreatedDocument").findAll(creatorSource).count() >= 3
-        )
+        assertTrue("必须领取本流程文档后才有清理权限", creatorSource.contains("NewVaultDocumentClaims.consume(targetUri)"))
+        assertTrue("失败统一收口，已提交文档不删除", creatorSource.contains("if (!committed) deleteEmptyOwnedDocument(context, targetUri)"))
+        assertTrue("部分写入的文档必须保留，不能误删竞争内容", creatorSource.contains("if (empty) SafDocumentCleanup.deleteCreatedDocument(context, uri)"))
     }
 
     @Test
     fun `中转临时文件在 finally 中删除`() {
+        // ISSUE-P1-594：中转库已被 createStream 替代；保留资产锁定无临时活动会话与失败清理。
+        assertTrue("不得把中转库作为活动会话", !creatorSource.contains("file = tempFile"))
         val finallyAt = creatorSource.indexOf("} finally {")
-        assertTrue("缺 finally 收口", finallyAt >= 0)
-        assertTrue(
-            "cacheDir 中转库必须在 finally 删除",
-            creatorSource.substring(finallyAt).contains("tempFile.delete()")
-        )
+        assertTrue("失败文档仍必须 finally 收口", finallyAt >= 0)
+        assertTrue(creatorSource.substring(finallyAt).contains("deleteEmptyOwnedDocument"))
     }
 
     @Test
     fun `写后读回复核且登记复用仓库单一出口`() {
-        assertTrue(
-            "写完后须以 openStream 重新绑定（既验证读回、又让用户停留在已解锁态）",
-            creatorSource.contains("databaseSession.openStream(")
-        )
-        assertTrue("登记经 register 回调上行", creatorSource.contains("register(name, targetUri.toString())"))
-        assertTrue(
-            "协调器侧必须按「系统文件选择器」口径登记（该值决定 isRemote=false，即不参与同步）",
-            coordinatorSource.contains("importExternalDatabase(dbName, path, SYNC_TYPE_FILE_PICKER)")
-        )
+        assertTrue("专用创建原语在读回复核成功后才移交会话", creatorSource.contains("databaseSession.createStream("))
+        assertTrue("必须字节对拍读回", creatorSource.contains("read.contentEquals(bytes) && input.read() == -1"))
+        assertTrue("登记使用系统实际名称和 URI", creatorSource.contains("register(actualName, targetUri.toString())"))
+        assertTrue("统一登记出口", coordinatorSource.contains("importExternalDatabase(dbName, path, SYNC_TYPE_FILE_PICKER)"))
     }
 
     @Test

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="err_create_collision">同名密码库已存在，请使用其他名称。</string>
+    <string name="err_create_unsupported">此位置不支持安全新建密码库，请选择其他位置。</string>
+    <string name="err_create_invalid_name">请输入有效文件名，不能包含路径分隔符。</string>
+</resources>

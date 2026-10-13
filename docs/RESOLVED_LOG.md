@@ -601,3 +601,4 @@
 | §501 | PD-04 触发面登记漂移补记批次 | `ISSUE-P3-586`（整条闭环；P3 1 → 0；PD-04 两处失真原文改为 `schedule`+`workflow_dispatch` 现状并补记「合并前零自动检测 / 合并后延迟巡检」残余，残余指向限界 §42） | [501-PD-04触发面登记漂移补记批次.md](resolved/batches/501-PD-04触发面登记漂移补记批次.md) |
 | §502 | VisibleForTests 架构收口与 Compose 修饰符规范批次 | ISSUE-P3-587（整条闭环；P3 0 → 0；收敛测试注解，VisibleForTests 告警归零，规范 Modifier 顺序） | [502-VisibleForTests架构收口与Compose修饰符规范批次.md](resolved/batches/502-VisibleForTests架构收口与Compose修饰符规范批次.md) |
 | §503 | 搜索框误唤自动填充弹窗整改批次 | ISSUE-P2-588（整条闭环；P2 1 → 0） | [503-搜索框误唤自动填充弹窗整改批次.md](resolved/batches/503-搜索框误唤自动填充弹窗整改批次.md) |
+| §504 | 首轮在途整改收口批次 | ISSUE-P1-589 / P3-607~609（闭环）；593/594候选保留开放 | [504-首轮在途整改收口批次.md](resolved/batches/504-首轮在途整改收口批次.md) |

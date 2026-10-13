@@ -29,6 +29,12 @@ internal class SessionCore {
     /** 保存时的二进制写出通道（对应拆分前的 `saveWriter`）。 */
     var saveWriter: (suspend (ByteArray) -> Unit)? = null
 
+    /** 凭据轮换的提交证据通道；普通 File 在真实替换点回报，流式通道声明写入与确认边界。 */
+    var trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null
+
+    /** 写入结果不确定时阻止继续覆盖；仅成功重新打开/新建或显式关闭会话后解除。 */
+    val credentialWriteUncertain = MutableStateFlow(false)
+
     /** 只读模式（对应拆分前的 `readOnlyMode`）。 */
     var readOnlyMode: Boolean = false
 }

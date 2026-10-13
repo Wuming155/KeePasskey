@@ -4,12 +4,17 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -44,7 +49,11 @@ class ChangeCredentialsKeyFileWipeTest {
             header = KdbxHeader.createDefault(useArgon2 = false),
             rootGroup = KdbxGroup(name = "Root", entries = listOf(entry))
         )
-        return ByteArrayOutputStream().also { KdbxFile.save(it, db, password, keyFile) }.toByteArray()
+        return try {
+            ByteArrayOutputStream().also { KdbxFile.save(it, db, password, keyFile) }.toByteArray()
+        } finally {
+            db.clearSensitiveData()
+        }
     }
 
     @Test
@@ -65,17 +74,115 @@ class ChangeCredentialsKeyFileWipeTest {
             ).isSuccess
         )
 
-        assertTrue("换密失败", session.changeCredentials(newPwd).isSuccess)
+        try {
+            assertTrue("换密失败", session.changeCredentials(newPwd).isSuccess)
+            val written = saved
+            assertNotNull("换密后必须触发一次写盘", written)
+            // 写盘前擦快照会导致产物使用全零文件派生，此解锁断言必红。
+            assertWrittenCredentials(written!!, newPwd, keyFile)
+            written.fill(0)
+            assertTrue("单参换密后普通保存仍须保持原密钥文件", session.save().isSuccess)
+            assertThrows(KdbxInvalidCredentialsException::class.java) {
+                assertWrittenCredentials(saved!!, newPwd, null)
+            }
+            assertWrittenCredentials(saved!!, newPwd, keyFile)
+        } finally {
+            session.close()
+            oldPwd.fill('0')
+            newPwd.fill('0')
+            saved?.fill(0)
+        }
+    }
 
-        val written = saved
-        assertNotNull("换密后必须触发一次写盘", written)
-        // 行为级核心断言：产物必须由「新主密码 + 原密钥文件」派生
-        // （若快照在写盘前被清零，这里会因派生密钥不匹配而失败）
-        val reopened = KdbxFile.load(ByteArrayInputStream(written!!), newPwd, keyFile)
-        assertTrue("换密后库应可正常解锁", reopened.rootGroup.entries.isNotEmpty())
+    private fun assertWrittenCredentials(bytes: ByteArray, pwd: CharArray, key: ByteArray?) {
+        val db = KdbxFile.load(ByteArrayInputStream(bytes), pwd, key)
+        try {
+            assertTrue("写出的库应可正常解锁", db.rootGroup.entries.isNotEmpty())
+        } finally {
+            db.clearSensitiveData()
+        }
+    }
 
-        written.fill(0)
-        session.close()
+    @Test
+    fun `解绑必须擦除旧缓存数组且调用方凭据保持不变`() {
+        val pwd = "Old#Pass#2026".toCharArray()
+        val nextPwd = "New#Pass#2026".toCharArray()
+        val expectedPwd = nextPwd.copyOf()
+        val expectedKey = keyFile.copyOf()
+        val cache = SessionCredentialCache()
+        cache.rotateCredentials(pwd, keyFile)
+        val oldPwd = cache.currentPassword()!!
+        val oldKey = cache.currentKeyFile()!!
+        try {
+            cache.rotateCredentials(nextPwd, null)
+            assertTrue("下线密码数组必须擦除", oldPwd.all { it == '0' })
+            assertTrue("下线文件数组必须擦除", oldKey.all { it == 0.toByte() })
+            assertNull(cache.currentKeyFile())
+            assertNull(cache.exportKeyFileBytes())
+            assertArrayEquals(expectedPwd, nextPwd)
+            assertArrayEquals(expectedKey, keyFile)
+            assertArrayEquals(expectedPwd, cache.currentPassword())
+            assertNotSame("缓存须独立克隆调用方密码", nextPwd, cache.currentPassword())
+        } finally {
+            cache.clear()
+            pwd.fill('0')
+            nextPwd.fill('0')
+            expectedPwd.fill('0')
+            expectedKey.fill(0)
+        }
+    }
+
+    @Test
+    fun `轮换复用缓存引用时必须先克隆两个因子再擦旧缓存`() {
+        val pwd = "Pass#2026".toCharArray()
+        val cache = SessionCredentialCache()
+        cache.rotateCredentials(pwd, keyFile)
+        val oldPwd = cache.currentPassword()!!
+        val oldKey = cache.currentKeyFile()!!
+        try {
+            cache.rotateCredentials(oldPwd, oldKey)
+            assertTrue(oldPwd.all { it == '0' })
+            assertTrue(oldKey.all { it == 0.toByte() })
+            assertArrayEquals(pwd, cache.currentPassword())
+            assertArrayEquals(keyFile, cache.currentKeyFile())
+            assertNotSame(oldPwd, cache.currentPassword())
+            assertNotSame(oldKey, cache.currentKeyFile())
+        } finally {
+            cache.clear()
+            pwd.fill('0')
+        }
+    }
+
+    @Test
+    fun `回滚克隆旧快照后事务擦快照不得破坏活动凭据`() {
+        val pwd = "Old#Pass#2026".toCharArray()
+        val nextPwd = "New#Pass#2026".toCharArray()
+        val cache = SessionCredentialCache()
+        cache.rotateCredentials(pwd, keyFile)
+        val oldPwd = cache.passwordSnapshot()!!
+        val oldKey = cache.keyFileSnapshot()!!
+        cache.rotateCredentials(nextPwd, null)
+        val retiredPwd = cache.currentPassword()!!
+        cache.restoreCredentials(oldPwd, oldKey)
+        val activePwd = cache.currentPassword()!!
+        val activeKey = cache.currentKeyFile()!!
+        try {
+            assertTrue("被回滚替换的新密码缓存必须擦除", retiredPwd.all { it == '0' })
+            assertNotSame("事务快照不得转移为缓存本体", oldPwd, activePwd)
+            assertNotSame("事务快照不得转移为缓存本体", oldKey, activeKey)
+            oldPwd.fill('0')
+            oldKey.fill(0)
+            assertArrayEquals(pwd, activePwd)
+            assertArrayEquals(keyFile, activeKey)
+        } finally {
+            oldPwd.fill('0')
+            oldKey.fill(0)
+            cache.clear()
+            pwd.fill('0')
+            nextPwd.fill('0')
+        }
+        assertTrue("恢复的密码副本应由缓存收口清零", activePwd.all { it == '0' })
+        assertTrue("恢复的文件副本应由缓存收口清零", activeKey.all { it == 0.toByte() })
     }
 
     @Test

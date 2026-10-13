@@ -1,5 +1,9 @@
 package com.keepasskey.app.autofill
 
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
+import com.keepasskey.app.data.repository.AppLanguage
+import com.keepasskey.app.data.repository.RealSettingsRepository
 import android.app.Activity
 import android.app.Application
 import android.content.ComponentName
@@ -11,6 +15,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.keepasskey.app.R
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -62,9 +67,18 @@ class AutofillAuthChainDeviceTest {
     /** 测试客户端包名：测试 APK 的包（与填充服务所在包 `com.keepasskey` 不同） */
     private val clientPackage: String = instrumentation.context.packageName
     private val probe = DeviceAutofillProbe()
+    private val labels = AutofillTestLabels(targetContext)
+
+    @Volatile
+    private var resumedActivity: Activity? = null
 
     private lateinit var application: Application
     private lateinit var evidence: Evidence
+    private lateinit var isolation: AutofillClientRunIsolation
+    private val runActivities = Collections.synchronizedList(mutableListOf<Activity>())
+    private var initialLogLines: Set<String> = emptySet()
+    private var originalAppLanguage: AppLanguage? = null
+    private var matrixSettings: RealSettingsRepository? = null
     private var originalAutofillService: String? = null
 
     /** 进程内 Activity 生命周期观测：认证 Activity 由系统在**本进程**拉起，可被直接观测 */
@@ -73,11 +87,13 @@ class AutofillAuthChainDeviceTest {
     private val lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
             lifecycleTrace.add("created:${activity.javaClass.name}")
+            if (activity.javaClass.name in setOf(UNLOCK_ACTIVITY, PICKER_ACTIVITY, CONFIRM_ACTIVITY)) runActivities.add(activity)
         }
 
         override fun onActivityStarted(activity: Activity) = Unit
 
         override fun onActivityResumed(activity: Activity) {
+            resumedActivity = activity
             lifecycleTrace.add("resumed:${activity.javaClass.name}")
         }
 
@@ -94,12 +110,44 @@ class AutofillAuthChainDeviceTest {
     fun setUp() {
         application = targetContext.applicationContext as Application
         evidence = Evidence(targetContext)
+        probe.requireAutomation()
+        initialLogLines = probe.shell("logcat -d -v threadtime").lines().toSet()
+        originalAutofillService = probe.shell("settings get secure autofill_service").trim().takeUnless { it.isEmpty() || it == "null" }
+        isolation = AutofillClientRunIsolation(probe, evidence::write)
         application.registerActivityLifecycleCallbacks(lifecycleCallbacks)
+        isolation.prepare()
+        InstrumentationRegistry.getArguments().getString("appLanguage")?.let { language ->
+            val requested = AppLanguage.valueOf(language)
+            val settings = RealSettingsRepository(targetContext)
+            matrixSettings = settings
+            runBlocking {
+                originalAppLanguage = settings.getSettings().first().appLanguage
+                settings.setAppLanguage(requested)
+            }
+            evidence.write("本轮应用内语言矩阵=$requested；收尾恢复=$originalAppLanguage")
+        }
     }
 
     @After
     fun tearDown() {
+        runCatching {
+            if (::isolation.isInitialized) isolation.cleanup()
+        }.onFailure { evidence.write("客户端清理异常: ${it.javaClass.simpleName}") }
+        instrumentation.runOnMainSync {
+            synchronized(runActivities) { runActivities.toList() }.forEach { it.finish() }
+        }
+        runActivities.clear()
+        runBlocking {
+            originalAppLanguage?.let { matrixSettings?.setAppLanguage(it) }
+        }
         application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
+        resumedActivity = null
+        runCatching {
+            evidence.write("收尾窗口树（任何断言失败亦留存）:\n" + probe.snapshot())
+            evidence.write("收尾服务日志:\n" + filteredLogcat(SERVICE_TAG))
+            evidence.write("收尾框架日志:\n" + frameworkLogcat())
+            screenshot("ac3-final-window")
+        }.onFailure { evidence.write("收尾取证异常: ${it.javaClass.simpleName}") }
         runCatching {
             if (originalAutofillService == null) {
                 probe.shell("settings delete secure autofill_service")
@@ -122,6 +170,7 @@ class AutofillAuthChainDeviceTest {
         probe.requireAutomation()
         // 原始取值用于收尾还原（设备是共享资源，不留下全局设置改动）
         originalAutofillService = probe.shell("settings get secure autofill_service").trim().ifEmpty { null }
+        evidence.write(labels.environment())
         val vault = AutofillTestVaultSeeder.seed(targetContext, clientPackage)
         val serviceComponent = ComponentName(
             targetContext.packageName,
@@ -141,8 +190,7 @@ class AutofillAuthChainDeviceTest {
                 " / " + probe.shell("getprop ro.product.cpu.abi").trim()
         )
 
-        // 清空 logcat，使后续留痕只属于本用例（放在闸门取证之后，避免误清本次扫描留痕）
-        probe.shell("logcat -c")
+        evidence.write("保留既有 logcat；当前运行仅计入启动后新增记录与 runId")
 
         // ---------------------------------------------------------------- 阶段 0.5：解除锁屏（设备侧前置）
         evidence.section("阶段 0.5：唤醒屏幕并解除锁屏（认证 Activity 需在前台可见）")
@@ -165,22 +213,24 @@ class AutofillAuthChainDeviceTest {
 
         // ---------------------------------------------------------------- 阶段 2：拉起真实客户端
         evidence.section("阶段 2：拉起独立包名的真实客户端登录表单")
-        targetContext.startActivity(clientIntent())
-        val clientWindowUp = probe.awaitText(AutofillClientActivity.TITLE, CLIENT_WAIT_MS) != null
+        isolation.startFresh("阶段2")
+        val clientWindowUp = probe.awaitAppText(clientPackage, AutofillClientActivity.TITLE, CLIENT_WAIT_MS) != null
         evidence.write("客户端窗口出现=$clientWindowUp")
         assertTrue("测试客户端 Activity 未出现在无障碍树中（跨包显式启动失败）", clientWindowUp)
 
         // ---------------------------------------------------------------- 阶段 3：库锁定 ⇒ 认证数据集
         evidence.section("阶段 3：框架下发并展示「认证引导」数据集（库锁定分支）")
-        val unlockItem = probe.awaitText(UNLOCK_ITEM_TEXT, FILL_UI_WAIT_MS)
+        val unlockItemText = labels.dataset(R.string.cred_autofill_unlock_prompt)
+        evidence.write("Service 认证数据集期望文案=$unlockItemText")
+        val unlockItem = probe.awaitDatasetText(targetContext.packageName, unlockItemText, FILL_UI_WAIT_MS)
         if (unlockItem == null) {
             evidence.write("窗口快照:\n" + probe.snapshot())
             evidence.write("服务侧留痕:\n" + filteredLogcat(SERVICE_TAG))
             evidence.write("框架留痕:\n" + frameworkLogcat())
         }
         assertNotNull(
-            "系统填充 UI 未出现认证引导数据集「$UNLOCK_ITEM_TEXT」——" +
-                "即带 setAuthentication 的 FillResponse 未到达框架或未被展示",
+            "系统填充 UI 未出现认证引导数据集「$unlockItemText」——" +
+                "定位前提未满足；结合窗口树、服务与框架留痕判断，不能仅凭定位失败判生产未发请求",
             unlockItem
         )
         evidence.write("认证引导数据集已展示: 「${textOf(unlockItem!!)}」")
@@ -203,8 +253,8 @@ class AutofillAuthChainDeviceTest {
         // 随后解锁按钮因密码框为空而失败，链路在 30 s 内不进入选择器）。
         // 故按**包名**把查找收敛到本应用窗口。
         val passwordField = probe.awaitActiveNode(PASSWORD_FIELD_LABEL, ACTIVITY_WAIT_MS) { node ->
-            node.packageName?.toString() == targetContext.packageName &&
-                (node.isEditable || node.isPassword)
+            AutofillNodeIdentity.appNode(node, targetContext.packageName) &&
+                node.isEditable && node.isPassword
         }
         assertNotNull("未在解锁页找到主密码输入框（已按包名收敛到本应用窗口）", passwordField)
         val typed = probe.setText(passwordField!!, AutofillSeedContract.MASTER_PASSWORD_TEXT)
@@ -220,17 +270,20 @@ class AutofillAuthChainDeviceTest {
         }
         SystemClock.sleep(UI_SETTLE_MS)
 
+        val unlockButtonText = labels.activity(R.string.unlock_btn_unlock, resumedActivity)
+        evidence.write("应用内解锁按钮期望文案=$unlockButtonText")
         val unlockButton = probe.awaitActiveNode(UNLOCK_BUTTON_LABEL, ACTIVITY_WAIT_MS) { node ->
-            normalizedText(node).contains(UNLOCK_BUTTON_KEY)
+            AutofillNodeIdentity.appButton(node, targetContext.packageName, unlockButtonText)
         }
         assertNotNull("未在解锁页找到解锁按钮", unlockButton)
         val clientRequestsBeforeUnlock = clientRequestCount()
+        val unlockPickerResumesBefore = traceCount("resumed:$PICKER_ACTIVITY")
         evidence.write("解锁按钮点击=${probe.click(unlockButton!!)}（文本「${normalizedText(unlockButton)}」）")
 
         // (1) ISSUE-P2-86 的决定性观测：解锁页解锁成功后**链入选择器**，由本次认证结果直接
         //     交付真实 Dataset。**不**再用「客户端显式重请求」把链路接下去——该手法恰好绕过本缺陷。
         //     注意：此刻解锁页**尚未**结束——它要等选择器回传结果后才 setResult+finish。
-        val pickerChained = awaitNewTrace("resumed:$PICKER_ACTIVITY", CHAIN_WAIT_MS)
+        val pickerChained = awaitNewTrace("resumed:$PICKER_ACTIVITY", CHAIN_WAIT_MS, unlockPickerResumesBefore)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue(
             "解锁页未链入 $PICKER_ACTIVITY——ISSUE-P2-86 要求解锁成功后直接经选择器交付，" +
@@ -242,7 +295,10 @@ class AutofillAuthChainDeviceTest {
         screenshot("ac3-04-unlock-chained-picker")
 
         val chainedEntry = probe.awaitActiveNode(ENTRY_ITEM_LABEL, ACTIVITY_WAIT_MS) { node ->
-            textOf(node).contains(AutofillSeedContract.ENTRY_TITLE)
+            AutofillNodeIdentity.appNode(node, targetContext.packageName) &&
+                textOf(node).lines().any {
+                    AutofillNodeIdentity.normalize(it) == AutofillNodeIdentity.normalize(AutofillSeedContract.ENTRY_TITLE)
+                }
         }
         assertNotNull(
             "解锁后链入的选择器中未找到播种条目「${AutofillSeedContract.ENTRY_TITLE}」（库未真正解锁？）",
@@ -268,6 +324,7 @@ class AutofillAuthChainDeviceTest {
                 "——ISSUE-P2-86 修复未生效",
             filledAfterUnlock
         )
+        AutofillClientAssertions.assertFilled(probe, clientPackage, CLIENT_WAIT_MS, isolation.formRunId)
         screenshot("ac3-05-client-filled-after-unlock")
 
         // (2) 解锁页此时必须正常结束（认证结果已被交付，而非卡死/崩溃）
@@ -306,32 +363,33 @@ class AutofillAuthChainDeviceTest {
         )
         // 客户端字段现状（认证结果是否把值写进了目标输入框——A 的功能面直接观测点）
         SystemClock.sleep(UI_SETTLE_MS)
-        val clientStateAfterAuth = probe.awaitText(CLIENT_STATUS_TRACE, 6_000)?.let { textOf(it) }
+        val clientStateAfterAuth = probe.awaitClientStatus(clientPackage, CLIENT_STATUS_TRACE, CLIENT_WAIT_MS)?.let { textOf(it) }
         evidence.write("解锁链路结束后客户端状态文本=${clientStateAfterAuth ?: "未读取到"}")
 
         // ---------------------------------------------------------------- 阶段 6（B）：选择器路径真实填充
         evidence.section("阶段 6：端到端填充——选择器显式指认条目，框架写入目标输入框")
         // 重新拉起**全新客户端实例**：阶段 5 已把该实例的输入框填满，若不重开，
         // 本阶段的「新填充留痕」断言会被阶段 5 的旧值顶替（假绿）。
-        probe.shell("input keyevent 4")
-        SystemClock.sleep(UI_SETTLE_MS)
-        targetContext.startActivity(clientIntent())
-        val clientForPicker = probe.awaitText(AutofillClientActivity.TITLE, CLIENT_WAIT_MS) != null
+        isolation.startFresh("阶段6")
+        val clientForPicker = probe.awaitAppText(clientPackage, AutofillClientActivity.TITLE, CLIENT_WAIT_MS) != null
         evidence.write("客户端重新拉起=$clientForPicker")
         assertTrue("客户端未能重新拉起，阶段 6 无法取得空表单实例", clientForPicker)
         SystemClock.sleep(UI_SETTLE_MS)
 
-        var pickerItem = probe.awaitText(PICKER_ITEM_TEXT, REQUEST_FILL_WAIT_MS)
+        val pickerItemText = labels.dataset(R.string.autofill_picker_entry_title)
+        evidence.write("Service 选择器数据集期望文案=$pickerItemText")
+        var pickerItem = probe.awaitDatasetText(targetContext.packageName, pickerItemText, REQUEST_FILL_WAIT_MS)
         if (pickerItem == null) {
             // 填充 UI 未自动弹出：再显式请求一次（客户端按钮）
             evidence.write("填充 UI 未出现，再显式触发一次客户端请求")
-            probe.awaitText(AutofillClientActivity.REQUEST_BUTTON_TEXT, CLIENT_WAIT_MS)?.let { probe.click(it) }
-            pickerItem = probe.awaitText(PICKER_ITEM_TEXT, FILL_UI_WAIT_MS)
+            probe.awaitAppText(clientPackage, AutofillClientActivity.REQUEST_BUTTON_TEXT, CLIENT_WAIT_MS)?.let { probe.click(it) }
+            pickerItem = probe.awaitDatasetText(targetContext.packageName, pickerItemText, FILL_UI_WAIT_MS)
         }
-        assertNotNull("系统填充 UI 未出现选择器入口数据集「$PICKER_ITEM_TEXT」", pickerItem)
+        assertNotNull("系统填充 UI 未出现选择器入口数据集「$pickerItemText」", pickerItem)
         screenshot("ac3-03-unlocked-dispatch")
+        val pickerResumesBefore = traceCount("resumed:$PICKER_ACTIVITY")
         evidence.write("点选选择器入口=${probe.click(pickerItem!!)}")
-        val pickerLaunched = awaitNewTrace("resumed:$PICKER_ACTIVITY", ACTIVITY_WAIT_MS)
+        val pickerLaunched = awaitNewTrace("resumed:$PICKER_ACTIVITY", ACTIVITY_WAIT_MS, pickerResumesBefore)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue("框架未拉起 $PICKER_ACTIVITY", pickerLaunched)
         SystemClock.sleep(UI_SETTLE_MS)
@@ -339,7 +397,10 @@ class AutofillAuthChainDeviceTest {
         screenshot("ac3-04-picker-attribution")
 
         val entryItem = probe.awaitActiveNode(ENTRY_ITEM_LABEL, ACTIVITY_WAIT_MS) { node ->
-            textOf(node).contains(AutofillSeedContract.ENTRY_TITLE)
+            AutofillNodeIdentity.appNode(node, targetContext.packageName) &&
+                textOf(node).lines().any {
+                    AutofillNodeIdentity.normalize(it) == AutofillNodeIdentity.normalize(AutofillSeedContract.ENTRY_TITLE)
+                }
         }
         assertNotNull("选择器中未找到播种条目「${AutofillSeedContract.ENTRY_TITLE}」", entryItem)
         evidence.write("点选播种条目=${probe.click(entryItem!!)}")
@@ -348,6 +409,7 @@ class AutofillAuthChainDeviceTest {
         evidence.write("客户端自述（logcat）:\n" + filteredLogcat(AutofillClientActivity.TAG))
         assertTrue("客户端输入框未被真实凭据填充（未捕获到新的「$CLIENT_FILLED_TRACE」）", filled)
         SystemClock.sleep(UI_SETTLE_MS)
+        AutofillClientAssertions.assertFilled(probe, clientPackage, CLIENT_WAIT_MS, isolation.formRunId)
         screenshot("ac3-05-client-filled")
 
         // ---------------------------------------------------------------- 阶段 7：已解锁候选 + 二次确认
@@ -355,27 +417,27 @@ class AutofillAuthChainDeviceTest {
         // 阶段 6 已在受保护窗口内**显式指认**调用方，即写入「包名 + 签名摘要」首次绑定；
         // 旧填充会话已随阶段 6 填充结束，故重新拉起**全新客户端实例**取得干净会话，
         // 使「android:// 包名维度」在本会话内真正授权。
-        probe.shell("input keyevent 4")
-        SystemClock.sleep(UI_SETTLE_MS)
-        targetContext.startActivity(clientIntent())
-        val clientRestarted = probe.awaitText(AutofillClientActivity.TITLE, CLIENT_WAIT_MS) != null
+        isolation.startFresh("阶段7")
+        val clientRestarted = probe.awaitAppText(clientPackage, AutofillClientActivity.TITLE, CLIENT_WAIT_MS) != null
         evidence.write("客户端重新拉起=$clientRestarted")
         assertTrue("客户端未能重新拉起，无法取得干净填充会话", clientRestarted)
 
-        val candidateItem = probe.awaitText(AutofillSeedContract.ENTRY_TITLE, CANDIDATE_WAIT_MS)
+        val candidateLabel = AutofillSeedContract.USERNAME // 生产 RemoteViews 主标题为用户名，条目标题在副标题。
+        val candidateItem = probe.awaitDatasetText(targetContext.packageName, candidateLabel, CANDIDATE_WAIT_MS)
         evidence.write(
             "服务侧候选数量留痕:\n" + filteredLogcat(SERVICE_TAG).lines()
                 .filter { line -> line.contains("候选数据集数量") }
                 .joinToString("\n")
         )
         assertNotNull(
-            "系统填充 UI 未出现自动匹配候选「${AutofillSeedContract.ENTRY_TITLE}」——" +
+            "系统填充 UI 未出现主标题为「$candidateLabel」的自动匹配候选——" +
                 "即解锁后候选维度未放行（选择器已写入首次绑定，理论上本会话应命中）",
             candidateItem
         )
         screenshot("ac3-06-candidate-dataset")
+        val confirmResumesBefore = traceCount("resumed:$CONFIRM_ACTIVITY")
         evidence.write("点选候选=${probe.click(candidateItem!!)}")
-        val confirmLaunched = awaitNewTrace("resumed:$CONFIRM_ACTIVITY", ACTIVITY_WAIT_MS)
+        val confirmLaunched = awaitNewTrace("resumed:$CONFIRM_ACTIVITY", ACTIVITY_WAIT_MS, confirmResumesBefore)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue("框架未拉起 $CONFIRM_ACTIVITY", confirmLaunched)
         SystemClock.sleep(UI_SETTLE_MS)
@@ -384,15 +446,19 @@ class AutofillAuthChainDeviceTest {
 
         // 阶段 6 已写入「首次绑定」⇒ 本页应走「已授权」分支（无勾选框、按钮直接可用）；
         // 若仍出现勾选框，如实记录并显式勾选后继续（不掩盖现象）。
-        probe.awaitActiveNode("记住此应用勾选框", ACTIVITY_WAIT_MS) { node -> node.isCheckable }?.let { box ->
+        probe.awaitActiveNode("记住此应用勾选框", ACTIVITY_WAIT_MS) { node ->
+            AutofillNodeIdentity.appNode(node, targetContext.packageName) && node.isCheckable
+        }?.let { box ->
             val checked = box.isChecked || probe.click(box)
             evidence.write("确认页出现「记住此应用」勾选框（本次仍按首次出现处理）勾选=$checked")
             SystemClock.sleep(UI_SETTLE_MS)
         }
+        val confirmButtonText = labels.activity(R.string.autofill_confirm_ok, resumedActivity)
+        evidence.write("应用内确认按钮期望文案=$confirmButtonText")
         val confirmButton = probe.awaitActiveNode(CONFIRM_BUTTON_LABEL, ACTIVITY_WAIT_MS) { node ->
-            normalizedText(node).contains(CONFIRM_BUTTON_KEY)
+            AutofillNodeIdentity.appButton(node, targetContext.packageName, confirmButtonText)
         }
-        assertNotNull("确认页未找到「$CONFIRM_BUTTON_KEY」按钮", confirmButton)
+        assertNotNull("确认页未找到「$confirmButtonText」按钮", confirmButton)
         // ISSUE-P2-88 判据基线：**点击前**先记下「客户端自述已填充」的留痕条数，
         // 否则确认后产生的行会被当成基线吞掉（假红）
         val filledLinesBaseline = logcatMatchCount(CLIENT_FILLED_TRACE)
@@ -437,8 +503,9 @@ class AutofillAuthChainDeviceTest {
         )
         assertTrue(
             "确认后客户端自述为「已填充」但账号不是播种账号——疑为把别处的旧值误判为本次填充",
-            confirmFilledLines.any { it.contains("username=[${AutofillSeedContract.USERNAME}]") }
+            confirmFilledLines.any { it.contains(" usernameMatchesSeed=true") && it.contains(" runId=${isolation.formRunId} ") }
         )
+        AutofillClientAssertions.assertFilled(probe, clientPackage, CLIENT_WAIT_MS, isolation.formRunId)
         screenshot("ac3-08-client-filled-after-confirm")
 
         evidence.section("结论")
@@ -480,7 +547,7 @@ class AutofillAuthChainDeviceTest {
 
     /** 设备侧截图（shell 身份直写共享存储，供宿主侧与记录文档取证） */
     private fun screenshot(name: String): String {
-        val path = "$SHOT_DIR/$name.png"
+        val path = "$SHOT_DIR/${isolation.runId}-$name.png"
         probe.shell("screencap -p $path")
         val listed = probe.shell("ls -l $path").trim()
         evidence.write("截图 $path → ${listed.lines().lastOrNull()?.trim().orEmpty()}")
@@ -489,7 +556,7 @@ class AutofillAuthChainDeviceTest {
 
     private fun textOf(node: AccessibilityNodeInfo): String = probe.textOf(node)
 
-    private fun normalizedText(node: AccessibilityNodeInfo): String = textOf(node).replace(" ", "")
+    private fun normalizedText(node: AccessibilityNodeInfo): String = AutofillNodeIdentity.normalize(textOf(node))
 
     private fun awaitActivity(className: String, timeoutMs: Long): Boolean =
         awaitTrace("resumed:$className", timeoutMs)
@@ -513,8 +580,7 @@ class AutofillAuthChainDeviceTest {
      * 同一 Activity 会在多个阶段被拉起（选择器、确认页均如此），仅判 `contains` 会命中上一阶段的
      * 旧留痕而**假绿**，故按「出现次数较调用前增加」判定。
      */
-    private fun awaitNewTrace(needle: String, timeoutMs: Long): Boolean {
-        val before = traceCount(needle)
+    private fun awaitNewTrace(needle: String, timeoutMs: Long, before: Int): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
             if (traceCount(needle) > before) return true
@@ -573,7 +639,7 @@ class AutofillAuthChainDeviceTest {
 
     /** 客户端主动请求填充的次数（归因用：区分「框架重发」与「客户端又请求」） */
     private fun clientRequestCount(): Int =
-        logcatDump().lines().count { it.contains(CLIENT_REQUEST_TRACE) }
+        logcatDump().lines().count { it.contains(CLIENT_REQUEST_TRACE) && it.contains(" runId=${isolation.formRunId} ") }
 
     /** 本应用或本测试客户端进程是否留下崩溃/ANR 留痕 */
     private fun hasOwnProcessCrash(): Boolean = logcatDump().lines().any { line ->
@@ -589,7 +655,8 @@ class AutofillAuthChainDeviceTest {
      * 执行，`&&` / `|` / 重定向可能整体被当作参数而静默失败（本用例 2026-09-16 实测：
      * `cp a b && echo OK` 返回空输出）。故一律「整份 dump + 在 Kotlin 侧过滤」。
      */
-    private fun logcatDump(): String = probe.shell("logcat -d -v threadtime")
+    private fun logcatDump(): String = probe.shell("logcat -d -v threadtime").lineSequence()
+        .filterNot { it in initialLogLines }.joinToString("\n")
 
     /**
      * threadtime 格式第 3 列是 pid；解析失败返回 null（该行即被丢弃）。
@@ -647,8 +714,9 @@ class AutofillAuthChainDeviceTest {
 
     /** 证据记录：同时落 logcat 与文件（文件在收尾时另存到共享存储，避免随卸载丢失） */
     private inner class Evidence(private val context: Context) {
+        private val fileName = "autofill-auth-chain-${java.util.UUID.randomUUID()}.txt"
         private val file: File? = runCatching {
-            File(context.getExternalFilesDir(null) ?: context.filesDir, EVIDENCE_FILE).also {
+            File(context.getExternalFilesDir(null) ?: context.filesDir, fileName).also {
                 it.writeText("")
             }
         }.getOrNull()
@@ -663,12 +731,12 @@ class AutofillAuthChainDeviceTest {
 
         fun publish(directory: String): String {
             val source = file?.absolutePath ?: return "另存失败: 本进程证据文件不可写"
-            val target = "$directory/$EVIDENCE_FILE"
+            val target = "$directory/$fileName"
             // 逐条命令执行：executeShellCommand 不保证经 sh -c，`&&` 会被当作参数整体失败
             val copied = probe.shell("cp $source $target")
             probe.shell("chmod 644 $target")
             val listed = probe.shell("ls -l $target").trim()
-            return if (listed.contains(EVIDENCE_FILE)) target else "另存失败: $copied${listed}"
+            return if (listed.contains(fileName)) target else "另存失败: $copied${listed}"
         }
 
         fun flushToLog() {
@@ -685,18 +753,6 @@ class AutofillAuthChainDeviceTest {
         const val UNLOCK_ACTIVITY = "com.keepasskey.app.autofill.AutofillUnlockActivity"
         const val PICKER_ACTIVITY = "com.keepasskey.app.autofill.AutofillPickerActivity"
         const val CONFIRM_ACTIVITY = "com.keepasskey.app.autofill.AutofillConfirmActivity"
-
-        /** 认证引导数据集文案（`R.string.cred_autofill_unlock_prompt`） */
-        const val UNLOCK_ITEM_TEXT = "解锁 KeePasskey"
-
-        /** 选择器入口文案（`R.string.autofill_picker_entry_title`） */
-        const val PICKER_ITEM_TEXT = "搜索全部条目"
-
-        /** 解锁按钮文案（`R.string.unlock_btn_unlock` 含空格，比较前先归一化） */
-        const val UNLOCK_BUTTON_KEY = "解锁密码库"
-
-        /** 二次确认按钮文案（`R.string.autofill_confirm_ok`） */
-        const val CONFIRM_BUTTON_KEY = "确认填充"
 
         const val UNLOCK_BUTTON_LABEL = "解锁按钮"
         const val PASSWORD_FIELD_LABEL = "解锁页主密码框"

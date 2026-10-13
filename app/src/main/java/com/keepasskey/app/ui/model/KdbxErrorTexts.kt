@@ -40,6 +40,9 @@ object KdbxErrorTexts {
     @Suppress("MapGetWithNotNullAssertion")
     private val TABLE: Map<String, Int> = mapOf(
         KdbxError.UNKNOWN to R.string.err_unknown,
+        KdbxError.CREATE_COLLISION to R.string.err_create_collision,
+        KdbxError.CREATE_UNSUPPORTED to R.string.err_create_unsupported,
+        KdbxError.CREATE_INVALID_NAME to R.string.err_create_invalid_name,
         KdbxError.CREATE_FAILED to R.string.err_open_create_failed,
         KdbxError.UNLOCK_FAILED to R.string.err_open_unlock_failed,
         KdbxError.UNLOCK_CORRUPT_FILE to R.string.err_open_corrupt_file,
@@ -55,6 +58,7 @@ object KdbxErrorTexts {
         KdbxError.CREDENTIALS_NO_WRITER to R.string.err_credentials_no_writer,
         KdbxError.CREDENTIALS_NO_DATABASE to R.string.err_credentials_no_database,
         KdbxError.CREDENTIALS_CHANGE_FAILED to R.string.err_credentials_change_failed,
+        KdbxError.CREDENTIALS_WRITE_UNCERTAIN to R.string.err_credentials_write_uncertain,
         KdbxError.CREDENTIALS_KEYFILE_ONLY_UNBIND to R.string.err_credentials_keyfile_only_unbind,
         KdbxError.DRIFT_FILE_UNREADABLE to R.string.err_drift_file_unreadable,
         KdbxError.DRIFT_NO_ACTIVE_DATABASE to R.string.err_drift_no_active_database,

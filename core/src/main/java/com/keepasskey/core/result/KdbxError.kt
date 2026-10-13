@@ -31,6 +31,9 @@ object KdbxError {
     const val UNKNOWN = "kdbx.unknown"
 
     // ---- 打开 / 创建（SessionOpener）----
+    const val CREATE_COLLISION = "kdbx.open.create_collision"
+    const val CREATE_UNSUPPORTED = "kdbx.open.create_unsupported"
+    const val CREATE_INVALID_NAME = "kdbx.open.create_invalid_name"
     const val CREATE_FAILED = "kdbx.open.create_failed"
     const val UNLOCK_FAILED = "kdbx.open.unlock_failed"
 
@@ -53,6 +56,7 @@ object KdbxError {
     const val CREDENTIALS_NO_WRITER = "kdbx.credentials.no_writer"
     const val CREDENTIALS_NO_DATABASE = "kdbx.credentials.no_database"
     const val CREDENTIALS_CHANGE_FAILED = "kdbx.credentials.change_failed"
+    const val CREDENTIALS_WRITE_UNCERTAIN = "kdbx.credentials.write_uncertain"
     const val CREDENTIALS_KEYFILE_ONLY_UNBIND = "kdbx.credentials.keyfile_only_unbind"
 
     // ---- 外部文件漂移处理（app/data/repository）----

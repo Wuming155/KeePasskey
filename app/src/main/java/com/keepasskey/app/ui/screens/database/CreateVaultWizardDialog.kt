@@ -16,6 +16,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +35,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.CreateVaultPreset
+import com.keepasskey.app.data.repository.NewVaultDocumentClaims
 import com.keepasskey.app.ui.components.MasterPasswordPolicy
 import com.keepasskey.app.ui.components.MasterPasswordWeakConfirmDialog
 import com.keepasskey.app.ui.components.SecurePasswordField
@@ -40,40 +46,6 @@ private class CreateVaultWizardLaunchers(
     val pickKeyFile: (Array<String>) -> Unit,
     val createVaultDocument: (String) -> Unit
 )
-
-/**
- * 向导表单状态（§280）：名称 / 密码对 / 密钥文件 / 预设 / 存储位置。
- * 主密码以 [CharArray] 承载；离场由 [CreateVaultWizardDialog] 擦除。
- */
-private class CreateVaultWizardState {
-    var vaultName by mutableStateOf("passwords.kdbx")
-    var passwordChars by mutableStateOf(CharArray(0))
-    var confirmChars by mutableStateOf(CharArray(0))
-    var passwordVisible by mutableStateOf(false)
-    var useKeyFile by mutableStateOf(false)
-    var keyFileChoice by mutableStateOf(KeyFileSourceChoice.GENERATE)
-    var selectedKeyFilePath by mutableStateOf("")
-    var selectedKeyFileName by mutableStateOf("")
-    // ISSUE-P2-85：预设改为类型化枚举——芯片与落盘共用 `CreateVaultPreset` 单一真相源
-    var selectedPreset by mutableStateOf(CreateVaultPreset.DEFAULT)
-    // ISSUE-P2-229：新建库的落地位置三选一；选「自选位置」时必须已挑定文档
-    var storageLocation by mutableStateOf(VaultStorageLocation.INTERNAL)
-    var selectedVaultUri by mutableStateOf("")
-    var selectedVaultFileName by mutableStateOf("")
-
-    val isLocationValid get() = storageLocation != VaultStorageLocation.EXTERNAL || selectedVaultUri.isNotBlank()
-    val isKeyFileValid get() = !useKeyFile || keyFileChoice == KeyFileSourceChoice.GENERATE ||
-        selectedKeyFilePath.isNotBlank()
-    // ISSUE-P2-288 AC①：主口令长度下限硬阻断（单一判据 MasterPasswordPolicy，与改密共用）
-    val isFormValid get() = vaultName.isNotBlank() &&
-        passwordChars.size >= MasterPasswordPolicy.MIN_LENGTH &&
-        passwordChars.contentEquals(confirmChars) && isKeyFileValid && isLocationValid
-
-    fun wipePasswords() {
-        passwordChars.fill('0')
-        confirmChars.fill('0')
-    }
-}
 
 /**
  * 新建密码库向导（ISSUE-P3-31 批次 B 自 `DatabasePickerScreen.kt` 拆出）。
@@ -106,6 +78,17 @@ internal fun CreateVaultWizardDialog(
     isBusy: Boolean = false
 ) {
     val state = remember { CreateVaultWizardState() }
+    val context = LocalContext.current
+    ObserveNewVaultName(state)
+    LaunchedEffect(state.selectedVaultUri) {
+        val ownedPath = state.selectedVaultUri
+        try { awaitCancellation() }
+        finally {
+            withContext(NonCancellable + Dispatchers.IO) {
+                NewVaultDocumentClaims.discard(context, ownedPath)
+            }
+        }
+    }
     val launchers = rememberCreateVaultWizardLaunchers(
         onKeyFilePicked = { name, path ->
             state.selectedKeyFileName = name
@@ -122,7 +105,9 @@ internal fun CreateVaultWizardDialog(
 
     // 弹窗离场（确认 / 取消 / 进程回收）时擦除组件内持有的全部密码副本
     DisposableEffect(Unit) {
-        onDispose { state.wipePasswords() }
+        onDispose {
+            state.wipePasswords()
+        }
     }
 
     CreateVaultWizardAlertDialog(
@@ -232,7 +217,7 @@ private fun rememberCreateVaultWizardLaunchers(
     val vaultCreateLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri: Uri? ->
-        if (uri != null) {
+        if (uri != null && NewVaultDocumentClaims.record(context, uri)) {
             onVaultDocumentPicked(queryDocumentDisplayName(context, uri), uri.toString())
         } else {
             onVaultDocumentCancelled()
@@ -262,12 +247,23 @@ private fun CreateVaultWizardForm(
         com.keepasskey.app.security.SecureDialogWindowEffect()
         OutlinedTextField(
             value = state.vaultName,
-            onValueChange = { state.vaultName = it },
+            onValueChange = {
+                state.checkingName = true
+                state.vaultName = it
+            },
+            isError = state.nameError != null,
+            supportingText = {
+                state.nameError?.let { Text(stringResource(it)) }
+            },
             label = { Text(stringResource(R.string.db_picker_vault_name)) },
             placeholder = { Text(stringResource(R.string.db_picker_vault_name_hint)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
+
+        state.suggestedName?.let { suggestion ->
+            TextButton(onClick = { state.vaultName = suggestion }) { Text(suggestion) }
+        }
 
         // ISSUE-P2-229：存储位置选择（§396：仅本地两档——应用私有目录 / 经系统文件选择器自选）
         VaultStorageLocationSection(

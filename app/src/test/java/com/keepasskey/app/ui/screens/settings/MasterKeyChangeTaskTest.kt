@@ -24,6 +24,9 @@ import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -105,13 +108,18 @@ class MasterKeyChangeTaskTest {
         val second = "Master-Key-Fake-2".toCharArray()
         viewModel.masterKeyChangeController.submit(second)
         assertTrue("忙路径必须同步清零被拒入参", second.all { it == '0' })
-        assertFalse(
-            "在途入参不得在调用点被预清零（清零属任务的 finally）",
+        assertTrue(
+            "受理后调用方原数组必须即时清零；后台读取私有副本",
             first.all { it == '0' }
         )
 
         gate.complete(Unit)
         testScheduler.advanceUntilIdle()
+        // 同步登记使用真实 IO；虚拟 scheduler 空闲不等于应用收尾完成。
+        withContext(Dispatchers.Default) {
+            withTimeout(5_000L) { viewModel.masterKeyChangeController.state.first { !it.isChanging } }
+        }
+        testScheduler.runCurrent()
 
         assertFalse("完成后忙态必须回落", viewModel.uiState.value.isChangingMasterKey)
         assertEquals(

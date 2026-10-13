@@ -80,7 +80,9 @@ class SettingsViewModel @Inject constructor(
     // ISSUE-P2-378：外部修改漂移协调器（null 仅纯 JVM 单测；生产 Hilt 注入 @Singleton）
     private val vaultFileDriftCoordinator: com.keepasskey.app.security.VaultFileDriftCoordinator? = null,
     private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
-    private val resumeSyncProbeCoordinator: com.keepasskey.app.sync.ResumeSyncProbeCoordinator? = null
+    private val resumeSyncProbeCoordinator: com.keepasskey.app.sync.ResumeSyncProbeCoordinator? = null,
+    private val credentialRotationRuntime: CredentialRotationRuntime? = null,
+    private val credentialRotationCompletion: CredentialRotationCompletion? = null
 ) : ViewModel() {
 
     companion object {
@@ -145,16 +147,16 @@ class SettingsViewModel @Inject constructor(
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
         debugLog = debugLogBuffer,
-        // ISSUE-P3-430：sessionPasswordChars = 仅改绑密钥文件时重封印的会话密码快照（清零在协调器）。
-        // ISSUE-P1-431：封印载荷不再含密钥文件字节，原 sessionKeyFileBytes 通道退役
+        // 仅改绑密钥文件时的密码快照由协调器擦除；封印载荷只含主密码。
         sessionPasswordChars = { databaseSession?.passwordSnapshot() }
     )
-    private val biometricToggleState = biometricGate.toggleState // 开关动作即时状态（验证中/一次性反馈），经投影层并入 uiState
+    private val biometricToggleState = biometricGate.toggleState
     private val masterKeyChange = masterKeyChangeControllerOf(
         vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange, keyFileAccess,
         keyFileVaultCopyStore, strings,
         residualBackupProbe = { databaseSession?.let { s -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { s.rollingBackupExists() } } ?: false },
-        onCredentialsRotated = { syncCoordinator.markLocalVaultRecrypted() }
+        onCredentialsRotated = { syncCoordinator.markLocalVaultRecrypted() },
+        runtime = credentialRotationRuntime, completion = credentialRotationCompletion
     ) // §411（P3-452/P3-448）改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
     internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange
     internal val keyFileReader get() = features.keyFileReader // ISSUE-P3-428：改密对话框 SAF 读取通道（全仓唯一）

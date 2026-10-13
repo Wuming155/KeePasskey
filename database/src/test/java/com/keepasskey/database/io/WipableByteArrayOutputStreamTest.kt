@@ -78,7 +78,7 @@ class WipableByteArrayOutputStreamTest {
         )
         assertTrue(
             "收口实现必须以 finally { buffer.wipe() } 包裹（成功与失败路径均擦）",
-            Regex("""finally\s*\{\s*buffer\.wipe\(\)\s*\}""").containsMatchIn(source)
+            Regex("""finally\s*\{[^{}]*buffer\.wipe\(\)[^{}]*\}""").containsMatchIn(source)
         )
         assertFalse(
             "不得残留匿名链式写法 `ByteArrayOutputStream().also { … }.toByteArray()`——" +

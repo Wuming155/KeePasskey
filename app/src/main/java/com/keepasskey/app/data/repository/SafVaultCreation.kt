@@ -7,37 +7,21 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.screens.settings.SafDocumentCleanup
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.result.KdbxError
+import com.keepasskey.core.files.NewVaultNames
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import java.io.File
+import android.os.ParcelFileDescriptor
 import java.io.IOException
 
 /**
- * 「自选位置」建库通道（**ISSUE-P2-229**，自 `VaultLifecycleCoordinator` 抽出为独立件）。
- *
- * ## 为什么单独成件
- *
- * SAF 建库的全部复杂度都来自一个事实：**`DatabaseSession.create` 只收 `File`，
- * 而 SAF 文档没有可原子重命名的同目录临时件**。于是这条路径必须自带
- * 「临时中转 → 搬运 → 读回复核 → 失败回滚」的完整编排，与内部存储那条一次性 `create` 的通道
- * 没有任何共享代码；留在协调器内会让该文件越过单文件行数阈值（工程规则「约 400 行即拆」）。
- *
- * ## 顺序即安全边界（不得重排，`CreateVaultLocationWiringTest` 逐条锁定）
- *
- * 1. **持久化授权先行**：拿不到 `takePersistableUriPermission` 就在动手建库**之前**显式失败，
- *    绝不留下「重启后打不开」的半成品库（打开已有库侧的同一静默 `catch` 已转登 `ISSUE-P3-230`）；
- * 2. **临时件必删**：`cacheDir` 中转库在 `finally` 删除；
- * 3. **失败即回滚**：三条失败出口都经 [SafDocumentCleanup] 删除本次 `CreateDocument` 产出的文档，
- *    不在用户选定位置留下空库；
- * 4. **读回复核**：写完后以 [DatabaseSession.openStream] 重新绑定该文档——既证明「写得进也读得回」，
- *    又让用户停留在已解锁态（与内部路径体验一致）。
- *
- * ## 两条已登记降级（不得对外承诺为等价能力）
- *
- * SAF 文档上无原子 rename ⇒ 后续写回是 `"rwt"` 截断式**非原子**写、无 `.bak` 滚动备份；
- * 且同步层硬依赖本地 `File` ⇒ 这类库**不支持** WebDAV / S3 同步。
- * 详见 `docs/architecture/已知工程限界.md` §24；向导内已如实告知用户。
+ * SAF 新建：只写本次 CreateDocument 产物；先持久授权，验证空文档后写入、同步、读回复核。
+ * 成功前不替换原会话，登记使用系统返回的实际名称/URI。清理仅限仍为空的本次文档。
+ * 写入中断的部分文档保留供用户处理；SAF 无跨提供方原子提交，见已知工程限界 §24。
+ * 普通后续保存仍为 rwt 非原子写且不支持同步。
  */
 internal object SafVaultCreation {
 
@@ -56,82 +40,95 @@ internal object SafVaultCreation {
         keyFileData: ByteArray?,
         preset: CreateVaultPreset,
         targetUri: Uri,
-        /** `ISSUE-P3-447` AC②：建库以 openStream 收尾（即该通道的「打开」时点），成功即留基线 */
+        /** `ISSUE-P3-447` AC②：建库完成写入及读回复核、移交会话后留基线 */
         baselineHolder: com.keepasskey.app.security.VaultFileBaselineHolder? = null,
         register: suspend (name: String, path: String) -> KdbxResult<Unit>
-    ): KdbxResult<Unit> = withContext(Dispatchers.IO) {
-        val displayName = name.removeSuffix(".kdbx")
-
-        // cancel-n/a: 保护段 takePersistableUriPermission 为阻塞式 SAF 调用，无挂起点
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                targetUri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        }.onFailure { t ->
-            return@withContext KdbxResult.Failure(
-                t,
-                strings.get(R.string.repo_saf_persist_consent_failed)
-            )
-        }
-
-        val tempFile = File(context.cacheDir, "vault-create-${System.currentTimeMillis()}.kdbx")
+    ): KdbxResult<Unit> = withContext(NonCancellable + Dispatchers.IO) {
+        // String URI 不是所有权证明；只有向导本次 CreateDocument 返回值可领取一次写入权。
+        if (!NewVaultDocumentClaims.consume(targetUri)) return@withContext KdbxResult.Failure(
+            IllegalArgumentException("非本流程创建的文档"), code = KdbxError.CREATE_COLLISION
+        )
+        var committed = false
         try {
-            val created = databaseSession.create(
-                file = tempFile,
-                name = displayName,
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    targetUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                return@withContext KdbxResult.Failure(t, strings.get(R.string.repo_saf_persist_consent_failed))
+            }
+            val actualName = documentName(context, targetUri)
+            val created = databaseSession.createStream(
+                pathIdentifier = targetUri.toString(),
+                name = actualName.removeSuffix(NewVaultNames.EXTENSION),
                 passwordChars = masterPassword,
                 useArgon2 = preset.useArgon2,
                 keyFileData = keyFileData,
-                cipherUuid = preset.cipherUuid
+                cipherUuid = preset.cipherUuid,
+                writeNew = { bytes -> writeOwnedDocument(context, targetUri, bytes) },
+                saveWriter = saveWriter(context, targetUri, actualName),
+                trackedSaveWriter = trackedSaveWriter(context, targetUri, actualName)
             )
-            if (created !is KdbxResult.Success) {
-                SafDocumentCleanup.deleteCreatedDocument(context, targetUri)
-                return@withContext created
-            }
-
-            val bytes = tempFile.readBytes()
-            // cancel-n/a: 保护段 openOutputStream + write/flush 为阻塞式写盘，无挂起点
-            val written = runCatching {
-                context.contentResolver.openOutputStream(targetUri, "w")?.use { os ->
-                    os.write(bytes)
-                    os.flush()
-                } ?: throw IOException("无法写入所选位置")
-            }
-            bytes.fill(0)
-            if (written.isFailure) {
-                databaseSession.close()
-                SafDocumentCleanup.deleteCreatedDocument(context, targetUri)
-                return@withContext KdbxResult.Failure(
-                    written.exceptionOrNull() ?: IOException("无法写入所选位置"),
-                    strings.get(R.string.repo_saf_write_failed)
-                )
-            }
-
-            databaseSession.close()
-            val opened = databaseSession.openStream(
-                pathIdentifier = targetUri.toString(),
-                inputStreamProvider = {
-                    context.contentResolver.openInputStream(targetUri)
-                        ?: throw IOException("无法打开数据库文件流: $displayName")
-                },
-                saveWriter = saveWriter(context, targetUri, displayName),
-                passwordChars = masterPassword,
-                keyFileData = keyFileData,
-                readOnly = false
-            )
-            if (opened !is KdbxResult.Success) {
-                SafDocumentCleanup.deleteCreatedDocument(context, targetUri)
-                return@withContext opened
-            }
-            // ISSUE-P3-447 AC②：新建的 SAF 库在首次保存前同样要有漂移防护——取真实文档元数据留基线
+            if (created !is KdbxResult.Success) return@withContext created
+            committed = true
             baselineHolder?.capture(
-                com.keepasskey.app.security.VaultFileMetadataProbe
-                    .baselineFor(context, targetUri.toString())
+                com.keepasskey.app.security.VaultFileMetadataProbe.baselineFor(context, targetUri.toString())
             )
-            register(name, targetUri.toString())
+            register(actualName, targetUri.toString())
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            KdbxResult.Failure(t, strings.get(R.string.repo_saf_write_failed))
         } finally {
-            runCatching { tempFile.delete() } // cancel-n/a: finally 清理段 delete() 为阻塞式，无挂起点
+            // 只有尚未成功移交会话、仍为空的本次文档可删。写入部分数据时宁可留件，避免误删竞争写入。
+            if (!committed) deleteEmptyOwnedDocument(context, targetUri)
+        }
+    }
+
+    /** 同一文件描述符验证空文档并写入，不以 w/rwt 截断任意已存在 URI。 */
+    private fun writeOwnedDocument(context: Context, targetUri: Uri, bytes: ByteArray) {
+        context.contentResolver.openFileDescriptor(targetUri, "rw")?.use { descriptor ->
+            if (descriptor.statSize < 0L) throw UnsupportedOperationException("提供方无法验证空文档")
+            if (descriptor.statSize != 0L) throw java.nio.file.FileAlreadyExistsException("SAF 文档非空")
+            ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { output ->
+                output.write(bytes)
+                output.flush()
+                output.fd.sync()
+            }
+        } ?: throw IOException("无法写入新建文档")
+        // 必须读回同样密文；不再关闭旧会话然后尝试重新解析，以免失败丢失旧会话。
+        val readBack = context.contentResolver.openInputStream(targetUri)?.use { input ->
+            val read = ByteArray(bytes.size)
+            try {
+                var offset = 0
+                while (offset < read.size) {
+                    val count = input.read(read, offset, read.size - offset)
+                    if (count <= 0) throw IOException("新建文档读回不完整")
+                    offset += count
+                }
+                read.contentEquals(bytes) && input.read() == -1
+            } finally {
+                read.fill(0)
+            }
+        } ?: false
+        if (!readBack) throw IOException("新建文档读回不一致")
+    }
+
+    private fun documentName(context: Context, uri: Uri): String {
+        val column = android.provider.OpenableColumns.DISPLAY_NAME
+        return context.contentResolver.query(uri, arrayOf(column), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst() || cursor.isNull(0)) throw IOException("新建文档名称不可用")
+            cursor.getString(0).takeIf { it.isNotBlank() } ?: throw IOException("新建文档名称为空")
+        } ?: throw IOException("新建文档名称不可用")
+    }
+
+    private fun deleteEmptyOwnedDocument(context: Context, uri: Uri) {
+        try {
+            val empty = context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize == 0L } == true
+            if (empty) SafDocumentCleanup.deleteCreatedDocument(context, uri)
+        } catch (e: Exception) { // cancel-n/a: 阻塞式清理；无法核实归属时不删除
+            com.keepasskey.core.log.AppLog.w("SafVaultCreation", "无法核实新建文档清理条件", e)
         }
     }
 
@@ -149,4 +146,20 @@ internal object SafVaultCreation {
                 } ?: throw IOException("无法写入目标数据库文件: $displayName")
             }
         }
+    /** 流式换密的提交证据在 IO 内关闭流后登记，取消交付窗口不会抹掉已完成写入。 */
+    fun trackedSaveWriter(context: Context, uri: Uri, displayName: String):
+        suspend (ByteArray, com.keepasskey.database.session.SessionWriteReceipt) -> Unit = { bytes, receipt ->
+        withContext(Dispatchers.IO) {
+            receipt.writing() // rwt 打开即可能截断，不能等到 write 才声明风险。
+            context.contentResolver.openFileDescriptor(uri, "rwt")?.use { descriptor ->
+                ParcelFileDescriptor.AutoCloseOutputStream(descriptor).use { output ->
+                    output.write(bytes)
+                    output.flush()
+                    output.fd.sync()
+                }
+            } ?: throw IOException("无法写入目标数据库文件: $displayName")
+            receipt.committed()
+        }
+    }
+
 }

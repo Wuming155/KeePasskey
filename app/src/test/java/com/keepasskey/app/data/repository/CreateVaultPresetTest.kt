@@ -139,7 +139,8 @@ class CreateVaultPresetTest {
         // ISSUE-P3-188 §179：向导的密钥文件区 / 预设芯片 / 确认按钮已下沉到同包段落文件，
         // 故按「门面 + 分支文件」**并集**扫描——**只放宽定位，不降低强度**：
         // 四条判据原文逐字保留，负向「不得出现裸预设字符串」同样扩扫两处（覆盖面变严而非变宽）。
-        val dialog = readSource(WIZARD) + readSource(WIZARD_SECTIONS)
+        val dialog = readSource(WIZARD) + readSource(WIZARD_SECTIONS) +
+            readSource("app/src/main/java/com/keepasskey/app/ui/screens/database/CreateVaultWizardNameState.kt")
         assertTrue(
             "向导默认值必须取自枚举",
             dialog.contains("mutableStateOf(CreateVaultPreset.DEFAULT)")
