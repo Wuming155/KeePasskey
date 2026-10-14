@@ -1,89 +1,50 @@
 # KeePasskey
 
-> 用 Kotlin 开发的 Android 版 KeePass 密码管理器：读写标准 `.kdbx` **v4** 数据库，支持 **WebDAV** / **S3 兼容协议** 同步，原生支持 **通行密钥（Passkey）** 自动填充与解锁，覆盖 KeePass 常用功能。
+KeePasskey 是一款原生 Kotlin Android 密码管理器，使用标准 KeePass `.kdbx` v4 数据库，可在 Android 上管理密码、通行密钥和其他凭据。
 
-## 特性亮点
+## 核心能力
 
-- **KeePass 兼容**：仅 v4（`v3` 及以下明确拒绝），与 KeePass / KeePassXC / pykeepass 真实互通
-- **多方式同步**：WebDAV（Nextcloud、ownCloud 等**公有托管服务**）与 S3 兼容协议（AWS S3、MinIO、Cloudflare R2 及**自建服务器**均可）——仅 HTTPS（自建内网端点开箱即用，见「已知局限」）
-- **通行密钥**：FIDO2 / WebAuthn 凭据的安全存储，并可作为设备绑定解锁方式与系统自动填充凭据
-- **全功能**：分组树 / 条目字段 / 附件 / 历史版本与回滚 / 模板 / 回收站 / 全文搜索
-- **增强**：TOTP·HOTP、密码生成器（含 Diceware）、离线密码健康度审计（可选联网泄露比对，k-匿名、默认关闭）、KeePass 字段引用 `{REF:...}`
-- **安全优先**：主密码 + 密钥文件 + 生物识别解锁；Argon2 KDF 走 **Rust 原生内核**（秘密缓冲 `zeroize` 确定性擦除），`ProtectedString` 驻留加密、FLAG_SECURE、自动锁定熔断
-- **仅 Android 16+（API 36+）**：Compose + Material 3，无需向下兼容负担
+- 创建、导入和管理 KeePass v4 数据库，包括分组、附件、历史记录、搜索和回收站。
+- 使用主密码、密钥文件或生物识别解锁。
+- 通过 HTTPS 使用 WebDAV 或 S3 兼容存储同步。
+- 通过 Android Autofill 和 Credential Manager 提供自动填充与通行密钥能力。
+- 提供 TOTP/HOTP、密码生成、密码健康检查和 KeePass 字段引用。
 
 ## 构建与运行
 
-环境前提：JDK 17、Android SDK 37（平台 `android-37.0`）、Android Studio（AGP 9.4.0）、**NDK 28.2.13676358**（`sdkmanager "ndk;28.2.13676358"`，供 AGP strip 与原生链接器共用）。
+需要 Android 开发环境；构建原生加密内核还需要 Rust stable、Android Rust targets 和 `cargo-ndk`。版本要求以项目构建配置及 Gradle 构建错误为准。
 
-Argon2 原生内核位于 `crypto/src/main/rust/`，由 **Rust + cargo-ndk 从源码交叉编译**（无预编译二进制），需额外准备：
-
-- **Rust stable** + 4 个 Android target：`rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
-- **cargo-ndk**：`cargo install cargo-ndk`
-
-`:crypto:cargoNdkBuild` 在 `assembleDebug` / `assembleRelease` 时自动触发，产出 4 ABI `libkeepasskey_argon2.so`；纯 `test` 不触发（桌面单测走 BouncyCastle 兜底，或经 `:crypto:cargoHostBuild` 加载宿主库验证原生路径）。
-
-```bash
-# 编译调试包
+```powershell
+# 构建调试 APK
 .\gradlew.bat assembleDebug
-# 单元测试（全模块；12 例真实联调用例需加 -DliveSyncTest 启用）
-.\gradlew.bat test
-# 混淆发布包（构建链路就绪，尚未发布到应用市场）
-.\gradlew.bat assembleRelease
+
+# 运行 JVM 单元测试
+.\gradlew.bat test --max-workers=1
 ```
 
-将 `app/build/outputs/apk/debug/*.apk` 安装到 Android 16+ 设备即可使用。
+调试 APK 位于 `app/build/outputs/apk/debug/`，可安装到 Android 16（API 36）或更新版本的设备。
 
-## 基本使用
+## 使用与限制
 
-1. **创建 / 打开库**：主密码（+ 可选密钥文件）建库，或从外部导入 `.kdbx` v4。
-2. **解锁**：主密码、密钥文件或生物识别；支持设备锁屏绑定的快速解锁。
-3. **同步**：设置页配置 WebDAV / S3 账号，手动或周期性后台同步，冲突时可视化逐字段合并（仅 HTTPS，自建内网端点可用，见「已知局限」）。
-4. **自动填充**：系统 Autofill 或 Credential Provider 双通道，含 IME 内联建议；通行密钥由系统 Credential Manager 直接调用。
+创建或导入 `.kdbx` v4 数据库后，可在设置中配置 WebDAV 或 S3 同步，并使用系统自动填充。应用仅接受 HTTPS；产品行为和其他已知边界见[产品裁决](docs/architecture/产品裁决登记.md)。
+
+当前要求 Android 16（API 36）或更新版本；不支持 KDBX v3 及以下。应用尚未发布到应用商店。
 
 ## 文档
 
-| 文档 | 内容 |
-|------|------|
-| [`docs/README.md`](docs/README.md) | **文档地图**：六分区总览（入口 / 架构 / 记录 / 安全 / 参考 / 归档） |
-| [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md) | **现存问题与待办清单**：按 P0 → P1 → P2 → P3 排序，自包含背景与验收标准 |
-| [`docs/RESOLVED_LOG.md`](docs/RESOLVED_LOG.md) 与 [`docs/resolved/`](docs/resolved/) | **已整改问题归档**：总索引（≤100 行）逐批次直达正文；正文按**一批次一文件**存放于 `docs/resolved/batches/` |
-| [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | 模块依赖拓扑、技术栈、关键架构决策与目录约定 |
-| [`docs/architecture/reference-projects.md`](docs/architecture/reference-projects.md) 与 [`docs/references/`](docs/references/) | 5 个参考项目的定位地图与深度架构分析 |
-| `AGENTS.md` | 给 AI 协作代理的项目约束、版本基线与闭环纪律 |
+- [文档入口](docs/README.md)
+- [隐私政策](docs/security/Privacy-Policy.md)
 
-## 已知局限
+## 官方签名指纹
 
-> 已知工程限界 / 已接受残余风险的**唯一登记表**：[`docs/architecture/已知工程限界.md`](docs/architecture/已知工程限界.md)
-> （原 `AGENTS.md` §6，已于提交 `215ea82` 迁移至该文件）；未闭环的现存缺陷见
-> [`docs/ACTIVE_ISSUES.md`](docs/ACTIVE_ISSUES.md)。
+官方 release 签名证书 SHA-256 指纹：
 
-自定义键盘（Magikeyboard 式）未实现（已提供 IME 内联建议 + 自动填充替代）；`KDBX v3` 及以下明确拒绝；应用尚未发布至 F-Droid / GitHub Release。
-
-**同步仅接受 HTTPS**：明文 HTTP 端点一律拒绝（平台 Network Security Config 与传输层 TLS-only 双层强制）。自建 / 内网端点（NAS 的 `https://192.168.x.x`、`nas.local`、`localhost` 等）**默认可用**——SSRF 纵深防御保留在连接期：重定向或 DNS 解析到的**非预期**内网地址仍会被拦截（含云元数据端点 `169.254.169.254`，任何形态下一律拒绝），口径见 [`docs/architecture/产品裁决登记.md`](docs/architecture/产品裁决登记.md) `PD-02`。
-
-## 官方签名指纹（ISSUE-P1-23）
-
-本应用**尚未上架任何应用商店**。无论从本仓库 Release 下载还是自行 `assembleRelease` 构建，官方 release 签名证书的 SHA-256 指纹为：
-
-```
+```text
 F3:A6:F0:92:4D:12:1E:27:3B:E0:22:58:9F:A6:87:24:70:3C:B7:D9:06:CA:A3:3F:E4:CD:ED:19:2C:CA:84:2E
 ```
 
-安装前核对 APK 签名（可复跑的校验路径）：
-
-```bash
-apksigner verify --print-certs app-release.apk
-# 或
-keytool -printcert -jarfile app-release.apk
-```
-
-> **安全须知**：应用内运行完整性自检（root / 调试器 / 钩子框架探测）**不能**证明 APK 未被篡改——能重打包 APK 的攻击者可一并移除应用内自检逻辑，该威胁的有效缓解只在应用外信任根（签名指纹核对；上架后接入 Play Integrity 或同等平台完整性证明）。安装来源无法判定（`installer == null`，如 adb 直装 / 侧载）既不构成风险升级判据、也不构成安全证明，请以上述指纹为准。
+安装前可用 `apksigner verify --print-certs <apk>` 核对签名。应用内完整性自检不能证明 APK 来源或未被篡改；请以签名核对为准。
 
 ## 许可证
 
-以 **GPL-3.0** 开源发布，完整文本见 [`LICENSE`](LICENSE)。
-
-## 致谢
-
-感谢 KeePassDX / keepass2android / KeePass 官方 / KeePassXC / Monica 等开源标杆的架构与设计借鉴；密码学基于 [BouncyCastle](https://www.bouncycastle.org/)，网络栈基于 [OkHttp](https://square.github.io/okhttp/)，平台与 DI 基于 AndroidX、[Jetpack Compose](https://developer.android.com/compose) 与 [Hilt](https://developer.android.com/training/dependency-injection/hilt-android)。本项目代码独立编写，仅借鉴其架构与设计思路。
+本项目以 GPL-3.0 发布，详见 [`LICENSE`](LICENSE)。
