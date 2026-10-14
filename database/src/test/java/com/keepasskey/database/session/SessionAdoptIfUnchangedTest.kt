@@ -5,16 +5,20 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.security.ProtectedString
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.ByteArrayInputStream
 
 /**
  * ISSUE-P2-278：「校验-采用」原子落库（[DatabaseSession.adoptDatabaseIfUnchanged]）的
@@ -95,6 +99,87 @@ class SessionAdoptIfUnchangedTest {
         )
 
         assertFalse("锁库后（无活动库）必须拒绝采用", adopted)
+    }
+
+    @Test
+    fun `活动库切换后拒绝旧设置提交且不执行变换`() = runBlocking {
+        val session = newSession()
+        val replacement = newSession()
+        val staleDatabase = session.databaseFlow.value!!
+        val replacementBytes = (replacement.exportToBytes() as KdbxResult.Success).data
+        val saveCalls = java.util.concurrent.atomic.AtomicInteger()
+        val password = "AdoptGuard#2026".toCharArray()
+        try {
+            assertTrue(
+                "前置：打开替换库失败",
+                session.openStream(
+                    pathIdentifier = "replacement-${System.nanoTime()}",
+                    inputStreamProvider = { ByteArrayInputStream(replacementBytes) },
+                    saveWriter = { saveCalls.incrementAndGet() },
+                    passwordChars = password
+                ) is KdbxResult.Success
+            )
+            val activeAfterSwitch = session.databaseFlow.value!!
+            var transformCalled = false
+
+            val result = session.writeIntents.commitDatabaseMeta(staleDatabase) {
+                transformCalled = true
+                it.copy(databaseDescription = "must-not-apply")
+            }
+
+            assertEquals("旧会话请求应收到明确切换错误", KdbxError.SAVE_SESSION_CHANGED, (result as KdbxResult.Failure).code)
+            assertFalse("拒绝旧会话请求前不得调用变换", transformCalled)
+            assertSame("活动库切换后的树必须保持不变", activeAfterSwitch, session.databaseFlow.value)
+            assertEquals("拒绝旧会话请求不得写正式文件", 0, saveCalls.get())
+        } finally {
+            replacementBytes.fill(0)
+            password.fill('\u0000')
+            session.close()
+            replacement.close()
+        }
+    }
+
+    @Test
+    fun `写入回执已提交后收到取消仍先发布已落盘候选`() = runBlocking {
+        val session = newSession()
+        val password = "AdoptGuard#2026".toCharArray()
+        val bytes = (session.exportToBytes() as KdbxResult.Success).data
+        try {
+            assertTrue(
+                "前置：装载带提交回执的会话失败",
+                session.openStream(
+                    pathIdentifier = "committed-before-cancel-${System.nanoTime()}",
+                    inputStreamProvider = { ByteArrayInputStream(bytes) },
+                    saveWriter = {},
+                    passwordChars = password,
+                    trackedSaveWriter = { _, receipt ->
+                        receipt.committed()
+                        throw CancellationException("synthetic cancellation after durable commit")
+                    }
+                ) is KdbxResult.Success
+            )
+            val before = session.databaseFlow.value!!
+            var cancellation: CancellationException? = null
+
+            try {
+                session.writeIntents.commitDatabaseMeta(before) { it.copy(databaseDescription = "committed despite cancellation") }
+            } catch (error: CancellationException) {
+                cancellation = error
+            }
+
+            assertNotNull("已取消的调用仍必须传播取消", cancellation)
+            assertEquals(
+                "提交回执已确认时内存候选必须追上正式文件",
+                "committed despite cancellation",
+                session.databaseFlow.value?.databaseDescription
+            )
+            assertEquals("提交后取消不得把已保存会话留为 DIRTY", DatabaseSession.SessionState.OPENED, session.state.value)
+            assertEquals("提交后取消的进度必须落到完成态", 1.0f, session.ioProgress.value)
+        } finally {
+            bytes.fill(0)
+            password.fill('\u0000')
+            session.close()
+        }
     }
 
     /**

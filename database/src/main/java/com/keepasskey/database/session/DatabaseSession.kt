@@ -82,15 +82,15 @@ class DatabaseSession(
         _ioProgress.value = value
     }
 
-    /** ISSUE-P3-305：整库序列化写盘协作类（保存 / 导出字节流 / 换密重加密） */
-    private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress)
+    private val mutations = SessionContentMutations(mutex, core.database, core.state) { core.readOnlyMode }
+    private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress, mutations::publishCommittedDatabaseMeta)
+    /** Atomic target snapshot and Meta commit entry points. */
+    val writeIntents = DatabaseSessionWriteIntents(mutex, core, persistence)
 
     private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore, ::publishProgress) {
         // ISSUE-P2-77：换库前置释放（由本次调用持有互斥锁，故不能走 lock()——会重入死锁）
         releaseSessionStateForReplacement()
     }
-
-    private val mutations = SessionContentMutations(mutex, core.database, core.state) { core.readOnlyMode }
 
     // ISSUE-P1-07：会话终止观察者集合——锁定/关闭时同步通知各派生敏态数据的持有方清理
     private val lockRegistry = SessionLockRegistry()

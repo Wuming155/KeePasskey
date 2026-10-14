@@ -939,6 +939,8 @@
     <string name="err_save_no_database">No active database</string>
     <string name="err_save_credentials_lost">Master password credential lost; please re-enter it</string>
     <string name="err_save_failed">Failed to save the database</string>
+    <string name="err_save_write_uncertain">The database write could not be confirmed. Further saves are blocked. Reopen and verify the database.</string>
+    <string name="err_save_session_changed">The active database changed. This setting was not applied; retry it in the current database.</string>
     <string name="err_export_no_database">No active database (locked or not open)</string>
     <string name="err_export_credentials_lost">Master password credential lost; cannot export</string>
     <string name="err_export_failed">Failed to export the database</string>

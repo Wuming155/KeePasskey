@@ -17,6 +17,7 @@ import java.io.File
 class AutofillSaveRobustnessTest {
 
     private val serviceSource = readSource(SERVICE_PATH)
+    private val pendingIntentFactorySource = readSource(PENDING_INTENT_FACTORY_PATH)
     private val buildersSource = readSource(BUILDERS_PATH)
     private val passwordSaveActivitySource = readSource(PASSWORD_SAVE_ACTIVITY_PATH)
     private val extractorSource = readSource(EXTRACTOR_PATH)
@@ -65,7 +66,7 @@ class AutofillSaveRobustnessTest {
         )
         assertTrue(
             "锁定时唤起的 Intent 必须指向 PasswordSaveActivity",
-            serviceSource.contains("PasswordSaveActivity::class.java")
+            pendingIntentFactorySource.contains("targetActivity: Class<out Activity> = PasswordSaveActivity::class.java")
         )
     }
 
@@ -90,6 +91,8 @@ class AutofillSaveRobustnessTest {
     private companion object {
         const val SERVICE_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/KeePasskeyAutofillService.kt"
+        const val PENDING_INTENT_FACTORY_PATH =
+            "app/src/main/java/com/keepasskey/app/autofill/LockedSaveRequestPendingIntent.kt"
         const val EXTRACTOR_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/AutofillSaveExtractor.kt"
         const val BUILDERS_PATH =

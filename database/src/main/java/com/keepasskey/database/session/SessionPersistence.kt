@@ -8,6 +8,7 @@ import com.keepasskey.database.file.KdbxProgress
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.io.WipableByteArrayOutputStream
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -37,8 +38,20 @@ internal class SessionPersistence(
      * ISSUE-P3-368：保存链进度上报（0..1 确定进度 / null 分段不确定段）。
      * 由 `DatabaseSession` 注入 StateFlow 写入口；只承载数值，不捕获任何敏感引用（AC③）。
      */
-    private val progress: (Float?) -> Unit = {}
+    private val progress: (Float?) -> Unit = {},
+    /** 成功落盘后在同一会话 Mutex 内发布候选；失败不触碰活动树。 */
+    private val publishDatabaseMeta: (KdbxDatabase, KdbxDatabase) -> Boolean = { _, _ -> false }
 ) {
+    private val metadataCommitter = DatabaseMetaCommitter(
+        mutex,
+        core,
+        credentials,
+        progress,
+        publishDatabaseMeta
+    ) { database, password, keyFile, onProgress ->
+        serializeToBytes(database, password, keyFile, onProgress)
+    }
+
     private val rotation = SessionCredentialRotation(core, credentials, fileWriter) { db, pwd, key ->
         serializeToBytes(db, pwd, key)
     }
@@ -50,7 +63,7 @@ internal class SessionPersistence(
         if (core.credentialWriteUncertain.value) {
             return@withLock KdbxResult.Failure(
                 IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),
-                code = KdbxError.CREDENTIALS_WRITE_UNCERTAIN
+                code = KdbxError.SAVE_WRITE_UNCERTAIN
             )
         }
         if (core.readOnlyMode) {
@@ -121,6 +134,19 @@ internal class SessionPersistence(
             }
         }
     }
+
+    /**
+     * `ISSUE-P2-602`：库级 Meta 的「序列化候选 → 落盘 → 发布」事务。
+     *
+     * 普通 UI Meta 更新此前先写入 `databaseFlow` 再调用 [save]；writer 返回 Failure 时，磁盘仍旧而
+     * StateFlow 已发布新值。此入口在共享会话 Mutex 内先构造候选，真实 writer 成功后才由
+     * [publishDatabaseMeta] 发布；提交前的 Failure / Cancellation 保持原树、状态和 UI 回显不变。
+     * writer 已确认提交后若取消，则先同步发布，再传播取消，避免磁盘与内存分叉。
+     */
+    suspend fun commitDatabaseMeta(
+        expectedDatabase: KdbxDatabase,
+        transform: (KdbxDatabase) -> KdbxDatabase
+    ): KdbxResult<Unit> = metadataCommitter.commit(expectedDatabase, transform)
 
     /**
      * TASK-13 整改：将当前内存数据库序列化为 KDBX 字节流（SAF 导出用）。

@@ -14,6 +14,7 @@ class AutofillSaveRequestIsolationTest {
 
     private val service = readSource(SERVICE_PATH)
     private val activity = readSource(ACTIVITY_PATH)
+    private val pendingIntentFactory = readSource(PENDING_INTENT_FACTORY_PATH)
 
     @Test
     fun `保存请求使用不可预测令牌与数据身份`() {
@@ -23,11 +24,11 @@ class AutofillSaveRequestIsolationTest {
         )
         assertTrue(
             "令牌必须写入 Intent.data（参与 PendingIntent.filterEquals，构成请求身份）",
-            service.contains("data = Uri.parse(\"keepasskey://autofill-save-request/\$requestToken\")")
+            pendingIntentFactory.contains("data = Uri.parse(\"keepasskey://autofill-save-request/\$requestToken\")")
         )
         assertTrue(
             "令牌必须随 extras 交给 Activity",
-            service.contains("PasswordSaveActivity.EXTRA_REQUEST_TOKEN, requestToken")
+            pendingIntentFactory.contains("PasswordSaveActivity.EXTRA_REQUEST_TOKEN, requestToken")
         )
     }
 
@@ -94,6 +95,8 @@ class AutofillSaveRequestIsolationTest {
             "app/src/main/java/com/keepasskey/app/autofill/KeePasskeyAutofillService.kt"
         const val ACTIVITY_PATH =
             "app/src/main/java/com/keepasskey/app/passkey/PasswordSaveActivity.kt"
+        const val PENDING_INTENT_FACTORY_PATH =
+            "app/src/main/java/com/keepasskey/app/autofill/LockedSaveRequestPendingIntent.kt"
 
         val repositoryRoot: File by lazy {
             var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile

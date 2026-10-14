@@ -210,7 +210,22 @@ class AutofillAuthChainDeviceTest {
 
         evidence.section("阶段 0.2：显式选择播种库并断言活动库前提（DYN-04）")
         selection = AutofillVaultSelection(targetContext)
-        selectionSnapshot = selection.select(vault.name)
+        if (withDecoy) {
+            val decoy = requireNotNull(decoyFile)
+            selectionSnapshot = selection.select(decoy.name)
+            val mismatchedSelection = runCatching {
+                assertEquals("播种库路径断言必须拒绝仍选中干扰库的状态", vault.name, selection.activeId())
+            }.exceptionOrNull()
+            assertTrue(
+                "活动库与播种库错配时，前置路径断言必须明确失败",
+                mismatchedSelection is AssertionError
+            )
+            assertEquals("负向判据应确认实际选择的是干扰库", decoy.name, selection.activeId())
+            evidence.write("负向路径错配已在前置断言处拒绝；活动库=${selection.activeId()}，预期播种库=${vault.name}")
+            selection.select(vault.name)
+        } else {
+            selectionSnapshot = selection.select(vault.name)
+        }
         evidence.write(
             "活动选择：操作前(解析)=${selectionSnapshot!!.resolvedId} 操作后(解析)=${selection.activeId()}"
         )
@@ -259,6 +274,43 @@ class AutofillAuthChainDeviceTest {
         val readBack = probe.shell("settings get secure autofill_service").trim()
         evidence.write("settings get secure autofill_service → $readBack")
         assertEquals("自动填充服务必须已切换为本应用", serviceComponent, readBack)
+
+        if (InstrumentationRegistry.getArguments().getString("exerciseTimeoutRecovery") == "true") {
+            evidence.section("ISSUE-P3-609：第一轮故意等待超时并清理，第二轮继续正常认证")
+            isolation.startFresh("P3-609-故意超时第一轮")
+            assertNotNull(
+                "超时前置轮必须有独立客户端窗口",
+                probe.awaitAppText(clientPackage, AutofillClientActivity.TITLE, CLIENT_WAIT_MS)
+            )
+            val abandonedDatasetText = labels.dataset(R.string.cred_autofill_unlock_prompt)
+            val abandonedDataset = probe.awaitDatasetText(
+                targetContext.packageName,
+                abandonedDatasetText,
+                FILL_UI_WAIT_MS
+            )
+            assertNotNull("第一轮必须先真实出现认证数据集，才可验证超时清理", abandonedDataset)
+            evidence.write("第一轮已出现真实认证数据集「$abandonedDatasetText」，此轮故意不确认")
+
+            val timeoutStartedAt = SystemClock.uptimeMillis()
+            SystemClock.sleep(FILL_UI_WAIT_MS)
+            val timeoutElapsed = SystemClock.uptimeMillis() - timeoutStartedAt
+            probe.shell("input keyevent 4")
+            val abandonedClientState = probe.awaitClientStatus(
+                clientPackage,
+                CLIENT_STATUS_TRACE,
+                CLIENT_WAIT_MS
+            )?.let(::textOf)
+            evidence.write(
+                "第一轮认证观察窗口超时 elapsedMs=$timeoutElapsed；返回客户端状态=${abandonedClientState.orEmpty()}；" +
+                    "随后由下一轮前置取消协议清理旧 Autofill context"
+            )
+            assertTrue("第一轮必须实际超过认证观察期限", timeoutElapsed >= FILL_UI_WAIT_MS)
+            assertNotNull("超时清理后应能回到原合成客户端", abandonedClientState)
+            assertTrue("超时轮不得写入用户名", abandonedClientState!!.contains("usernameFilled=false"))
+            assertTrue("超时轮不得写入口令", abandonedClientState.contains("passwordFilled=false"))
+            // 阶段 2 随后以 startFresh 创建新实例；它会先取消并冷停本轮客户端，证明超时后
+            // 的旧 Autofill context/requestedOnce 不会阻塞下一次真实认证填充。
+        }
 
         // ---------------------------------------------------------------- 阶段 2：拉起真实客户端
         evidence.section("阶段 2：拉起独立包名的真实客户端登录表单")

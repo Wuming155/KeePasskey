@@ -951,6 +951,8 @@
     <string name="err_save_no_database">当前无活动数据库</string>
     <string name="err_save_credentials_lost">主密码凭据丢失，请重新输入主密码</string>
     <string name="err_save_failed">保存数据库失败</string>
+    <string name="err_save_write_uncertain">无法确认数据库是否已完整写入。已阻止继续保存，请重新打开并核实数据库。</string>
+    <string name="err_save_session_changed">活动数据库已切换，此项设置未应用。请在当前数据库中重试。</string>
     <string name="err_export_no_database">当前无活动数据库（已锁定或未打开）</string>
     <string name="err_export_credentials_lost">主密码凭据丢失，无法导出</string>
     <string name="err_export_failed">导出数据库失败</string>

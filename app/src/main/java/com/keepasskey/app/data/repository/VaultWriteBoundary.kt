@@ -4,9 +4,11 @@ import com.keepasskey.app.R
 import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.security.VaultFileDriftGuard
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
+import java.io.File
 
 /**
  * `ISSUE-P1-601`：**库级写入意图的窄接口**——全部修改活动库的用户操作（设置页算法 / KDF /
@@ -68,10 +70,16 @@ internal class VaultWriteBoundary(
      * （并已唤起 UI 三选提示），否则 null。全库保存、库 Meta 提交、换密 / 改绑**同源**调用本方法。
      */
     fun abortOnDrift(): KdbxResult.Failure? {
-        val pathId = databaseSession.currentPathIdentifier.orEmpty()
-        val localFile = databaseSession.currentFile
-        return driftGuard.driftedFailure(pathId, localFile, strings.get(R.string.ext_mod_save_aborted))
+        return abortOnDrift(databaseSession.currentPathIdentifier, databaseSession.currentFile)
     }
+
+    /** Evaluate drift against the request's captured target, even if another vault becomes active later. */
+    private fun abortOnDrift(pathIdentifier: String?, localFile: File?): KdbxResult.Failure? =
+        driftGuard.driftedFailure(
+            pathIdentifier.orEmpty(),
+            localFile,
+            strings.get(R.string.ext_mod_save_aborted)
+        )
 
     /**
      * 会话落盘的**唯一出口**——save() 失败必须原样向上传播，禁止磁盘写失败被静默吞掉导致
@@ -105,8 +113,40 @@ internal class VaultWriteBoundary(
      * [transform] 必须为纯函数式拷贝（`db.copy(...)`），不得原地改动传入树。
      */
     suspend fun commitMeta(transform: (KdbxDatabase) -> KdbxDatabase): KdbxResult<Unit> {
-        abortOnDrift()?.let { return it }
-        databaseSession.updateDatabaseMeta(transform)
-        return persist()
+        val snapshot = databaseSession.writeIntents.captureSnapshot() ?: return KdbxResult.Failure(
+            IllegalStateException("活动数据库为空"), code = KdbxError.SAVE_NO_DATABASE
+        )
+        fun switched(): KdbxResult.Failure = KdbxResult.Failure(
+            IllegalStateException("提交期间活动数据库已切换"),
+            code = KdbxError.SAVE_SESSION_CHANGED
+        )
+        fun snapshotStillActive(): Boolean =
+            databaseSession.databaseFlow.value === snapshot.database &&
+                databaseSession.currentPathIdentifier == snapshot.pathIdentifier &&
+                databaseSession.currentFile == snapshot.file
+
+        if (!snapshotStillActive()) return switched()
+        abortOnDrift(snapshot.pathIdentifier, snapshot.file)?.let { return it }
+        autoLockGuard.beginLongTask()
+        try {
+            if (!snapshotStillActive()) return switched()
+            // 第二次写前检查与 `persist()` 的普通保存路径同口径；命中漂移时不构造或发布候选。
+            abortOnDrift(snapshot.pathIdentifier, snapshot.file)?.let { return it }
+            if (!snapshotStillActive()) return switched()
+            val result = databaseSession.writeIntents.commitDatabaseMeta(snapshot.database, transform)
+            when (result) {
+                is KdbxResult.Success -> {
+                    afterPersist()
+                    driftGuard.captureAfterPersist(
+                        snapshot.pathIdentifier.orEmpty(),
+                        snapshot.file
+                    )
+                }
+                is KdbxResult.Failure -> logPersistFailure(result)
+            }
+            return result
+        } finally {
+            autoLockGuard.endLongTask()
+        }
     }
 }

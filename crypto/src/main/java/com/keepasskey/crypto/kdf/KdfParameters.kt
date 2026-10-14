@@ -10,10 +10,11 @@ import com.keepasskey.core.model.KdbxUuid
  * 原实现以普通 `ByteArray` 常驻头部且全仓无清零点，寿命上界为进程结束。
  * [clearSensitive] 提供显式擦除入口，其**生命周期契约**（AC③）：
  *
- * - **只允许在「拥有该头部的会话终止」时调用**（`DatabaseSession.lock()` / `close()` /
- *   换库前置释放——三者均在会话互斥锁内且随后 `database = null`，之后不可能再发起保存派生）。
- *   **严禁**在会话存活期调用：保存路径会以同一头部重新派生（`KdbxFile.save` 对
- *   `header.kdfParameters` 复制新盐后派生），清早了会**静默写出用错误密钥加密的库**。
+ * - 允许在「拥有该头部的会话终止」时调用（`DatabaseSession.lock()` / `close()` /
+ *   换库前置释放——三者均在会话互斥锁内且随后 `database = null`），或在事务成功发布新 KDF 后，
+ *   确认旧 KDF 的 secret 数组未被新 KDF 共享时清理已下线旧 KDF。不得清理仍供活动库派生使用的 KDF。
+ *   保存路径会以活动头部重新派生（`KdbxFile.save` 对 `header.kdfParameters` 复制新盐后派生），
+ *   清理活动 KDF 会**静默写出用错误密钥加密的库**。
  * - **所有权约定**：`KdbxHeader.copy()` 为 data class 浅拷贝，`secretKey` 数组引用被
  *   保存路径的 `freshKdfParams` / `updatedHeader` 等副本**共享**。本方法是**就地清零**
  *   （fill + 置 null），全部浅拷贝共享同一逻辑所有者，清零后所有持有者同步失效——
@@ -46,7 +47,7 @@ sealed class KdfParameters(val kdfUuid: KdbxUuid) {
 
     /**
      * 擦除本参数容器中的秘密材料。基类（AES-KDF，无 secret 分量）为 no-op；
-     * 仅限会话终止路径调用，契约详见类 KDoc。
+     * 仅限会话终止，或事务替换后已确认不再被活动 KDF 共享时调用；契约详见类 KDoc。
      */
     open fun clearSensitive() = Unit
 
@@ -96,7 +97,7 @@ sealed class KdfParameters(val kdfUuid: KdbxUuid) {
 
         /**
          * ISSUE-P2-60：擦除 KDF secret `K`——先就地 fill(0) 再置 null。
-         * 仅限会话终止路径调用（`KdbxDatabase.clearSensitiveData` 统一收口），
+         * 仅限会话终止路径，或已确认被提交的新 KDF 不共享该 secret 数组时调用，
          * 契约与所有权约定详见外层类 KDoc。
          */
         override fun clearSensitive() {

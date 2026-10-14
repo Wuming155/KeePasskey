@@ -11,17 +11,22 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.PasskeyEntryCoordinator
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.model.PasskeyKeyText
+import com.keepasskey.core.result.KdbxError
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assume
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.IOException
 
 /**
  * 通行密钥 (Passkey) 创建链路在**真机**上的端到端运行态验证。
@@ -164,6 +169,82 @@ class PasskeyCreationDeviceTest {
             assertTrue("断言签名输出必须非空且符合 ASN.1 DER 结构 (0x30 开头)", signature.isNotEmpty() && signature[0] == 0x30.toByte())
         } finally {
             java.util.Arrays.fill(signingKey.keyBytes, 0.toByte())
+        }
+    }
+
+    /**
+     * ISSUE-P1-590：设备运行时注入 Passkey 持久化失败，确认协调器不向 Activity 交付成功值，
+     * 且未落盘凭据只留在 DIRTY 会话中供重试；正式 KDBX 字节保持不变。
+     */
+    @Test
+    fun `设备上Passkey持久化失败不交付成功且正式文件不变`() = runBlocking {
+        val tempFile = File(context.cacheDir, "passkey-persist-failure-${System.nanoTime()}.kdbx")
+        val password = "Passkey-Persist-Failure-2026".toCharArray()
+        val session = DatabaseSession()
+        var stableFile = ByteArray(0)
+        val passkeyData = PasskeyCryptoEngine.generateEs256KeyPair(
+            relyingPartyId = "passkeys.io",
+            userName = "failure@example.com",
+            userDisplayName = "Synthetic Failure User"
+        )
+
+        try {
+            assertTrue(
+                "合成 Passkey 库创建失败",
+                session.create(tempFile, "PasskeyPersistFailure", password, useArgon2 = false).isSuccess
+            )
+            stableFile = tempFile.readBytes()
+            var persistCalls = 0
+            val coordinator = PasskeyEntryCoordinator(
+                databaseSession = session,
+                debugLog = DebugLogBuffer(),
+                persistSession = {
+                    persistCalls++
+                    KdbxResult.Failure(
+                        IOException("synthetic-device-persistence-failure"),
+                        code = KdbxError.SAVE_FAILED
+                    )
+                }
+            )
+
+            val result = coordinator.saveNewPasskeyEntry(passkeyData, boundPackage = null)
+
+            assertTrue("落盘失败必须以 Failure 回传，不得交付 Success", result is KdbxResult.Failure)
+            assertEquals(KdbxError.SAVE_FAILED, (result as KdbxResult.Failure).code)
+            assertEquals("一次创建只允许一次提交尝试", 1, persistCalls)
+            assertEquals(DatabaseSession.SessionState.DIRTY, session.state.value)
+            assertTrue(
+                "失败后凭据留在内存树内供重试",
+                session.databaseFlow.value!!.rootGroup.allEntries().any {
+                    PasskeyData.fromCustomFields(it.customFields)?.credentialId == passkeyData.credentialId
+                }
+            )
+            assertArrayEquals("未确认提交时正式文件字节不得变化", stableFile, tempFile.readBytes())
+
+            session.lock()
+            val reopened = DatabaseSession()
+            val reopenPassword = password.clone()
+            try {
+                assertTrue(
+                    "原正式文件仍可用原口令重开",
+                    reopened.open(tempFile, reopenPassword).isSuccess
+                )
+                assertFalse(
+                    "未提交 Passkey 不得出现在正式文件中",
+                    reopened.databaseFlow.value!!.rootGroup.allEntries().any {
+                        PasskeyData.fromCustomFields(it.customFields)?.credentialId == passkeyData.credentialId
+                    }
+                )
+            } finally {
+                reopenPassword.fill('\u0000')
+                reopened.lock()
+            }
+        } finally {
+            session.lock()
+            passkeyData.privateKey.clear()
+            password.fill('\u0000')
+            stableFile.fill(0)
+            tempFile.delete()
         }
     }
 

@@ -3,7 +3,8 @@
 1. 拉起本地 HTTPS WebDAV 服务（wsgidav + 自签名证书）
 2. 拉起本地 HTTPS MinIO(S3) 服务并创建测试桶
 3. 运行 sync 模块的 LiveSyncServersTest 真实集成测试（针对真实服务）
-4. 回收所有本地服务
+4. 运行 app 模块的 KDBX 内容比较 / 三方合并语义真实 WebDAV 往返测试
+5. 回收所有本地服务
 
 用法：python run_lab.py
 前置：pip install wsgidav cheroot pyopenssl；bin/ 下含 minio.exe / mc.exe（首次需联网下载）。
@@ -13,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))      # .../KeePasskey（仓库根）
@@ -31,6 +33,7 @@ S3_USER = "tester"
 S3_PASSWORD = "tester1234"
 BUCKET = "keepasskey-test"
 CERT_PATH = os.path.join(HERE, "certs", "cert.pem")
+LIVE_ARTIFACT_DIR = os.path.join(REPO, ".ci-artifacts", "live-sync-kdbx")
 
 PROCS = []
 
@@ -76,6 +79,11 @@ def run(cmd, display):
 
 def main():
     py = sys.executable
+    # WebDAV 与两个测试 JVM 共用一次性本地凭据；不回显口令，且不依赖弱口令默认值。
+    os.environ.setdefault("WEBDAV_HOST", "127.0.0.1")
+    os.environ.setdefault("WEBDAV_USER", "kp-test-" + uuid.uuid4().hex[:8])
+    os.environ.setdefault("WEBDAV_PASSWORD", "kp-test-" + uuid.uuid4().hex)
+    os.environ.setdefault("LIVE_SYNC_TEST", "1")
     wd = subprocess.Popen([py, os.path.join(HERE, "run_webdav.py")],
                           cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     PROCS.append(wd)
@@ -107,15 +115,29 @@ def main():
     if not (ok and (ok2 or "exists" in out)):
         print("[WARN] 建桶可能失败，S3 测试可能失败")
 
-    print("[lab] 运行 LiveSyncServersTest（针对真实本地服务）...")
-    gradle_cmd = (
+    print("[lab] 运行 sync LiveSyncServersTest（针对真实本地服务）...")
+    sync_gradle_cmd = (
         f'"{GRADLEW}" :sync:testDebugUnitTest '
         f'--tests "com.keepasskey.sync.LiveSyncServersTest" '
         f'-DliveSyncTest=true -DliveCertPath="{CERT_PATH}"'
     )
-    rc = subprocess.run(gradle_cmd, cwd=REPO, shell=True).returncode
-    print(f"[lab] Gradle 退出码: {rc}")
-    return rc
+    sync_rc = subprocess.run(sync_gradle_cmd, cwd=REPO, shell=True).returncode
+    print(f"[lab] sync Gradle 退出码: {sync_rc}")
+    if sync_rc != 0:
+        return sync_rc
+
+    os.makedirs(LIVE_ARTIFACT_DIR, exist_ok=True)
+    print("[lab] 运行 app KDBX 语义真实 WebDAV 往返（到期检测 / 合并 / 下载重开）...")
+    app_gradle_cmd = (
+        f'"{GRADLEW}" :app:testDebugUnitTest '
+        f'--tests "com.keepasskey.app.sync.LiveSyncKdbxSemanticsTest" '
+        f'-DliveSyncTest=true -DliveCertPath="{CERT_PATH}" '
+        f'-DliveWebdavUrl="https://127.0.0.1:{WEBDAV_PORT}" '
+        f'-DliveArtifactDir="{LIVE_ARTIFACT_DIR}"'
+    )
+    app_rc = subprocess.run(app_gradle_cmd, cwd=REPO, shell=True).returncode
+    print(f"[lab] app Gradle 退出码: {app_rc}")
+    return app_rc
 
 
 if __name__ == "__main__":

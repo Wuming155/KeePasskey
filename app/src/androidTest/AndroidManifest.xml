@@ -52,6 +52,23 @@
             android:launchMode="singleTop"
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+        <!-- 系统 PendingIntent A/B 身份验收专用；只接收应用生成的合成令牌与假数据。 -->
+        <activity
+            android:name="com.keepasskey.app.autofill.LockedSaveRequestProbeActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+
+        <provider
+            android:name="com.keepasskey.app.autofill.LockedSaveRequestHolderProvider"
+            android:authorities="${applicationId}.p2_603_holder"
+            android:exported="true"
+            android:process=":p2_603_holder" />
+        <activity
+            android:name="com.keepasskey.app.autofill.LockedSaveRequestHolderActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 
 </manifest>

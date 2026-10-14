@@ -7,8 +7,18 @@ import com.keepasskey.crypto.kdf.AesKdfEngine
 import com.keepasskey.crypto.kdf.Argon2KdfEngine
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.crypto.kdf.NativeArgon2
+import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.exception.KdbxCorruptFileException
+import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.file.KdbxFile
+import com.keepasskey.database.file.KdbxHeader
+import com.keepasskey.database.file.KdbxKdfAcceptance
 import com.keepasskey.database.file.KdbxKdfParameterCodec
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -179,6 +189,79 @@ class KdfWallClockDeviceTest {
         report("worstCaseWithinBudget_acceptedByCodec", true)
 
         assertEquals("默认配置耗时应为正数", true, defaultNanos > 0)
+    }
+
+    /**
+     * ISSUE-P1-595：在真实设备预算内选取高成本合法参数，实际写出 KDBX 并重新打开。
+     *
+     * 该用例补齐接受域单测之外的实际 Argon2 派生与 KDBX 往返证据；参数按本设备堆预算计算，
+     * 不强行运行低堆设备不可能接受的 256 MiB 配置，也不以 `derive()` 单独成功替代文件重开。
+     */
+    @Test
+    fun `设备预算内高成本 Argon2 配置真实写出并重开`() {
+        val memoryBytes = minOf(heapHalfBytes, 64 * MIB)
+        val iterations = minOf(
+            50L,
+            KdbxKdfAcceptance.ARGON2_MAX_TOTAL_WORK / memoryBytes
+        )
+        val parallelism = 2
+        val kdf = KdfParameters.Argon2(
+            type = KdfParameters.Argon2.Argon2Type.ARGON2ID,
+            salt = ByteArray(32) { index -> (index + 1).toByte() },
+            parallelism = parallelism,
+            memoryInBytes = memoryBytes,
+            iterations = iterations,
+            version = KdfParameters.Argon2.ARGON2_VERSION_13
+        )
+        assertEquals(
+            "本设备实际预算与高成本参数必须同判据接受",
+            null,
+            KdbxKdfAcceptance.argon2Rejection(
+                memoryInBytes = memoryBytes,
+                iterations = iterations,
+                parallelism = parallelism,
+                version = kdf.version
+            )
+        )
+
+        val entry = KdbxEntry(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("P1-595 device round-trip"),
+                KdbxConstants.Fields.USER_NAME to ProtectedString("synthetic-user")
+            )
+        )
+        val database = KdbxDatabase(
+            header = KdbxHeader.createDefault().copy(kdfParameters = kdf),
+            databaseName = "kdf-high-cost-device-round-trip",
+            rootGroup = KdbxGroup(name = "Root", entries = listOf(entry))
+        )
+        val password = "Kdf-High-Cost-Device-2026".toCharArray()
+        val startedAt = System.nanoTime()
+        val saved = try {
+            ByteArrayOutputStream().also { KdbxFile.save(it, database, password) }.toByteArray()
+        } finally {
+            password.fill('\u0000')
+        }
+        assertTrue("高成本合法参数必须真实写出非空 KDBX", saved.isNotEmpty())
+
+        val reloadPassword = "Kdf-High-Cost-Device-2026".toCharArray()
+        val reloaded = try {
+            KdbxFile.load(ByteArrayInputStream(saved), reloadPassword)
+        } finally {
+            reloadPassword.fill('\u0000')
+        }
+        val loadedKdf = reloaded.header.kdfParameters as? KdfParameters.Argon2
+        assertTrue("真实重开必须保留 Argon2 参数", loadedKdf != null)
+        assertEquals(memoryBytes, loadedKdf!!.memoryInBytes)
+        assertEquals(iterations, loadedKdf.iterations)
+        assertEquals(parallelism, loadedKdf.parallelism)
+        assertEquals("synthetic-user", reloaded.rootGroup.allEntries().single().userName)
+        report("issueP1_595_roundTrip", "PASS")
+        report("issueP1_595_memoryMiB", memoryBytes / MIB)
+        report("issueP1_595_iterations", iterations)
+        report("issueP1_595_elapsedSeconds", nanosToSeconds(System.nanoTime() - startedAt))
+        reloaded.clearSensitiveData()
+        database.clearSensitiveData()
     }
 
     /**

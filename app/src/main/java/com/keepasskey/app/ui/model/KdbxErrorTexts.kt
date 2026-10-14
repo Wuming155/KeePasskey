@@ -51,6 +51,8 @@ object KdbxErrorTexts {
         KdbxError.SAVE_NO_DATABASE to R.string.err_save_no_database,
         KdbxError.SAVE_CREDENTIALS_LOST to R.string.err_save_credentials_lost,
         KdbxError.SAVE_FAILED to R.string.err_save_failed,
+        KdbxError.SAVE_WRITE_UNCERTAIN to R.string.err_save_write_uncertain,
+        KdbxError.SAVE_SESSION_CHANGED to R.string.err_save_session_changed,
         KdbxError.EXPORT_NO_DATABASE to R.string.err_export_no_database,
         KdbxError.EXPORT_CREDENTIALS_LOST to R.string.err_export_credentials_lost,
         KdbxError.EXPORT_FAILED to R.string.err_export_failed,

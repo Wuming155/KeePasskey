@@ -46,6 +46,10 @@ object KdbxError {
     const val SAVE_NO_DATABASE = "kdbx.save.no_database"
     const val SAVE_CREDENTIALS_LOST = "kdbx.save.credentials_lost"
     const val SAVE_FAILED = "kdbx.save.failed"
+    /** writer 无法确认提交点；会话已转只读，须重开核实后才能继续写入。 */
+    const val SAVE_WRITE_UNCERTAIN = "kdbx.save.write_uncertain"
+    /** 请求排队期间活动库已切换；候选变更未应用。 */
+    const val SAVE_SESSION_CHANGED = "kdbx.save.session_changed"
 
     const val EXPORT_NO_DATABASE = "kdbx.export.no_database"
     const val EXPORT_CREDENTIALS_LOST = "kdbx.export.credentials_lost"

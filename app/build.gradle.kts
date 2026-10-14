@@ -428,6 +428,20 @@ dependencies {
     testImplementation(libs.mockwebserver)
 }
 
+// 真实 HTTPS WebDAV 上的 KDBX 语义联调只由 tools/local-sync/run_lab.py 显式启用；
+// 常规 JVM 全量测试把该类从发现集排除，避免把「本机无服务」记成 skipped 的假绿。
+val liveKdbxSyncEnabled = System.getProperty("liveSyncTest") == "true"
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    if (liveKdbxSyncEnabled) {
+        systemProperty("liveSyncTest", "true")
+        System.getProperty("liveWebdavUrl")?.let { systemProperty("liveWebdavUrl", it) }
+        System.getProperty("liveCertPath")?.let { systemProperty("liveCertPath", it) }
+        System.getProperty("liveArtifactDir")?.let { systemProperty("liveArtifactDir", it) }
+    } else {
+        exclude("**/LiveSyncKdbxSemanticsTest.class")
+    }
+}
+
 // =============================================================================================
 // 本地开发：Compose @Preview 截图导出（gitignore）。两个入口：
 //   主页面 → preview-exports/main/{light,dark}/         20 整屏 × 明暗

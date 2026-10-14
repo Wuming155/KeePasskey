@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.crypto.kdf.KdfParameters
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -146,6 +147,28 @@ internal class SessionContentMutations(
         // `CustomIcon` 实例引用的条目就地清零（`copy` 形态共享同一列表 ⇒ 全部跳过；删除单个
         // 图标 / 远端库整体接管的形态 ⇒ 下线图标清零，不再滞留 GC）。判据与上方池擦除同口径。
         currentDb.clearCustomIconPool(updated.customIcons)
+    }
+
+    /**
+     * 原子发布已成功落盘的库级候选（`ISSUE-P2-602`）。
+     *
+     * 仅由 [SessionPersistence] 在持有本类共享的会话 Mutex、且对应文件 writer 已成功返回时调用。
+     * 写盘失败不得先发布候选，否则设置页会从 `databaseFlow` 回显一个磁盘中不存在的值。
+     */
+    fun publishCommittedDatabaseMeta(expected: KdbxDatabase, committed: KdbxDatabase): Boolean {
+        if (databaseFlow.value !== expected) return false
+        databaseFlow.value = committed
+        stateFlow.value = DatabaseSession.SessionState.OPENED
+        expected.rootGroup.clearSupersededSensitiveData(committed.rootGroup)
+        expected.clearBinaryPool(committed.binaries)
+        expected.clearCustomIconPool(committed.customIcons)
+        val oldKdf = expected.header.kdfParameters
+        val newKdf = committed.header.kdfParameters
+        val sharesArgonSecret = oldKdf is KdfParameters.Argon2 &&
+            newKdf is KdfParameters.Argon2 && oldKdf.secretKey != null &&
+            oldKdf.secretKey === newKdf.secretKey
+        if (oldKdf !== newKdf && !sharesArgonSecret) oldKdf.clearSensitive()
+        return true
     }
 
     /**

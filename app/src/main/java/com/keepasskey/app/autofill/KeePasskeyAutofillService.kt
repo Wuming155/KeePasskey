@@ -1,9 +1,7 @@
 package com.keepasskey.app.autofill
 
-import android.app.PendingIntent
 import android.app.assist.AssistStructure
 import android.content.Intent
-import android.net.Uri
 import android.os.CancellationSignal
 import android.service.autofill.AutofillService
 import android.service.autofill.FillCallback
@@ -436,25 +434,20 @@ class KeePasskeyAutofillService : AutofillService() {
         // ISSUE-P2-603：每请求唯一身份（令牌入 Intent.data，参与 filterEquals）——原固定 requestCode
         // + 仅 extras 不同，配合 UPDATE_CURRENT 会让后一请求改写前一请求已交付的 extras（保存串单）。
         val requestToken = java.util.UUID.randomUUID().toString()
-        val saveIntent = Intent(this, PasswordSaveActivity::class.java).apply {
-            data = Uri.parse("keepasskey://autofill-save-request/$requestToken")
-            putExtra(PasswordSaveActivity.EXTRA_REQUEST_TOKEN, requestToken)
-            putExtra(PasswordSaveActivity.EXTRA_PACKAGE_NAME, callingPkg)
-            putExtra(PasswordSaveActivity.EXTRA_WEB_DOMAIN, extracted.webDomain)
-            putExtra(PasswordSaveActivity.EXTRA_USERNAME, extracted.username)
-            putExtra(PasswordSaveActivity.EXTRA_PASSWORD, extracted.password)
-        }
         // ISSUE-P2-549：`FLAG_MUTABLE` 在此处**无任何 fillIn 需求**（全仓 fillIn 仅用于
         // 自动填充数据集与 Credential Manager 的回传注入，见 `AutofillDatasetBuilders` /
         // `CredentialPendingIntents`），却让承载**明文口令**的 extras 可被接收方改写 ⇒ 收紧为
         // `FLAG_IMMUTABLE`。已核实 `PasswordSaveActivity`（`AndroidManifest.xml:190` exported=false）
         // 不读任何 fillIn 注入的 extras。
         // ISSUE-P2-603：requestCode 改由进程级单调分配器给出，配合唯一 data ⇒ 每请求独立 PendingIntent。
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            saveRequestCodeAllocator.getAndIncrement(),
-            saveIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        val pendingIntent = LockedSaveRequestPendingIntent.create(
+            context = this,
+            requestCode = saveRequestCodeAllocator.getAndIncrement(),
+            requestToken = requestToken,
+            callingPackage = callingPkg,
+            webDomain = extracted.webDomain,
+            username = extracted.username,
+            password = extracted.password
         )
         callback.onSuccess(pendingIntent.intentSender)
     }

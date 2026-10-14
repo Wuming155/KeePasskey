@@ -19,8 +19,8 @@ import java.io.IOException
 /**
  * ISSUE-P3-551 回归：**序列化缓冲（整库密文）在写盘异常路径也必须清零**。
  *
- * 缺陷形态：`SessionPersistence` 的两条写盘路径把 `serialized.fill(0)` 写在 **`try` 体内**
- * 而非 `finally`——`writer(serialized)` 抛异常（磁盘满 / SAF 通道中断 / URI 授权失效）时，
+ * 覆盖 `SessionPersistence` 保存、Meta 候选提交及凭据轮换的三条写盘路径；
+ * `serialized.fill(0)` 必须写在 **`finally`**——`writer(serialized)` 抛异常（磁盘满 / SAF 通道中断 / URI 授权失效）时，
  * 整库密文副本直接滞留堆上等 GC。与**同文件**换密路径对凭据快照的处理（`finally` + 失败路径
  * 所有权移交 `restoreCredentials`）相比，本处属**遗漏而非取舍**。
  *
@@ -107,13 +107,14 @@ class SessionSerializationBufferWipeTest {
     }
 
     @Test
-    fun `两处清零必须位于 finally 内`() {
+    fun `三处序列化缓冲清零必须位于 finally 内`() {
         val source = readSource(SESSION_PERSISTENCE_PATH) + "\n" +
+            readSource(DATABASE_META_COMMITTER_PATH) + "\n" +
             readSource("database/src/main/java/com/keepasskey/database/session/SessionCredentialRotation.kt")
         val occurrences = Regex("serialized\\??\\.fill\\(0\\)").findAll(source).toList()
         assertTrue(
-            "两处 serialized.fill(0) 都必须存在（保存 / 换密），实测 ${occurrences.size} 处",
-            occurrences.size == 2
+            "保存 / Meta 事务 / 换密三处 serialized.fill(0) 都必须存在，实测 ${occurrences.size} 处",
+            occurrences.size == 3
         )
         occurrences.forEach { match ->
             val prefix = source.substring(maxOf(0, match.range.first - 400), match.range.first)
@@ -141,6 +142,8 @@ class SessionSerializationBufferWipeTest {
     private companion object {
         const val SESSION_PERSISTENCE_PATH =
             "database/src/main/java/com/keepasskey/database/session/SessionPersistence.kt"
+        const val DATABASE_META_COMMITTER_PATH =
+            "database/src/main/java/com/keepasskey/database/session/DatabaseMetaCommitter.kt"
         const val ROOT_SEARCH_DEPTH = 6
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

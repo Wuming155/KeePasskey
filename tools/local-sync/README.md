@@ -14,8 +14,9 @@
 | **MinIO (S3)** | `9000` | MinIO（HTTPS + SigV4，AccessKey `tester` / `tester1234`，桶 `keepasskey-test`） |
 | MinIO Console | `9001` | Web 管理界面（可选） |
 
-对应测试：`sync/src/test/java/com/keepasskey/sync/LiveSyncServersTest.kt`
-（默认跳过，仅当设置 `LIVE_SYNC_TEST=1` 或 `-DliveSyncTest` 时执行）。
+对应测试：`sync/src/test/java/com/keepasskey/sync/LiveSyncServersTest.kt` 与
+`app/src/test/java/com/keepasskey/app/sync/LiveSyncKdbxSemanticsTest.kt`
+（均由 `run_lab.py` 显式启用；常规 JVM 全量测试不发现 app live 用例，不留下 Assume/skipped 假绿）。
 
 ## 首次准备
 
@@ -81,6 +82,9 @@ python smoke_minio.py    # 建桶 / 上传 / 下载字节精确 / 删除（SigV4
   错误 ETag 触发 `412 ConflictError`、DELETE。
 - **下载 → 合并**：三方库镜像经真实服务器上传/下载（字节精确），
   由真实 `KdbxMerger.mergeDatabases` 完成并发新增合并与冲突检测。
+- **app KDBX 内容语义**：到期语义变化由 `KdbxContentComparator` 确认为需上传；实际 `KdbxFile.save`
+  产物经 WebDAV `uploadAtomic` 保存、下载并重新解密；三方合并独立字段变化后同样落成真实 KDBX 远端产物。
+  `run_lab.py` 把两份产物留在 `.ci-artifacts/live-sync-kdbx/`，可用 `pykeepass` 做官方实现回读复核。
 
 ## 场景 → 测试映射总表
 
