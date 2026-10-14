@@ -608,5 +608,6 @@
 | §508 | 生物识别解封缓冲清理批次 | `ISSUE-P2-598`（整条闭环；P2 7 → 6） | [508-生物识别解封缓冲清理批次.md](resolved/batches/508-生物识别解封缓冲清理批次.md) |
 | §509 | Autofill 保存请求身份隔离与口令数组清理批次 | `ISSUE-P2-603` / `ISSUE-P2-606`（两条整条闭环；P2 6 → 4） | [509-Autofill保存请求身份隔离与口令数组清理批次.md](resolved/batches/509-Autofill保存请求身份隔离与口令数组清理批次.md) |
 | §510 | 附件草稿所有权与擦除批次 | `ISSUE-P2-600`（整条闭环；P2 4 → 3） | [510-附件草稿所有权与擦除批次.md](resolved/batches/510-附件草稿所有权与擦除批次.md) |
+| §511 | 同步内容变化语义补齐批次 | `ISSUE-P2-596`（整条闭环；P2 3 → 2；同步更正 PD-20 重开条件 ①②） | [511-同步内容变化语义补齐批次.md](resolved/batches/511-同步内容变化语义补齐批次.md) |
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起）。

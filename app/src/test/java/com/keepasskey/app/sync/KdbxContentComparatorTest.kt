@@ -8,7 +8,11 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.model.CustomIcon
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.file.KdbxHeader
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,13 +26,11 @@ import java.time.Instant
  * `resolveLocalContentChanged`）。本类把它的**每一条比较臂**与**三条刻意排除项**
  * （`times`、历史内容、以及合并侧才需要的 `lastModificationTime`）都变成可执行断言。
  *
- * 与合并侧 `KdbxEntryMerger.isModified` 的口径差异（本判定刻意不比 `times`）见
+ * 与合并侧 `KdbxEntryMerger.isModified` 的口径差异（本判定刻意不比 `times` 的使用性字段）见
  * [KdbxContentComparator] 类 KDoc 与 `docs/architecture/已知工程限界.md` §10。
  *
- * **覆盖缺口（如实声明，不得读作已验证）**：根级 `changed()`（`deletedObjects` 比较 +
- * 委托分组比较）本类**未覆盖**——构造 `KdbxDatabase` 需一并提供 `KdbxHeader` 与
- * `DeletedObject` 夹具，本批未做；本类覆盖的是其中真正承载判定逻辑的
- * [KdbxContentComparator.entryChanged] 与 [KdbxContentComparator.groupChanged]。
+ * **ISSUE-P2-596 起根级 [KdbxContentComparator.changed] 亦被覆盖**（库级 Meta / 头部语义 /
+ * 随机材料排除）；历史内容级比较与到期语义由本类新增用例锁定。
  */
 class KdbxContentComparatorTest {
 
@@ -70,19 +72,18 @@ class KdbxContentComparatorTest {
     }
 
     @Test
-    fun `仅 times 的变化刻意不判为内容变更`() {
+    fun `仅使用性 times 的变化刻意不判为内容变更`() {
         val timeMutations = listOf(
             "lastModificationTime" to KdbxTimes(lastModificationTime = Instant.ofEpochMilli(1_700_000_000_000L)),
             "usageCount" to base.times.copy(usageCount = 42L),
-            "lastAccessTime" to base.times.copy(lastAccessTime = Instant.ofEpochMilli(1L)),
-            "expires 语义" to base.times.copy(expires = true, expiryTime = Instant.ofEpochMilli(2L))
+            "lastAccessTime" to base.times.copy(lastAccessTime = Instant.ofEpochMilli(1L))
         )
         timeMutations.forEach { (name, times) ->
             val mutated = base.copy(times = times)
             // 理由：KdbxTimes 混装「使用性」字段（lastAccessTime / usageCount）与
             // lastModificationTime，而 KdbxEntry.withField 经 withModified() 一次性改写三者
             // ⇒ 纳入比较会让「触碰但内容等同」被判成变更，触发重序列化 + 上传 + 前移远端 ETag
-            //（正是本检测器存在的理由）。生产代码亦无「只改 times」的编辑入口。
+            //（正是本检测器存在的理由）。ISSUE-P2-596 仅把**到期语义**纳入，使用性字段仍排除。
             assertFalse(
                 "$name 属使用性 / 合并性变动，不得判为需要重新上传的内容变更",
                 KdbxContentComparator.entryChanged(mutated, base)
@@ -94,19 +95,50 @@ class KdbxContentComparatorTest {
         }
     }
 
+    // ===== ISSUE-P2-596：到期语义纳入（PD-20 重开条件成立） =====
+
     @Test
-    fun `历史条数相同而内容不同刻意不判为变更`() {
+    fun `到期语义的每一处变化都必须被检出`() {
+        val baseTimes = KdbxTimes(expires = false, expiryTime = Instant.ofEpochMilli(1_000L))
+        val entry = base.copy(times = baseTimes)
+
+        assertTrue(
+            "expires 由 false 翻转为 true 必须判为变更",
+            KdbxContentComparator.entryChanged(entry.copy(times = baseTimes.copy(expires = true)), entry)
+        )
+        assertTrue(
+            "expires 生效时 expiryTime 变化必须判为变更",
+            KdbxContentComparator.entryChanged(
+                entry.copy(times = baseTimes.copy(expires = true, expiryTime = Instant.ofEpochMilli(2_000L))),
+                entry.copy(times = baseTimes.copy(expires = true, expiryTime = Instant.ofEpochMilli(3_000L)))
+            )
+        )
+    }
+
+    @Test
+    fun `禁用到期时 expiryTime 差异不判为变更`() {
+        val a = base.copy(times = KdbxTimes(expires = false, expiryTime = Instant.ofEpochMilli(1_000L)))
+        val b = base.copy(times = KdbxTimes(expires = false, expiryTime = Instant.ofEpochMilli(9_999L)))
+
+        assertFalse(
+            "expires == false 时 expiryTime 不生效 ⇒ 不得因陈旧日期差异误报变更",
+            KdbxContentComparator.entryChanged(a, b)
+        )
+    }
+
+    @Test
+    fun `历史等条数原地改写必须判为变更`() {
         val sharedId = KdbxUuid.random()
         val oldSnapshot = KdbxEntry(id = sharedId, fields = mapOf("Title" to ProtectedString("旧")))
         val newSnapshot = KdbxEntry(id = sharedId, fields = mapOf("Title" to ProtectedString("新")))
         val a = base.copy(history = listOf(oldSnapshot))
         val b = base.copy(history = listOf(newSnapshot))
-        // 刻意的已知不覆盖：可达的历史变更（追加快照 / 按保留期修剪 / 合并并集）必然改变条数；
-        // 若日后引入「等条数原地改写历史」的路径，本断言即失效判据，须同步改判据。
-        assertFalse(
-            "本判定只比历史条数（该口径登记于已知工程限界 §10）",
+
+        assertTrue(
+            "ISSUE-P2-596：历史改内容级比较，等条数原地改写必须判为变更",
             KdbxContentComparator.entryChanged(a, b)
         )
+        assertFalse("同内容历史不得误报", KdbxContentComparator.entryChanged(a, a.copy()))
     }
 
     // ===== ISSUE-P3-542：标准五字段按**内容**比较（isProtected 由库级配置决定、不构成树内容） =====
@@ -220,6 +252,60 @@ class KdbxContentComparatorTest {
                 ),
                 baseGroup
             )
+        )
+    }
+
+    // ===== ISSUE-P2-596：库级 Meta / 头部语义纳入根级 changed() =====
+
+    @Test
+    fun `库级 Meta 可编辑字段逐项纳入判据`() {
+        val db = KdbxDatabase(header = KdbxHeader.createDefault(useArgon2 = true), rootGroup = KdbxGroup(name = "Root"))
+        val mutations = listOf(
+            "databaseName" to db.copy(databaseName = "改名"),
+            "databaseDescription" to db.copy(databaseDescription = "描述"),
+            "defaultUserName" to db.copy(defaultUserName = "alice"),
+            "recycleBinEnabled" to db.copy(recycleBinEnabled = false),
+            "recycleBinUuid" to db.copy(recycleBinUuid = KdbxUuid.random()),
+            "entryTemplatesGroup" to db.copy(entryTemplatesGroup = KdbxUuid.random()),
+            "customIcons" to db.copy(customIcons = listOf(CustomIcon(uuid = KdbxUuid.random(), data = ByteArray(4)))),
+            "customData" to db.copy(customData = mapOf("k" to "v")),
+            "historyMaxItems" to db.copy(historyMaxItems = 42),
+            "historyMaxSize" to db.copy(historyMaxSize = 1234L)
+        )
+        mutations.forEach { (name, mutated) ->
+            assertTrue("库级 Meta $name 变化必须判为变更（漏判即「设置改动不上云」）", KdbxContentComparator.changed(mutated, db))
+        }
+        assertFalse("同内容快照不得误报", KdbxContentComparator.changed(db, db.copy()))
+    }
+
+    @Test
+    fun `会话定位与时间戳变化不判为变更`() {
+        val db = KdbxDatabase(header = KdbxHeader.createDefault(useArgon2 = true), rootGroup = KdbxGroup(name = "Root"))
+        val moved = db.copy(lastSelectedGroup = KdbxUuid.random(), generator = "X", settingsChanged = Instant.now())
+        assertFalse(KdbxContentComparator.changed(moved, db))
+    }
+
+    @Test
+    fun `随机头部材料不判为变更而同语义参数判为变更`() {
+        val root = KdbxGroup(name = "Root")
+        val h1 = KdbxHeader.createDefault(useArgon2 = true)
+        val randOnly = h1.copy(masterSeed = ByteArray(32) { 7 }, encryptionIv = ByteArray(16) { 3 })
+        assertFalse(
+            "随机 masterSeed / IV 不得判为内容变更（否则每次保存后无编辑也恒判变更）",
+            KdbxContentComparator.changed(KdbxDatabase(header = randOnly, rootGroup = root), KdbxDatabase(header = h1, rootGroup = root))
+        )
+
+        val cipherChanged = h1.copy(cipherUuid = KdbxConstants.Cipher.TWOFISH)
+        assertTrue(
+            "加密算法变化必须判为变更",
+            KdbxContentComparator.changed(KdbxDatabase(header = cipherChanged, rootGroup = root), KdbxDatabase(header = h1, rootGroup = root))
+        )
+
+        val argon = h1.kdfParameters as KdfParameters.Argon2
+        val kdfChanged = h1.copy(kdfParameters = argon.copy(iterations = argon.iterations + 1))
+        assertTrue(
+            "KDF 语义参数（迭代）变化必须判为变更（salt 差异不计）",
+            KdbxContentComparator.changed(KdbxDatabase(header = kdfChanged, rootGroup = root), KdbxDatabase(header = h1, rootGroup = root))
         )
     }
 
