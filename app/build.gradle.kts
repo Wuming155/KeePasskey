@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
-    // 本地开发：把 main 源集全部 @Preview 渲染为 PNG（与 GUI导航.md 配套）
+    // 本地开发：把 main 源集全部 @Preview 渲染为 PNG
     alias(libs.plugins.compose.screenshot)
 }
 

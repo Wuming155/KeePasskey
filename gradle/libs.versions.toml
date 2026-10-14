@@ -162,5 +162,5 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
-# Compose Preview → 截图导出（GUI 导航配套；仅 app 模块 apply）
+# Compose Preview 截图导出插件（仅 app 模块 apply）
 compose-screenshot = { id = "com.android.compose.screenshot", version.ref = "composeScreenshot" }

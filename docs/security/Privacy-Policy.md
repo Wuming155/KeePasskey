@@ -1,26 +1,23 @@
 # KeePasskey 隐私政策（Privacy Policy）
 
-> **文档定位**：KeePasskey for Android 对外可引用的成文隐私承诺。
-> **核实基线**：2026-09-12。本文每一条承诺均与仓库代码事实逐条对应，并标注可核对的落点；
-> 若某条与代码不符，以代码为准并视为缺陷（禁止写入与实现不符的承诺）。
-> **适用版本**：`app/build.gradle.kts` 中 `versionName`（当前 `0.1.0`）及之后版本。
+> KeePasskey for Android 的数据处理承诺。发布前应按实际发行行为复核。
 
 ---
 
 ## 0. 一句话摘要
 
-KeePasskey 是一款**纯本地**的密码管理器：默认情况下不联网、不注册账号、不收集任何数据；
-唯一的网络行为是**用户主动启用**的云同步与**默认关闭**的已泄露密码检测，二者均可被用户完全掌控与关闭。
+KeePasskey 是一款以本地存储为主的密码管理器，不要求注册账号，也不集成遥测、广告或崩溃上报。
+同步、已泄露密码检测和通行密钥站点归属校验会在各自条件下发起网络请求；其目标和可用设置见下文。
 
 ---
 
 ## 1. 我们收集哪些数据
 
-**不收集任何数据。** 本应用：
+本应用不向 KeePasskey 运营的服务器收集或发送数据，也不集成遥测、广告或崩溃上报 SDK：
 
 - 无遥测（telemetry）、无行为分析（analytics）、无广告（ads）、无崩溃上报（crash reporting）SDK；
 - 无账号体系，不需要注册、登录，不采集手机号 / 邮箱 / 设备标识符 / 广告 ID / 位置信息；
-- 不采集、不上传用户库中的任何条目、口令、附件、TOTP 种子或通行密钥。
+- 不向 KeePasskey 运营的服务发送用户库内容。用户启用同步时，加密数据库会发送到用户配置的 WebDAV / S3 服务；HIBP 查询会发送密码 SHA-1 哈希的前缀，详见 §2。
 
 **可核对落点**：`app/build.gradle.kts` 的依赖列表不含任何分析 / 广告 / 崩溃上报 SDK
 （全仓检索 `firebase` / `analytics` / `crashlytics` / `sentry` 等关键字，仅命中文案与供应链抑制文件，无实际依赖）；
@@ -31,15 +28,15 @@ KeePasskey 是一款**纯本地**的密码管理器：默认情况下不联网�
 
 ---
 
-## 2. 网络访问范围（仅两类，均可关闭）
+## 2. 网络访问
 
-本应用**仅**在两处访问网络，且都能被用户关闭：
+应用网络请求由用户配置和正在使用的功能决定。以下列出已确认的请求路径：
 
 ### 2.1 云同步（默认关闭，需用户显式配置）
 
 - 支持 WebDAV 与 S3 兼容对象存储；凭据与服务器地址**完全由用户自行填写**。
 - 目标地址**只**是用户配置的那一台服务器，绝不向任何厂商服务器回传。
-- 未配置或关闭同步时，本应用**零外联**。
+- 未配置或关闭同步时，不会发起云同步请求；HIBP 与 Digital Asset Links 请求仍分别按 §2.2 和 §2.3 所述条件触发。
 - 同步凭据经 Android Keystore 封印后本地保存；传输全程 TLS（见 §3）。
 
 **可核对落点**：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subsscreens/CloudSyncConfigFields.kt`、
@@ -57,10 +54,17 @@ KeePasskey 是一款**纯本地**的密码管理器：默认情况下不联网�
 **可核对落点**：默认值 `breachCheckEnabled: Boolean = false`
 （[`ExtendedSettings.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/ExtendedSettings.kt)、
 [`SettingsUiState.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiState.kt)）；
-关闭态零外联（[`SettingsHealthController.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsHealthController.kt)）；
+HIBP 关闭时不发起该功能的请求（[`SettingsHealthController.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsHealthController.kt)）；
 k-匿名实现（[`HibpRangeClient.kt`](../../app/src/main/java/com/keepasskey/app/data/breach/HibpRangeClient.kt)）。
 
-**除以上两类外，本应用不存在任何其他网络访问。**
+### 2.3 通行密钥站点归属校验（Digital Asset Links）
+
+- 在通行密钥注册流程中，若用户未启用“跳过通行密钥站点归属校验”，应用可能向本次注册所用 RP 域名请求 `https://<rpId>/.well-known/assetlinks.json`。
+- 自动填充对非受信浏览器调用方校验其提供的 web 域名时，也可能请求该域名对应的同一路径；注册侧的“跳过”设置不关闭自动填充的域归属校验。
+- 请求是无请求体的 GET，并显式发送 `Accept: application/json`。请求目标是用户当前交互所涉及的 RP / web 域名，不是 KeePasskey 厂商服务；应用不在该请求中附加数据库条目、口令或凭据载荷。目标站点会收到该路径请求及常规网络连接信息。
+- 注册校验默认不跳过，可通过上述设置关闭注册侧请求；自动填充侧没有可关闭该校验的对应设置。校验结果可能由应用在内存中缓存。
+
+**可核对落点**：[`DigitalAssetLinksVerifier.kt`](../../app/src/main/java/com/keepasskey/app/passkey/DigitalAssetLinksVerifier.kt)、[`AutofillOriginResolver.kt`](../../app/src/main/java/com/keepasskey/app/autofill/AutofillOriginResolver.kt)、[`ExtendedSettings.kt`](../../app/src/main/java/com/keepasskey/app/ui/screens/settings/ExtendedSettings.kt)。
 
 ---
 
@@ -82,27 +86,15 @@ k-匿名实现（[`HibpRangeClient.kt`](../../app/src/main/java/com/keepasskey/a
 - 用户的库文件（标准 `.kdbx`）**仅存于本地**或用户自行选择的存储位置，除非用户开启云同步。
 - 本应用不设云端账户、不保留任何服务器侧副本；用户开启同步时，远端副本位于**用户自己的存储服务**，
   其留存与删除由用户在对应服务上掌控。
-- **删除方式**：卸载应用即删除本地数据；如需删除云副本，请在用户自己的 WebDAV / S3 服务上删除。
+- **删除方式**：卸载会移除应用私有存储中的数据。通过系统文件选择器在 SAF 文档提供方中创建或选择的外部数据库文件位于用户选择的位置，不属于应用私有存储；卸载不等于删除这些文件，用户需在相应提供方中自行管理或删除。云端副本也需在用户自己的 WebDAV / S3 服务上删除。
 
 ---
 
 ## 5. 敏感数据的内存与日志处理
 
-- **内存**：主密码、密钥、条目口令等敏感数据一律以 `CharArray` / `ByteArray` 承载并**显式清零**，
-  绝不落地为长期存活的 `String`（Compose 文本输入等框架边界妥协已收敛到唯一的
-  [`SecurePasswordField`](../../app/src/main/java/com/keepasskey/app/ui/components/SecurePasswordField.kt) 封装点）。
-- **日志脱敏**：全仓业务代码统一经
-  [`AppLog`](../../core/src/main/java/com/keepasskey/core/log/AppLog.kt) 输出日志——
-  - `v` / `d` 级别**仅调试构建**输出，release 构建由 R8 直接剥离；
-  - `e` / `w` 级别在 release 下**只保留异常类名**，不透出异常 message 与堆栈（避免携带主机地址、用户名等敏感标识）；
-  - 日志**严禁**包含主密码、口令、TOTP 种子等明文。
-- **防截屏**：提供 `FLAG_SECURE` 开关，**窗口截屏防护全程由该开关决定**——开启则施加，关闭则真实解除
-  （含解锁页；关闭后解锁页等窗口可被截屏 / 录屏 / Recents 预览捕获）。窗口 attach 时保留**首帧保守遮蔽**
-  （先加旗、随后按开关修正）以消除「onCreate → 首次发射」的 Recents 空窗，但**不构成**全程保护；
-  开关关闭期间产生的截屏 / 录屏 / 相册副本**无法**由应用追溯擦除。
-  **例外**：建库向导、主密钥修改、子库凭据、附件预览与修订差异**四类敏感对话框始终强制遮罩**（不读该开关）；
-  TOTP 与通行密钥扫码取景 / 确认对话框则**跟随**该开关（2026-09-26 裁决，`PD-47` / `PD-48`）。
-  关闭开关须先在设置页完成风险确认（`ISSUE-P2-09`）。
+- **内存**：应用尽量以可显式清理的字符或字节缓冲处理密码和密钥。平台接口、界面状态、展示数据或数据库模型的部分业务路径可能持有不可擦除的字符串；丢弃引用不能保证立即或确定地清除其内存副本。
+- **日志脱敏**：日志不得包含主密码、口令、TOTP 种子或其他敏感明文。
+- **防截屏**：防截屏设置开启时，随设置控制的窗口受到系统保护；关闭时，这些窗口可能被截屏、录屏或显示在最近任务预览中。建库、修改主密钥、子库凭据、附件预览和修订差异对话框始终受保护；TOTP 与通行密钥扫码窗口遵循该设置。关闭保护前会要求确认风险；已产生的截图或录屏副本无法由应用追溯删除。
 
 ---
 
@@ -110,7 +102,8 @@ k-匿名实现（[`HibpRangeClient.kt`](../../app/src/main/java/com/keepasskey/a
 
 | 权限 | 用途 |
 |---|---|
-| `INTERNET` / `ACCESS_NETWORK_STATE` | 仅供用户启用的云同步与默认关闭的 HIBP 查询 |
+| `INTERNET` / `ACCESS_NETWORK_STATE` | 云同步、默认关闭的 HIBP 查询，以及符合条件时的 Digital Asset Links 归属校验 |
+| `CAMERA` | 用户在条目编辑中选择 TOTP 二维码扫码时采集相机画面；应用使用 CameraX 取帧并在设备上解码二维码，将识别文本交给条目编辑流程。扫码实现不发起网络请求，也不上传相机画面或识别结果。也可从系统照片选择器导入二维码图片，无需相机权限。 |
 | `USE_BIOMETRIC` | 指纹 / 生物识别快速解锁（本地校验） |
 | `POST_NOTIFICATIONS` | 解锁态常驻通知、TOTP 通知 |
 | `HIDE_OVERLAY_WINDOWS` | 防覆盖窗口钓鱼（防点击劫持） |
@@ -119,32 +112,12 @@ k-匿名实现（[`HibpRangeClient.kt`](../../app/src/main/java/com/keepasskey/a
 
 ---
 
-## 7. 「禁网」构建变体评估（noNet）
-
-本仓于 2026-09-12 评估过新增 `productFlavors { noNet }`（裁剪同步与泄露检测、构建期不申请网络权限）。
-**当前结论：暂不实施**，原因如下（属可复核的工程权衡，非隐私承诺弱化）：
-
-1. **与发布产物契约冲突**：引入 flavor 会使 `assembleRelease` 产物路径由
-   `app-release.apk` 变为 `app-<flavor>-release.apk`，直接违反既有的稳定版产物路径契约
-   （`AGENTS.md` 原 §3.8 的约定；该节已于提交 `215ea82` 随「过时构建规则」精简删除，约定本身仍由发布链路与 CI 断言承担），
-   并波及 CI 与既有安装/升级链路。
-2. **裁剪面极大、回归风险高**：同步与泄露检测已深入设置导航、Hilt 注入、WorkManager 后台任务与
-   自动填充 / Passkey 链路，flavor 化需要成体系的 `BuildConfig` 条件编译与源集隔离，
-   易在「看起来禁网、实则留旁路」的方向上引入隐蔽缺陷——这与本项目「宁缺毋滥」的安全取向相悖。
-3. **无实际增益**：默认配置下本应用本就不联网（同步默认关闭、HIBP 默认关闭，见 §2），
-   所谓「禁网」在当前默认行为面前几无额外保护收益。
-
-**替代与展望**：如确有硬性「禁网」需求，建议以独立仓库分支 / 独立发行渠道维护，
-在保持主仓产物契约不变的前提下裁剪同步与泄露检测模块（届时需移除 `INTERNET` / `ACCESS_NETWORK_STATE` 权限）。
-
----
-
-## 8. 政策变更
+## 7. 政策变更
 
 本政策随应用版本更新；如发生实质性变更，将在对应版本的发布说明与本文档中同步注明。
 
 ---
 
-## 9. 联系方式
+## 8. 联系方式
 
 如对本政策或数据处理有疑问，请通过本仓库的 Issue 渠道反馈。
