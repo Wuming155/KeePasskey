@@ -3,6 +3,7 @@ package com.keepasskey.app.autofill
 import android.app.PendingIntent
 import android.app.assist.AssistStructure
 import android.content.Intent
+import android.net.Uri
 import android.os.CancellationSignal
 import android.service.autofill.AutofillService
 import android.service.autofill.FillCallback
@@ -432,7 +433,12 @@ class KeePasskeyAutofillService : AutofillService() {
         callback: SaveCallback
     ) {
         AppLog.i(TAG, "密码库当前处于锁定状态，向系统返回解锁保存 IntentSender")
+        // ISSUE-P2-603：每请求唯一身份（令牌入 Intent.data，参与 filterEquals）——原固定 requestCode
+        // + 仅 extras 不同，配合 UPDATE_CURRENT 会让后一请求改写前一请求已交付的 extras（保存串单）。
+        val requestToken = java.util.UUID.randomUUID().toString()
         val saveIntent = Intent(this, PasswordSaveActivity::class.java).apply {
+            data = Uri.parse("keepasskey://autofill-save-request/$requestToken")
+            putExtra(PasswordSaveActivity.EXTRA_REQUEST_TOKEN, requestToken)
             putExtra(PasswordSaveActivity.EXTRA_PACKAGE_NAME, callingPkg)
             putExtra(PasswordSaveActivity.EXTRA_WEB_DOMAIN, extracted.webDomain)
             putExtra(PasswordSaveActivity.EXTRA_USERNAME, extracted.username)
@@ -443,9 +449,10 @@ class KeePasskeyAutofillService : AutofillService() {
         // `CredentialPendingIntents`），却让承载**明文口令**的 extras 可被接收方改写 ⇒ 收紧为
         // `FLAG_IMMUTABLE`。已核实 `PasswordSaveActivity`（`AndroidManifest.xml:190` exported=false）
         // 不读任何 fillIn 注入的 extras。
+        // ISSUE-P2-603：requestCode 改由进程级单调分配器给出，配合唯一 data ⇒ 每请求独立 PendingIntent。
         val pendingIntent = PendingIntent.getActivity(
             this,
-            REQUEST_CODE_SAVE,
+            saveRequestCodeAllocator.getAndIncrement(),
             saveIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
@@ -478,8 +485,12 @@ class KeePasskeyAutofillService : AutofillService() {
         /** ISSUE-P3-40：手动选择器入口数据集的 requestCode（与确认基址段无重叠） */
         internal const val REQUEST_CODE_PICKER = 2200
 
-        /** ISSUE-P1-224：密码库锁定时保存凭据拉起解锁保存 Activity 的 requestCode */
-        internal const val REQUEST_CODE_SAVE = 2300
+        /** ISSUE-P1-224 / P2-603：保存请求 requestCode 基址——改由进程级单调分配器逐请求分配。 */
+        internal const val REQUEST_CODE_SAVE = 3100
+
+        /** ISSUE-P2-603：保存请求 requestCode 分配器（与唯一 `Intent.data` 共同构成请求身份）。 */
+        private val saveRequestCodeAllocator =
+            java.util.concurrent.atomic.AtomicInteger(REQUEST_CODE_SAVE)
 
         // ISSUE-P2-07：保存被拒的提示文案已迁入 strings.xml
         // （autofill_save_blocked），与填充侧同源资源化。
