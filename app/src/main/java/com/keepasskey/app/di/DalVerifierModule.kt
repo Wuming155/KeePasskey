@@ -68,6 +68,12 @@ object DalVerifierModule {
      * **不适用**于 DAL——RP 的 `assetlinks.json` 只可能来自公网站点，放行内网目标纯属扩大攻击面。
      *
      * 超时沿用校验器既有的紧预算常量（注册流程有系统 5s 级约束），仅覆盖工厂默认值。
+     *
+     * **禁止重定向（ISSUE-P2-604）**：在加固工厂产出的客户端上以 `newBuilder()` 派生 DAL 专用配置，
+     * `followRedirects(false)` + `followSslRedirects(false)`——Google Digital Asset Links 规范要求
+     * 声明必须由**目标 HTTPS 主机的 well-known 地址直接**返回；跟随跳转会把「跳转目标的 JSON」
+     * 误当作原 RP 的声明，削弱域名授权边界。派生而非另建裸客户端，是为**保住**工厂装配的
+     * DNS/连接期 SSRF 守卫与 TLS-only 规格（`newBuilder` 逐项复制既有配置）。
      */
     @Provides
     @Singleton
@@ -79,5 +85,8 @@ object DalVerifierModule {
             writeTimeoutMs = DigitalAssetLinksVerifier.READ_TIMEOUT_MS,
             callTimeoutMs = DigitalAssetLinksVerifier.CALL_TIMEOUT_MS
         )
-    )
+    ).newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
 }

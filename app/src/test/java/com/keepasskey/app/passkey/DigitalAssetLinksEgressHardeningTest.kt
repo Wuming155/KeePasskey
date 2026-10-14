@@ -4,6 +4,7 @@ import com.keepasskey.app.di.DalVerifierModule
 import com.keepasskey.sync.network.SsrfGuardDns
 import okhttp3.ConnectionSpec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -56,6 +57,15 @@ class DigitalAssetLinksEgressHardeningTest {
             "回环目标必须被拒绝——否则「已装配守卫」只是纸面配置",
             thrown
         )
+    }
+
+    @Test
+    fun `DAL 出口禁止跟随重定向`() {
+        assertFalse(
+            "不得跟随 HTTP 重定向（ISSUE-P2-604：声明必须由目标地址直接返回）",
+            client.followRedirects
+        )
+        assertFalse("不得跟随 SSL 重定向", client.followSslRedirects)
     }
 
     @Test

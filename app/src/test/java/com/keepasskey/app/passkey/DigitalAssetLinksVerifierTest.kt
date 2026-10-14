@@ -46,7 +46,12 @@ class DigitalAssetLinksVerifierTest {
             // MockWebServer（明文本地回环）——两者在传输层必然冲突（明文与回环都会被拒），故注入
             // 自建客户端。「生产出口是否真的加固」由 `DigitalAssetLinksEgressHardeningTest`
             // **单独断言**，不会被这里的测试替身掩盖。
-            http = okhttp3.OkHttpClient.Builder().build()
+            http = okhttp3.OkHttpClient.Builder()
+                // ISSUE-P2-604：与生产出口一致**不跟随重定向**，使「重定向不授权且不访问目标」
+                // 在本套用例中可确定性验证（生产出口由 `DalVerifierModule` 关闭重定向）。
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build()
         )
     }
 
@@ -54,6 +59,19 @@ class DigitalAssetLinksVerifierTest {
     fun tearDown() {
         server.shutdown()
     }
+
+    /**
+     * 构造响应。**ISSUE-P2-604**：DAL 现要求 `Content-Type: application/json`，而 MockWebServer
+     * 的 `setBody(String)` **不**自动补 Content-Type，故此处显式设置，避免用例把「缺类型」误当合法。
+     */
+    private fun json(
+        body: String,
+        code: Int = 200,
+        contentType: String = "application/json; charset=utf-8"
+    ): MockResponse = MockResponse()
+        .setResponseCode(code)
+        .setHeader("Content-Type", contentType)
+        .setBody(body)
 
     private fun dalJson(
         packageName: String = pkg,
@@ -85,7 +103,7 @@ class DigitalAssetLinksVerifierTest {
 
     @Test
     fun `远程声明_包名与指纹匹配_校验通过`() = runBlocking {
-        server.enqueue(MockResponse().setBody(dalJson()))
+        server.enqueue(json(dalJson()))
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
 
         val recorded = server.takeRequest()
@@ -95,45 +113,114 @@ class DigitalAssetLinksVerifierTest {
     @Test
     fun `远程声明_冒号指纹与无冒号指纹跨格式匹配`() = runBlocking {
         // 证书侧无冒号大写，声明侧冒号小写 → 归一后命中
-        server.enqueue(MockResponse().setBody(dalJson(fingerprint = fpColon)))
+        server.enqueue(json(dalJson(fingerprint = fpColon)))
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify(fingerprint = fpNoColon.lowercase()))
     }
 
     @Test
     fun `远程声明_包名不匹配_拒绝`() = runBlocking {
-        server.enqueue(MockResponse().setBody(dalJson(packageName = "com.evil.app")))
+        server.enqueue(json(dalJson(packageName = "com.evil.app")))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
     @Test
     fun `远程声明_指纹不匹配_拒绝`() = runBlocking {
         val other = fpNoColon.substring(0, fpNoColon.length - 2) + "AA"
-        server.enqueue(MockResponse().setBody(dalJson(fingerprint = other)))
+        server.enqueue(json(dalJson(fingerprint = other)))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
     @Test
     fun `远程声明_relation不符_拒绝`() = runBlocking {
-        server.enqueue(MockResponse().setBody(dalJson(relation = "delegate_permission/common.handle_all_urls")))
+        server.enqueue(json(dalJson(relation = "delegate_permission/common.handle_all_urls")))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
     @Test
     fun `远程声明_namespace非android_app_拒绝`() = runBlocking {
-        server.enqueue(MockResponse().setBody(dalJson(namespace = "web")))
+        server.enqueue(json(dalJson(namespace = "web")))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
     @Test
     fun `远程声明_DAL格式错误_拒绝而非网络故障`() = runBlocking {
-        server.enqueue(MockResponse().setBody("not a json {"))
+        server.enqueue(json("not a json {"))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
     @Test
     fun `远程声明_HTTP404视为无声明_拒绝`() = runBlocking {
-        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setResponseCode(404).setHeader("Content-Type", "application/json"))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    // ===== ISSUE-P2-604：严格「目标地址直返 200 + application/json」（禁重定向） =====
+
+    @Test
+    fun `远程声明_HTTP201视为无声明_拒绝`() = runBlocking {
+        server.enqueue(json(dalJson(), code = 201))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_HTTP204视为无声明_拒绝`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(204))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_HTTP206视为无声明_拒绝`() = runBlocking {
+        server.enqueue(json(dalJson(), code = 206))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_ContentType缺失_拒绝`() = runBlocking {
+        // 只设 body 不设 Content-Type（MockWebServer 不自动补类型）
+        server.enqueue(MockResponse().setResponseCode(200).setBody(dalJson()))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_ContentType为text-plain_拒绝`() = runBlocking {
+        server.enqueue(json(dalJson(), contentType = "text/plain; charset=utf-8"))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_ContentType为text-html_拒绝`() = runBlocking {
+        server.enqueue(json(dalJson(), contentType = "text/html"))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_application-json带charset_接受`() = runBlocking {
+        server.enqueue(json(dalJson(), contentType = "application/json; charset=utf-8"))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
+    }
+
+    @Test
+    fun `远程声明_重定向不被跟随_不授权且不访问目标`() = runBlocking {
+        // 302 → 目标地址持合法声明；生产出口不跟随跳转，故目标不得被访问，结论 NOT_VERIFIED
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/elsewhere"))
+        server.enqueue(json(dalJson()))
+        assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
+        assertEquals("只应收到原始 well-known 请求一次", 1, server.requestCount)
+        assertEquals("/.well-known/assetlinks.json", server.takeRequest().path)
+    }
+
+    @Test
+    fun `响应判据_缺失或非法ContentType一律拒绝`() {
+        // 纯函数边界：仅 (200, 无跳转, application/json) 才接受
+        assertTrue(DalResponseGuard.accepts(200, false, "application", "json"))
+        assertTrue(DalResponseGuard.accepts(200, false, "APPLICATION", "JSON"))
+        assertFalse(DalResponseGuard.accepts(200, false, null, null))
+        assertFalse(DalResponseGuard.accepts(200, false, "application", null))
+        assertFalse(DalResponseGuard.accepts(200, false, null, "json"))
+        assertFalse(DalResponseGuard.accepts(200, false, "text", "plain"))
+        assertFalse(DalResponseGuard.accepts(200, true, "application", "json"))
+        assertFalse(DalResponseGuard.accepts(201, false, "application", "json"))
+        assertFalse(DalResponseGuard.accepts(404, false, "application", "json"))
     }
 
     // ===== ISSUE-P2-50（审计 F-14）：有界流式读取 + 字节数裁决 =====
@@ -143,7 +230,7 @@ class DigitalAssetLinksVerifierTest {
         // 2 MiB 响应（> 256 KiB 上限）：原实现会先整体 string() 物化再比较字符数；
         // 现实现流式读到上限 +1 即中止，结果一律 NOT_VERIFIED。
         val oversized = " ".repeat(2 * 1024 * 1024)
-        server.enqueue(MockResponse().setBody(oversized))
+        server.enqueue(json(oversized))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
@@ -159,13 +246,13 @@ class DigitalAssetLinksVerifierTest {
             DigitalAssetLinksVerifier.MAX_BODY_BYTES.toLong(),
             body.toByteArray(Charsets.UTF_8).size.toLong()
         )
-        server.enqueue(MockResponse().setBody(body))
+        server.enqueue(json(body))
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
     }
 
     @Test
     fun `远程声明_空响应体_拒绝`() = runBlocking {
-        server.enqueue(MockResponse().setBody(""))
+        server.enqueue(json(""))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
     }
 
@@ -187,21 +274,21 @@ class DigitalAssetLinksVerifierTest {
 
     @Test
     fun `缓存_命中期内不重复发起网络请求`() = runBlocking {
-        server.enqueue(MockResponse().setBody(dalJson()))
+        server.enqueue(json(dalJson()))
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
         // 同 key 缓存命中：不新增网络请求
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
         assertEquals(1, server.requestCount)
 
         // 不同包名（不同 key）：重新发起请求
-        server.enqueue(MockResponse().setBody(dalJson(packageName = "com.evil.app")))
+        server.enqueue(json(dalJson(packageName = "com.evil.app")))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify(packageName = "com.other.app"))
         assertEquals(2, server.requestCount)
     }
 
     @Test
     fun `缓存_正向TTL过期后重新拉取`() = runBlocking {
-        server.enqueue(MockResponse().setBody(dalJson()))
+        server.enqueue(json(dalJson()))
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
 
         // 未过期：不重新拉取
@@ -211,14 +298,14 @@ class DigitalAssetLinksVerifierTest {
 
         // 过期：重新拉取
         nowMs += 1
-        server.enqueue(MockResponse().setBody(dalJson(packageName = "com.evil.app")))
+        server.enqueue(json(dalJson(packageName = "com.evil.app")))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
         assertEquals(2, server.requestCount)
     }
 
     @Test
     fun `缓存_负向TTL短于正向_过期后重新拉取`() = runBlocking {
-        server.enqueue(MockResponse().setBody(dalJson(packageName = "com.evil.app")))
+        server.enqueue(json(dalJson(packageName = "com.evil.app")))
         assertEquals(DigitalAssetLinksVerifier.DalResult.NOT_VERIFIED, verify())
 
         // 负向缓存期内不重复请求
@@ -228,7 +315,7 @@ class DigitalAssetLinksVerifierTest {
 
         // 负向过期：重新拉取并成功（站点补发声明后可及时收敛）
         nowMs += 1
-        server.enqueue(MockResponse().setBody(dalJson()))
+        server.enqueue(json(dalJson()))
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
         assertEquals(2, server.requestCount)
     }
@@ -239,7 +326,7 @@ class DigitalAssetLinksVerifierTest {
         assertEquals(DigitalAssetLinksVerifier.DalResult.NETWORK_UNAVAILABLE, verify())
 
         nowMs += DigitalAssetLinksVerifier.NEGATIVE_TTL_MS + 1
-        server.enqueue(MockResponse().setBody(dalJson()))
+        server.enqueue(json(dalJson()))
         assertEquals(DigitalAssetLinksVerifier.DalResult.VERIFIED, verify())
         assertEquals(2, server.requestCount)
     }

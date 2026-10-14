@@ -79,7 +79,7 @@ class DigitalAssetLinksVerifier @Inject constructor(
     enum class DalResult {
         /** DAL 存在且存在匹配（relation + 包名 + 证书指纹）的声明 */
         VERIFIED,
-        /** 声明缺失 / 包名或指纹不匹配 / JSON 格式错误 / HTTP 非 2xx */
+        /** 声明缺失 / 包名或指纹不匹配 / JSON 格式错误 / 非「严格 200 + application/json」的 HTTP 响应 */
         NOT_VERIFIED,
         /** DNS / 连接 / 读取超时等网络层失败（区别于确定性失败，便于现场排查） */
         NETWORK_UNAVAILABLE,
@@ -141,9 +141,19 @@ class DigitalAssetLinksVerifier @Inject constructor(
                 .header("Accept", "application/json")
                 .build()
             http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    // 声明缺失（如 404）属确定性失败，与网络故障区分
-                    AppLog.w(TAG, "DAL 响应非 2xx，视为无声明")
+                // ISSUE-P2-604：严格校验「目标主机直接返回 200 + application/json」。
+                // 重定向（生产出口 followRedirects=false）以 3xx 状态暴露、201/204/206 等其它 2xx 亦不授权；
+                // 防御性地再拒 priorResponse 非空（覆盖跟随跳转的调用方，最终地址已非原地址）。
+                val mediaType = response.body.contentType()
+                if (!DalResponseGuard.accepts(
+                        code = response.code,
+                        hasPriorResponse = response.priorResponse != null,
+                        contentTypeType = mediaType?.type,
+                        contentTypeSubtype = mediaType?.subtype
+                    )
+                ) {
+                    // 声明缺失（如 404）或协议偏差属确定性失败，与网络故障区分
+                    AppLog.w(TAG, "DAL 响应不符「原地址直返 200 + application/json」，视为无声明")
                     return DalResult.NOT_VERIFIED
                 }
                 // ISSUE-P2-50（审计 F-14）：有界流式读取并按**字节数**裁决——
@@ -259,6 +269,35 @@ internal object DalStatementMatcher {
         certSha256Hex: String
     ): DigitalAssetLinksVerifier.DalResult =
         match(json, expectedPackage, CallerCertDigests.ofSingle(certSha256Hex))
+}
+
+/**
+ * DAL 响应可接受性判据（纯函数，**ISSUE-P2-604**）。
+ *
+ * Google Digital Asset Links 规范要求声明由**目标 HTTPS 主机的 well-known 地址直接**返回。
+ * 故仅当同时满足下列全部条件才接受：
+ * 1. HTTP 状态码**恰为 200**（301/302/303/307/308 等重定向、201/204/206 等其它 2xx 一律拒绝）；
+ * 2. **未发生跳转**（`priorResponse == null`，即最终请求仍是原地址；生产出口已关闭重定向，
+ *    此项为覆盖「跟随跳转的调用方」的纵深防御）；
+ * 3. 媒体类型为 `application/json`（`type` / `subtype` 大小写不敏感；`charset` 等参数由 OkHttp
+ *    解析后剥离，不影响判定）；**媒体类型缺失或格式非法**（解析为 null）同样拒绝。
+ *
+ * `Accept: application/json` 请求头**不**等于服务端返回合规 Content-Type，故不作为放行依据。
+ */
+internal object DalResponseGuard {
+
+    fun accepts(
+        code: Int,
+        hasPriorResponse: Boolean,
+        contentTypeType: String?,
+        contentTypeSubtype: String?
+    ): Boolean =
+        code == 200 &&
+            !hasPriorResponse &&
+            contentTypeType != null &&
+            contentTypeType.equals("application", ignoreCase = true) &&
+            contentTypeSubtype != null &&
+            contentTypeSubtype.equals("json", ignoreCase = true)
 }
 
 /**
