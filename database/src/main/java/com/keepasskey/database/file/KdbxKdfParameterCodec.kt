@@ -44,8 +44,17 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
  * | AES-KDF `S` 长度 | 固定 32 字节（规范 Byte[32]） | **32** | 与规范一致（ISSUE-P3-267；恰 16 字节曾静默按 AES-128 派生） |
  * | Argon2 `I×M` 联合预算 | 无（官方仅逐项校验，见 `AreParametersWeak`） | **2^33 字节·轮** | 本仓封顶（ISSUE-P2-49，**测量锚定**，见下） |
  *
- * **凡标注「本仓更严」的封顶均属 fail-closed 加固**：取值宽于一切合法用户配置
- * （合法范围见 KdfBenchmark / 各引擎默认值），正常文件不受影响，仅恶意构造文件被提前裁决。
+ * **ISSUE-P1-595 接受域统一（本表即单一真相源）**：上列全部边界已收敛为公开判据
+ * [`KdbxKdfAcceptance`]（UI / 写侧 / 读侧共享）；本对象仅**委托**该判据（错误消息逐字保留），
+ * `KdbxFile.save` 在写盘前亦调用同一判据做写前校验。
+ *
+ * **关于「宽于一切合法用户配置」的更正**：逐项封顶确实宽于一切合法用户配置，但**联合预算
+ * （`2^33` 字节·轮）并非如此**——设置页历史上的 256 MiB × 33~50 轮组合会超出它，正是
+ * ISSUE-P1-595 的缺陷面。故本判据同时约束 UI 候选：**本应用可写入的设置必须能被本应用重开**。
+ * 另：设备可用内存预算（JVM 堆一半）是**设备能力限制**（本进程能否安全派生），
+ * **不得**解读为 KDBX 格式标准上限——相同文件在更大堆的设备上仍可打开。
+ *
+ * **凡标注「本仓更严」的封顶均属 fail-closed 加固**：正常文件不受影响，仅恶意构造文件被提前裁决。
  *
  * ## Argon2 `I×M` 联合预算（ISSUE-P2-49，审计 F-12）
  *
@@ -85,56 +94,13 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
 internal object KdbxKdfParameterCodec {
 
     /**
-     * Argon2 内存下界：对齐官方 `Argon2Kdf.MinMemory = 1024 * 8`（8192 字节）。
-     * 属规范语义，**不得上调**——上调会误拒官方客户端写出的合法库（如 P=1 的小内存配置）。
-     */
-    private const val ARGON2_MIN_MEMORY_BYTES = 8192L
-
-    /** ISSUE-P2-290 AC②：每通道内存下界（8 × 1024 字节）——`memory ≥ p × 本值`，与原生内核 `memoryKib ≥ 8×p` 同值。 */
-    private const val ARGON2_MIN_MEMORY_PER_LANE_BYTES = 8L * 1024
-
-    /** Argon2 内存上界：远超一切合法用户配置的绝对封顶（4 GiB），防恶意文件分配期 OOM。本仓更严封顶。 */
-    private const val ARGON2_MAX_MEMORY_BYTES = 4L * 1024 * 1024 * 1024
-
-    /** Argon2 迭代上界（合法配置通常 ≤ 数千轮）。本仓更严封顶。 */
-    private const val ARGON2_MAX_ITERATIONS = 1L shl 24
-
-    /** Argon2 并行度上界（合法配置通常 ≤ CPU 核数）。本仓更严封顶。 */
-    private const val ARGON2_MAX_PARALLELISM = 64
-
-    /**
-     * Argon2 盐长下界：对齐官方 `Argon2Kdf.cs:57-58` 的 `MinSalt = 8`（ISSUE-P3-78）。
-     * 属规范语义，**不得上调**——上调会误拒官方客户端写出的短盐库。
-     */
-    private const val ARGON2_MIN_SALT_BYTES = 8
-
-    /**
-     * Argon2 盐长上界：官方 `MaxSalt = 0x3FFFFFFF`。实际不可达——`S` 受变体字典
-     * 值长度上限（1 MiB）间接约束，故本项**无内存风险**，仅为接受域对齐。
-     */
-    private const val ARGON2_MAX_SALT_BYTES = 0x3FFFFFFF
-
-    /** AES-KDF 轮数上界：合法偏执配置通常 ≤ 1 亿轮，此处封顶 2^28 防无限期占用 CPU。本仓封顶。 */
-    private const val AES_KDF_MAX_ROUNDS = 1L shl 28
-
-    /**
-     * AES-KDF 种子 `S` 定长：规范定 Byte[32]（ISSUE-P3-267）。
+     * Argon2 工作量联合预算上界（字节·轮），`ISSUE-P2-49`。
      *
-     * 恰 16 字节时 `SecretKeySpec(seed)` 会静默按 AES-128 派生——官方客户端不会产出该文件，
-     * 派生结果必错、表现为「主密码错误」且难排查；其余非法长度在派生期才抛非类型化 JCE 异常。
-     * 故解析期即按损坏文件拒绝，与 Argon2 盐边界（[validateArgon2SaltBounds]）对称。
-     */
-    private const val AES_KDF_SEED_BYTES = 32
-
-    /**
-     * Argon2 工作量联合预算（`I × M` 上界，单位「字节·轮」）：ISSUE-P2-49 / 审计 F-12。
-     *
-     * `2^33` 由**真机实测速率锚定**（详见本对象类 KDoc 的「Argon2 `I×M` 联合预算」一节）：
-     * 实测吞吐 ≈2.1×10⁸ 字节·轮/秒 ⇒ 最坏耗时 ≈39–41 s（原 `2^40` 为 ≈1.4 小时）。
      * **可见性**：`internal` 而非 `private` —— 设备侧实测用例需读取该值构造边界样本
      * （`KdfWallClockDeviceTest`），避免在测试里复制字面量造成两处漂移。
+     * ISSUE-P1-595 起真值定义在 [`KdbxKdfAcceptance`]，此处保留别名以兼容既有引用。
      */
-    internal const val ARGON2_MAX_TOTAL_WORK = 1L shl 33
+    internal const val ARGON2_MAX_TOTAL_WORK = KdbxKdfAcceptance.ARGON2_MAX_TOTAL_WORK
 
     fun serialize(params: KdfParameters): VariantDictionary {
         val vd = VariantDictionary()
@@ -222,46 +188,9 @@ internal object KdbxKdfParameterCodec {
      * 另有动态堆门槛：请求内存超过 JVM 堆一半时按损坏文件拒绝（分配发生在 Java 堆上）。
      */
     fun validateArgon2Bounds(memoryInBytes: Long, iterations: Long, parallelism: Int, version: Int) {
-        if (memoryInBytes < ARGON2_MIN_MEMORY_BYTES || memoryInBytes > ARGON2_MAX_MEMORY_BYTES) {
-            throw KdbxCorruptFileException(
-                "Argon2 内存参数越界: $memoryInBytes 字节（允许 $ARGON2_MIN_MEMORY_BYTES ~ $ARGON2_MAX_MEMORY_BYTES）"
-            )
-        }
-        if (iterations < 1 || iterations > ARGON2_MAX_ITERATIONS) {
-            throw KdbxCorruptFileException("Argon2 迭代参数越界: $iterations（允许 1 ~ $ARGON2_MAX_ITERATIONS）")
-        }
-        if (parallelism < 1 || parallelism > ARGON2_MAX_PARALLELISM) {
-            throw KdbxCorruptFileException("Argon2 并行度越界: $parallelism（允许 1 ~ $ARGON2_MAX_PARALLELISM）")
-        }
-        // ISSUE-P2-290 AC②：交叉约束与原生内核 fail-closed 下界逐项对齐——
-        // `memory ≥ 8 × parallelism × 1024`（NativeArgon2 KDoc 的内核下界 `memoryKib ≥ 8×p`）。
-        // 缺它时 (m=8192, p=64) 一类「逐项合法、交叉非法」的参数经解析层放行，
-        // 派生期才被内核拒绝（异常路径无谓触发，且此前连带 compositeKey 未清零，AC①）
-        if (memoryInBytes < parallelism.toLong() * ARGON2_MIN_MEMORY_PER_LANE_BYTES) {
-            throw KdbxCorruptFileException(
-                "Argon2 内存参数低于每通道下界: $memoryInBytes 字节 < 8 × $parallelism × 1024" +
-                    "（memory 须 ≥ 8 × parallelism × 1024，与原生内核下界一致）"
-            )
-        }
-        if (version != KdfParameters.Argon2.ARGON2_VERSION_10 && version != KdfParameters.Argon2.ARGON2_VERSION_13) {
-            // V 由 UInt32 窄化到 Int，高位非零时为负数；按无符号 32 位渲染，
-            // 否则日志会打印 "0x-1" 这类不可读的错误消息
-            throw KdbxCorruptFileException(
-                "不支持的 Argon2 版本: 0x${(version.toLong() and 0xFFFFFFFFL).toString(16)}"
-            )
-        }
-        // 联合预算：逐项封顶不约束总工作量（见类 KDoc）。以除法判定规避乘法溢出；
-        // 上行已保证 memoryInBytes ≥ 8192 > 0，除数安全。
-        if (iterations > ARGON2_MAX_TOTAL_WORK / memoryInBytes) {
-            throw KdbxCorruptFileException(
-                "Argon2 工作量（迭代 × 内存）越界: $iterations × $memoryInBytes" +
-                    " 超过上界 $ARGON2_MAX_TOTAL_WORK 字节·轮"
-            )
-        }
-        // 动态内存门槛：请求内存超过 JVM 堆一半时按损坏文件拒绝（分配发生在 Java 堆上）
-        val heapCap = Runtime.getRuntime().maxMemory() / 2
-        if (memoryInBytes > heapCap) {
-            throw KdbxCorruptFileException("Argon2 内存参数超出本设备可用内存上限")
+        // ISSUE-P1-595：边界判据统一在 [KdbxKdfAcceptance]（UI / 写侧 / 读侧共享），此处委托
+        KdbxKdfAcceptance.argon2Rejection(memoryInBytes, iterations, parallelism, version)?.let {
+            throw KdbxCorruptFileException(it)
         }
     }
 
@@ -275,17 +204,11 @@ internal object KdbxKdfParameterCodec {
      * 边界取官方值，故不会误拒任何官方客户端写出的库；本仓自身写出的 32 字节盐亦必然通过。
      */
     fun validateArgon2SaltBounds(saltLength: Int) {
-        if (saltLength < ARGON2_MIN_SALT_BYTES || saltLength > ARGON2_MAX_SALT_BYTES) {
-            throw KdbxCorruptFileException(
-                "Argon2 盐长度越界: $saltLength 字节（允许 $ARGON2_MIN_SALT_BYTES ~ $ARGON2_MAX_SALT_BYTES）"
-            )
-        }
+        KdbxKdfAcceptance.argon2SaltRejection(saltLength)?.let { throw KdbxCorruptFileException(it) }
     }
 
     fun validateAesKdfBounds(rounds: Long) {
-        if (rounds < 1 || rounds > AES_KDF_MAX_ROUNDS) {
-            throw KdbxCorruptFileException("AES-KDF 轮数越界: $rounds（允许 1 ~ $AES_KDF_MAX_ROUNDS）")
-        }
+        KdbxKdfAcceptance.aesKdfRejection(rounds)?.let { throw KdbxCorruptFileException(it) }
     }
 
     /**
@@ -296,10 +219,6 @@ internal object KdbxKdfParameterCodec {
      * [KdbxCorruptFileException] 的「文件损坏」通道，与 Argon2 盐边界（[validateArgon2SaltBounds]）对称。
      */
     fun validateAesKdfSeedBounds(seedLength: Int) {
-        if (seedLength != AES_KDF_SEED_BYTES) {
-            throw KdbxCorruptFileException(
-                "AES-KDF 种子长度非法: $seedLength 字节（规范固定 $AES_KDF_SEED_BYTES 字节）"
-            )
-        }
+        KdbxKdfAcceptance.aesKdfSeedRejection(seedLength)?.let { throw KdbxCorruptFileException(it) }
     }
 }

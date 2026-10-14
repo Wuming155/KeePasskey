@@ -412,6 +412,9 @@ object KdbxFile {
         )
 
         // 4. 恒用官方派生标准计算主加密与 HMAC 密钥（KDF 单次同步 JNI 不可细分 ⇒ 分段不确定）
+        // ISSUE-P1-595：写前接受域校验（与读侧同一判据，见 KdbxKdfAcceptance）——在写任何目标字节
+        // 与进行 KDF 之前 fail-closed，阻止绕过 UI 的调用者写出本应用读侧会拒绝的产物
+        KdbxKdfAcceptance.requireAcceptableOrThrow(updatedHeader.kdfParameters)
         progress.emit(null)
         val (cipherKey, hmacKey64) = deriveKeys(updatedHeader, passwordChars, keyFileData, isLegacy = false)
 

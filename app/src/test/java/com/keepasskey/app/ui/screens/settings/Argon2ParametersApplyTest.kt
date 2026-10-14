@@ -6,6 +6,7 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.ui.screens.settings.subscreens.argon2AcceptanceRejection
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.database.session.DatabaseSession
@@ -16,6 +17,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -126,5 +129,48 @@ class Argon2ParametersApplyTest {
         awaitCondition("调度完成") { true }
         Thread.sleep(200)
         assertEquals(0L, controller.databaseConfigState.value.argon2Iterations)
+    }
+
+    /**
+     * ISSUE-P1-595：与读写侧同一判据——**写出本应用读侧会拒绝的组合必须被拒**。
+     * 256 MiB × 50 = 12.5 GiB 字节·轮 > `2^33` 联合预算 ⇒ 提交前拒绝，不改会话头、不落盘、不派生。
+     */
+    @Test
+    fun `超出联合预算的组合被拒且不改变会话与磁盘`() {
+        val dir = Files.createTempDirectory("argon2_reject").toFile()
+        val file = File(dir, "reject-test.kdbx")
+        val password = "reject-test-password".toCharArray()
+
+        val session = DatabaseSession()
+        runBlocking {
+            assertTrue(session.create(file, "reject-test", password) is KdbxResult.Success)
+        }
+        val controller = buildController(session)
+        val before = session.databaseFlow.value!!.header.kdfParameters
+
+        controller.setArgon2Parameters(iterations = 50L, memoryMb = 256L, parallelism = 2)
+        awaitCondition("调度完成") { true }
+        Thread.sleep(300)
+
+        assertEquals("非法组合不得改变会话头", before, session.databaseFlow.value!!.header.kdfParameters)
+        assertTrue("状态不得停留 DIRTY", session.state.value != DatabaseSession.SessionState.DIRTY)
+        runBlocking { session.close() }
+    }
+
+    /**
+     * ISSUE-P1-595：对话框「应用」按钮的禁用判据（`argon2AcceptanceRejection`）与读 / 写侧同源：
+     * ① 设置页可达的越界档 256 MiB × 33~50 轮必须给出拒绝原因（联合预算面，与堆容量无关）；
+     * ② MiB 换算溢出按非法处置（fail-closed）；③ 常用低配组合不得被误拒。
+     */
+    @Test
+    fun `对话框接受域判据锁定越界档与溢出面`() {
+        for (rounds in 33L..50L) {
+            assertNotNull("256 MiB × $rounds 轮必须禁用「应用」", argon2AcceptanceRejection(rounds, 256L, 2))
+        }
+        assertNotNull("MiB 换算溢出须按非法处置", argon2AcceptanceRejection(2L, Long.MAX_VALUE, 2))
+        assertNotNull("负数 MiB 须按非法处置", argon2AcceptanceRejection(2L, -1L, 2))
+        assertNotNull("低于每通道下界须拒绝", argon2AcceptanceRejection(2L, 0L, 4))
+        assertNull("官方默认档不得误拒", argon2AcceptanceRejection(2L, 64L, 2))
+        assertNull("低配高档（64 MiB × 50）在联合预算内不得误拒", argon2AcceptanceRejection(50L, 64L, 8))
     }
 }

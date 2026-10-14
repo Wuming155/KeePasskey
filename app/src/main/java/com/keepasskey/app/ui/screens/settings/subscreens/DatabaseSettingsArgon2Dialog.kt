@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
+import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.file.KdbxKdfAcceptance
 
 // 对话框 3：Argon2 参数详细调节
 @Composable
@@ -43,6 +45,11 @@ internal fun Argon2ParametersDialog(
     var tempIterations by remember { mutableLongStateOf(uiState.argon2Iterations) }
     var tempMemoryMb by remember { mutableLongStateOf(uiState.argon2MemoryMb) }
     var tempParallelism by remember { mutableIntStateOf(uiState.argon2Parallelism) }
+
+    // ISSUE-P1-595：非法组合与读 / 写侧同判据（辅助函数见本文件末尾，非法时禁用「应用」并说明原因）
+    val acceptanceRejection: String? = remember(tempIterations, tempMemoryMb, tempParallelism) {
+        argon2AcceptanceRejection(tempIterations, tempMemoryMb, tempParallelism)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -77,6 +84,9 @@ internal fun Argon2ParametersDialog(
                     onParallelismChange = { tempParallelism = it }
                 )
 
+                // ISSUE-P1-595：非法组合的原因说明（与判据同源，不另抄一份边界文案）
+                Argon2AcceptanceReasonText(acceptanceRejection)
+
                 OutlinedButton(
                     onClick = onRunKdfBenchmark,
                     enabled = kdfBenchmarkState?.isRunning != true,
@@ -99,10 +109,14 @@ internal fun Argon2ParametersDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                onApplyParameters(tempIterations, tempMemoryMb, tempParallelism)
-                onDismiss()
-            }) {
+            TextButton(
+                // ISSUE-P1-595：非法组合禁用「应用」（原因见对话框内说明）
+                enabled = acceptanceRejection == null,
+                onClick = {
+                    onApplyParameters(tempIterations, tempMemoryMb, tempParallelism)
+                    onDismiss()
+                }
+            ) {
                 Text(stringResource(R.string.dbset_apply_params))
             }
         },
@@ -111,6 +125,36 @@ internal fun Argon2ParametersDialog(
                 Text(stringResource(R.string.btn_cancel))
             }
         }
+    )
+}
+
+/**
+ * `ISSUE-P1-595`：与读 / 写侧共用同一接受域判据（`KdbxKdfAcceptance`）——
+ * 返回 `null` = 可接受；否则为**用户可读的拒绝原因**。非法组合（如 256 MiB × 33~50 轮
+ * 超出 `2^33` 字节·轮联合预算）在写入前即被识别，避免产出本应用自身读侧会拒绝的库。
+ *
+ * 「MiB → 字节」换算溢出同样按非法处置（fail-closed，见 [KdbxKdfAcceptance.memoryBytesFromMbOrNull]），
+ * 与 [SettingsPreferencesController.setArgon2Parameters] 的提交前校验同源（默认版本取本仓写出的 V13）。
+ */
+internal fun argon2AcceptanceRejection(iterations: Long, memoryMb: Long, parallelism: Int): String? {
+    val memoryBytes = KdbxKdfAcceptance.memoryBytesFromMbOrNull(memoryMb)
+        ?: return "Argon2 内存参数越界（MiB 换算溢出）"
+    return KdbxKdfAcceptance.argon2Rejection(
+        memoryInBytes = memoryBytes,
+        iterations = iterations,
+        parallelism = parallelism,
+        version = KdfParameters.Argon2.ARGON2_VERSION_13
+    )
+}
+
+/** `ISSUE-P1-595`：非法组合的原因说明（与判据同源，不另抄一份边界文案）；可接受时不发射节点。 */
+@Composable
+private fun Argon2AcceptanceReasonText(rejection: String?) {
+    if (rejection == null) return
+    Text(
+        text = rejection,
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall
     )
 }
 

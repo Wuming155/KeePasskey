@@ -12,6 +12,7 @@ import com.keepasskey.app.ui.theme.AppThemePalette
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.file.KdbxKdfAcceptance
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -279,16 +280,22 @@ internal class SettingsPreferencesController(
      */
     fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) {
         val session = databaseSession ?: return
+        val kdf = session.databaseFlow.value?.header?.kdfParameters
+        if (kdf !is KdfParameters.Argon2) return
+        // ISSUE-P1-595：提交前用与读 / 写侧**同一判据**校验；非法组合（如 256 MiB × 33~50 轮
+        // 超出 2^33 字节·轮联合预算）拒绝提交——不改变会话头、不落盘、不产生不可重开的库
+        val memoryBytes = KdbxKdfAcceptance.memoryBytesFromMbOrNull(memoryMb) ?: return
+        if (KdbxKdfAcceptance.argon2Rejection(memoryBytes, iterations, parallelism, kdf.version) != null) return
         scope.launch {
             // ISSUE-P1-601：经仓库统一提交边界（漂移检查 → 变换 → 落盘单点收口）
             vaultRepository.commitDatabaseMeta { db ->
-                val kdf = db.header.kdfParameters
-                if (kdf is KdfParameters.Argon2) {
+                val target = db.header.kdfParameters
+                if (target is KdfParameters.Argon2) {
                     db.copy(
                         header = db.header.copy(
-                            kdfParameters = kdf.copy(
+                            kdfParameters = target.copy(
                                 iterations = iterations,
-                                memoryInBytes = memoryMb * 1024L * 1024L,
+                                memoryInBytes = memoryBytes,
                                 parallelism = parallelism
                             )
                         )

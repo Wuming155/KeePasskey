@@ -1,6 +1,7 @@
 package com.keepasskey.database.file
 
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.database.crypto.VariantDictionary
@@ -293,5 +294,35 @@ class KdbxKdfParameterCodecWriteContractTest {
         assertThrows(KdbxCorruptFileException::class.java) {
             KdbxKdfParameterCodec.deserialize(missingR)
         }
+    }
+
+    // ================= ISSUE-P1-595：读写接受域统一 =================
+
+    /**
+     * `ISSUE-P1-595`：写侧 `KdbxFile.save` 与读侧 codec 共用同一判据（[KdbxKdfAcceptance]）。
+     * 256 MiB × 50 = 12.5 GiB 字节·轮 > `2^33` 联合预算 ⇒ 写侧必须在写出前 fail-closed。
+     */
+    @Test
+    fun `联合预算超限的 Argon2 参数被写侧在写出前拒绝`() {
+        val badHeader = KdbxHeader.createDefault(
+            cipherUuid = KdbxConstants.Cipher.AES_256_CBC,
+            useArgon2 = true
+        ).copy(
+            kdfParameters = KdfParameters.Argon2(
+                type = KdfParameters.Argon2.Argon2Type.ARGON2ID,
+                salt = ByteArray(32),
+                parallelism = 2,
+                memoryInBytes = 256L * 1024 * 1024,
+                iterations = 50L,
+                version = KdfParameters.Argon2.ARGON2_VERSION_13
+            )
+        )
+        val db = KdbxDatabase(header = badHeader, rootGroup = KdbxGroup(name = "Root"))
+        val out = java.io.ByteArrayOutputStream()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            KdbxFile.save(out, db, "write-contract-password".toCharArray())
+        }
+        assertEquals("写侧拒绝时不得写出任何目标字节", 0, out.size())
     }
 }
