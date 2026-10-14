@@ -266,12 +266,18 @@ internal class BiometricUnlockCoordinator(
             return
         }
         scope.launch {
+            // ISSUE-P2-598：解密结果一在工作线程产生即登记所有权——调用方（本协程）若在
+            // `withContext` 把结果交付回来之前被取消，`withContext` 会抛 CancellationException，
+            // 该结果数组对上层不可达（原实现无引用，只能等 GC）；外层 finally 凭此引用仍能擦除。
+            val decryptedHolder = java.util.concurrent.atomic.AtomicReference<ByteArray?>()
             try {
                 // ISSUE-P1-429：解封密算（载荷含密钥文件字节时最大 1 MiB，StrongBox 可达秒级）
                 // 绝不上主线程
                 val decryptedBytes = withContext(cryptoDispatcher) {
-                    authedCipher.doFinal(sealedCiphertext)
+                    authedCipher.doFinal(sealedCiphertext).also { decryptedHolder.set(it) }
                 }
+                // 所有权移交 completeBiometricUnlock（其 finally 负责擦除），本层先解除登记，避免双擦
+                decryptedHolder.set(null)
                 // ISSUE-P3-327：解锁断言层已整体移除，快速解锁 = 生物识别授权 → 解封封印凭据
                 completeBiometricUnlock(decryptedBytes, storage, dbId)
             } catch (e: Exception) {
@@ -290,6 +296,9 @@ internal class BiometricUnlockCoordinator(
                         errorMessage = UiMessage(R.string.unlock_error_invalid_password)
                     )
                 }
+            } finally {
+                // 交付前取消（含本协程取消）时 holder 仍持有结果数组 ⇒ 此处兜底擦除
+                decryptedHolder.getAndSet(null)?.fill(0)
             }
         }
     }
@@ -315,15 +324,19 @@ internal class BiometricUnlockCoordinator(
         storage: BiometricCredentialStorage,
         dbId: String
     ) {
-        val payload = BiometricSealedPayloadCodec.decode(decryptedBytes)
-        // ③ 现读一次：仅在「载荷没带密钥文件且会话驻留也没有」时才走 IO 重读
-        // （ISSUE-P3-437 AC①：现读期间呈现「正在读取密钥文件…」阶段文案）
-        if (payload.keyFileData == null && sessionKeyFileData() == null) {
-            uiState.update { it.copy(loadStage = UnlockStage.READING_KEY_FILE) }
-            restoreRememberedKeyFile?.invoke()
-        }
-        val legacyKeyFileInPayload = payload.keyFileData != null
+        // ISSUE-P2-598：清理所有权自**解码开始**即建立——`decode` 抛异常、或密钥文件现读在挂起点
+        // 抛异常/被取消时，已解密的字节与已解码载荷都在 finally 内被擦除（原实现把 decode 与现读
+        // 放在 try 之外，是清理盲区：这两段一旦失败/取消，明文只等 GC）。
+        var payload: BiometricSealedPayloadCodec.Decrypted? = null
         try {
+            payload = BiometricSealedPayloadCodec.decode(decryptedBytes)
+            // ③ 现读一次：仅在「载荷没带密钥文件且会话驻留也没有」时才走 IO 重读
+            // （ISSUE-P3-437 AC①：现读期间呈现「正在读取密钥文件…」阶段文案）
+            if (payload.keyFileData == null && sessionKeyFileData() == null) {
+                uiState.update { it.copy(loadStage = UnlockStage.READING_KEY_FILE) }
+                restoreRememberedKeyFile?.invoke()
+            }
+            val legacyKeyFileInPayload = payload.keyFileData != null
             // ISSUE-P3-437 AC①：进入 unlockActiveDatabase 管线即处于 KDF 派生段
             uiState.update { it.copy(loadStage = UnlockStage.DERIVING_KEYS) }
             when (val unlockResult = vaultRepository.unlockActiveDatabase(
@@ -372,7 +385,7 @@ internal class BiometricUnlockCoordinator(
                 }
             }
         } finally {
-            payload.wipe()
+            payload?.wipe()
             decryptedBytes.fill(0)
         }
     }

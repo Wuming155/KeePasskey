@@ -106,16 +106,23 @@ internal object BiometricSealedPayloadCodec {
         val pwdLength = readLength(buffer)
         check(pwdLength <= buffer.remaining()) { "主密码段长度越界: $pwdLength" }
         val pwdBytes = ByteArray(pwdLength).also { buffer.get(it) }
+        var passwordChars: CharArray? = null
+        var keyFileData: ByteArray? = null
         try {
-            val passwordChars = decodeUtf8Chars(pwdBytes)
-            val keyFileData = if (hasKeyFile) {
+            val decodedChars = decodeUtf8Chars(pwdBytes)
+            passwordChars = decodedChars
+            if (hasKeyFile) {
                 val kfLength = readLength(buffer)
                 check(kfLength == buffer.remaining()) { "密钥文件段长度不自洽: $kfLength" }
-                ByteArray(kfLength).also { buffer.get(it) }
-            } else {
-                null
+                keyFileData = ByteArray(kfLength).also { buffer.get(it) }
             }
-            return Decrypted(passwordChars, keyFileData)
+            return Decrypted(decodedChars, keyFileData)
+        } catch (t: Throwable) {
+            // ISSUE-P2-598：半解码失败（如密钥文件段长度前缀越界）时，已分配但**不会交付**给
+            // 调用方的密码字符 / 密钥文件字节由本 codec 自行擦除（调用方拿不到对象，无从清理）。
+            passwordChars?.fill('0')
+            keyFileData?.fill(0)
+            throw t
         } finally {
             pwdBytes.fill(0)
         }
