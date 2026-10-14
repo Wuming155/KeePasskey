@@ -19,46 +19,10 @@ import com.keepasskey.core.security.ProtectedString
 internal object KdbxEntryMerger {
 
     /**
-     * ISSUE-P2-279：标量字段的**单一词汇表**——[isModified] 的判修改集、
-     * [mergeConflictedEntry] 的实际合并集与 `diffFields` 上报集一律由本表驱动，
-     * 禁止在多处各写一份字段清单。此前图标 / 覆写 URL / 质量检查判定进修改集，
-     * 却不进合并集（`local.copy` 原样保留本地值）与冲突清单 ⇒ 远端改动静默丢失。
-     *
-     * 字段口径：
-     * - `iconId` / `customIconId` / `overrideUrl`：本仓有真实写入者
-     *   （`VaultEntryWriteCoordinator` / `VaultGroupCoordinator`），跨端合并必须生效；
-     * - `qualityCheck`：本仓**无写入者**（仅序列化写出 / 健康检查读取，AC③ 适用范围声明）——
-     *   保留在词汇表内是为合并 KeePassXC / 官方桌面端产生的改动（对端关闭某条目质量检查后
-     *   同步回本端），非「判定含它但永不产生」的空转。
-     *
-     * 类型安全：每条的 `read` / `write` 绑定同一字段，泛型擦除点（`Any?`）的转型
-     * 只在 `write` 闭包内发生，由词汇表自身保证不错位。
+     * ISSUE-P2-279 立表 / ISSUE-P2-597 扩表：标量 / 联合到期字段的**单一词汇表**
+     * （判修改集 = 实际合并集 = 上报集）。表体与其字段口径见 [EntryScalarVocabulary]。
      */
-    private class ScalarFieldSpec(
-        /** ISSUE-P2-281：冲突差异键（机读词汇，与 `KdbxMerger.CONFLICT_KEY_*` 同表）。 */
-        val conflictKey: String,
-        val read: (KdbxEntry) -> Any?,
-        val write: (KdbxEntry, Any?) -> KdbxEntry
-    )
-
-    private val MERGED_SCALAR_FIELDS: List<ScalarFieldSpec> = listOf(
-        ScalarFieldSpec(KdbxMerger.CONFLICT_KEY_ICON_ID, { it.iconId }, { e, v -> e.copy(iconId = v as Int) }),
-        ScalarFieldSpec(
-            KdbxMerger.CONFLICT_KEY_CUSTOM_ICON_ID,
-            { it.customIconId },
-            { e, v -> e.copy(customIconId = v as KdbxUuid?) }
-        ),
-        ScalarFieldSpec(
-            KdbxMerger.CONFLICT_KEY_OVERRIDE_URL,
-            { it.overrideUrl },
-            { e, v -> e.copy(overrideUrl = v as String?) }
-        ),
-        ScalarFieldSpec(
-            KdbxMerger.CONFLICT_KEY_QUALITY_CHECK,
-            { it.qualityCheck },
-            { e, v -> e.copy(qualityCheck = v as Boolean) }
-        )
-    )
+    private val mergedScalarFields: List<ScalarFieldSpec> = EntryScalarVocabulary.FIELDS
 
     /**
      * 按 UUID 逐条目裁决三方存活集合，并汇总同字段分歧的冲突清单。
@@ -175,7 +139,7 @@ internal object KdbxEntryMerger {
         if (base.attachments != current.attachments) return true
         if (base.parentGroupId != current.parentGroupId) return true
         // ISSUE-P2-279：标量字段判定与合并共用同一词汇表（禁两份清单）
-        if (MERGED_SCALAR_FIELDS.any { it.read(base) != it.read(current) }) return true
+        if (mergedScalarFields.any { it.read(base) != it.read(current) }) return true
         if (base.times.lastModificationTime != current.times.lastModificationTime) return true
         return false
     }
@@ -242,14 +206,17 @@ internal object KdbxEntryMerger {
             local.times.lastModificationTime
         }
 
-        val mergedEntry = mergeScalarFields(base, local, remote, diffFields).copy(
+        // ISSUE-P2-597：先做标量/联合到期合并（可能改写 `times.expires`/`expiryTime`），
+        // 再仅覆盖 `lastModificationTime`——若在此前基于 `local.times` 重建 times，会抹掉联合到期的合并结果。
+        val scalarMerged = mergeScalarFields(base, local, remote, diffFields)
+        val mergedEntry = scalarMerged.copy(
             fields = mergedFields,
             customFields = mergedCustomFields,
             customData = mergedCustomData,
             tags = mergedTags,
             attachments = mergedAttachments,
             history = mergedHistory,
-            times = local.times.copy(lastModificationTime = maxMod),
+            times = scalarMerged.times.copy(lastModificationTime = maxMod),
             parentGroupId = resolveMergedParentGroup(base, local, remote)
         )
 
@@ -257,7 +224,7 @@ internal object KdbxEntryMerger {
     }
 
     /**
-     * ISSUE-P2-279：标量字段三方合并（判定 / 合并 / 上报同一词汇表 [MERGED_SCALAR_FIELDS] 驱动）。
+     * ISSUE-P2-279：标量字段三方合并（判定 / 合并 / 上报同一词汇表 [mergedScalarFields] 驱动）。
      *
      * 单侧变更取该侧；双侧同值取本地；双侧异值**按 LWW 明确裁决**（与标准字段冲突的
      * 取胜口径一致）并把字段名记入 [diffFields] 留痕——冲突清单由此覆盖图标 / 覆写 URL /
@@ -274,7 +241,7 @@ internal object KdbxEntryMerger {
         val lTime = local.times.lastModificationTime
         val rTime = remote.times.lastModificationTime
         var merged = local
-        for (spec in MERGED_SCALAR_FIELDS) {
+        for (spec in mergedScalarFields) {
             val bv = base?.let(spec.read)
             val lv = spec.read(local)
             val rv = spec.read(remote)

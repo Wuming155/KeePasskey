@@ -52,6 +52,10 @@
     <string name="conflict_field_custom_icon">自定义图标 (CustomIcon)</string>
     <string name="conflict_field_override_url">覆写 URL (OverrideUrl)</string>
     <string name="conflict_field_quality_check">质量检查 (QualityCheck)</string>
+    <string name="conflict_field_auto_type">自动输入 (AutoType)</string>
+    <string name="conflict_field_expires">到期 (Expires)</string>
+    <string name="conflict_field_background_color">背景色 (BackgroundColor)</string>
+    <string name="conflict_field_foreground_color">前景色 (ForegroundColor)</string>
     <string name="conflict_value_true">是</string>
     <string name="conflict_value_false">否</string>
     <string name="conflict_value_none">（无）</string>

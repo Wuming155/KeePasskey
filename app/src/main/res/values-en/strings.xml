@@ -1714,6 +1714,10 @@
     <string name="conflict_field_custom_icon">Custom icon</string>
     <string name="conflict_field_override_url">Override URL</string>
     <string name="conflict_field_quality_check">Quality check</string>
+    <string name="conflict_field_auto_type">Auto-Type</string>
+    <string name="conflict_field_expires">Expiry</string>
+    <string name="conflict_field_background_color">Background color</string>
+    <string name="conflict_field_foreground_color">Foreground color</string>
     <string name="conflict_value_true">Yes</string>
     <string name="conflict_value_false">No</string>
     <string name="conflict_value_none">(none)</string>

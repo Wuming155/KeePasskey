@@ -111,7 +111,7 @@ object BothModifiedEntryCollector {
 
     /**
      * 双方差异键（`ISSUE-P2-281`：与 [ConflictedEntryPair.modifiedFields] 同一词汇表——
-     * 标准字段键 + `custom:` 前缀自定义字段键 + 四个标量键；空列表表示差异仅在不入词汇的
+     * 标准字段键 + `custom:` 前缀自定义字段键 + 标量 / 联合到期 / AutoType / 颜色键；空列表表示差异仅在不入词汇的
      * 面（如 `times` / 标签并集 / 附件并集）。
      */
     private fun differingConflictFields(local: KdbxEntry, remote: KdbxEntry): List<String> = buildList {

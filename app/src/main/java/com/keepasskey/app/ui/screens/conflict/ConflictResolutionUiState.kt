@@ -29,7 +29,7 @@ enum class ModifiedTimeSide {
 
 data class ConflictedField(
     // TASK-30 / ISSUE-P2-281：差异键（与 ConflictedEntryPair.modifiedFields 同一词汇表：
-    // 标准字段键 / `custom:` 前缀自定义字段键 / 四个标量键），applyMerge 据此生成字段级合并决策
+    // 标准字段键 / `custom:` 前缀自定义字段键 / 标量 / 联合到期 / AutoType / 颜色键），applyMerge 据此生成字段级合并决策
     val fieldKey: String,
     val fieldName: String,
     val localValue: String,

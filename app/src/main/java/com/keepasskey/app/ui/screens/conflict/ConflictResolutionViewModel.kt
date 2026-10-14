@@ -10,7 +10,9 @@ import com.keepasskey.app.sync.launchGuarded
 import com.keepasskey.app.ui.model.RelativeTimeFormatter
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.core.model.KdbxAutoType
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.core.security.readCharsForDisplayOrNull
 import com.keepasskey.core.security.readStringForDisplayOrEmpty
@@ -139,7 +141,7 @@ class ConflictResolutionViewModel @Inject constructor(
 
     /**
      * ISSUE-P2-281：把 `modifiedFields` 的一个差异键映射为可裁决的界面行
-     * （键的词汇与合并器同表——标准字段键 / `custom:` 前缀自定义字段键 / 四个标量键）。
+     * （键的词汇与合并器同表——标准字段键 / `custom:` 前缀自定义字段键 / 标量 / 联合到期 / AutoType / 颜色键）。
      * 敏感值（密码 / `isProtected` 的自定义字段）一律掩码，不物化明文。
      */
     private fun buildConflictedField(
@@ -194,32 +196,9 @@ class ConflictResolutionViewModel @Inject constructor(
                     isSensitive = sensitive
                 )
             }
-            key == KdbxMerger.CONFLICT_KEY_ICON_ID -> ConflictedField(
-                fieldKey = key,
-                fieldName = strings.get(R.string.conflict_field_icon),
-                localValue = local.iconId.toString(),
-                remoteValue = remote.iconId.toString()
-            )
-            key == KdbxMerger.CONFLICT_KEY_CUSTOM_ICON_ID -> ConflictedField(
-                fieldKey = key,
-                fieldName = strings.get(R.string.conflict_field_custom_icon),
-                localValue = local.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none),
-                remoteValue = remote.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none)
-            )
-            key == KdbxMerger.CONFLICT_KEY_OVERRIDE_URL -> ConflictedField(
-                fieldKey = key,
-                fieldName = strings.get(R.string.conflict_field_override_url),
-                localValue = local.overrideUrl ?: strings.get(R.string.conflict_value_none),
-                remoteValue = remote.overrideUrl ?: strings.get(R.string.conflict_value_none)
-            )
-            key == KdbxMerger.CONFLICT_KEY_QUALITY_CHECK -> ConflictedField(
-                fieldKey = key,
-                fieldName = strings.get(R.string.conflict_field_quality_check),
-                localValue = strings.get(if (local.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false),
-                remoteValue = strings.get(if (remote.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false)
-            )
-            // 词汇外的键：可见呈现（禁静默丢弃差异），resolveConflictByFields 对未知键为安全 no-op
-            else -> ConflictedField(
+            // 标量 / 联合到期 / AutoType / 颜色键经专用映射；词汇外的键可见呈现（禁静默丢弃差异），
+            // resolveConflictByFields 对未知键为安全 no-op
+            else -> buildEntryScalarField(key, local, remote) ?: ConflictedField(
                 fieldKey = key,
                 fieldName = key,
                 localValue = strings.get(R.string.conflict_value_changed),
@@ -227,6 +206,70 @@ class ConflictResolutionViewModel @Inject constructor(
             )
         }
     }
+
+    /**
+     * 标量 / 联合到期 / AutoType / 颜色差异键的界面行映射（ISSUE-P2-279 / P2-597）。
+     * 未知键返回 null，由调用方回落到「可见呈现」兜底。
+     */
+    private fun buildEntryScalarField(key: String, local: KdbxEntry, remote: KdbxEntry): ConflictedField? = when (key) {
+        KdbxMerger.CONFLICT_KEY_ICON_ID -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_icon),
+            localValue = local.iconId.toString(),
+            remoteValue = remote.iconId.toString()
+        )
+        KdbxMerger.CONFLICT_KEY_CUSTOM_ICON_ID -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_custom_icon),
+            localValue = local.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none),
+            remoteValue = remote.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none)
+        )
+        KdbxMerger.CONFLICT_KEY_OVERRIDE_URL -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_override_url),
+            localValue = local.overrideUrl ?: strings.get(R.string.conflict_value_none),
+            remoteValue = remote.overrideUrl ?: strings.get(R.string.conflict_value_none)
+        )
+        KdbxMerger.CONFLICT_KEY_QUALITY_CHECK -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_quality_check),
+            localValue = strings.get(if (local.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false),
+            remoteValue = strings.get(if (remote.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false)
+        )
+        KdbxMerger.CONFLICT_KEY_AUTO_TYPE -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_auto_type),
+            localValue = autoTypeHint(local.autoType),
+            remoteValue = autoTypeHint(remote.autoType)
+        )
+        KdbxMerger.CONFLICT_KEY_EXPIRES -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_expires),
+            localValue = expiryHint(local),
+            remoteValue = expiryHint(remote)
+        )
+        KdbxMerger.CONFLICT_KEY_BACKGROUND_COLOR -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_background_color),
+            localValue = local.backgroundColor ?: strings.get(R.string.conflict_value_none),
+            remoteValue = remote.backgroundColor ?: strings.get(R.string.conflict_value_none)
+        )
+        KdbxMerger.CONFLICT_KEY_FOREGROUND_COLOR -> ConflictedField(
+            fieldKey = key,
+            fieldName = strings.get(R.string.conflict_field_foreground_color),
+            localValue = local.foregroundColor ?: strings.get(R.string.conflict_value_none),
+            remoteValue = remote.foregroundColor ?: strings.get(R.string.conflict_value_none)
+        )
+        else -> null
+    }
+
+    /** AutoType 配置提示（ISSUE-P2-597）：仅呈现配置启用状态，不新增自动输入执行功能。 */
+    private fun autoTypeHint(autoType: KdbxAutoType?): String =
+        strings.get(if (autoType?.enabled == true) R.string.conflict_value_true else R.string.conflict_value_false)
+
+    /** 到期提示（ISSUE-P2-597）：未启用到期显示「（无）」，启用则显示到期时刻。 */
+    private fun expiryHint(entry: KdbxEntry): String =
+        if (entry.times.expires) entry.times.expiryTime.toString() else strings.get(R.string.conflict_value_none)
 
     /** [fieldKey] 为差异键（[ConflictedField.fieldKey]，与 `modifiedFields` 同词汇表） */
     fun selectFieldChoice(entryId: String, fieldKey: String, choice: FieldChoice) {

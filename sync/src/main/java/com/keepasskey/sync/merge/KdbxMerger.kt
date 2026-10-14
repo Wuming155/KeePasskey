@@ -93,6 +93,12 @@ object KdbxMerger {
     const val CONFLICT_KEY_OVERRIDE_URL = "overrideUrl"
     const val CONFLICT_KEY_QUALITY_CHECK = "qualityCheck"
 
+    /** ISSUE-P2-597 补齐的条目语义差异键（AutoType 整体 / 联合到期 / 前景与背景色）。 */
+    const val CONFLICT_KEY_AUTO_TYPE = "autoType"
+    const val CONFLICT_KEY_EXPIRES = "expires"
+    const val CONFLICT_KEY_BACKGROUND_COLOR = "backgroundColor"
+    const val CONFLICT_KEY_FOREGROUND_COLOR = "foregroundColor"
+
     /**
      * 墓碑感知三方数据库合并。
      */
@@ -227,7 +233,7 @@ object KdbxMerger {
      * lastModificationTime 刷新为当前时刻（产物相对两侧均有变化，需触发他端再次合并）。
      * [fieldChoices] 键的词汇与 [ConflictedEntryPair.modifiedFields] 同表
      * （单一真相源，禁止另造）：标准字段键（[KdbxConstants.Fields.*]）、
-     * [CUSTOM_FIELD_CONFLICT_PREFIX] 前缀的自定义字段键、四个标量键
+     * [CUSTOM_FIELD_CONFLICT_PREFIX] 前缀的自定义字段键、条目语义键（标量 / 联合到期 / AutoType / 颜色）
      * （[CONFLICT_KEY_ICON_ID] / [CONFLICT_KEY_CUSTOM_ICON_ID] /
      * [CONFLICT_KEY_OVERRIDE_URL] / [CONFLICT_KEY_QUALITY_CHECK]）。
      * 密码等敏感字段以 ProtectedString 整体移交，全程不物化明文。
@@ -257,6 +263,17 @@ object KdbxMerger {
                     merged = merged.copy(overrideUrl = pair.remoteEntry.overrideUrl)
                 fieldKey == CONFLICT_KEY_QUALITY_CHECK ->
                     merged = merged.copy(qualityCheck = pair.remoteEntry.qualityCheck)
+                fieldKey == CONFLICT_KEY_AUTO_TYPE ->
+                    merged = merged.copy(autoType = pair.remoteEntry.autoType)
+                fieldKey == CONFLICT_KEY_EXPIRES -> {
+                    // 联合到期语义：整组一并采用远端（expires + expiryTime），避免混合状态
+                    val rt = pair.remoteEntry.times
+                    merged = merged.copy(times = merged.times.copy(expires = rt.expires, expiryTime = rt.expiryTime))
+                }
+                fieldKey == CONFLICT_KEY_BACKGROUND_COLOR ->
+                    merged = merged.copy(backgroundColor = pair.remoteEntry.backgroundColor)
+                fieldKey == CONFLICT_KEY_FOREGROUND_COLOR ->
+                    merged = merged.copy(foregroundColor = pair.remoteEntry.foregroundColor)
                 else -> {
                     val remoteValue = pair.remoteEntry.fields[fieldKey] ?: continue
                     merged = merged.withField(fieldKey, remoteValue)
