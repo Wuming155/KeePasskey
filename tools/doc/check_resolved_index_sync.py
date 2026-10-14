@@ -27,6 +27,17 @@
    静默吞掉重登故恒绿——散文「双向一致」挡不住重登，必须机检）。
 5. **批次正文 → 全量索引**：每份正文编号还须出现在 `docs/RESOLVED_LOG.md` 的
    `| §N |` 行中，且该表同样不得重登（§270 曾漏登 §269 的全量索引行，分册却已有）。
+6. **分册编号区间有序且互不重叠**（`ISSUE-P3-611` 立规，2026-10-14）：各分册的编号区间
+   必须**按分册序严格递增**（`max(册i) < min(册i+1)`），且**册内登记顺序递增**。
+   这条把「新批次只登记在**最新册**」变成可机检判据——把新编号写进任一旧册都会被判
+   「区间乱序 / 重叠」而红。立规缘由：`ISSUE-P3-611` 指出容量规则（100 数据行触顶另立）与
+   现行滚动索引不一致，维护者无法从规则确定下一条索引的归属；容量本身是**阈值触发项**，
+   不追溯已封卷册（分册 05 为已登记的超额册），故容量只出**读数**，真正的硬约束是本条。
+
+## 容量读数（非门槛，只打印）
+
+各分册数据行数一并打印（`ISSUE-P3-611`：容量规则是「达到 100 触发另立下一册」，不追溯已封卷册，
+故不作 fail-closed 判据；仅输出读数供维护者判断下一册归属）。
 
 ## 豁免（唯一权威定义，改此处须同时在批次文档说明理由）
 
@@ -86,6 +97,48 @@ def scan_index_rows(path: pathlib.Path) -> dict[int, list[str]]:
     return found
 
 
+def volume_rows() -> list[tuple[str, list[int]]]:
+    """各分册 `(文件名, 按登记顺序的编号列表)`；用于判据 6（区间有序 / 不重叠）与容量读数。"""
+    volumes: list[tuple[str, list[int]]] = []
+    for path in sorted(RESOLVED_DIR.glob("BATCH_*.md")):
+        numbers = [
+            int(match.group(1))
+            for match in (INDEX_ROW.match(line) for line in path.read_text(encoding="utf-8").splitlines())
+            if match
+        ]
+        volumes.append((path.name, numbers))
+    return volumes
+
+
+def check_volume_ordering(volumes: list[tuple[str, list[int]]]) -> list[str]:
+    """判据 6（ISSUE-P3-611）：册内登记顺序递增、册间区间按册序严格递增且互不重叠。
+
+    分册文件名（`BATCH_58_PLUS.md` / `BATCH_158_PLUS.md` / `BATCH_505_PLUS.md`…）按字典序排序
+    与编号序不一致，故**按各册最小编号排序**后再判区间有序性。
+    """
+    problems: list[str] = []
+    ordered = sorted((v for v in volumes if v[1]), key=lambda v: (min(v[1]), v[0]))
+    prev_name: str | None = None
+    prev_max: int | None = None
+    for name, numbers in ordered:
+        if numbers != sorted(numbers):
+            problems.append(f"{name} 内编号未按登记顺序递增（判据 6）")
+        lowest, highest = min(numbers), max(numbers)
+        if prev_max is not None and lowest <= prev_max:
+            problems.append(
+                f"分册区间乱序 / 重叠：{name} 起始 §{lowest} ≤ 前一册（{prev_name}）最大 §{prev_max}"
+                f"——新批次只能登记在最新册（ISSUE-P3-611 判据 6）"
+            )
+        prev_name, prev_max = name, highest
+    return problems
+
+
+def volume_capacity_reading(volumes: list[tuple[str, list[int]]]) -> str:
+    """容量读数（非门槛）：各分册数据行数（`ISSUE-P3-611`：100 行是触发另立下一册的阈值）。"""
+    ordered = sorted((v for v in volumes if v[1]), key=lambda v: (min(v[1]), v[0]))
+    return " ".join(f"{name}={len(numbers)}行" for name, numbers in ordered)
+
+
 def index_numbers() -> tuple[dict[int, str], list[str]]:
     """分册登记：编号 → 首次所在分册；并收集重登问题。"""
     places: dict[int, list[str]] = {}
@@ -120,7 +173,8 @@ def main() -> int:
     batches = batch_numbers()
     registered, index_problems = index_numbers()
     log_numbers, log_problems = resolved_log_numbers()
-    problems: list[str] = [*index_problems, *log_problems]
+    volumes = volume_rows()
+    problems: list[str] = [*index_problems, *log_problems, *check_volume_ordering(volumes)]
 
     missing = sorted(batches - set(registered))
     if missing:
@@ -170,6 +224,7 @@ def main() -> int:
         f"RESOLVED_INDEX_SYNC=OK（批次正文 {len(batches)} 份；分册登记 {len(registered)} 条；"
         f"全量索引 {len(log_numbers)} 条；最大 §{max(batches)}）"
     )
+    print(f"分册容量读数: {volume_capacity_reading(volumes)}")
     return 0
 
 

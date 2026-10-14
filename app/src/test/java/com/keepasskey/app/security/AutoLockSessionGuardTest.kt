@@ -160,6 +160,104 @@ class AutoLockSessionGuardTest {
         assertEquals("Banking", loadedEntries!!.single().title)
     }
 
+    // ===== ISSUE-P1-592：补存失败后的独立保全（明确结果 + 恢复策略注入） =====
+
+    private class RecordingRecovery(private val outcome: LockOutcome) : SessionRecoveryPolicy {
+        var calls = 0
+        override suspend fun onSaveFailedBeforeLock(): LockOutcome {
+            calls++
+            return outcome
+        }
+    }
+
+    /** 以「保存通道必然抛异常」的方式打开会话（`saveWriter` 抛 IOException，模拟磁盘满）。 */
+    private fun unlockWithFailingSave(): Pair<DatabaseSession, File> {
+        val file = File(tempFolder.root, "entry_vault.kdbx")
+        val seed = DatabaseSession()
+        runBlocking { assertTrue(seed.create(file, "EntryVault", ENTRY_PASSWORD, useArgon2 = false).isSuccess) }
+        runBlocking { seed.lock() }
+
+        val session = DatabaseSession()
+        val opened = runBlocking {
+            session.openStream(
+                pathIdentifier = file.absolutePath,
+                inputStreamProvider = { java.io.FileInputStream(file) },
+                saveWriter = { throw java.io.IOException("disk full") },
+                passwordChars = ENTRY_PASSWORD
+            )
+        }
+        assertTrue("流式打开应成功", opened.isSuccess)
+        return session to file
+    }
+
+    private fun makeDirty(session: DatabaseSession) {
+        runBlocking {
+            session.saveEntry(
+                KdbxEntry(
+                    fields = mapOf(
+                        KdbxConstants.Fields.TITLE to ProtectedString("Banking", isProtected = false),
+                        KdbxConstants.Fields.PASSWORD to ProtectedString("Bank1234", isProtected = true)
+                    )
+                )
+            )
+        }
+        assertEquals(DatabaseSession.SessionState.DIRTY, session.state.value)
+    }
+
+    @Test
+    fun `补存成功时结果标记 Saved 且不触发恢复策略`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val recovery = RecordingRecovery(LockOutcome.RecoveryCommitted)
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+        makeDirty(session)
+
+        val outcome = guard.triggerLock("测试")
+
+        assertEquals(LockOutcome.Saved, outcome)
+        assertEquals("补存成功不得触发恢复策略", 0, recovery.calls)
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+    }
+
+    @Test
+    fun `无未落盘修改时结果标记 NoPendingChanges`() = runBlocking {
+        val (session, _) = unlockViaUnlockEntry()
+        val recovery = RecordingRecovery(LockOutcome.RecoveryCommitted)
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+
+        val outcome = guard.triggerLock("测试")
+
+        assertEquals(LockOutcome.NoPendingChanges, outcome)
+        assertEquals(0, recovery.calls)
+    }
+
+    @Test
+    fun `补存失败时触发恢复策略并回传其明确结果`() = runBlocking {
+        val (session, _) = unlockWithFailingSave()
+        val recovery = RecordingRecovery(LockOutcome.RecoveryCommitted)
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+        makeDirty(session)
+
+        val outcome = guard.triggerLock("测试")
+
+        assertEquals(LockOutcome.RecoveryCommitted, outcome)
+        assertEquals("补存失败必须触发一次恢复策略", 1, recovery.calls)
+        assertEquals("无论保全成败，锁定照常生效", DatabaseSession.SessionState.LOCKED, session.state.value)
+        assertTrue(guard.isLocked.value)
+    }
+
+    @Test
+    fun `全部保全失败时回传 PreservationFailed 并携带告警持久化标志`() = runBlocking {
+        val (session, _) = unlockWithFailingSave()
+        val recovery = RecordingRecovery(LockOutcome.PreservationFailed(alertPersisted = false))
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+        makeDirty(session)
+
+        val outcome = guard.triggerLock("测试")
+
+        assertEquals(LockOutcome.PreservationFailed(alertPersisted = false), outcome)
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+    }
+
     // ===== ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知 =====
 
     @Test

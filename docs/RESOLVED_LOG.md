@@ -6,7 +6,7 @@
 > 读数块 / 验收标准 / 文件清单 / 根因叙述等**一律只入正文**，不得在索引行复述（复述曾使本表由 §154 的 ≈316 B/行膨胀至 ≈1 284 B/行）。
 > **如实留痕**：整改中真实发生的生产 / 测试 / 编排缺陷不美化、不隐去（各批次文件的「过程缺陷」小节）。
 > **引用约定**：仓内其它文档写「`RESOLVED_LOG.md` §NN」时，按本表「正文」列跳转到该批次的独立文件。
-> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起）。
+> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58~§157，已封卷）· [`05`](resolved/BATCH_158_PLUS.md)（§158~§504，已封卷·超额册）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起，**当前滚动册**）。
 
 ---
 
@@ -615,5 +615,8 @@
 | §515 | 数据库设置保存失败反馈批次 | `ISSUE-P2-602`（整条闭环；P2 1 → 0） | [515-数据库设置保存失败反馈批次.md](resolved/batches/515-数据库设置保存失败反馈批次.md) |
 | §516 | 通行密钥持久化成功回传批次 | `ISSUE-P1-590`（整条闭环；P1 3 → 2） | [516-通行密钥持久化成功回传批次.md](resolved/batches/516-通行密钥持久化成功回传批次.md) |
 | §517 | 同步提交快照一致性批次 | `ISSUE-P1-591`（整条闭环；P1 2 → 1） | [517-同步提交快照一致性批次.md](resolved/batches/517-同步提交快照一致性批次.md) |
+| §518 | 自动锁定失败数据保全批次 | `ISSUE-P1-592`（整条闭环；P1 1 → 0） | [518-自动锁定失败数据保全批次.md](resolved/batches/518-自动锁定失败数据保全批次.md) |
+| §519 | 自动填充设备用例活动库前提批次 | `ISSUE-P3-610`（整条闭环；P3 2 → 1） | [519-自动填充设备用例活动库前提批次.md](resolved/batches/519-自动填充设备用例活动库前提批次.md) |
+| §520 | 归档分册容量规则与滚动索引对齐批次 | `ISSUE-P3-611`（整条闭环；P3 1 → 0） | [520-归档分册容量规则与滚动索引对齐批次.md](resolved/batches/520-归档分册容量规则与滚动索引对齐批次.md) |
 
-> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起）。
+> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58~§157，已封卷）· [`05`](resolved/BATCH_158_PLUS.md)（§158~§504，已封卷·超额册）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起，**当前滚动册**）。

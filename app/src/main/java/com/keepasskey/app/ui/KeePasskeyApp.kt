@@ -146,6 +146,9 @@ fun KeePasskeyApp() {
                 pending = externalModificationPending,
                 onChoice = { settingsViewModel.applyExternalModificationChoice(it) }
             )
+
+            // ISSUE-P1-592：恢复面外壳挂点（冷启动恢复副本处置 + 无法保全告警即时明示）
+            RecoveryShellHost(autoLockManager = autoLockManager)
         }
     }
 }

@@ -53,6 +53,9 @@ class AutoLockManager @Inject constructor(
 
     val lockEvents: SharedFlow<Unit> get() = sessionGuard.lockEvents
 
+    /** ISSUE-P1-592：锁定结果流直通（UI 在「告警未能持久化」时当场明示数据丢失）。 */
+    val lockOutcomes: SharedFlow<LockOutcome> get() = sessionGuard.lockOutcomes
+
     private val _lockDeadline = MutableStateFlow<Long?>(null)
     /** 当前自动锁定的目标截止时间戳（毫秒）；null 表示当前未处于自动锁定倒计时（如在前台或从不锁定） */
     val lockDeadline: StateFlow<Long?> get() = _lockDeadline

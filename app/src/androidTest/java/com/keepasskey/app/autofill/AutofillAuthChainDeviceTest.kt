@@ -81,6 +81,13 @@ class AutofillAuthChainDeviceTest {
     private var matrixSettings: RealSettingsRepository? = null
     private var originalAutofillService: String? = null
 
+    /** ISSUE-P3-610：活动库前提编排与原选择快照 / 干扰库（供路径核验与收尾清理）。 */
+    private lateinit var selection: AutofillVaultSelection
+    private var selectionSnapshot: AutofillVaultSelection.Snapshot? = null
+    private var decoyFile: File? = null
+    private var decoyHashBefore: String? = null
+    private var seededVaultFile: File? = null
+
     /** 进程内 Activity 生命周期观测：认证 Activity 由系统在**本进程**拉起，可被直接观测 */
     private val lifecycleTrace: MutableList<String> = Collections.synchronizedList(mutableListOf())
 
@@ -133,6 +140,16 @@ class AutofillAuthChainDeviceTest {
         runCatching {
             if (::isolation.isInitialized) isolation.cleanup()
         }.onFailure { evidence.write("客户端清理异常: ${it.javaClass.simpleName}") }
+        // ISSUE-P3-610 步骤 5：恢复原活动选择，并**只删本轮拥有的合成资产**（干扰库 / 播种库）；
+        // 非本测试产物一律不动（deleteOwned 以测试主密码判定归属）。
+        runCatching {
+            selectionSnapshot?.let { snapshot -> if (::selection.isInitialized) selection.restore(snapshot) }
+            val removed = listOfNotNull(
+                decoyFile?.let { AutofillTestVaultSeeder.deleteOwned(it, AutofillSeedContract.DECOY_MASTER_PASSWORD_TEXT) },
+                seededVaultFile?.let { AutofillTestVaultSeeder.deleteOwned(it, AutofillSeedContract.MASTER_PASSWORD_TEXT) }
+            )
+            evidence.write("收尾：原活动选择已恢复；本轮合成库已清理=$removed")
+        }.onFailure { evidence.write("活动库前提收尾异常: ${it.javaClass.simpleName}") }
         instrumentation.runOnMainSync {
             synchronized(runActivities) { runActivities.toList() }.forEach { it.finish() }
         }
@@ -171,7 +188,39 @@ class AutofillAuthChainDeviceTest {
         // 原始取值用于收尾还原（设备是共享资源，不留下全局设置改动）
         originalAutofillService = probe.shell("settings get secure autofill_service").trim().ifEmpty { null }
         evidence.write(labels.environment())
+
+        // ISSUE-P3-610：① 先造一个**不同主密码**的合成干扰库（模拟设备上已有的旧活动库）；
+        // ② 再播种主测试库（写后校验身份与内容）；③ 之后才构造活动库前提编排（其构造即注入
+        // 仓库 ⇒ 触发 filesDir 扫描，故必须在两次播种之后）；④ 显式选择并**断言**播种库为活动库。
+        evidence.section("阶段 0.1：合成干扰库（不同主密码旧活动库）")
+        // ISSUE-P3-610 矩阵：「有无旧库」由 instrumentation 参数 `withDecoy`（默认 true）切换
+        val withDecoy = InstrumentationRegistry.getArguments().getString("withDecoy") != "false"
+        evidence.write("本轮活动库起点：已有不同主密码旧活动库=$withDecoy")
+        if (withDecoy) {
+            val decoy = AutofillTestVaultSeeder.seedDecoy(targetContext)
+            decoyFile = decoy
+            decoyHashBefore = AutofillTestVaultSeeder.sha256(decoy)
+            evidence.write(
+                "干扰库: ${decoy.name} 大小=${decoy.length()} sha256前12=${decoyHashBefore!!.take(12)}"
+            )
+        }
+
         val vault = AutofillTestVaultSeeder.seed(targetContext, clientPackage)
+        seededVaultFile = vault
+
+        evidence.section("阶段 0.2：显式选择播种库并断言活动库前提（DYN-04）")
+        selection = AutofillVaultSelection(targetContext)
+        selectionSnapshot = selection.select(vault.name)
+        evidence.write(
+            "活动选择：操作前(解析)=${selectionSnapshot!!.resolvedId} 操作后(解析)=${selection.activeId()}"
+        )
+        assertEquals(
+            "播种库必须已成为活动库——只改偏好不足以证明实际会话前提",
+            vault.name,
+            selection.activeId()
+        )
+        evidence.write("解锁前会话路径标识=${selection.sessionPathIdentifier()}（应为空=会话未打开）")
+
         val serviceComponent = ComponentName(
             targetContext.packageName,
             KeePasskeyAutofillService::class.java.name
@@ -326,6 +375,27 @@ class AutofillAuthChainDeviceTest {
         )
         AutofillClientAssertions.assertFilled(probe, clientPackage, CLIENT_WAIT_MS, isolation.formRunId)
         screenshot("ac3-05-client-filled-after-unlock")
+
+        // (1b) ISSUE-P3-610：核对实际打开的是**播种库**（而非同名 / 旧活动库干扰项），
+        //     并确认干扰库未被改动——「清空后通过」不算路径已确证。
+        evidence.section("阶段 5b：路径级核验（实际会话 = 播种库；旧活动库哈希不变）")
+        val sessionPath = selection.sessionPathIdentifier()
+        val sessionEntries = selection.sessionEntryCount()
+        evidence.write("解锁后实际会话路径标识=$sessionPath 条目数=$sessionEntries 根UUID=${selection.sessionRootUuid()}")
+        assertNotNull("解锁后应存在活动会话（会话未打开则链路是被绕过而非通过）", sessionPath)
+        assertTrue(
+            "实际打开的会话不是播种库（路径标识不含 ${AutofillSeedContract.VAULT_FILE_NAME}）——" +
+                "活动库前提未建立，本用例不能证明填充链路",
+            sessionPath!!.contains(AutofillSeedContract.VAULT_FILE_NAME)
+        )
+        assertEquals("实际会话条目数应为播种库的 1 条", 1, sessionEntries)
+        decoyHashBefore?.let { before ->
+            assertEquals(
+                "干扰库（不同主密码旧活动库）内容被改动——用例不得触碰非本轮合成资产",
+                before,
+                AutofillTestVaultSeeder.sha256(requireNotNull(decoyFile))
+            )
+        }
 
         // (2) 解锁页此时必须正常结束（认证结果已被交付，而非卡死/崩溃）
         val unlockFinished = awaitActivityFinished(UNLOCK_ACTIVITY, ACTIVITY_WAIT_MS)

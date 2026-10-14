@@ -32,20 +32,14 @@ import javax.inject.Singleton
 import com.keepasskey.app.coroutines.guardedScope
 
 /**
- * 基于真实 KDBX 数据库引擎与 DatabaseSession 的生产级数据仓库。
- * 遵循推荐架构规范：屏蔽底层加解密与 XML 序列化细节，向上层 UI 提供反应式状态流与 CRUD 契约。
- *
- * ISSUE-P3-31 批次 B：本类收敛为**编排层**——具体职责按内聚边界下沉到同包协调器
- * （[VaultDatabaseCatalog] 已知库注册 / [VaultLifecycleCoordinator] 库生命周期 /
- * [VaultEntryWriteCoordinator] 条目写入 / [VaultEntrySecretReader] 敏感值读取 /
- * [VaultGroupCoordinator] 分组投影与保存 / [VaultExportCoordinator] 导出与模板 /
- * [RecycleBinCoordinator] 回收站 / [EntryDuplicateCoordinator] 克隆 /
- * [CustomIconCoordinator] 自定义图标 / [PasskeyEntryCoordinator] Passkey 条目），
- * 本类仅保留状态流持有、会话生命周期与委托分发；拆分是**纯结构性**的，不含行为变更。
- *
- * ISSUE-P3-305：继续下沉两个仍有独立编排职责的面——条目只读查询与 `{REF:...}` 解析
- * （[VaultEntryQueryCoordinator]）、HOTP 计数器推进（[HotpAdvanceCoordinator]）；
- * 条目批量移动改由 [VaultGroupCoordinator] 承接。
+ * 基于真实 KDBX 引擎与 [DatabaseSession] 的生产级数据仓库：屏蔽加解密 / XML 序列化细节，
+ * 向上提供反应式状态流与 CRUD 契约；本类只保留状态流持有、会话生命周期与委托分发，
+ * 具体职责按内聚边界下沉同包协调器（ISSUE-P3-31 批次 B / ISSUE-P3-305，纯结构性拆分）：
+ * 库目录 [VaultDatabaseCatalog]、库生命周期 [VaultLifecycleCoordinator]、条目写入 / 读取
+ * （[VaultEntryWriteCoordinator] / [VaultEntrySecretReader] / [VaultEntryQueryCoordinator]）、
+ * 分组 [VaultGroupCoordinator]、导出 [VaultExportCoordinator]、回收站 [RecycleBinCoordinator]、
+ * 克隆 [EntryDuplicateCoordinator]、图标 [CustomIconCoordinator]、通行密钥 [PasskeyEntryCoordinator]、
+ * HOTP [HotpAdvanceCoordinator]。
  */
 @Singleton
 class RealVaultRepository @Inject constructor(
@@ -66,7 +60,9 @@ class RealVaultRepository @Inject constructor(
     // ISSUE-P2-378：外部修改基线与漂移处置协调器
     // 默认 null 仅为既有单测构造点兼容（Hilt 生产路径注入真实单例）
     private val baselineHolder: VaultFileBaselineHolder? = null,
-    private val driftCoordinator: VaultFileDriftCoordinator? = null
+    private val driftCoordinator: VaultFileDriftCoordinator? = null,
+    // ISSUE-P1-592：换密 / 改绑成功后清理该库旧凭据恢复副本（默认 null 兼容既有单测构造点）
+    private val recoveryStore: com.keepasskey.app.security.VaultRecoveryStore? = null
 ) : VaultRepository {
 
     private val repositoryScope = guardedScope(Dispatchers.Default, "RealVaultRepository")
@@ -121,9 +117,7 @@ class RealVaultRepository @Inject constructor(
     private val hotp = HotpAdvanceCoordinator(secretReader, entryWriter, strings)
 
     init {
-        // TASK-42 整改（P2-31）：构造期不再同步扫盘——@Singleton 构造发生在主线程，
-        // listFiles 磁盘 IO 移至协程 + Dispatchers.IO；databasesFlow 初始为空列表，
-        // 扫描完成后由 Flow 自然推送更新，观察者语义不变
+        // TASK-42 整改（P2-31）：构造期不扫盘（@Singleton 构造在主线程），磁盘 IO 移入协程
         repositoryScope.launch { refreshDatabases() }
         // 观察会话，当数据库发生变化时同步刷新
         repositoryScope.launch {
@@ -168,15 +162,26 @@ class RealVaultRepository @Inject constructor(
     /** ISSUE-P3-368：读写链路进度直通会话单例（0..1 确定进度 / null 分段不确定段）。 */
     override fun ioProgress(): Flow<Float?> = databaseSession.ioProgress
 
-    /** ISSUE-P3-305：凭据轮换下沉 [VaultLifecycleCoordinator]（仅成功时刷新库列表）。 */
+    /** ISSUE-P3-305 / P1-592：凭据轮换下沉 [VaultLifecycleCoordinator]；成功后清理旧凭据恢复副本。 */
     override suspend fun changeMasterPassword(
         newPassword: CharArray,
         keyFileIntent: ChangeKeyFileIntent
-    ): KdbxResult<Unit> = lifecycle.changeMasterPassword(newPassword, keyFileIntent)
+    ): KdbxResult<Unit> {
+        val result = lifecycle.changeMasterPassword(newPassword, keyFileIntent)
+        if (result.isSuccess) recoveryStore?.deleteByVaultId(activeVaultId())
+        return result
+    }
 
-    /** ISSUE-P3-430：仅改绑密钥文件下沉 [VaultLifecycleCoordinator]（主密码分量保留）。 */
-    override suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> =
-        lifecycle.changeKeyFileOnly(keyFileIntent)
+    /** ISSUE-P3-430 / P1-592：仅改绑密钥文件下沉 [VaultLifecycleCoordinator]；成功后清理旧凭据恢复副本。 */
+    override suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> {
+        val result = lifecycle.changeKeyFileOnly(keyFileIntent)
+        if (result.isSuccess) recoveryStore?.deleteByVaultId(activeVaultId())
+        return result
+    }
+
+    /** ISSUE-P1-592 步骤 6：当前活动库身份（路径标识优先，回退活动文件绝对路径）；无会话返回 null。 */
+    private fun activeVaultId(): String? =
+        databaseSession.currentPathIdentifier ?: databaseSession.currentFile?.absolutePath
 
     /** ISSUE-P3-305：锁定与刷新下沉 [VaultLifecycleCoordinator]。 */
     override suspend fun lockDatabase() {
@@ -395,11 +400,9 @@ class RealVaultRepository @Inject constructor(
         passkeyEntries.patchPasskeySignCount(entryId, newCount)
 
     /**
-     * ISSUE-P3-27 子项 2：原子递增并回传**实际落库**的签名计数器。
-     * 委托 [PasskeyEntryCoordinator.incrementPasskeySignCount]（递增与落库同处一个受控变换），
-     * 使断言路径能取得唯一值而不必用锁外快照自算。
-     *
-     * `ISSUE-P1-590`：落盘失败返回 `Failure`——断言链据此拒签，不再回传未提交的计数器。
+     * ISSUE-P3-27 子项 2：原子递增并回传**实际落库**的签名计数器（委托
+     * [PasskeyEntryCoordinator.incrementPasskeySignCount]；`ISSUE-P1-590` 起落盘失败即 `Failure`，
+     * 断言链据此拒签，不再回传未提交的计数器）。
      */
     override suspend fun incrementPasskeySignCount(entryId: String): KdbxResult<Int> =
         passkeyEntries.incrementPasskeySignCount(entryId)
@@ -446,11 +449,8 @@ class RealVaultRepository @Inject constructor(
     }
 
     /**
-     * ISSUE-P2-378：用户对漂移提示的三选处置。
-     *
-     * - [com.keepasskey.app.security.ExternalModificationChoice.ABANDON_SAVE]：仅关闭提示，
-     *   不写盘（调用方本次保存已中止）；内存改动保留。
-     * - RELOAD_FROM_DISK / MERGE_AND_SAVE：委托 [VaultFileDriftResolve]（失败如实上浮且保留内存改动）。
+     * ISSUE-P2-378：用户对漂移提示的三选处置——`ABANDON_SAVE` 仅关闭提示且不写盘（内存改动保留）；
+     * `RELOAD_FROM_DISK` / `MERGE_AND_SAVE` 委托 [VaultFileDriftResolve]（失败如实上浮且保留内存改动）。
      */
     override suspend fun applyExternalModificationChoice(
         choice: com.keepasskey.app.security.ExternalModificationChoice

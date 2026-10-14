@@ -66,7 +66,13 @@ object KdbxErrorTexts {
         // ISSUE-P2-602：写前漂移中止复用既有「已中止保存：磁盘文件已被外部修改」文案
         KdbxError.DRIFT_SAVE_ABORTED to R.string.ext_mod_save_aborted,
         // ISSUE-P1-590：通行密钥写入口未命中条目（与落盘失败分型）
-        KdbxError.PASSKEY_ENTRY_NOT_FOUND to R.string.err_passkey_entry_not_found
+        KdbxError.PASSKEY_ENTRY_NOT_FOUND to R.string.err_passkey_entry_not_found,
+        // ISSUE-P1-592：自动锁定失败后的独立恢复副本处置
+        KdbxError.RECOVERY_PAYLOAD_CORRUPT to R.string.err_recovery_payload_corrupt,
+        KdbxError.RECOVERY_UNLOCK_FAILED to R.string.err_recovery_unlock_failed,
+        KdbxError.RECOVERY_LOCAL_ONLY to R.string.err_recovery_local_only,
+        KdbxError.RECOVERY_OVERWRITE_BLOCKED to R.string.err_recovery_overwrite_blocked,
+        KdbxError.RECOVERY_WRITE_FAILED to R.string.err_recovery_write_failed
     )
 
     /** 错误码 → 资源 ID；未登记/陌生错误码一律回落 [R.string.err_unknown]（可观测降级，非崩溃）。 */

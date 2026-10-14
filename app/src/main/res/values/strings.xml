@@ -963,6 +963,31 @@
     <string name="err_drift_no_active_database">无活动数据库</string>
     <string name="err_drift_session_tree_changed">合并窗口内会话树已变化</string>
     <string name="err_passkey_entry_not_found">未找到该通行密钥条目（可能已被删除）</string>
+    <string name="err_recovery_payload_corrupt">恢复副本缺失或已损坏，未自动采纳</string>
+    <string name="err_recovery_unlock_failed">恢复副本解锁失败（凭据不匹配或缺密钥文件）</string>
+    <string name="err_recovery_local_only">该库非本地文件，无法原地恢复，请改用另存</string>
+    <string name="err_recovery_overwrite_blocked">正式库已存在，请先比较差异再确认覆盖</string>
+    <string name="err_recovery_write_failed">恢复副本写入失败</string>
+    <!-- ISSUE-P1-592：自动锁定失败后的恢复副本处置对话框 -->
+    <string name="recovery_dialog_title">发现未保存的恢复副本</string>
+    <string name="recovery_dialog_body">上次锁定时有未获取落盘的改动已单独加密保存。请用该库的主密码解锁以比较差异，再选择恢复或另存；不会在无确认时覆盖正式库。</string>
+    <string name="recovery_entry_summary">%1$s · %2$s</string>
+    <string name="recovery_preview_action">解锁并比较</string>
+    <string name="recovery_preview_summary">副本 %1$d 项；正式库 %2$d 项；新增 %3$d / 删除 %4$d / 修改 %5$d</string>
+    <string name="recovery_preview_no_official">正式库当前不可读（缺失或凭据不符），无法比较差异</string>
+    <string name="recovery_restore_action">恢复为正式库</string>
+    <string name="recovery_save_as_action">另存为新库</string>
+    <string name="recovery_keep_action">暂不处理</string>
+    <string name="recovery_discard_action">删除副本</string>
+    <string name="recovery_confirm_overwrite_title">以副本覆盖正式库？</string>
+    <string name="recovery_confirm_overwrite_body">正式库已存在。覆盖会以恢复副本整体替换它，且不可撤销；请确认上面显示的差异无误。</string>
+    <string name="recovery_confirm_overwrite_action">确认覆盖</string>
+    <string name="recovery_saved_as_message">已另存为 %1$s，将在库列表刷新后可见</string>
+    <string name="recovery_restored_message">已恢复并删除副本</string>
+    <string name="recovery_discarded_message">副本已删除</string>
+    <string name="recovery_alert_title">上次有改动未能保全</string>
+    <string name="recovery_alert_body">上次锁定时未获取落盘的改动既未写入正式库，也未能生成恢复副本，可能已丢失。请检查存储空间后重试编辑。</string>
+    <string name="recovery_immediate_loss_message">未能保全未保存的改动：请立即检查存储空间</string>
     <string name="err_lifecycle_no_change">未指定任何改动</string>
     <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
     <!-- §410 走查：未配置云同步时下拉刷新的如实提示（不进同步周期） -->

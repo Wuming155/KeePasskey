@@ -79,4 +79,20 @@ object KdbxError {
      */
     const val PASSKEY_ENTRY_NOT_FOUND = "kdbx.passkey.entry_not_found"
 
+    // ---- 自动锁定失败后的独立恢复副本处置（app/security/VaultRecoveryCoordinator，ISSUE-P1-592）----
+    /** 恢复副本缺失或完整性校验（长度 / SHA-256）失败——不自动采纳。 */
+    const val RECOVERY_PAYLOAD_CORRUPT = "kdbx.recovery.payload_corrupt"
+
+    /** 恢复副本解锁失败（凭据不匹配或缺密钥文件）。 */
+    const val RECOVERY_UNLOCK_FAILED = "kdbx.recovery.unlock_failed"
+
+    /** 该库非本地文件（SAF `content://`），不支持原地恢复，只能另存。 */
+    const val RECOVERY_LOCAL_ONLY = "kdbx.recovery.local_only"
+
+    /** 正式库已存在且未获显式覆盖确认——先预览差异再确认，防止无提示覆盖外改版本。 */
+    const val RECOVERY_OVERWRITE_BLOCKED = "kdbx.recovery.overwrite_blocked"
+
+    /** 恢复副本写回正式库 / 另存写盘失败。 */
+    const val RECOVERY_WRITE_FAILED = "kdbx.recovery.write_failed"
+
 }

@@ -3,6 +3,8 @@ package com.keepasskey.app.di
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.security.ClipboardSecurityManager
+import com.keepasskey.app.security.SessionRecoveryCoordinator
+import com.keepasskey.app.security.SessionRecoveryPolicy
 import com.keepasskey.app.security.SharedPrefsUnlockThrottleStore
 import com.keepasskey.app.security.ThrottleConfigSource
 import com.keepasskey.app.security.UnlockThrottleConfigProvider
@@ -44,4 +46,14 @@ abstract class SecurityModule {
     abstract fun bindClipboardSecurityChannel(
         impl: ClipboardSecurityManager
     ): ClipboardSecurityChannel
+
+    /**
+     * ISSUE-P1-592：锁定前补存失败的保全策略绑定（独立加密恢复副本 + 持久化告警）。
+     * 纯 JVM 单测用 `SessionRecoveryPolicy.Disabled` 缺省替身，不经 Hilt。
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSessionRecoveryPolicy(
+        impl: SessionRecoveryCoordinator
+    ): SessionRecoveryPolicy
 }

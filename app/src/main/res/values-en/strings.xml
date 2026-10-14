@@ -951,6 +951,31 @@
     <string name="err_drift_no_active_database">No active database</string>
     <string name="err_drift_session_tree_changed">In-memory tree changed during the merge window</string>
     <string name="err_passkey_entry_not_found">Passkey entry not found (it may have been deleted)</string>
+    <string name="err_recovery_payload_corrupt">Recovery copy is missing or corrupted; not adopted automatically</string>
+    <string name="err_recovery_unlock_failed">Failed to unlock the recovery copy (wrong credentials or missing key file)</string>
+    <string name="err_recovery_local_only">This vault is not a local file; in-place restore is unsupported — use Save as instead</string>
+    <string name="err_recovery_overwrite_blocked">The official vault already exists; compare differences and confirm before overwriting</string>
+    <string name="err_recovery_write_failed">Failed to write the recovery copy</string>
+    <!-- ISSUE-P1-592: recovery copy handling dialog after a failed auto-lock save -->
+    <string name="recovery_dialog_title">Unsaved recovery copy found</string>
+    <string name="recovery_dialog_body">Changes that could not be written to the vault before the last lock were saved separately in encrypted form. Unlock with this vault\'s master password to compare differences, then restore or save as a new vault. The official vault is never overwritten without confirmation.</string>
+    <string name="recovery_entry_summary">%1$s · %2$s</string>
+    <string name="recovery_preview_action">Unlock and compare</string>
+    <string name="recovery_preview_summary">Copy %1$d entries; official %2$d; added %3$d / removed %4$d / modified %5$d</string>
+    <string name="recovery_preview_no_official">The official vault is currently unreadable (missing or wrong credentials); cannot compare differences</string>
+    <string name="recovery_restore_action">Restore into official vault</string>
+    <string name="recovery_save_as_action">Save as a new vault</string>
+    <string name="recovery_keep_action">Not now</string>
+    <string name="recovery_discard_action">Delete copy</string>
+    <string name="recovery_confirm_overwrite_title">Overwrite the official vault with this copy?</string>
+    <string name="recovery_confirm_overwrite_body">The official vault already exists. Overwriting replaces it entirely with the recovery copy and cannot be undone; make sure the differences shown above are correct.</string>
+    <string name="recovery_confirm_overwrite_action">Confirm overwrite</string>
+    <string name="recovery_saved_as_message">Saved as %1$s; it will appear after the vault list refreshes</string>
+    <string name="recovery_restored_message">Restored and copy deleted</string>
+    <string name="recovery_discarded_message">Copy deleted</string>
+    <string name="recovery_alert_title">Some changes could not be preserved last time</string>
+    <string name="recovery_alert_body">Changes that were not written to the vault before the last lock were neither saved to the official vault nor preserved as a recovery copy; they may be lost. Check available storage and edit again.</string>
+    <string name="recovery_immediate_loss_message">Could not preserve unsaved changes: check available storage now</string>
     <string name="err_lifecycle_no_change">No change specified</string>
     <string name="sync_feedback_offline">Offline or network unreachable; local changes kept safe</string>
     <!-- §410 walkthrough: honest notice when pull-to-refresh fires with cloud sync unconfigured -->

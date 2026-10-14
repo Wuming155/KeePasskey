@@ -33,7 +33,9 @@ class AutoLockSessionGuard @Inject constructor(
     // ISSUE-P2-355 AC③：全局脏表单注册表（Hilt 注入进程级单例；缺省新实例供 JVM 单测隔离）
     private val unsavedEditRegistry: UnsavedEditRegistry = UnsavedEditRegistry(),
     // ISSUE-P3-366 AC②：长任务挂锁闸（Hilt 注入进程级单例，与各挂点共享；缺省新实例供 JVM 单测隔离）
-    private val holdoff: AutoLockHoldoff = AutoLockHoldoff()
+    private val holdoff: AutoLockHoldoff = AutoLockHoldoff(),
+    // ISSUE-P1-592：补存失败后的保全策略（Hilt 绑定 SessionRecoveryCoordinator；缺省替身供 JVM 单测）
+    private val recovery: SessionRecoveryPolicy = SessionRecoveryPolicy.Disabled
 ) {
 
     private val _isLocked = MutableStateFlow(false)
@@ -41,6 +43,13 @@ class AutoLockSessionGuard @Inject constructor(
 
     private val _lockEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val lockEvents: SharedFlow<Unit> = _lockEvents.asSharedFlow()
+
+    /**
+     * ISSUE-P1-592：每次锁定的明确结果流（含补存成功 / 恢复副本已提交 / 全部保全失败）。
+     * 供 UI 在「连告警都未能持久化」时当场明示；缓冲 1，不阻塞锁定路径。
+     */
+    private val _lockOutcomes = MutableSharedFlow<LockOutcome>(extraBufferCapacity = 1)
+    val lockOutcomes: SharedFlow<LockOutcome> = _lockOutcomes.asSharedFlow()
 
     /**
      * 熄屏事件熔断：熄屏立即锁（lockWhenScreenOff）或后台锁定（autoLockBackground）
@@ -112,26 +121,41 @@ class AutoLockSessionGuard @Inject constructor(
      * 触发锁定：擦除内存数据库敏感状态，发出锁定事件。
      * H3 整改：锁库前若存在未落盘修改（DIRTY），先做一次 best-effort 补存——
      * 锁库会销毁内存树与主密码缓存，跳过补存将使未落盘修改永久丢失（对齐 KP2A 锁库守卫语义）。
+     *
+     * ISSUE-P1-592：补存失败**不再静默销毁**该版本——改由 [recovery] 写独立加密恢复副本或
+     * 持久化数据丢失告警；无论保全成败，锁定照常生效（安全事件优先）。返回明确 [LockOutcome]。
      */
-    suspend fun triggerLock(reason: String = "安全锁定") {
+    suspend fun triggerLock(reason: String = "安全锁定"): LockOutcome {
         // ISSUE-P3-366 AC②：长任务挂锁期——锁定请求暂存延迟，depth 归零后经 endLongTask 补执行
         if (holdoff.defer(reason)) {
             debugLog.info(TAG, "长任务挂锁中，锁定请求暂存: $reason")
-            return
+            return LockOutcome.Deferred
         }
         // ISSUE-P2-355 AC③：锁定将经导航 popUpTo(0) 销毁编辑页——存在未保存编辑时先登记
         // 「已丢弃」事实，解锁页消费后一次性告知，杜绝静默丢编辑（登记幂等，无脏态即空操作）
         unsavedEditRegistry.markDirtyEditsDiscarded()
-        val state = databaseSession.state.value
-        if (state == DatabaseSession.SessionState.DIRTY) {
-            val saveResult = databaseSession.save()
-            if (saveResult is KdbxResult.Failure) {
-                debugLog.error(TAG, "锁库前补存失败: ${saveResult.error.javaClass.simpleName}")
-            }
-        }
+        val outcome = preserveDirtySessionBeforeLock()
         databaseSession.lock()
         _isLocked.value = true
         _lockEvents.tryEmit(Unit)
+        _lockOutcomes.tryEmit(outcome)
+        return outcome
+    }
+
+    /** 锁定前的补存与保全（`ISSUE-P1-592` 步骤 1）：把 DIRTY 分支的结局收敛为 [LockOutcome]。 */
+    private suspend fun preserveDirtySessionBeforeLock(): LockOutcome {
+        if (databaseSession.state.value != DatabaseSession.SessionState.DIRTY) {
+            return LockOutcome.NoPendingChanges
+        }
+        val saveResult = databaseSession.save()
+        return when (saveResult) {
+            is KdbxResult.Success -> LockOutcome.Saved
+            is KdbxResult.Failure -> {
+                debugLog.error(TAG, "锁库前补存失败: ${saveResult.error.javaClass.simpleName}")
+                // 补存失败：交由保全策略写独立加密恢复副本或登记数据丢失告警
+                recovery.onSaveFailedBeforeLock()
+            }
+        }
     }
 
     /**
