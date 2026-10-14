@@ -921,6 +921,8 @@
     <string name="sync_feedback_uploaded">Local changes uploaded to %1$s successfully</string>
     <string name="sync_feedback_merged">Changes automatically merged and synced to %1$s</string>
     <string name="sync_feedback_conflict">Conflict detected, please resolve in conflict screen</string>
+    <!-- ISSUE-P1-591: remote accepted this upload, but local still has unsynced changes from the upload window -->
+    <string name="sync_feedback_local_pending">The cloud is now at the version uploaded this round, but local changes remain unsynced; the next sync will upload them</string>
     <string name="vault_conflict_action">Resolve conflict</string>
     <string name="op_failed">Operation failed: %1$s</string>
     <!-- ISSUE-P3-453: typed error codes from core/database map to these strings. -->

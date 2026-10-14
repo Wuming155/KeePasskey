@@ -52,8 +52,12 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
         // ISSUE-P2-308：内容与本轮本地字节一致也必须结算——交付缓存并把基线前移到远端 ETag，
         // 否则基线滞留旧值、每轮都重新下载
         openResult.adoption?.accept()
-        session.lastSyncedDb = databaseSession.databaseFlow.value
-        return SyncOutcome.UpToDate
+        // ISSUE-P1-591：确认与远端一致的版本是**周期起点快照**；前移基线只认它。若比对窗口内
+        // 用户又保存出新版本（活动树已非快照），不前移基线并如实回报待同步，绝不谎报 UpToDate。
+        return when (settleSyncedVersion(session, ctx.localDbSnapshot, databaseSession.databaseFlow.value)) {
+            UploadSettlement.CONVERGED -> SyncOutcome.UpToDate
+            UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
+        }
     }
     // ISSUE-P2-404：字节级短路在「基线/缓存双缺失」场景恒不命中——KDBX4 随机 IV 使内容
     // 相同的两次序列化字节必然不同，而此刻 [RemoteSyncContext.localChangeState] 只是
@@ -75,8 +79,11 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
             }
             if (!remoteDiffers) {
                 openResult.adoption?.accept()
-                session.lastSyncedDb = databaseSession.databaseFlow.value
-                return SyncOutcome.UpToDate
+                // ISSUE-P1-591：同上一支——基线只前移到周期起点快照；窗口内换版本即回报待同步
+                return when (settleSyncedVersion(session, ctx.localDbSnapshot, databaseSession.databaseFlow.value)) {
+                    UploadSettlement.CONVERGED -> SyncOutcome.UpToDate
+                    UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
+                }
             }
         }
     }
@@ -177,7 +184,9 @@ internal suspend fun SyncCycleRunner.handleConflictDetected(
         syncEngine = ctx.syncEngine,
         remotePath = ctx.remotePath,
         localBytes = openResult.localBytes,
-        remoteBytes = openResult.remoteBytes
+        remoteBytes = openResult.remoteBytes,
+        // ISSUE-P1-591：openResult.localBytes 即周期起点快照的字节，基线结算须以它为准
+        localDbSnapshot = ctx.localDbSnapshot
     ) ?: conflicts.handleConflictMerge(
         syncEngine = ctx.syncEngine,
         syncCache = ctx.syncCache,

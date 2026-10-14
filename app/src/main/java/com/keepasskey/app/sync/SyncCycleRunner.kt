@@ -173,7 +173,9 @@ class SyncCycleRunner @Inject constructor(
                     provider = ctx.provider,
                     syncEngine = ctx.syncEngine,
                     remotePath = ctx.remotePath,
-                    localBytes = ctx.localBytes
+                    localBytes = ctx.localBytes,
+                    // ISSUE-P1-591：上传的即周期起点快照，基线结算须以它为准
+                    localDbSnapshot = ctx.currentDb
                 )?.let { return@withLock it }
             }
 
@@ -283,8 +285,11 @@ class SyncCycleRunner @Inject constructor(
                     is SyncCommitResult.Uploaded -> {
                         // ISSUE-P2-308：上传内容即当前会话库内容，采纳已隐式完成，立即落地基线
                         takeoverCommit.settlement?.accept()
-                        session.lastSyncedDb = databaseSession.databaseFlow.value
-                        SyncOutcome.UploadedLocal
+                        // ISSUE-P1-591：基线前移到**实际上传的版本**（窗口内换库/换版本则回报待同步）
+                        when (settleSyncedVersion(session, currentDb, databaseSession.databaseFlow.value)) {
+                            UploadSettlement.CONVERGED -> SyncOutcome.UploadedLocal
+                            UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
+                        }
                     }
                     is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
                     // ISSUE-P2-548：整库覆盖被鉴权 / 协议 / 服务端拒绝——不是「离线」
@@ -342,13 +347,18 @@ class SyncCycleRunner @Inject constructor(
         return try {
             when (val openResult = syncEngine.openRemote(remotePath)) {
                 is SyncOpenResult.RemoteSynced -> handleRemoteSynced(ctx, openResult)
-                is SyncOpenResult.LocalWinAutoUploaded -> {
-                    session.lastSyncedDb = databaseSession.databaseFlow.value
-                    SyncOutcome.UploadedLocal
+                // ISSUE-P1-591：这两支上传的都是周期起点快照 ⇒ 基线结算以快照为准（窗口内换版本即回报待同步）
+                is SyncOpenResult.LocalWinAutoUploaded -> when (
+                    settleSyncedVersion(session, localDbSnapshot, databaseSession.databaseFlow.value)
+                ) {
+                    UploadSettlement.CONVERGED -> SyncOutcome.UploadedLocal
+                    UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
                 }
-                is SyncOpenResult.RemoteLostRestored -> {
-                    session.lastSyncedDb = databaseSession.databaseFlow.value
-                    SyncOutcome.UploadedLocal
+                is SyncOpenResult.RemoteLostRestored -> when (
+                    settleSyncedVersion(session, localDbSnapshot, databaseSession.databaseFlow.value)
+                ) {
+                    UploadSettlement.CONVERGED -> SyncOutcome.UploadedLocal
+                    UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
                 }
                 is SyncOpenResult.CacheHitOffline -> SyncOutcome.Offline
                 is SyncOpenResult.RemoteUnreachableUsingCache -> SyncOutcome.Offline

@@ -103,7 +103,12 @@ class SyncLocalFileCheckpoint @Inject constructor() {
  *
  * 三个成功结论都保证「云端内容 == 本地内容」：`UpToDate`（两端一致 / 远端已接管）、
  * `UploadedLocal`（本地赢已上传）、`MergedAndUploaded`（合并产物已上传）。
- * 其余（`Error` / `Offline` / `ConflictNeedsUser` / `VaultBindingMismatch`）**不得**记录检查点。
+ * 其余（`Error` / `Offline` / `ConflictNeedsUser` / `VaultBindingMismatch` /
+ * `LocalPendingChanges`）**不得**记录检查点。
+ *
+ * `ISSUE-P1-591`：`LocalPendingChanges` 明确排除——它表示「远端已接受本轮上传版本，但本地在上传
+ * 窗口内又保存出了未同步的新版本」，本地文件与远端**尚未收敛**，记录检查点会把 B 误标为已同步
+ * （下一轮判定「本地文件自上次同步未变」而错过 B）。
  */
 internal fun SyncOutcome.isInSyncWithRemote(): Boolean = when (this) {
     is SyncOutcome.UpToDate,
@@ -113,5 +118,6 @@ internal fun SyncOutcome.isInSyncWithRemote(): Boolean = when (this) {
     is SyncOutcome.ConflictNeedsUser,
     is SyncOutcome.Offline,
     is SyncOutcome.Error,
-    is SyncOutcome.VaultBindingMismatch -> false
+    is SyncOutcome.VaultBindingMismatch,
+    is SyncOutcome.LocalPendingChanges -> false
 }

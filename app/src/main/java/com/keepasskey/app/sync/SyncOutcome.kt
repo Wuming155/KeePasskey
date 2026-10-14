@@ -15,6 +15,15 @@ sealed class SyncOutcome {
     /** 本地修改赢并已成功上传云端 */
     data object UploadedLocal : SyncOutcome()
 
+    /**
+     * `ISSUE-P1-591`：本轮已让**远端与实际上传 / 确认的版本**一致，但上传窗口内用户又保存出了
+     * 新版本（会话活动树已非该版本）⇒ 本地**仍有待同步修改**，下一轮才会上传。
+     *
+     * 它**不是**「已收敛」结论（`isInSyncWithRemote()` 为 false，不得记录本地文件检查点），
+     * 也不得回显「已同步」——否则会向用户谎报未上传的 B 已上云（`AUD-03` 的直接后果）。
+     */
+    data object LocalPendingChanges : SyncOutcome()
+
     /** 三方自动合并成功并已同步回写云端与本地 */
     data object MergedAndUploaded : SyncOutcome()
 

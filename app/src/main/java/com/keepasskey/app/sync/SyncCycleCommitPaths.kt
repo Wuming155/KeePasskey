@@ -32,7 +32,9 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
     provider: SyncProvider,
     syncEngine: SyncEngine,
     remotePath: String,
-    localBytes: ByteArray
+    localBytes: ByteArray,
+    /** `ISSUE-P1-591`：与 [localBytes] 等价的本地内存树（上传的就是这一版本）。 */
+    localDbSnapshot: KdbxDatabase
 ): SyncOutcome? {
     val metaResult = provider.getMetadata(remotePath)
     if (metaResult.isFailure) {
@@ -45,8 +47,11 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
                 is SyncCommitResult.Uploaded -> {
                     // ISSUE-P2-308：首传内容即当前会话库内容，采纳已隐式完成，立即落地基线
                     uploadResult.settlement?.accept()
-                    session.lastSyncedDb = databaseSession.databaseFlow.value
-                    SyncOutcome.UploadedLocal
+                    // ISSUE-P1-591：基线前移到**实际上传的版本**；窗口内已有新版本则如实回报待同步
+                    when (settleSyncedVersion(session, localDbSnapshot, databaseSession.databaseFlow.value)) {
+                        UploadSettlement.CONVERGED -> SyncOutcome.UploadedLocal
+                        UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
+                    }
                 }
                 // 离线 / 远端不可达：如实报 Offline，不得误标成「上传云端失败」
                 is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
@@ -112,8 +117,13 @@ internal suspend fun SyncCycleRunner.tryFastCommitPath(
             }
             // ISSUE-P2-308：采纳确认（落盘成功）后落地基线前移与高水位记录
             commitResult.settlement?.accept()
-            session.lastSyncedDb = databaseSession.databaseFlow.value
-            SyncOutcome.UploadedLocal
+            // ISSUE-P1-591：基线前移到**实际上传的版本**（而非结算时刻的活动树）。
+            // 上面 `databaseSession.save()` 可能已把窗口内新版本 B 写入本地文件 ⇒ 此刻活动树已非
+            // 上传的 A，基线必须停在 A：B 仍待同步，且本轮不得记「已收敛」检查点（AUD-03）。
+            when (settleSyncedVersion(session, localDbSnapshot, databaseSession.databaseFlow.value)) {
+                UploadSettlement.CONVERGED -> SyncOutcome.UploadedLocal
+                UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
+            }
         }
         is SyncCommitResult.ConflictNeedsMerge -> {
             // R3 整改：本地未同步修改必须先落盘正式库文件——冲突会话可能在
@@ -127,7 +137,9 @@ internal suspend fun SyncCycleRunner.tryFastCommitPath(
                 syncEngine = syncEngine,
                 remotePath = remotePath,
                 localBytes = localBytes,
-                remoteBytes = commitResult.remoteBytes
+                remoteBytes = commitResult.remoteBytes,
+                // ISSUE-P1-591：「以本地为准」上传的就是这份快照，基线结算须以它为准
+                localDbSnapshot = localDbSnapshot
             ) ?: conflicts.handleConflictMerge(
                 syncEngine = syncEngine,
                 syncCache = syncCache,

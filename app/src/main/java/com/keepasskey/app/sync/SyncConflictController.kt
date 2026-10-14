@@ -131,6 +131,9 @@ class SyncConflictController @Inject constructor(
      * 「以云端为准」/「以本地为准」是单方强制策略：不做三方合并，直接落到一侧，
      * 用户在下拉选择时已由设置页文案明示「另一方修改将被覆盖」。
      *
+     * @param localDbSnapshot `ISSUE-P1-591`：与 [localBytes] 内容等价的本地内存树——「以本地为准」
+     *   分支上传的就是这一版本，基线结算须以它（而非结算时刻的活动树）为准。
+     *
      * @return 已处理的同步结果；返回 null 表示本策略不停机处理
      *   （自动合并 / 每次询问），调用方继续走三方合并流程。
      */
@@ -139,7 +142,8 @@ class SyncConflictController @Inject constructor(
         syncEngine: SyncEngine,
         remotePath: String,
         localBytes: ByteArray,
-        remoteBytes: ByteArray
+        remoteBytes: ByteArray,
+        localDbSnapshot: KdbxDatabase
     ): SyncOutcome? = when (ConflictStrategyPolicy.dispositionOf(strategy)) {
         ConflictDisposition.TakeRemote -> {
             debugLog.warn(SYNC_LOG_TAG, "冲突解决策略=以云端为准：放弃本地未同步修改，采用远端版本")
@@ -170,8 +174,11 @@ class SyncConflictController @Inject constructor(
                     } else {
                         // ISSUE-P2-308：采纳确认（落盘成功）后落地基线前移
                         forcedCommit.settlement?.accept()
-                        session.lastSyncedDb = databaseSession.databaseFlow.value
-                        SyncOutcome.UploadedLocal
+                        // ISSUE-P1-591：基线前移到**实际上传的版本**；窗口内已换新版本则如实回报待同步
+                        when (settleSyncedVersion(session, localDbSnapshot, databaseSession.databaseFlow.value)) {
+                            UploadSettlement.CONVERGED -> SyncOutcome.UploadedLocal
+                            UploadSettlement.LOCAL_DIVERGED -> SyncOutcome.LocalPendingChanges
+                        }
                     }
                 }
                 // 强制上传路径无冲突分支：上传失败只可能是远端不可达或被拒绝

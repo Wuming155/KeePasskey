@@ -343,6 +343,8 @@ internal class SettingsSyncController(
                     listOf(provider.protocol),
                     durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
                 )
+                // ISSUE-P1-591：远端已接受本轮上传版本，但本地仍有未同步修改——如实提示，不谎报已同步
+                is SyncOutcome.LocalPendingChanges -> UiMessage(R.string.sync_feedback_local_pending)
                 is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
                 // ISSUE-P2-291 AC②：绑定拦截只提示，确认入口在库列表页（下拉刷新触发），
                 // 设置页不提供第二处「整库覆盖」闸门

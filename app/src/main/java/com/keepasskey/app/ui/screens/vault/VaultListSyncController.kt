@@ -177,6 +177,11 @@ internal class VaultListSyncController(
                     )
                 )
             }
+            // ISSUE-P1-591：远端已接受本轮上传版本，但本地仍有未同步修改——不置「已同步」时间，
+            // 如实提示下一轮才会上传
+            is SyncOutcome.LocalPendingChanges -> {
+                onMessage(UiMessage(R.string.sync_feedback_local_pending))
+            }
             is SyncOutcome.ConflictNeedsUser -> {
                 onMessage(UiMessage(R.string.sync_feedback_conflict))
             }

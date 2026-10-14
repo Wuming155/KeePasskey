@@ -16,6 +16,8 @@ package com.keepasskey.app.sync
 internal fun syncOutcomeDescription(outcome: SyncOutcome): String = when (outcome) {
     is SyncOutcome.UpToDate -> "UpToDate(与云端一致)"
     is SyncOutcome.UploadedLocal -> "UploadedLocal(本地已上传)"
+    // ISSUE-P1-591：远端已接受本轮上传版本，但窗口内又产生了未同步的本地版本
+    is SyncOutcome.LocalPendingChanges -> "LocalPendingChanges(远端已更新，本地仍有未同步修改)"
     is SyncOutcome.MergedAndUploaded -> "MergedAndUploaded(合并后已上传)"
     is SyncOutcome.ConflictNeedsUser -> "ConflictNeedsUser(条目冲突数=${outcome.conflicts.size})"
     is SyncOutcome.Offline -> "Offline(离线/网络不可达)"
