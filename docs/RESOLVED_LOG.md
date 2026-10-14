@@ -603,5 +603,6 @@
 | §503 | 搜索框误唤自动填充弹窗整改批次 | ISSUE-P2-588（整条闭环；P2 1 → 0） | [503-搜索框误唤自动填充弹窗整改批次.md](resolved/batches/503-搜索框误唤自动填充弹窗整改批次.md) |
 | §504 | 首轮在途整改收口批次 | ISSUE-P1-589 / P3-607~609（闭环）；593/594候选保留开放 | [504-首轮在途整改收口批次.md](resolved/batches/504-首轮在途整改收口批次.md) |
 | §505 | 凭据轮换、新建库与历史附件收口 | ISSUE-P1-593 / P1-594 / P2-599 / P3-612（四条整条闭环） | [505-凭据轮换与历史大小整改闭环批次.md](resolved/batches/505-凭据轮换与历史大小整改闭环批次.md) |
+| §506 | 防截屏政策与裁决表对齐批次 | `ISSUE-P3-605`（整条闭环；纯文档，P3 3 → 2） | [506-防截屏政策与裁决表对齐批次.md](resolved/batches/506-防截屏政策与裁决表对齐批次.md) |
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起）。
