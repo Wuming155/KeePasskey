@@ -17,6 +17,8 @@ internal class SettingsDatabaseMetaController(
     // ISSUE-P1-601：库 Meta 写入经统一提交边界（commitDatabaseMeta），不再直连 session.save
     private val vaultRepository: com.keepasskey.app.data.repository.VaultRepository,
     private val databaseSession: DatabaseSession?,
+    // ISSUE-P2-602：与算法 / KDF / Argon2 / 回收站共用同一写盘状态（正在保存 + 一次性反馈）
+    private val writeState: SettingsDatabaseWriteState,
     private val scope: CoroutineScope
 ) {
 
@@ -26,6 +28,8 @@ internal class SettingsDatabaseMetaController(
      *
      * ISSUE-P1-601：改写经 [VaultRepository.commitDatabaseMeta] 统一边界——
      * 漂移检查（fail-closed）→ 变换 → 落盘一并收口；命中外改即拒绝、不应用本意图。
+     * ISSUE-P2-602：返回值不再被吞——经 [SettingsDatabaseWriteState.trackSave] 显式回执
+     * 成功 / 失败（漂移交既有三选提示）；失败时 Meta 不落树，回显保持磁盘真值。
      */
     fun setDatabaseMeta(
         databaseName: String?,
@@ -36,16 +40,18 @@ internal class SettingsDatabaseMetaController(
         scope.launch {
             // 无活动库 / 会话未就绪时如实 no-op（沿用既有语义；session 仅作就绪判据）
             session.databaseFlow.value ?: return@launch
-            vaultRepository.commitDatabaseMeta { cur ->
-                val now = Instant.now()
-                cur.copy(
-                    databaseName = databaseName ?: cur.databaseName,
-                    databaseNameChanged = if (databaseName != null && databaseName != cur.databaseName) now else cur.databaseNameChanged,
-                    databaseDescription = databaseDescription ?: cur.databaseDescription,
-                    databaseDescriptionChanged = if (databaseDescription != null && databaseDescription != cur.databaseDescription) now else cur.databaseDescriptionChanged,
-                    defaultUserName = defaultUserName ?: cur.defaultUserName,
-                    defaultUserNameChanged = if (defaultUserName != null && defaultUserName != cur.defaultUserName) now else cur.defaultUserNameChanged
-                )
+            writeState.trackSave {
+                vaultRepository.commitDatabaseMeta { cur ->
+                    val now = Instant.now()
+                    cur.copy(
+                        databaseName = databaseName ?: cur.databaseName,
+                        databaseNameChanged = if (databaseName != null && databaseName != cur.databaseName) now else cur.databaseNameChanged,
+                        databaseDescription = databaseDescription ?: cur.databaseDescription,
+                        databaseDescriptionChanged = if (databaseDescription != null && databaseDescription != cur.databaseDescription) now else cur.databaseDescriptionChanged,
+                        defaultUserName = defaultUserName ?: cur.defaultUserName,
+                        defaultUserNameChanged = if (defaultUserName != null && defaultUserName != cur.defaultUserName) now else cur.defaultUserNameChanged
+                    )
+                }
             }
         }
     }

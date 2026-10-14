@@ -386,6 +386,27 @@ internal fun DatabaseIntegrityCard() {
     }
 }
 
+/**
+ * `ISSUE-P2-602`：库级设置落盘进行中的进度行。
+ *
+ * 换加密算法 / KDF / Argon2 会**真实重派生**（Argon2 可能耗时数秒），此前无任何过程反馈——
+ * 用户只看到对话框已关闭、界面数值未变，无从判断「正在写盘」还是「点了没反应」。
+ * 本行明示状态；一次性结果（成功 / 失败）另经全局 Snackbar 呈现。
+ */
+@Composable
+internal fun DatabaseSavingRow() {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        Text(
+            text = stringResource(R.string.dbset_save_in_progress),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        androidx.compose.material3.LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+        )
+    }
+}
+
 /** 操作结果反馈文本：失败呈错误色，可附带点击回调（如清除导出反馈） */
 @Composable
 internal fun DatabaseFeedbackItem(

@@ -38,6 +38,8 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
         val kdfBenchmarkState by settingsViewModel.kdfBenchmark.collectAsStateWithLifecycle()
         // ISSUE-P3-20：子库挂载状态流（真实挂载记录 + 运行时状态 + 操作反馈）
         val childDatabaseState by settingsViewModel.childDatabaseState.collectAsStateWithLifecycle()
+        // ISSUE-P2-602：库级设置写盘状态（正在保存 + 一次性反馈：成功 / 失败 / 参数无效）
+        val databaseConfigWrite by settingsViewModel.databaseConfigWrite.collectAsStateWithLifecycle()
         DatabaseSettingsScreen(
             uiState = settingsState,
             onBackClick = { navController.popBackStack() },
@@ -45,6 +47,9 @@ internal fun NavGraphBuilder.settingsDatabaseRoute(navController: NavHostControl
             onEncryptionAlgorithmChange = settingsViewModel::setEncryptionAlgorithm,
             onKdfAlgorithmChange = settingsViewModel::setKdfAlgorithm,
             onArgon2ParametersChange = settingsViewModel::setArgon2Parameters,
+            isSavingDatabaseConfig = databaseConfigWrite.isSaving,
+            databaseConfigFeedback = databaseConfigWrite.feedback,
+            onDatabaseConfigFeedbackShown = settingsViewModel::clearDatabaseConfigWriteFeedback,
             // ISSUE-P3-385：库级 Meta 编辑（库名 / 描述 / 默认用户名）接线
             onDatabaseMetaChange = settingsViewModel::setDatabaseMeta,
             // M6 整改：真实 KDF 基准接线

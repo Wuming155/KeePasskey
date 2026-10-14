@@ -340,9 +340,9 @@ class SettingsViewModel @Inject constructor(
     ) = issueWiring.applyExternalModificationChoice(choice)
     /** ISSUE-P2-378：待决外部修改提示（KeePasskeyApp 全局对话框消费） */
     val externalModificationPending: StateFlow<com.keepasskey.app.security.VaultFileDriftPrompt?> get() = issueWiring.pending
-    /** ISSUE-P3-385：密码库设置页 Meta 编辑反馈 */
-    val databaseMetaFeedback: StateFlow<String?> get() = issueWiring.databaseMetaFeedback
-    fun clearDatabaseMetaFeedback() = issueWiring.clearDatabaseMetaFeedback()
+    /** ISSUE-P2-602：库级设置写盘状态（正在保存 + 一次性反馈；经全局 Snackbar / 进度行呈现） */
+    internal val databaseConfigWrite: StateFlow<DatabaseConfigWriteState> get() = preferences.databaseConfigWriteState
+    fun clearDatabaseConfigWriteFeedback() = preferences.clearDatabaseConfigWriteFeedback()
     fun setFlagSecureEnabled(enabled: Boolean) = preferences.setFlagSecureEnabled(enabled)
     fun setAutoClearClipboard(enabled: Boolean) = preferences.setAutoClearClipboard(enabled)
 

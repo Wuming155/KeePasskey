@@ -64,4 +64,11 @@ object KdbxError {
     const val DRIFT_NO_ACTIVE_DATABASE = "kdbx.drift.no_active_database"
     const val DRIFT_SESSION_TREE_CHANGED = "kdbx.drift.session_tree_changed"
 
+    /**
+     * ISSUE-P2-602：库级写入在**写前**被外部修改漂移检查中止（即 `ext_mod_save_aborted` 那条失败）。
+     * 单列此码是为了让上层能把它与「磁盘满 / 只读 / 无写通道」等写失败**分型**——漂移自有三选提示
+     * （`VaultFileDriftCoordinator`），不得再叠加一次性失败反馈。
+     */
+    const val DRIFT_SAVE_ABORTED = "kdbx.drift.save_aborted"
+
 }

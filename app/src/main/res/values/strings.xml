@@ -686,6 +686,10 @@
     <string name="dbset_benchmark_result">基准完成：推荐迭代 %1$d 轮、内存 %2$d MB、并行度 %3$d，已自动填入参数</string>
     <string name="dbset_benchmark_failed">基准测试失败：%1$s</string>
     <string name="dbset_apply_params">应用参数</string>
+    <!-- ISSUE-P2-602：库级设置写盘的三类反馈（正在保存 / 参数无效 / 成功）；写失败文案复用错误码资源 -->
+    <string name="dbset_save_in_progress">正在保存数据库设置…</string>
+    <string name="dbset_save_applied">数据库设置已保存</string>
+    <string name="dbset_kdf_params_rejected">KDF 参数超出本应用接受范围，未应用</string>
     <string name="dbset_btn_done">完成</string>
     <string name="dbset_templates_dialog_title">安装条目模板</string>
     <string name="dbset_templates_dialog_desc">将批量创建以下常用条目模板分组：</string>

@@ -674,6 +674,10 @@
     <string name="dbset_benchmark_result">Benchmark done: recommended %1$d iterations, %2$d MB memory, parallelism %3$d — parameters applied</string>
     <string name="dbset_benchmark_failed">Benchmark failed: %1$s</string>
     <string name="dbset_apply_params">Apply parameters</string>
+    <!-- ISSUE-P2-602: three feedback states for database-level setting writes (saving / invalid params / success); write failures reuse the error-code resources -->
+    <string name="dbset_save_in_progress">Saving database settings…</string>
+    <string name="dbset_save_applied">Database settings saved</string>
+    <string name="dbset_kdf_params_rejected">KDF parameters are outside the accepted range and were not applied</string>
     <string name="dbset_btn_done">Done</string>
     <string name="dbset_templates_dialog_title">Install entry templates</string>
     <string name="dbset_templates_dialog_desc">The following template groups will be created:</string>

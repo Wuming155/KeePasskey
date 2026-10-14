@@ -20,15 +20,8 @@ internal class SettingsIssueWiring(
     private val _pending = MutableStateFlow<VaultFileDriftPrompt?>(null)
     val pending: StateFlow<VaultFileDriftPrompt?> = _pending.asStateFlow()
 
-    private val _databaseMetaFeedback = MutableStateFlow<String?>(null)
-    val databaseMetaFeedback: StateFlow<String?> = _databaseMetaFeedback.asStateFlow()
-
     fun publishPending(prompt: VaultFileDriftPrompt?) {
         _pending.value = prompt
-    }
-
-    fun clearDatabaseMetaFeedback() {
-        _databaseMetaFeedback.value = null
     }
 
     fun setAutoLockForegroundEnabled(enabled: Boolean) =

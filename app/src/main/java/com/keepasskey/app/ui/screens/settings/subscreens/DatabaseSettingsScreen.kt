@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.ui.AppSnackbarChannel
+import com.keepasskey.app.ui.AppSnackbarEvent
+import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.settings.ChildDatabaseUiState
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
@@ -37,6 +41,10 @@ fun DatabaseSettingsScreen(
     onEncryptionAlgorithmChange: (String) -> Unit = {},
     onKdfAlgorithmChange: (String) -> Unit = {},
     onArgon2ParametersChange: (iterations: Long, memoryMb: Long, parallelism: Int) -> Unit = { _, _, _ -> },
+    // ISSUE-P2-602：库级设置写盘状态（正在保存 + 一次性反馈）与「已展示」回调
+    isSavingDatabaseConfig: Boolean = false,
+    databaseConfigFeedback: UiMessage? = null,
+    onDatabaseConfigFeedbackShown: () -> Unit = {},
     // ISSUE-P3-385：库级 Meta（库名 / 描述 / 默认用户名）编辑回调
     onDatabaseMetaChange: (databaseName: String?, databaseDescription: String?, defaultUserName: String?) -> Unit = { _, _, _ -> },
     // M6 整改：真实 KDF 基准状态与触发（原按钮仅展示假完成消息）
@@ -70,6 +78,15 @@ fun DatabaseSettingsScreen(
     // ISSUE-P3-385：库级 Meta 编辑对话框
     var showMetaDialog by remember { mutableStateOf(false) }
 
+    // ISSUE-P2-602：库级设置写盘一次性反馈（成功 / 失败）转发全局通道——回执后一次性清位。
+    // 与 SettingsContent 的换密反馈同口径：发出即交外壳唯一宿主呈现，切页不丢、不重复弹。
+    databaseConfigFeedback?.let { feedback ->
+        LaunchedEffect(feedback) {
+            AppSnackbarChannel.trySend(AppSnackbarEvent(feedback))
+            onDatabaseConfigFeedbackShown()
+        }
+    }
+
     SettingsSubscreenScaffold(
         titleRes = R.string.settings_database,
         onBackClick = onBackClick,
@@ -82,6 +99,11 @@ fun DatabaseSettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ISSUE-P2-602：写盘进行中（换算法 / KDF / Argon2 会真实重派生，可能耗时数秒）——
+            // 如实呈现「正在保存」，而非静默无响应
+            if (isSavingDatabaseConfig) {
+                item { DatabaseSavingRow() }
+            }
             // 1. 常规与基础属性
             item { SectionHeader(title = stringResource(R.string.dbset_section_basic)) }
             item {
@@ -204,6 +226,24 @@ internal fun DatabaseSettingsScreenPreview() {
             ),
             onBackClick = {},
             onRecycleBinToggle = {}
+        )
+    }
+}
+
+// ISSUE-P2-602 AC：新增「正在保存」可见性开关后同批补该态预览（默认态预览看不见进度行，见规则 ISSUE-P3-340）
+@androidx.compose.ui.tooling.preview.Preview(name = "密码库属性设置页 - 正在保存", showBackground = true)
+@Composable
+internal fun DatabaseSettingsScreenSavingPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        DatabaseSettingsScreen(
+            uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
+                databaseName = "预览示例密码库",
+                databasePath = "/预览目录/预览示例.kdbx",
+                databaseDefaultUsername = "demo@example.com"
+            ),
+            onBackClick = {},
+            onRecycleBinToggle = {},
+            isSavingDatabaseConfig = true
         )
     }
 }

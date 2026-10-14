@@ -1,6 +1,7 @@
 package com.keepasskey.app.security
 
 import android.content.Context
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import java.io.File
 
@@ -37,7 +38,10 @@ internal class VaultFileDriftGuard(
         coordinator?.requestPrompt(pathIdentifier = pathIdentifier)
         return KdbxResult.Failure(
             IllegalStateException("Vault file modified externally"),
-            abortMessage
+            abortMessage,
+            // ISSUE-P2-602：类型化漂移码——供上层区分「漂移（自有三选提示）」与其余写失败，
+            // 不再靠文案比对；文案仍走 userText（已本地化）
+            code = KdbxError.DRIFT_SAVE_ABORTED
         )
     }
 

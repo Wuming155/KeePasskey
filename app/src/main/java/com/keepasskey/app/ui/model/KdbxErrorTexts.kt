@@ -62,7 +62,9 @@ object KdbxErrorTexts {
         KdbxError.CREDENTIALS_KEYFILE_ONLY_UNBIND to R.string.err_credentials_keyfile_only_unbind,
         KdbxError.DRIFT_FILE_UNREADABLE to R.string.err_drift_file_unreadable,
         KdbxError.DRIFT_NO_ACTIVE_DATABASE to R.string.err_drift_no_active_database,
-        KdbxError.DRIFT_SESSION_TREE_CHANGED to R.string.err_drift_session_tree_changed
+        KdbxError.DRIFT_SESSION_TREE_CHANGED to R.string.err_drift_session_tree_changed,
+        // ISSUE-P2-602：写前漂移中止复用既有「已中止保存：磁盘文件已被外部修改」文案
+        KdbxError.DRIFT_SAVE_ABORTED to R.string.ext_mod_save_aborted
     )
 
     /** 错误码 → 资源 ID；未登记/陌生错误码一律回落 [R.string.err_unknown]（可观测降级，非崩溃）。 */

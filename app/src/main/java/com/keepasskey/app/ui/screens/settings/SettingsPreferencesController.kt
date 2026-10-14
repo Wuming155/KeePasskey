@@ -80,6 +80,16 @@ internal class SettingsPreferencesController(
     val databaseConfigState: StateFlow<DatabaseConfigUiState> = databaseConfigStateFlow
     val debugLogLines: StateFlow<List<String>> = debugLogLinesFlow
 
+    // ISSUE-P2-602：库级设置写盘的过程态与一次性反馈（正在保存 / 成功 / 失败）。回显**不**由本类
+    // 自持：失败不落盘 ⇒ databaseFlow 不重发 ⇒ 回显保持磁盘真值（不做假应用），重试通道天然保留。
+    private val databaseWriteState = SettingsDatabaseWriteState()
+
+    /** 库级设置写盘状态（正在保存 + 一次性反馈；UI 经全局 Snackbar 与进度行呈现） */
+    val databaseConfigWriteState: StateFlow<DatabaseConfigWriteState> = databaseWriteState.state
+
+    /** 回执经 Snackbar 展示后清除（一次性消息语义，同换密反馈口径） */
+    fun clearDatabaseConfigWriteFeedback() = databaseWriteState.clearFeedback()
+
     // ========== TASK-44：自动填充黑名单（真实条目生命周期） ==========
 
     /**
@@ -171,8 +181,19 @@ internal class SettingsPreferencesController(
         settingsRepository = settingsRepository,
         vaultRepository = vaultRepository,
         databaseSession = databaseSession,
+        // ISSUE-P2-602：与算法 / KDF / Argon2 / 回收站共用同一写盘状态（一次性反馈与 busy 单点）
+        writeState = databaseWriteState,
         scope = scope
     )
+
+    /**
+     * ISSUE-P2-602：库级设置写入的**统一提交与结果处理**——`Success` 才视为已应用并回执成功；
+     * `Failure` 显式回执（外部漂移交既有三选提示，不回执）。回显不在此维护：失败不落盘 ⇒ 会话
+     * `databaseFlow` 不重发 ⇒ 回显保持磁盘真值；取消原样传播（`trackSave` 不吞取消）且不回执。
+     */
+    private fun commitLibraryConfig(transform: (KdbxDatabase) -> KdbxDatabase) {
+        scope.launch { databaseWriteState.trackSave { vaultRepository.commitDatabaseMeta(transform) } }
+    }
 
     /**
      * 应用外层加密算法（ISSUE-P2-271 整改：真实生效）。
@@ -193,12 +214,8 @@ internal class SettingsPreferencesController(
         val current = session.databaseFlow.value ?: return
         val cipherUuid = CipherLabels.cipherUuidForLabel(algorithm) ?: return
         if (current.header.cipherUuid == cipherUuid) return
-        scope.launch {
-            // ISSUE-P1-601：经仓库统一提交边界——漂移检查 → 变换 → 落盘一并收口
-            vaultRepository.commitDatabaseMeta { db ->
-                db.copy(header = db.header.copy(cipherUuid = cipherUuid))
-            }
-        }
+        // ISSUE-P2-602：经统一提交并按 KdbxResult 回执（失败不再被吞掉 + 状态/磁盘保持一致）
+        commitLibraryConfig { db -> db.copy(header = db.header.copy(cipherUuid = cipherUuid)) }
     }
 
     /**
@@ -224,12 +241,8 @@ internal class SettingsPreferencesController(
         val current = session.databaseFlow.value ?: return
         val target = targetKdfParameters(current, kdf) ?: return
         if (sameKdfVariant(current.header.kdfParameters, target)) return
-        scope.launch {
-            // ISSUE-P1-601：经仓库统一提交边界（同 setEncryptionAlgorithm）
-            vaultRepository.commitDatabaseMeta { db ->
-                db.copy(header = db.header.copy(kdfParameters = target))
-            }
-        }
+        // ISSUE-P2-602：经统一提交并按 KdbxResult 回执（同 setEncryptionAlgorithm）
+        commitLibraryConfig { db -> db.copy(header = db.header.copy(kdfParameters = target)) }
     }
 
     /** 按显示标签构造参数齐备的目标 KDF 变体；未知标签返回 null。 */
@@ -283,26 +296,28 @@ internal class SettingsPreferencesController(
         val kdf = session.databaseFlow.value?.header?.kdfParameters
         if (kdf !is KdfParameters.Argon2) return
         // ISSUE-P1-595：提交前用与读 / 写侧**同一判据**校验；非法组合（如 256 MiB × 33~50 轮
-        // 超出 2^33 字节·轮联合预算）拒绝提交——不改变会话头、不落盘、不产生不可重开的库
-        val memoryBytes = KdbxKdfAcceptance.memoryBytesFromMbOrNull(memoryMb) ?: return
-        if (KdbxKdfAcceptance.argon2Rejection(memoryBytes, iterations, parallelism, kdf.version) != null) return
-        scope.launch {
-            // ISSUE-P1-601：经仓库统一提交边界（漂移检查 → 变换 → 落盘单点收口）
-            vaultRepository.commitDatabaseMeta { db ->
-                val target = db.header.kdfParameters
-                if (target is KdfParameters.Argon2) {
-                    db.copy(
-                        header = db.header.copy(
-                            kdfParameters = target.copy(
-                                iterations = iterations,
-                                memoryInBytes = memoryBytes,
-                                parallelism = parallelism
-                            )
+        // 超出 2^33 字节·轮联合预算）拒绝提交——不改变会话头、不落盘、不产生不可重开的库。
+        // ISSUE-P2-602：拒绝时如实回执「参数无效」（对话框已禁用「应用」，此为程序化调用兜底）
+        val memoryBytes = KdbxKdfAcceptance.memoryBytesFromMbOrNull(memoryMb)
+            ?: return databaseWriteState.rejectInvalidKdfParameters()
+        if (KdbxKdfAcceptance.argon2Rejection(memoryBytes, iterations, parallelism, kdf.version) != null) {
+            return databaseWriteState.rejectInvalidKdfParameters()
+        }
+        // ISSUE-P2-602：经统一提交并按 KdbxResult 回执（漂移检查 → 变换 → 落盘单点收口）
+        commitLibraryConfig { db ->
+            val target = db.header.kdfParameters
+            if (target is KdfParameters.Argon2) {
+                db.copy(
+                    header = db.header.copy(
+                        kdfParameters = target.copy(
+                            iterations = iterations,
+                            memoryInBytes = memoryBytes,
+                            parallelism = parallelism
                         )
                     )
-                } else {
-                    db
-                }
+                )
+            } else {
+                db
             }
         }
     }
@@ -323,10 +338,8 @@ internal class SettingsPreferencesController(
      */
     fun setRecycleBinEnabled(enabled: Boolean) {
         val session = databaseSession ?: return
-        scope.launch {
-            // ISSUE-P1-601：经仓库统一提交边界（漂移检查 → 变换 → 落盘单点收口）
-            vaultRepository.commitDatabaseMeta { db -> db.copy(recycleBinEnabled = enabled) }
-        }
+        // ISSUE-P2-602：经统一提交并按 KdbxResult 回执（不再吞掉落盘失败）
+        commitLibraryConfig { db -> db.copy(recycleBinEnabled = enabled) }
     }
 
     // ISSUE-P3-65：setTanExpiresOnUse / setCheckForDuplicateUuids 已移除——
