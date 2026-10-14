@@ -28,7 +28,10 @@ internal object AttachmentMergePolicy {
         val consumed = BooleanArray(existingByIndex.size)
         return entry.attachments.map { ui ->
             if (ui.data != null) {
-                KdbxAttachment(name = ui.fileName, data = ui.data, isProtected = false)
+                // ISSUE-P2-600：会话侧持**独立副本**——`ui.data` 属编辑页草稿，落库后编辑页可能在
+                // 锁定 / 销毁时清零它；直接共享（`data = ui.data`）会让库内附件字节被一并清零
+                // （`KdbxAttachment.data` 内存来源为借用视图）。不改 `KdbxAttachment` 的零拷贝契约。
+                KdbxAttachment(name = ui.fileName, data = ui.data.copyOf(), isProtected = false)
             } else {
                 val byRef = ui.refIndex.takeIf { it in existingByIndex.indices && !consumed[it] }
                 if (byRef != null) {

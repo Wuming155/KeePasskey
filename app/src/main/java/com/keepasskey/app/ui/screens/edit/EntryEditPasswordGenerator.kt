@@ -70,6 +70,7 @@ internal class EntryEditPasswordGenerator(
  */
 internal class EntryEditAttachmentDraft(
     private val strings: StringsProvider,
+    private val state: () -> EntryEditUiState,
     private val update: ((EntryEditUiState) -> EntryEditUiState) -> Unit
 ) {
 
@@ -85,12 +86,30 @@ internal class EntryEditAttachmentDraft(
             addedAt = strings.get(R.string.time_just_now),
             data = data
         )
+        // ISSUE-P2-600：同名视为替换——被淘汰的**草稿自有**数组（data 非空）在退出 UI 态后擦除。
+        // 清零副作用刻意放在 update 闭包**之外**（StateFlow.update 可能重试，闭包须保持纯粹）。
+        val replaced = state().attachments.filter { it.fileName == fileName }.mapNotNull { it.data }
         update { state ->
             state.copy(attachments = state.attachments.filterNot { it.fileName == fileName } + newAtt, isDirty = true)
         }
+        replaced.forEach { it.fill(0) }
     }
 
     fun remove(id: String) {
+        // ISSUE-P2-600：移除同样只擦除草稿自有的数组；已落库附件投影（data == null）不动
+        val removed = state().attachments.firstOrNull { it.id == id }?.data
         update { state -> state.copy(attachments = withoutAttachment(state.attachments, id), isDirty = true) }
+        removed?.fill(0)
+    }
+
+    /**
+     * ISSUE-P2-600：会话锁定 / 页面销毁时擦除本轮编辑**新导入**的附件明文（草稿独占数组），
+     * 并从 UI 态移除这些草稿（避免残留引用）；已落库附件投影不受影响。幂等。
+     */
+    fun wipeDrafts() {
+        val owned = state().attachments.mapNotNull { it.data }
+        if (owned.isEmpty()) return
+        update { state -> state.copy(attachments = state.attachments.filter { it.data == null }) }
+        owned.forEach { it.fill(0) }
     }
 }

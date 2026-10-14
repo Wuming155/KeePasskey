@@ -146,7 +146,7 @@ class EntryEditViewModel @Inject constructor(
         }
     )
 
-    private val attachments = EntryEditAttachmentDraft(strings = strings, update = _uiState::update)
+    private val attachments = EntryEditAttachmentDraft(strings = strings, state = { _uiState.value }, update = _uiState::update)
 
     /**
      * ISSUE-P3-337 搬移：自定义字段四写入口的执行者（AC⑪① 只读锁在 [protectedFieldChars] 一侧
@@ -493,8 +493,8 @@ class EntryEditViewModel @Inject constructor(
         _loadedProtectedFields.value = emptyMap()
         // ISSUE-P3-337 AC③：会话锁定 / 销毁时，尚未确认的导入草案（私钥明文唯一持有者）一并擦除
         passkeyImport.wipeAll()
-        // ISSUE-P3-342：会话锁定 / 页面销毁时不留悬空的「解除」确认态
-        // （不这么做会出现"重新解锁后对话框还在，点了就删凭据"的路径）
+        // ISSUE-P3-342：会话锁定 / 页面销毁时不留悬空的「解除」确认态（重新解锁后对话框还在、点了就删凭据）
         passkeyUnbind.reset()
+        attachments.wipeDrafts()
     }
 }
