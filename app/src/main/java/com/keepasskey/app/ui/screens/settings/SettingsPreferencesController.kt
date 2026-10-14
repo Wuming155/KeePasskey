@@ -34,7 +34,9 @@ import kotlinx.coroutines.launch
  */
 internal class SettingsPreferencesController(
     private val settingsRepository: SettingsRepository,
-    vaultRepository: VaultRepository,
+    // ISSUE-P1-601：库级写入统一提交边界（commitDatabaseMeta）——设置控制器只提交意图，
+    // 不再直接调用 session.updateDatabaseMeta / save
+    private val vaultRepository: VaultRepository,
     private val autofillBlocklistStore: AutofillBlocklistStore,
     // ISSUE-P3-43 ③：保存侧独立黑名单（与填充黑名单分离）
     private val autofillSaveBlocklistStore: AutofillSaveBlocklistStore,
@@ -166,6 +168,7 @@ internal class SettingsPreferencesController(
     /** ISSUE-P3-385/381/382 / P2-379：Meta / 探测 / 去重 / 前台闲置协作对象（见其 KDoc） */
     val databaseMetaController = SettingsDatabaseMetaController(
         settingsRepository = settingsRepository,
+        vaultRepository = vaultRepository,
         databaseSession = databaseSession,
         scope = scope
     )
@@ -175,12 +178,12 @@ internal class SettingsPreferencesController(
      *
      * 此前仅回写设置页内存回显（假开关）：既不改库头也不落盘，文件头一个字节未动，
      * 用户据界面误信「已更换算法」；任一 databaseFlow 重发后回显还会回退为文件头真值。
-     * 现经 [CipherLabels.cipherUuidForLabel] 反查算法 ID 后接入
-     * [DatabaseSession.updateDatabaseMeta] 写 `KdbxHeader.cipherUuid` 并立即
-     * [DatabaseSession.save]——写侧 `KdbxFile.save` 按保存时 cipherUuid 生成**该算法
-     * 官方长度**的全新 EncryptionIV（ChaCha20 12B / AES、Twofish 16B，P0-4 契约）并以
-     * 新 IV 重派生写出，语义与官方 KeePass「算法保存时生效」一致。回显不再自持状态：
-     * 会话 databaseFlow 重发后由 init 的头映射通道统一下发（P2-19 单一真相源）。
+     * 现经 [CipherLabels.cipherUuidForLabel] 反查算法 ID 后经**仓库统一提交边界**
+     * [VaultRepository.commitDatabaseMeta] 写 `KdbxHeader.cipherUuid` 并落盘（ISSUE-P1-601 起
+     * 该边界内统一做外部修改漂移检查，控制器不再直连 `session.save`）——写侧 `KdbxFile.save`
+     * 按保存时 cipherUuid 生成**该算法官方长度**的全新 EncryptionIV（ChaCha20 12B / AES、
+     * Twofish 16B，P0-4 契约）并以新 IV 重派生写出，语义与官方 KeePass「算法保存时生效」一致。
+     * 回显不再自持状态：会话 databaseFlow 重发后由 init 的头映射通道统一下发（P2-19 单一真相源）。
      *
      * 无活动会话 / 库未就绪 / 未知标签 / 与现行算法相同（避免无谓重派生）时如实 no-op。
      */
@@ -190,10 +193,10 @@ internal class SettingsPreferencesController(
         val cipherUuid = CipherLabels.cipherUuidForLabel(algorithm) ?: return
         if (current.header.cipherUuid == cipherUuid) return
         scope.launch {
-            session.updateDatabaseMeta { db ->
+            // ISSUE-P1-601：经仓库统一提交边界——漂移检查 → 变换 → 落盘一并收口
+            vaultRepository.commitDatabaseMeta { db ->
                 db.copy(header = db.header.copy(cipherUuid = cipherUuid))
             }
-            session.save()
         }
     }
 
@@ -201,10 +204,10 @@ internal class SettingsPreferencesController(
      * 应用 KDF 派生算法（ISSUE-P2-271 整改：真实生效）。
      *
      * 与 [setEncryptionAlgorithm] 同型：此前仅回写内存回显，文件头 KDF 变体字典未动。
-     * 现构造**参数齐备**的目标变体（AC②：换变体不留半成品头）后接入
-     * [DatabaseSession.updateDatabaseMeta] 写 `KdbxHeader.kdfParameters` 并立即
-     * [DatabaseSession.save]——写侧以保存时 kdfParameters（全新随机 salt/seed）重派生
-     * 加密密钥。参数补齐口径：
+     * 现构造**参数齐备**的目标变体（AC②：换变体不留半成品头）后经仓库统一提交边界
+     * [VaultRepository.commitDatabaseMeta] 写 `KdbxHeader.kdfParameters` 并落盘
+     * （ISSUE-P1-601；边界内统一做漂移检查）——写侧以保存时 kdfParameters（全新随机
+     * salt/seed）重派生加密密钥。参数补齐口径：
      * - Argon2id ↔ Argon2d：携带现行 I/M/P（换型不改强度）；
      * - → AES-KDF：rounds 取官方缺省 [KdbxConstants.Kdf.DEFAULT_AES_KDF_ROUNDS]；
      * - → Argon2（自 AES-KDF）：I/M/P 取类型缺省（2 轮 / 64MB / 并行 2）——自 AES-KDF
@@ -221,10 +224,10 @@ internal class SettingsPreferencesController(
         val target = targetKdfParameters(current, kdf) ?: return
         if (sameKdfVariant(current.header.kdfParameters, target)) return
         scope.launch {
-            session.updateDatabaseMeta { db ->
+            // ISSUE-P1-601：经仓库统一提交边界（同 setEncryptionAlgorithm）
+            vaultRepository.commitDatabaseMeta { db ->
                 db.copy(header = db.header.copy(kdfParameters = target))
             }
-            session.save()
         }
     }
 
@@ -266,18 +269,19 @@ internal class SettingsPreferencesController(
      * 应用 Argon2 KDF 参数（ISSUE-P2-22 整改：真实生效）。
      *
      * 此前仅回写 UI 内存回显（假闭环）：既不更新会话头也不落盘，冷启动即还原。
-     * 现接入 [DatabaseSession.updateDatabaseMeta] 更新活动库头的变体字典 I/M/P 并立即
-     * [DatabaseSession.save]——写侧 `KdbxFile.save` 以保存时的 `header.kdfParameters`
-     * （含全新随机 salt）重派生加密密钥并写出新外层头，语义与官方 KeePass「KDF 参数
-     * 保存时生效」一致。回显不再自持状态：会话 databaseFlow 重发后由 init 的头映射
-     * 通道统一下发（P2-19 单一真相源）。
+     * 现经仓库统一提交边界 [VaultRepository.commitDatabaseMeta] 更新活动库头的变体字典
+     * I/M/P 并落盘（ISSUE-P1-601；边界内统一做漂移检查）——写侧 `KdbxFile.save` 以保存时的
+     * `header.kdfParameters`（含全新随机 salt）重派生加密密钥并写出新外层头，语义与官方
+     * KeePass「KDF 参数保存时生效」一致。回显不再自持状态：会话 databaseFlow 重发后由 init
+     * 的头映射通道统一下发（P2-19 单一真相源）。
      *
      * 无活动会话 / 库头非 Argon2 时如实 no-op（回显保持文件头真值，不产生假变更）。
      */
     fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) {
         val session = databaseSession ?: return
         scope.launch {
-            session.updateDatabaseMeta { db ->
+            // ISSUE-P1-601：经仓库统一提交边界（漂移检查 → 变换 → 落盘单点收口）
+            vaultRepository.commitDatabaseMeta { db ->
                 val kdf = db.header.kdfParameters
                 if (kdf is KdfParameters.Argon2) {
                     db.copy(
@@ -293,7 +297,6 @@ internal class SettingsPreferencesController(
                     db
                 }
             }
-            session.save()
         }
     }
 
@@ -303,9 +306,9 @@ internal class SettingsPreferencesController(
      * 此前仅回写设置页内存回显（假开关）：删除分流全部读库 Meta 真值
      * `db.recycleBinEnabled`（RecycleBinCoordinator），与 UI 开关无任何数据通路——
      * 关闭后界面显示「已关闭」，删除却仍软删移入回收站，方向与界面声明相反。
-     * 现接入 [DatabaseSession.updateDatabaseMeta] 写 `KdbxDatabase.recycleBinEnabled`
-     * 并立即 [DatabaseSession.save]——写侧 `KdbxDatabase.toMetaData()` 将其还原为
-     * `KdbxMetaData.recycleBinEnabled` 写出 `<RecycleBinEnabled>` 元素，与官方
+     * 现经仓库统一提交边界 [VaultRepository.commitDatabaseMeta] 写 `KdbxDatabase.recycleBinEnabled`
+     * 并落盘（ISSUE-P1-601；边界内统一做漂移检查）——写侧 `KdbxDatabase.toMetaData()` 将其
+     * 还原为 `KdbxMetaData.recycleBinEnabled` 写出 `<RecycleBinEnabled>` 元素，与官方
      * KeePass「回收站禁用后删除即物理删除」语义一致。回显不再自持状态：会话
      * databaseFlow 重发后由 init 的头映射通道统一下发（单一真相源，同 P2-19）。
      *
@@ -314,8 +317,8 @@ internal class SettingsPreferencesController(
     fun setRecycleBinEnabled(enabled: Boolean) {
         val session = databaseSession ?: return
         scope.launch {
-            session.updateDatabaseMeta { db -> db.copy(recycleBinEnabled = enabled) }
-            session.save()
+            // ISSUE-P1-601：经仓库统一提交边界（漂移检查 → 变换 → 落盘单点收口）
+            vaultRepository.commitDatabaseMeta { db -> db.copy(recycleBinEnabled = enabled) }
         }
     }
 

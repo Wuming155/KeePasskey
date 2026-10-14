@@ -17,6 +17,7 @@ import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
+import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,7 +32,11 @@ class FakeVaultRepository(
     initialDatabases: List<VaultDatabaseInfo> = initialMockDatabases,
     // ISSUE-P1-04：置 true 时 unlockActiveDatabase 恒返回「凭据错误」失败，
     // 供节流/清零路径单测驱动认证失败分支（默认 false，不影响既有用例）
-    private val forceInvalidCredentials: Boolean = false
+    private val forceInvalidCredentials: Boolean = false,
+    // ISSUE-P1-601：库级元数据提交（commitDatabaseMeta）的落点——需要验证「设置写盘真实生效」
+    // 的单测传入真实 DatabaseSession；缺省 null 时 commitDatabaseMeta 为不落盘的假成功
+    // （与既有「Fake 不建模库文件写入」口径一致，不影响既有用例）
+    private val databaseSession: DatabaseSession? = null
 ) : VaultRepository {
 
     private val databasesFlow = MutableStateFlow(initialDatabases)
@@ -111,6 +116,21 @@ class FakeVaultRepository(
 
     override suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): com.keepasskey.core.result.KdbxResult<Unit> {
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
+    }
+
+    /**
+     * ISSUE-P1-601：库级元数据提交替身。
+     *
+     * 无 [databaseSession] 时退化为「不落盘的假成功」（仅供不需要验证写盘落地的用例沿用）；
+     * 传入真实会话时**如实**执行 `updateDatabaseMeta + save`，使设置链路的真实生效契约
+     * （算法 / KDF / Argon2 参数真实落盘并重开）在替身上同样成立。
+     */
+    override suspend fun commitDatabaseMeta(
+        transform: (com.keepasskey.database.file.KdbxDatabase) -> com.keepasskey.database.file.KdbxDatabase
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
+        val session = databaseSession ?: return com.keepasskey.core.result.KdbxResult.Success(Unit)
+        session.updateDatabaseMeta(transform)
+        return session.save()
     }
 
 

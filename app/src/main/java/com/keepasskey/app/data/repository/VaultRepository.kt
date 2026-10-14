@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.emptyFlow
  * 敏感值按需读取通道见 [VaultSecretAccess]，Passkey 凭据面见 [VaultPasskeyRepository]；
  * 本文件只保留库生命周期、分组与条目 CRUD、条目投影 / 查询、导出与模板。
  */
-interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository {
+interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWritePort {
     /** 按已受理会话路径读取库登记快照；默认实现仅供测试替身兼容。 */
     fun databaseInfoForPath(path: String): VaultDatabaseInfo? = null
     /**

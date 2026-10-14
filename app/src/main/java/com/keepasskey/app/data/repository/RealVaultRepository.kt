@@ -14,6 +14,7 @@ import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.security.VaultFileBaselineHolder
 import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.app.security.VaultFileDriftGuard
+import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -73,6 +74,16 @@ class RealVaultRepository @Inject constructor(
     /** ISSUE-P3-447 AC②：保存侧漂移检测 / 基线刷新的单点收口（两通道元数据分流在此） */
     private val driftGuard = VaultFileDriftGuard(driftCoordinator, context)
 
+    /** ISSUE-P1-601：全部库级写入口的统一提交边界（详见 [VaultWriteBoundary]）。 */
+    private val writeBoundary = VaultWriteBoundary(
+        databaseSession = databaseSession,
+        driftGuard = driftGuard,
+        strings = strings,
+        autoLockGuard = autoLockGuard,
+        afterPersist = { secretReader.invalidateTotpCache() },
+        logPersistFailure = { debugLog.error(TAG, "数据库保存失败: ${it.error.javaClass.simpleName}") }
+    )
+
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
 
     // TASK-21 拆分：投影映射器与领域协调器（回收站/Passkey/模板），仓库仅保留 CRUD 编排
@@ -91,7 +102,9 @@ class RealVaultRepository @Inject constructor(
         refresh = ::refreshDatabases,
         selectDatabase = ::selectDatabase,
         // ISSUE-P2-378 AC①：打开成功后留存基线
-        baselineHolder = baselineHolder
+        baselineHolder = baselineHolder,
+        // ISSUE-P1-601：换密 / 改绑的写前漂移检查与全库保存同源（单点收口，见 VaultWriteBoundary）
+        driftRejection = ::driftAbortFailure
     )
     private val entryWriter = VaultEntryWriteCoordinator(strings, databaseSession, entryMapper) { persistSession() }
     // ISSUE-P3-442：URL 字段级写入口（搜索词自愈回灌；独立成器，见 VaultEntryUrlWriter KDoc）
@@ -412,37 +425,21 @@ class RealVaultRepository @Inject constructor(
 
     override suspend fun installEntryTemplates(): KdbxResult<Unit> = exporter.installEntryTemplates()
 
-    /**
-     * H3 整改：会话落盘的唯一出口——save() 失败必须原样向上传播，
-     * 禁止磁盘写失败被静默吞掉导致 UI 谎报保存成功、锁库后修改永久丢失。
-     *
-     * ISSUE-P3-366 AC②：整库保存（KDF + 重序列化）期间挂锁，try/finally 保证
-     * begin/end 成对（漏配对会令挂锁永不恢复）；挂起期间的锁定触发延迟至保存结束补执行。
-     */
+    /** ISSUE-P2-378 / P1-601：写前外部修改漂移检查（单一收口；全库保存与换密 / 改绑同源）。 */
+    private fun driftAbortFailure(): KdbxResult.Failure? = writeBoundary.abortOnDrift()
+
+    /** H3：会话落盘的唯一出口（ISSUE-P1-601 起实现收敛到 [VaultWriteBoundary.persist]）。 */
     private suspend fun persistSession(): KdbxResult<Unit> {
-        // ISSUE-P2-378 AC② / ISSUE-P3-447 AC②：保存前外部修改漂移检测——漂移即 fail-closed
-        // 中止覆盖并唤起 UI 三选（放弃 / 重载 / 合并）。本地 File 与 SAF 两通道的元数据分流
-        // 口径收口在 VaultFileDriftGuard（单点，重载 / 合并侧同源）
-        val pathId = databaseSession.currentPathIdentifier.orEmpty()
-        val localFile = databaseSession.currentFile
-        driftGuard.driftedFailure(pathId, localFile, strings.get(R.string.ext_mod_save_aborted))?.let {
-            debugLog.error(TAG, "保存中止：库文件已被外部修改")
-            return it
-        }
-        autoLockGuard.beginLongTask()
-        try {
-            val result = databaseSession.save()
-            secretReader.invalidateTotpCache()
-            if (result is KdbxResult.Success) {
-                driftGuard.captureAfterPersist(pathId, localFile)
-            }
-            if (result is KdbxResult.Failure) {
-                debugLog.error(TAG, "数据库保存失败: ${result.error.javaClass.simpleName}")
-            }
-            return result
-        } finally {
-            autoLockGuard.endLongTask()
-        }
+        val result = writeBoundary.persist()
+        if (result is KdbxResult.Failure) debugLog.error(TAG, "保存中止或失败：${result.error.javaClass.simpleName}")
+        return result
+    }
+
+    /** ISSUE-P1-601：库级写入统一提交边界（先漂移检查 → 再应用候选 → 再落盘，详见 [VaultWritePort]）。 */
+    override suspend fun commitDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase): KdbxResult<Unit> {
+        val result = writeBoundary.commitMeta(transform)
+        if (result is KdbxResult.Failure) debugLog.error(TAG, "库设置提交失败：${result.error.javaClass.simpleName}")
+        return result
     }
 
     /**

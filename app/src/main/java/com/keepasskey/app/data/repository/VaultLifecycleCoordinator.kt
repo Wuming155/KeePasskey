@@ -44,7 +44,8 @@ internal class VaultLifecycleCoordinator(
      * ISSUE-P2-378 AC①：打开成功后留存外部修改基线。
      * 缺省空实现保持既有单测构造点兼容；生产由 RealVaultRepository 注入 holder。
      */
-    private val baselineHolder: VaultFileBaselineHolder? = null
+    private val baselineHolder: VaultFileBaselineHolder? = null,
+    private val driftRejection: () -> KdbxResult.Failure? = { null }
 ) {
 
     /** `ISSUE-P2-529`：来源只读探测（KDF 工作因子评估）——原实现自本类切出，见 [VaultSourceProbe]。 */
@@ -216,7 +217,6 @@ internal class VaultLifecycleCoordinator(
         }
     }
 
-
     /**
      * 移除已知库：摘除注册表条目、**仅当条目确为应用私有库时**删除沙盒内文件、
      * 必要时关闭会话并清空活动库 ID。
@@ -347,7 +347,7 @@ internal class VaultLifecycleCoordinator(
         newPassword: CharArray,
         keyFileIntent: ChangeKeyFileIntent = ChangeKeyFileIntent.Keep
     ): KdbxResult<Unit> {
-        val result = when (keyFileIntent) {
+        val result = driftRejection() ?: when (keyFileIntent) {
             ChangeKeyFileIntent.Keep -> databaseSession.changeCredentials(newPassword)
             ChangeKeyFileIntent.Remove -> databaseSession.changeCredentials(newPassword, null)
             is ChangeKeyFileIntent.Use -> databaseSession.changeCredentials(newPassword, keyFileIntent.bytes)
@@ -364,7 +364,7 @@ internal class VaultLifecycleCoordinator(
      * `Keep` 意味着无任何改动，fail-closed 返回 Failure（不静默成功）。仅成功时刷新库列表。
      */
     suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> {
-        val result = when (keyFileIntent) {
+        val result = driftRejection() ?: when (keyFileIntent) {
             ChangeKeyFileIntent.Keep -> KdbxResult.Failure(
                 IllegalArgumentException("Keep 意图不构成任何改动"),
                 strings.get(R.string.err_lifecycle_no_change)

@@ -88,7 +88,8 @@ class AlgorithmSelectionApplyTest {
     private fun buildController(session: DatabaseSession): SettingsPreferencesController =
         SettingsPreferencesController(
             settingsRepository = FakeSettingsRepository(),
-            vaultRepository = FakeVaultRepository(),
+            // ISSUE-P1-601：库级写入改经仓库统一边界 commitDatabaseMeta，替身须接真实会话方可验证落盘
+            vaultRepository = FakeVaultRepository(databaseSession = session),
             autofillBlocklistStore = AutofillBlocklistStore(null),
             autofillSaveBlocklistStore = AutofillSaveBlocklistStore(null),
             autofillFieldBlocklistStore = AutofillFieldBlocklistStore(null),
