@@ -28,21 +28,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 应用级同步编排协调器 (Wave 3-E P0-5 app 侧接线)。
- * 遵循安全与架构铁律：
- * 1. 串联 DatabaseSession 状态机、KDBX4 序列化与三哈希字节级 SyncEngine；
- * 2. 借出凭据 useCredentials 用完在 finally 显式擦除清零；
- * 3. 严格划分协程调度边界：加密与合并在 Dispatchers.Default，网络与文件写盘在 Dispatchers.IO。
- *
- * ISSUE-P3-25 拆分：本类保留**对外公开 API 与串行化外壳**（状态流、测试钩子、
- * [syncNow] / [resolveConflicts] / [testConnection] / [onSessionLocked]），
- * 三职责按依赖倒置下沉为 Hilt 构造注入的协作方：
- * - 同步周期编排 → [SyncCycleRunner]（步骤 2/3/4 各自成方法）；
- * - 冲突决策 → [SyncConflictController]（含待决冲突会话状态）；
- * - Provider 构建 → [SyncProviderResolver]；另拆出 [SyncDatabaseCodec]（KDBX4 编解码）、
- *   [SyncContentChangeDetector]（内容变化判据）、[SyncPreferences]（进阶偏好与详细日志）、
- *   [SyncSessionState]（跨周期共享状态与互斥锁）。
- * 公开可见性与签名保持不变（[SyncOutcome] 仍为本包顶层 sealed class）。
+ * 应用同步串行编排、StateFlow 与测试入口；同步周期由 [SyncCycleRunner]、冲突由 [SyncConflictController] 承担。
+ * Provider / 编解码 / 变化判定 / 偏好 / 跨周期状态分别由 [SyncProviderResolver]、[SyncDatabaseCodec]、
+ * [SyncContentChangeDetector]、[SyncPreferences]、[SyncSessionState] 协作完成。
+ * 敏感凭据借用后显式擦除；加密合并走 Dispatchers.Default，网络与文件 IO 走 Dispatchers.IO。
+ * 既有公共 API 保持兼容；完整依赖拓扑见 `docs/architecture/ARCHITECTURE.md`。
  */
 @Singleton
 open class SyncCoordinator @Inject constructor(
@@ -213,13 +203,21 @@ open class SyncCoordinator @Inject constructor(
     /** 成功换密后登记本地重加密事实；未配置同步则空操作，不触发网络。 */
     suspend fun markLocalVaultRecrypted(): Boolean = markCredentialRotationTarget(captureCredentialRotationTarget())
 
+    /** 受理时同步捕获当前凭据票据对应的非秘密远端路径快照。 */
+    fun captureCredentialRotationTargetSnapshot(): String? {
+        if (credentialRotation == null) return null
+        val path = databaseSession.currentPathIdentifier ?: return null
+        val fileName = if (path.startsWith("content://")) null else java.io.File(path).name
+        val defaultName = fileName?.takeIf(String::isNotBlank)
+            ?: databaseSession.databaseFlow.value?.let { "${it.databaseName}.kdbx" }
+            ?: return null
+        return session.testRemotePath
+            ?: syncCredentialsStore.captureRotationRemotePath(path, defaultName)
+    }
+
     /** 轮换前固定远端身份，提交后不能按已切换的活动库登记同步事实。 */
     suspend fun captureCredentialRotationTarget(): String? = withContext(Dispatchers.IO) {
-        if (credentialRotation == null) return@withContext null
-        val fileName = databaseSession.currentFile?.name
-            ?: databaseSession.databaseFlow.value?.let { "${it.databaseName}.kdbx" }
-            ?: return@withContext null
-        session.testRemotePath ?: providers.resolveRemotePath(fileName)
+        captureCredentialRotationTargetSnapshot()
     }
 
     /** 仅写入已捕获目标的本地标记，不触发网络或重读活动库。 */

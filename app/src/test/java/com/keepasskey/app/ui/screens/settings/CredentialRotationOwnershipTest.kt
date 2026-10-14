@@ -1,16 +1,24 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.R
+import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import com.keepasskey.app.data.repository.*
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.security.AutoLockHoldoff
 import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.database.session.CredentialRotationCancellationException
 import com.keepasskey.database.session.SessionWriteReceipt
+import com.keepasskey.database.session.SessionCredentialRequest
+import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.database.file.KdbxHeader
+import com.keepasskey.core.model.KdbxGroup
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.*
@@ -87,6 +95,25 @@ class CredentialRotationOwnershipTest {
         assertFalse(controller.state.value.isChanging)
     }
 
+    @Test fun `应用作用域取消导致launch未进入时输入和挂锁均收尾`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val holdoff = AutoLockHoldoff()
+        val runtime = CredentialRotationRuntime(AutoLockSessionGuard(
+            DatabaseSession(), FakeSettingsRepository(), DebugLogBuffer(), holdoff = holdoff))
+        runtime.scope.cancel()
+        val controller = SettingsMasterKeyChangeController(FakeVaultRepository(), backgroundScope, runtime = runtime)
+        val password = "Queued#NeverRun".toCharArray()
+        try {
+            controller.submit(password)
+            runCurrent()
+            assertTrue(password.all { it == '0' })
+            assertFalse(controller.state.value.isChanging)
+            assertFalse(holdoff.isHolding)
+        } finally {
+            MainDispatcherGuard.tearDown()
+        }
+    }
+
     @Test fun `已提交取消仍执行捕获目标收尾再释放输入`() = runTest {
         val target = "captured-A"
         var completedTarget: String? = null
@@ -111,6 +138,167 @@ class CredentialRotationOwnershipTest {
         assertTrue(password.all { it == '0' })
         assertFalse(controller.state.value.isChanging)
         assertNotNull(controller.state.value.feedback)
+    }
+
+    @Test fun `排队后活动库与同步目标变化仍按受理目录快照收尾`() = runTest {
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(KdbxDatabase(
+            KdbxHeader.createDefault(useArgon2 = false), rootGroup = KdbxGroup(name = "Admission")
+        ))
+        val ticket = session.captureCredentialRequest().ticket!!
+        var catalog = com.keepasskey.app.ui.model.VaultDatabaseInfo("A", "A", ticket.pathIdentifier, isRemote = true)
+        var target = "remote-A"
+        var activeId = "A"
+        var committedId: String? = null
+        var committedTarget: String? = null
+        var requestTicket: Any? = null
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override fun databaseInfoForPath(path: String) = catalog.takeIf { it.path == path }
+            override suspend fun changeMasterPassword(password: CharArray, keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> =
+                KdbxResult.Success(Unit)
+        }
+        val controller = SettingsMasterKeyChangeController(
+            repository = repository,
+            scope = backgroundScope,
+            credentialSession = session,
+            activeDbId = { activeId },
+            syncBound = { activeId == "B" },
+            captureSyncTarget = { target },
+            completionWithRequest = { request, id, _, _, syncTarget ->
+                requestTicket = request.ticket
+                committedId = id
+                committedTarget = syncTarget
+                true
+            }
+        )
+        controller.submit("Admission#Password".toCharArray())
+        catalog = com.keepasskey.app.ui.model.VaultDatabaseInfo("B", "B", "other.kdbx", isRemote = false)
+        activeId = "B"
+        target = "remote-B"
+        runCurrent()
+        assertSame(ticket, requestTicket)
+        assertEquals("A", committedId)
+        assertEquals("remote-A", committedTarget)
+        assertFalse(controller.state.value.isChanging)
+    }
+
+    @Test fun `云端标记失败仍报告本地成功并提示旧副本`() = runTest {
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(KdbxDatabase(
+            KdbxHeader.createDefault(useArgon2 = false), rootGroup = KdbxGroup(name = "CloudMark")
+        ))
+        val ticket = session.captureCredentialRequest().ticket!!
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override fun databaseInfoForPath(path: String) = com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                "A", "A", ticket.pathIdentifier, isRemote = true
+            )
+            override suspend fun changeMasterPassword(password: CharArray, keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> =
+                KdbxResult.Success(Unit)
+        }
+        val password = "Cloud#MarkFake".toCharArray()
+        val controller = SettingsMasterKeyChangeController(
+            repository = repository,
+            scope = backgroundScope,
+            credentialSession = session,
+            captureSyncTarget = { "remote-A" },
+            completionWithRequest = { _, _, _, _, _ -> false },
+            strings = StringsProvider { id, _ -> "res:$id" }
+        )
+        controller.submit(password)
+        runCurrent()
+        assertFalse(controller.state.value.isChanging)
+        assertTrue(password.all { it == '0' })
+        assertEquals(R.string.set_master_key_updated, controller.state.value.feedback?.resId)
+        assertEquals("res:${R.string.set_master_key_cloud_mark_failed_note}", controller.state.value.feedback?.args?.get(0))
+    }
+
+    @Test fun `withContext普通取消仍运行提交收尾并固定A的归属`() = runTest {
+        val session = DatabaseSession()
+        val oldPassword = "Old#TicketPassword".toCharArray()
+        val newPassword = "New#TicketPassword".toCharArray()
+        var disk = byteArrayOf()
+        try {
+            val created = session.createStream(
+                pathIdentifier = "/virtual/A.kdbx",
+                name = "A",
+                passwordChars = oldPassword,
+                useArgon2 = false,
+                keyFileData = null,
+                cipherUuid = KdbxConstants.Cipher.AES_256_CBC,
+                writeNew = { bytes -> disk = bytes.copyOf() },
+                saveWriter = { bytes -> disk = bytes.copyOf() },
+                trackedSaveWriter = { bytes, receipt ->
+                    receipt.writing()
+                    disk.fill(0)
+                    disk = bytes.copyOf()
+                    receipt.committed()
+                    withContext(Dispatchers.IO) {
+                        currentCoroutineContext().cancel(CancellationException("提交后的普通取消"))
+                        currentCoroutineContext().ensureActive()
+                    }
+                }
+            )
+            assertTrue(created is KdbxResult.Success)
+            val oldTicket = session.captureCredentialRequest().ticket!!
+            var activeId = "A"
+            var target = "remote-A"
+            var finishCalls = 0
+            var observedRequest: SessionCredentialRequest? = null
+            val repository = object : VaultRepository by FakeVaultRepository() {
+                override fun databaseInfoForPath(path: String) = com.keepasskey.app.ui.model.VaultDatabaseInfo(
+                    "A", "A", path, isRemote = true
+                )
+                override suspend fun changeMasterPassword(
+                    password: CharArray, keyFileIntent: ChangeKeyFileIntent
+                ): KdbxResult<Unit> {
+                    observedRequest = currentCoroutineContext().fold(null as SessionCredentialRequest?) { found, element ->
+                        if (element is SessionCredentialRequest) element else found
+                    }
+                    return session.changeCredentials(password)
+                }
+            }
+            val controller = SettingsMasterKeyChangeController(
+                repository = repository,
+                scope = backgroundScope,
+                credentialSession = session,
+                activeDbId = { activeId },
+                captureSyncTarget = { target },
+                completionWithRequest = { request, databaseId, _, _, syncTarget ->
+                    finishCalls++
+                    assertSame(oldTicket, request.ticket)
+                    assertEquals("A", databaseId)
+                    assertEquals("remote-A", syncTarget)
+                    assertEquals(SessionWriteReceipt.Status.COMMITTED, request.writeStatus)
+                    assertSame(session.captureCredentialRequest().ticket, request.committedTicket)
+                    false
+                },
+                strings = StringsProvider { id, _ -> "res:$id" }
+            )
+            val submitted = newPassword.copyOf()
+            controller.submit(submitted)
+            activeId = "B"
+            target = "remote-B"
+            runCurrent()
+            withContext(Dispatchers.Default) {
+                withTimeout(20_000) { controller.state.first { !it.isChanging } }
+            }
+            assertTrue(submitted.all { it == '0' })
+            assertEquals(SessionWriteReceipt.Status.COMMITTED, observedRequest?.writeStatus)
+            assertSame(session.captureCredentialRequest().ticket, observedRequest?.committedTicket)
+            assertEquals(1, finishCalls)
+            assertFalse(controller.state.value.isChanging)
+            assertEquals(R.string.set_master_key_updated, controller.state.value.feedback?.resId)
+            assertEquals(
+                "res:${R.string.set_master_key_cloud_mark_failed_note}",
+                controller.state.value.feedback?.args?.get(0)
+            )
+            session.useCredentials { password, _ -> assertArrayEquals(newPassword, password) }
+        } finally {
+            session.close()
+            oldPassword.fill('0')
+            newPassword.fill('0')
+            disk.fill(0)
+        }
     }
     @Test fun `首任务完成触发下一受理时旧完成钩子不得覆盖新忙态`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))

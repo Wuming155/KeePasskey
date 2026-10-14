@@ -12,28 +12,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 云同步协议凭据持久化加密存储库 (Wave 3-E P2-19)。
- * 遵循安全规范：
- * 敏感密码与 AccessKey/SecretKey 经 Keystore AES-256-GCM 硬件加密后落盘于私有 SharedPreferences 中。
- * Wave 15 整改：凭据读写全链路以 CharArray 承载（CharBuffer 直转 UTF-8 字节，全程不经 String），
- * 借用语义由调用方承担用毕清零义务；保存结果如实回传（封印失败返回 false）。
- * 允许在单测中注入恒等/模拟加解密器以测试往返逻辑。
- *
- * ## 按库命名空间（`ISSUE-P2-465`）
- *
- * 全部键（协议、端点、远端路径、密文、S3 时钟偏移）**按当前活动库命名空间化**
- * （键形态与摘要口径见 [SyncCredentialKeys]），命名空间标识由 [ActiveVaultSyncNamespace]
- * 解析——整改前所有库共用一份全局配置，切库后配置页与同步周期仍指向上一个库。
- *
- * - 读写默认走**当前活动库**（设置页表单、同步周期、库列表自动同步判定同源）；
- * - 无会话的写路径可显式指定库（`dbId` 形参）：云端打开导入按即将落盘的本地路径落凭据
- *   （该路径随后即成为库列表登记 ID，解锁后读到的仍是同一个命名空间）；
- * - 无活动库（无会话且库列表无活动项）时退回旧全局键，并保留升级前的存量语义。
- *
- * ## 存量迁移（AC②）
- *
- * 首次在已知活动库语境下读写时，存量全局配置一次性归属该库并被物理删除；
- * 其余库初始为未配置。判定与执行见 [SyncCredentialKeys.adoptLegacyInto]。
+ * Keystore 封印同步凭据；口令以 CharArray 借用并即时擦除，读取副本由调用方 finally 清零。
+ * 配置按库命名空间保存，键形态与路径归一见 [SyncCredentialKeys] 和 [ActiveVaultSyncNamespace]。
+ * 首次已知活动库迁移归属旧全局配置并删除全局键；已有该库锚点时不覆盖。
+ * 默认操作当前库；显式 dbId 只访问指定命名空间。
+ * 轮换目标快照只读取非秘密 metadata，不解封凭据、不迁移或写偏好。
  */
 @Singleton
 class SyncCredentialsStore @Inject constructor(
@@ -103,6 +86,20 @@ class SyncCredentialsStore @Inject constructor(
     /** 命名空间键名：`dbId` 为 null（无活动库）时即旧全局键（见 [SyncCredentialKeys]） */
     private fun keyOf(base: String, scope: String?): String =
         SyncCredentialKeys.scoped(base, scope)
+
+    /** 只读捕获指定库的远端路径元数据，不迁移偏好、不解封任何秘密凭据。 */
+    fun captureRotationRemotePath(dbId: String, defaultFileName: String): String? {
+        val scope = vaultNamespace.idFor(dbId)
+        val scopedMetadataKeys = listOf(
+            SyncCredentialKeys.PROVIDER,
+            SyncCredentialKeys.WEBDAV_URL,
+            SyncCredentialKeys.WEBDAV_REMOTE_PATH,
+            SyncCredentialKeys.S3_ENDPOINT,
+            SyncCredentialKeys.S3_OBJECT_KEY
+        ).flatMap { base -> listOf(SyncCredentialKeys.scoped(base, scope), base) }.toSet()
+        val snapshot = prefs.all.filterKeys { it in scopedMetadataKeys }.toMap()
+        return SyncRotationTargetMetadata.capture(snapshot, scope, vaultNamespace.currentId(), defaultFileName)
+    }
 
     fun saveProvider(provider: CloudSyncProvider, dbId: String? = null) {
         val scope = resolveScope(dbId)

@@ -148,6 +148,7 @@ internal class SessionOpener(
                 var ownedPassword: CharArray? = null
                 var ownedKeyFile: ByteArray? = null
                 try {
+                    val candidateTicket = SessionCredentialTicket(pathIdentifier)
                     // 先分配候选副本；clone 失败时旧会话尚未释放，已分配副本由 finally 擦除。
                     ownedPassword = passwordChars.copyOf()
                     ownedKeyFile = keyFileData?.copyOf()
@@ -171,6 +172,7 @@ internal class SessionOpener(
                     ownedPassword = null
                     ownedKeyFile = null
                     core.database.value = db
+                    core.adoptCredentialTicket(candidateTicket)
                     core.state.value = DatabaseSession.SessionState.OPENED
                     candidate = null // 明文树移交会话，失败分支不能擦除旧树。
                     KdbxResult.Success(Unit)
@@ -247,6 +249,7 @@ internal class SessionOpener(
             // ISSUE-P3-368：进入打开链先清陈旧进度（null = 不确定段），避免上一次进度残留首帧
             progress(null)
             try {
+                val candidateTicket = SessionCredentialTicket(pathIdentifier)
                 // 文件总长已知（本地 File）⇒ 载荷段确定进度；SAF 等未知长度流传 null 退分段不确定
                 val totalBytes = associatedFile?.length()?.takeIf { it > 0 }
                 val db = inputStreamProvider().use { fis ->
@@ -264,6 +267,7 @@ internal class SessionOpener(
                 credentials.cacheKeyFile(keyFileData)
 
                 core.database.value = db
+                core.adoptCredentialTicket(candidateTicket)
                 core.state.value = DatabaseSession.SessionState.OPENED
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {

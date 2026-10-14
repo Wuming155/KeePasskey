@@ -15,6 +15,23 @@
         因此无需测试进程持有其 View 引用（跨进程亦可驱动）。
     -->
     <application>
+        <provider
+            android:name="com.keepasskey.app.data.repository.SafCreationProbeDocumentsProvider"
+            android:authorities="${applicationId}.saf594"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
+        <activity
+            android:name="com.keepasskey.app.data.repository.SafCreationProbeActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+
         <activity
             android:name="com.keepasskey.app.autofill.AutofillClientActivity"
             android:excludeFromRecents="true"

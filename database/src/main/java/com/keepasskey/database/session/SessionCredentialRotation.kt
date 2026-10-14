@@ -23,6 +23,8 @@ internal class SessionCredentialRotation(
 ) {
     suspend fun execute(password: CharArray?, keyFile: ByteArray?): KdbxResult<Unit> {
         validate(password, keyFile)?.let { return it }
+        val request = currentCoroutineContext()[SessionCredentialRequest]
+        val nextTicket = core.credentialTicket?.next()
         val database = core.database.value!!
         val writer = core.saveWriter!!
         val trackedWriter = core.trackedSaveWriter
@@ -75,10 +77,13 @@ internal class SessionCredentialRotation(
             return KdbxResult.Failure(error, code = code)
         } finally {
             try {
+                request?.recordWriteStatus(receipt.status)
                 // 无挂起点的缓存采用先于任何调度器跳转，不会因调用者取消而漏掉。
                 if (receipt.status == SessionWriteReceipt.Status.COMMITTED) {
                     credentials.adoptOwnedCredentials(candidatePassword, candidateKey)
                     adopted = true
+                    core.adoptCredentialTicket(nextTicket)
+                    request?.recordCommitted(nextTicket)
                     core.state.value = DatabaseSession.SessionState.OPENED
                     // NonCancellable 仅包本地备份删除；不包计算、writer、网络或生物识别等待。
                     withContext(NonCancellable) {

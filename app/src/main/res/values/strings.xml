@@ -760,6 +760,7 @@
     <!-- ISSUE-P2-520：占位 %1$s＝云端旧版本说明（仅同步库）/ %2$s＝.bak 删除失败说明，缺席时为空串，渲染与旧口径一致 -->
     <string name="set_master_key_updated">主密码已更新，加密密钥已重新派生%1$s%2$s</string>
     <string name="set_master_key_cloud_old_version_note">。云端旧版本副本将在下次同步后被替换，期间仍可用旧口令解开</string>
+    <string name="set_master_key_cloud_mark_failed_note">。云端待替换状态登记失败，旧副本仍可用旧口令解开，请检查同步状态</string>
     <string name="set_master_key_backup_cleanup_failed_note">。注意：旧口令可解密的本地备份（.bak）删除失败，文件仍在应用私有目录内，将在下次成功保存时自动清理</string>
     <string name="set_master_key_dialog_desc">修改主密码将使用 %1$s 重新派生密钥并重加密整个数据库，过程不可逆</string>
     <!-- ISSUE-P3-433：「修改主密码」显式开关（KeePassDX 口径），取代「留空即保持」暗示语义 -->

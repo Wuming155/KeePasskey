@@ -14,6 +14,25 @@ import java.io.File
  */
 internal class SessionCore {
 
+    /** 仅在会话 mutex 内更新；受理方只读已发布的不可变票据。 */
+    @Volatile
+    var credentialTicket: SessionCredentialTicket? = null
+        private set
+
+    fun establishSessionTicket(pathIdentifier: String) {
+        credentialTicket = SessionCredentialTicket(pathIdentifier)
+    }
+
+    fun invalidateSessionTicket() { credentialTicket = null }
+
+    /** 接管预先分配的凭据代次，提交收尾本身不分配票据。 */
+    fun adoptCredentialTicket(ticket: SessionCredentialTicket?) {
+        credentialTicket = ticket
+    }
+
+    fun advanceCredentialTicket(): SessionCredentialTicket? =
+        credentialTicket?.next().also { credentialTicket = it }
+
     /** 会话状态机（对应拆分前的 `_state`）。 */
     val state = MutableStateFlow(DatabaseSession.SessionState.CLOSED)
 

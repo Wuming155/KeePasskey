@@ -7,9 +7,11 @@ import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.crypto.hash.HashUtil
 import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +64,27 @@ class AlgorithmSelectionApplyTest {
         }
     }
 
+    /** 以文件外层头确认保存完成；会话回到 OPENED 本身不能证明磁盘已写入新值。 */
+    private fun awaitDiskHeader(
+        file: File,
+        session: DatabaseSession,
+        describe: String,
+        expectedCipher: KdbxUuid,
+        expectedKdf: KdbxUuid
+    ) {
+        awaitCondition(describe) {
+            if (!file.isFile || file.length() == 0L) return@awaitCondition false
+            val (header, rawHeader) = file.inputStream().use { KdbxHeader.deserialize(it) }
+            try {
+                header.cipherUuid == expectedCipher &&
+                    header.kdfParameters.kdfUuid == expectedKdf &&
+                    session.state.value == DatabaseSession.SessionState.OPENED
+            } finally {
+                rawHeader.fill(0)
+            }
+        }
+    }
+
     private fun buildController(session: DatabaseSession): SettingsPreferencesController =
         SettingsPreferencesController(
             settingsRepository = FakeSettingsRepository(),
@@ -110,10 +133,10 @@ class AlgorithmSelectionApplyTest {
         awaitCondition("会话头 cipherUuid 切到 ChaCha20") {
             session.databaseFlow.value?.header?.cipherUuid == KdbxConstants.Cipher.CHACHA20
         }
-        awaitCondition("落盘完成") {
-            file.exists() && file.length() > 0 &&
-                session.state.value == DatabaseSession.SessionState.OPENED
-        }
+        awaitDiskHeader(
+            file, session, "磁盘头已写入 ChaCha20 + Argon2id",
+            KdbxConstants.Cipher.CHACHA20, KdbxConstants.Kdf.ARGON2ID
+        )
         // 回显随库真值统一下发（不再自持内存状态）
         awaitCondition("回显随头真值下发") {
             controller.databaseConfigState.value.encryptionAlgorithm == CipherLabels.CHACHA20
@@ -143,9 +166,10 @@ class AlgorithmSelectionApplyTest {
             (session.databaseFlow.value?.header?.kdfParameters as? KdfParameters.Argon2)
                 ?.type == KdfParameters.Argon2.Argon2Type.ARGON2D
         }
-        awaitCondition("落盘完成") {
-            session.state.value == DatabaseSession.SessionState.OPENED
-        }
+        awaitDiskHeader(
+            file, session, "磁盘头已写入 AES-256-CBC + Argon2d",
+            KdbxConstants.Cipher.AES_256_CBC, KdbxConstants.Kdf.ARGON2D
+        )
         awaitCondition("回显随头真值下发") {
             controller.databaseConfigState.value.kdfAlgorithm == KdfLabels.ARGON2D
         }
@@ -178,9 +202,10 @@ class AlgorithmSelectionApplyTest {
         awaitCondition("会话头 KDF 切到 AES-KDF") {
             session.databaseFlow.value?.header?.kdfParameters is KdfParameters.Aes
         }
-        awaitCondition("落盘完成") {
-            session.state.value == DatabaseSession.SessionState.OPENED
-        }
+        awaitDiskHeader(
+            file, session, "磁盘头已写入 AES-256-CBC + AES-KDF",
+            KdbxConstants.Cipher.AES_256_CBC, KdbxConstants.Kdf.AES_KDF
+        )
         awaitCondition("回显随头真值下发") {
             controller.databaseConfigState.value.kdfAlgorithm == KdfLabels.AES_KDF
         }
@@ -259,16 +284,15 @@ class AlgorithmSelectionApplyTest {
 
         val (session, controller) = createSession(file, "algo-probe", password)
         controller.setEncryptionAlgorithm(CipherLabels.TWOFISH_CBC)
-        awaitCondition("加密算法切到 Twofish 落盘") {
-            session.databaseFlow.value?.header?.cipherUuid == KdbxConstants.Cipher.TWOFISH &&
-                session.state.value == DatabaseSession.SessionState.OPENED
-        }
+        awaitDiskHeader(
+            file, session, "磁盘头已写入 Twofish + Argon2id",
+            KdbxConstants.Cipher.TWOFISH, KdbxConstants.Kdf.ARGON2ID
+        )
         controller.setKdfAlgorithm(KdfLabels.ARGON2D)
-        awaitCondition("KDF 切到 Argon2d 落盘") {
-            (session.databaseFlow.value?.header?.kdfParameters as? KdfParameters.Argon2)
-                ?.type == KdfParameters.Argon2.Argon2Type.ARGON2D &&
-                session.state.value == DatabaseSession.SessionState.OPENED
-        }
+        awaitDiskHeader(
+            file, session, "磁盘头已写入 Twofish + Argon2d",
+            KdbxConstants.Cipher.TWOFISH, KdbxConstants.Kdf.ARGON2D
+        )
 
         // ── 自家往返（必要但不充分）─────────────────────────────────────────
         reopenAndAssertHeader(file, password) { reopen ->

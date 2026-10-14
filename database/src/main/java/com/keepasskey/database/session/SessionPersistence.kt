@@ -8,10 +8,13 @@ import com.keepasskey.database.file.KdbxProgress
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.io.WipableByteArrayOutputStream
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 /**
  * 会话落盘与凭据轮换（ISSUE-P3-305 结构拆分，逐行搬运）。
@@ -156,7 +159,7 @@ internal class SessionPersistence(
      * 现改为显式重载：快照由本方法自持，并在返回前 `finally` 清零。
      * **顺序硬约束**：清零只发生在**写盘与可能回滚之后**——写前擦会静默写出「用全零密钥文件加密」的库。
      */
-    suspend fun changeCredentials(newPasswordChars: CharArray?): KdbxResult<Unit> = mutex.withLock {
+    suspend fun changeCredentials(newPasswordChars: CharArray?): KdbxResult<Unit> = withRotationTicket {
         val keyFileSnapshot = credentials.keyFileSnapshot()
         try {
             rotation.execute(newPasswordChars, keyFileSnapshot)
@@ -176,7 +179,7 @@ internal class SessionPersistence(
     suspend fun changeCredentials(
         newPasswordChars: CharArray?,
         newKeyFileData: ByteArray?
-    ): KdbxResult<Unit> = mutex.withLock {
+    ): KdbxResult<Unit> = withRotationTicket {
         rotation.execute(newPasswordChars, newKeyFileData)
     }
 
@@ -189,13 +192,37 @@ internal class SessionPersistence(
      *
      * @param newKeyFileData 新密钥文件字节（null = 解绑）；借用语义同双参 [changeCredentials]。
      */
-    suspend fun changeKeyFileOnly(newKeyFileData: ByteArray?): KdbxResult<Unit> = mutex.withLock {
+    suspend fun changeKeyFileOnly(newKeyFileData: ByteArray?): KdbxResult<Unit> = withRotationTicket {
         val pwdSnapshot = credentials.passwordSnapshot()
         try {
             rotation.execute(pwdSnapshot, newKeyFileData)
         } finally {
             pwdSnapshot?.fill('0')
         }
+    }
+
+    /** 在第一处挂起之前捕获身份；等待 mutex 期间换库或换密均拒绝，绝不改写后来会话。 */
+    private suspend fun withRotationTicket(block: suspend () -> KdbxResult<Unit>): KdbxResult<Unit> {
+        val request = currentCoroutineContext()[SessionCredentialRequest]
+        val nestedRequest = currentCoroutineContext()[RotationRequestContext]?.request
+        if (request != null && nestedRequest === request) {
+            return if (core.credentialTicket === request.expected) block() else KdbxResult.Failure(
+                IllegalStateException("受理后的会话或凭据已改变"),
+                code = KdbxError.CREDENTIALS_CHANGE_FAILED
+            )
+        }
+        val expected = request?.expected ?: core.credentialTicket
+        return mutex.withLock {
+            if ((request != null && (request.expected == null || !request.consumeOnce())) || core.credentialTicket !== expected) {
+                KdbxResult.Failure(IllegalStateException("受理后的会话或凭据已改变"),
+                    code = KdbxError.CREDENTIALS_CHANGE_FAILED)
+            } else if (request == null) block() else withContext(RotationRequestContext(request)) { block() }
+        }
+    }
+
+    private class RotationRequestContext(val request: SessionCredentialRequest) :
+        AbstractCoroutineContextElement(Key) {
+        companion object Key : CoroutineContext.Key<RotationRequestContext>
     }
 
     /**

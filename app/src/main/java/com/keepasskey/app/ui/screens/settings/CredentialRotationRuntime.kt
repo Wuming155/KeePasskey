@@ -10,6 +10,7 @@ import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.SessionCredentialRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -41,7 +42,7 @@ class CredentialRotationCompletion @Inject constructor(
     private val settings: SettingsRepository,
     private val auth: BiometricAuthManager,
     private val storage: BiometricCredentialStorage,
-    private val session: DatabaseSession,
+    internal val session: DatabaseSession,
     private val sync: SyncCoordinator,
     private val strings: StringsProvider,
     private val debugLog: DebugLogBuffer
@@ -50,33 +51,49 @@ class CredentialRotationCompletion @Inject constructor(
         databaseId?.let { storage.clearCredential(it) }
     }
 
-    suspend fun captureTarget(): String? = sync.captureCredentialRotationTarget()
+    fun captureTarget(): String? = sync.captureCredentialRotationTargetSnapshot()
 
-    suspend fun complete(databaseId: String?, activity: FragmentActivity?, password: CharArray?, syncTarget: String?) {
+    suspend fun complete(request: SessionCredentialRequest, databaseId: String?, activity: FragmentActivity?, password: CharArray?, syncTarget: String?): Boolean {
+        val ticket = request.committedTicket ?: return false
         // 同步登记发生前先清陈旧封印，任何后续失败/取消/宿主消失均只留下待重新登记状态。
-        val hadSeal = databaseId?.let { storage.hasEncryptedCredential(it) } == true
-        invalidate(databaseId)
+        var hadSeal = false
+        withContext(NonCancellable) {
+            withTimeoutOrNull(MARK_TIMEOUT_MILLIS) {
+                session.useCredentialTicket(ticket) {
+                    hadSeal = databaseId?.let { storage.hasEncryptedCredential(it) } == true
+                    databaseId?.let(storage::clearCredential)
+                }
+            }
+        }
+        var markSucceeded = syncTarget == null
         try {
             // 本地持久标记的有界收尾；这里不触发网络同步，也不包生物识别等待。
             withContext(NonCancellable) {
-                withTimeoutOrNull(MARK_TIMEOUT_MILLIS) { sync.markCredentialRotationTarget(syncTarget) }
+                if (syncTarget != null) {
+                    markSucceeded = withTimeoutOrNull(MARK_TIMEOUT_MILLIS) {
+                        sync.markCredentialRotationTarget(syncTarget)
+                    } ?: false
+                }
             }
         } finally {
-            if (databaseId != null && hadSeal && activity != null && !activity.isDestroyed && !activity.isFinishing) {
+            if (databaseId != null && hadSeal && session.isCredentialTicketCurrent(ticket) &&
+                activity != null && !activity.isDestroyed && !activity.isFinishing) {
                 val coordinator = BiometricResealCoordinator(
                     settingsRepository = settings,
                     activeDbId = { databaseId },
-                    sessionPasswordChars = session::passwordSnapshot,
+                    sessionPasswordChars = { if (session.isCredentialTicketCurrent(ticket)) session.passwordSnapshot() else null },
                     biometricAuthManager = auth,
                     biometricCredentialStorage = storage,
                     strings = strings,
-                    debugLog = debugLog
+                    debugLog = debugLog,
+                    publishSeal = { publish -> session.useCredentialTicket(ticket) { publish() } }
                 )
                 withTimeoutOrNull(RESEAL_TIMEOUT_MILLIS) {
                     coordinator.resealAfterMasterKeyChange(activity, password, allowInitialSeal = true)
                 }
             }
         }
+        return markSucceeded
     }
 
     private companion object {

@@ -129,7 +129,7 @@ class RealVaultRepository @Inject constructor(
     }
 
     override fun getDatabases(): Flow<List<VaultDatabaseInfo>> = databasesFlow.asStateFlow()
-
+    override fun databaseInfoForPath(path: String): VaultDatabaseInfo? = databasesFlow.value.firstOrNull { it.path == path }
     override suspend fun selectDatabase(id: String) {
         val current = databasesFlow.value
         val target = current.firstOrNull { it.id == id || it.path == id || it.name == id }

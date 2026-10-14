@@ -6,7 +6,7 @@
 > 读数块 / 验收标准 / 文件清单 / 根因叙述等**一律只入正文**，不得在索引行复述（复述曾使本表由 §154 的 ≈316 B/行膨胀至 ≈1 284 B/行）。
 > **如实留痕**：整改中真实发生的生产 / 测试 / 编排缺陷不美化、不隐去（各批次文件的「过程缺陷」小节）。
 > **引用约定**：仓内其它文档写「`RESOLVED_LOG.md` §NN」时，按本表「正文」列跳转到该批次的独立文件。
-> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 5 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）。
+> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起）。
 
 ---
 
@@ -602,3 +602,6 @@
 | §502 | VisibleForTests 架构收口与 Compose 修饰符规范批次 | ISSUE-P3-587（整条闭环；P3 0 → 0；收敛测试注解，VisibleForTests 告警归零，规范 Modifier 顺序） | [502-VisibleForTests架构收口与Compose修饰符规范批次.md](resolved/batches/502-VisibleForTests架构收口与Compose修饰符规范批次.md) |
 | §503 | 搜索框误唤自动填充弹窗整改批次 | ISSUE-P2-588（整条闭环；P2 1 → 0） | [503-搜索框误唤自动填充弹窗整改批次.md](resolved/batches/503-搜索框误唤自动填充弹窗整改批次.md) |
 | §504 | 首轮在途整改收口批次 | ISSUE-P1-589 / P3-607~609（闭环）；593/594候选保留开放 | [504-首轮在途整改收口批次.md](resolved/batches/504-首轮在途整改收口批次.md) |
+| §505 | 凭据轮换、新建库与历史附件收口 | ISSUE-P1-593 / P1-594 / P2-599 / P3-612（四条整条闭环） | [505-凭据轮换与历史大小整改闭环批次.md](resolved/batches/505-凭据轮换与历史大小整改闭环批次.md) |
+
+> **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起）。

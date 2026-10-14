@@ -4,6 +4,7 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.FakeSettingsRepository
+import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
@@ -12,6 +13,9 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.screens.unlock.BiometricSealedPayloadCodec
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.flow
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -86,6 +90,49 @@ class BiometricResealCoordinatorTest {
         } finally {
             payload.fill(0)
         }
+    }
+
+    @Test
+    fun `设置读取挂起期间票据变化时保留已有封印`() = runTest {
+        val storage = inMemoryCredentialStorage()
+        storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val settings = object : SettingsRepository by FakeSettingsRepository() {
+            override fun getSettings() = flow {
+                entered.complete(Unit)
+                release.await()
+                emit(com.keepasskey.app.data.repository.UserSettings(biometricEnabled = true))
+            }
+        }
+        var ticketCurrent = true
+        val coordinator = createCoordinator(storage, settingsRepository = settings) { publish ->
+            if (!ticketCurrent) false else { publish(); true }
+        }
+        val job = async { coordinator.resealAfterMasterKeyChange(null, NEW_PASSWORD) }
+        entered.await()
+        ticketCurrent = false
+        release.complete(Unit)
+        job.await()
+        val retained = requireNotNull(storage.getEncryptedCredential(ACTIVE_DB_ID))
+        assertArrayEquals(OLD_IV, retained.first)
+        assertArrayEquals(OLD_CIPHERTEXT, retained.second)
+    }
+
+    @Test
+    fun `授权等待期间票据变化时拒绝最终封印发布`() = runTest {
+        val storage = inMemoryCredentialStorage()
+        storage.saveEncryptedCredential(ACTIVE_DB_ID, OLD_IV, OLD_CIPHERTEXT)
+        var ticketCurrent = true
+        val coordinator = createCoordinator(storage) { publish ->
+            if (!ticketCurrent) false else { publish(); true }
+        }
+        coordinator.promptOverride = { _, cipher, onResult ->
+            ticketCurrent = false
+            onResult(BiometricResult.Success(cipher))
+        }
+        coordinator.resealAfterMasterKeyChange(null, NEW_PASSWORD)
+        assertNull(storage.getEncryptedCredential(ACTIVE_DB_ID))
     }
 
     // ── AC②：前置不满足即空操作 ─────────────────────────────────────────
@@ -221,17 +268,20 @@ class BiometricResealCoordinatorTest {
     private suspend fun createCoordinator(
         storage: BiometricCredentialStorage,
         databaseId: String? = ACTIVE_DB_ID,
-        biometricEnabled: Boolean = true
+        biometricEnabled: Boolean = true,
+        settingsRepository: SettingsRepository? = null,
+        publishSeal: (suspend (() -> Unit) -> Boolean)? = null
     ): BiometricResealCoordinator {
         val settings = FakeSettingsRepository()
         settings.setBiometricEnabled(biometricEnabled)
         val coordinator = BiometricResealCoordinator(
-            settingsRepository = settings,
+            settingsRepository = settingsRepository ?: settings,
             activeDbId = { databaseId },
             biometricAuthManager = BiometricAuthManager(KeystoreManager(null)),
             biometricCredentialStorage = storage,
             strings = StringsProvider { _, _ -> "" },
-            debugLog = DebugLogBuffer()
+            debugLog = DebugLogBuffer(),
+            publishSeal = publishSeal ?: { publish -> publish(); true }
         )
         // 桌面 JVM AES/GCM 替身封印密钥（测试密钥，仅存于测试进程），落位按硬件放行；
         // 默认替身 Prompt：授权通过并回传同一授权 Cipher（模拟 BiometricPrompt CryptoObject 成功）

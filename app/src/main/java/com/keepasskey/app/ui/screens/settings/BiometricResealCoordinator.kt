@@ -65,7 +65,9 @@ internal class BiometricResealCoordinator(
     private val strings: StringsProvider,
     private val debugLog: DebugLogBuffer,
     /** ISSUE-P1-429：重封印 keystore 密算与供给的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
-    private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
+    private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+    /** 仅包同步存储发布；票据核验由调用方完成，不能持会话锁等待密算或生物识别。 */
+    private val publishSeal: suspend (() -> Unit) -> Boolean = { publish -> publish(); true }
 ) {
 
     /** 测试替身：替代真实封印密钥供给（生产恒 null → [defaultSealKeyProvision]） */
@@ -123,7 +125,7 @@ internal class BiometricResealCoordinator(
 
         // 先摘除陈旧封印：内含旧密码，已确定失效；此后任何失败都不残留「注定失败态」
         if (hadCredential) {
-            storage.clearCredential(dbId)
+            if (!publishSeal { storage.clearCredential(dbId) }) return
             debugLog.info(TAG, "改密成功，摘除陈旧封印凭据并尝试重封印")
         }
 
@@ -179,8 +181,9 @@ internal class BiometricResealCoordinator(
                     debugLog.info(TAG, "重封印授权挂起期间生物识别开关已关闭，放弃落库")
                     return
                 }
-                storage.saveEncryptedCredential(dbId, sealed.first, sealed.second)
-                debugLog.info(TAG, "生物识别封印凭据已随改密重封印")
+                if (publishSeal { storage.saveEncryptedCredential(dbId, sealed.first, sealed.second) }) {
+                    debugLog.info(TAG, "生物识别封印凭据已随改密重封印")
+                } else debugLog.info(TAG, "会话或凭据代次已改变，放弃过期重封印")
             }
         } finally {
             if (erasePassword) passwordChars.fill('0')

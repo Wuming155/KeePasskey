@@ -11,12 +11,15 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.util.Arrays
 
@@ -54,7 +57,13 @@ internal class VaultEntryWriteCoordinator(
         protectedFieldChars: Map<String, CharArray>
     ): KdbxResult<Unit> {
         try {
-            return saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars)
+            return withContext(Dispatchers.Default) {
+                try {
+                    saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars)
+                } catch (error: IllegalArgumentException) {
+                    KdbxResult.Failure(error, code = KdbxError.SAVE_FAILED)
+                }
+            }
         } finally {
             passwordChars?.fill('0')
             totpSecretChars?.fill('0')

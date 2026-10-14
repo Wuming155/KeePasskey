@@ -69,6 +69,41 @@ class SyncCredentialsStoreTest {
     }
 
     @Test
+    fun `轮换目标快照不解封秘密且按库隔离`() {
+        var decryptCalls = 0
+        store.customDecryptor = { _, cipher ->
+            decryptCalls++
+            cipher.map { (it.toInt() xor 0x5A).toByte() }.toByteArray()
+        }
+        store.saveWebDavConfig(
+            url = "https://dav.example.test/",
+            username = "user",
+            password = "Secret#MetadataTest".toCharArray(),
+            remotePath = "vaults/a.kdbx",
+            dbId = "content://metadata.test/catalog-A.kdbx"
+        )
+        assertEquals("/vaults/a.kdbx", store.captureRotationRemotePath("content://metadata.test/catalog-A.kdbx", "fallback.kdbx"))
+        assertNull(store.captureRotationRemotePath("content://metadata.test/catalog-B.kdbx", "fallback.kdbx"))
+        assertEquals(0, decryptCalls)
+    }
+
+    @Test
+    fun `legacy目标只归当前命名空间且scoped锚点优先`() {
+        val legacy = mapOf(
+            SyncCredentialKeys.WEBDAV_URL to "https://legacy.test/",
+            SyncCredentialKeys.WEBDAV_REMOTE_PATH to "legacy.kdbx"
+        )
+        assertEquals("/legacy.kdbx", SyncRotationTargetMetadata.capture(legacy, "A", "A", "fallback.kdbx"))
+        assertNull(SyncRotationTargetMetadata.capture(legacy, "B", "A", "fallback.kdbx"))
+        val scoped = legacy + mapOf(
+            SyncCredentialKeys.scoped(SyncCredentialKeys.WEBDAV_URL, "A") to "https://scoped.test/",
+            SyncCredentialKeys.scoped(SyncCredentialKeys.WEBDAV_REMOTE_PATH, "A") to "scoped.kdbx"
+        )
+        assertEquals("/scoped.kdbx", SyncRotationTargetMetadata.capture(scoped, "A", "A", "fallback.kdbx"))
+        assertEquals(2, legacy.size)
+    }
+
+    @Test
     fun `S3 凭据保存加密与读取解密 round-trip`() {
         val accessKey = "AKIAIOSFODNN7EXAMPLE".toCharArray()
         val secretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".toCharArray()

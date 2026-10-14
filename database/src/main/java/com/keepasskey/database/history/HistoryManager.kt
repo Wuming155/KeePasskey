@@ -223,41 +223,54 @@ object HistoryManager {
         val countTrimmed = if (maxItems >= 0) history.take(maxItems) else history
         if (maxSize < 0 || countTrimmed.isEmpty()) return countTrimmed
 
-        var dropCount = 0
-        var sum = countTrimmed.sumOf { estimateHistoryItemSize(it) }
-        while (dropCount < countTrimmed.size && sum > maxSize) {
-            sum -= estimateHistoryItemSize(countTrimmed[countTrimmed.size - 1 - dropCount])
-            dropCount++
+        // 从最新端确定可保留的前缀：尺寸非负，首个超预算项及其更旧项均须移除。
+        // 用预算差额比较，避免先求全部历史总和溢出；每项尺寸至多估算一次。
+        var keptCount = 0
+        var sum = 0L
+        for (item in countTrimmed) {
+            val itemSize = estimateHistoryItemSize(item)
+            if (itemSize > maxSize - sum) break
+            sum += itemSize
+            keptCount++
         }
-        return if (dropCount > 0) countTrimmed.dropLast(dropCount) else countTrimmed
+        return if (keptCount < countTrimmed.size) countTrimmed.take(keptCount) else countTrimmed
     }
 
     /**
      * 历史快照大小估算（字节），口径对齐官方 PwEntry.GetSize：
      * 字段键名与值长度 + 附件名与数据长度 + 标签 + AutoType 序列 + 固定开销。
      * [com.keepasskey.core.security.ProtectedString] 的 length 为驻留密文长度
-     * （CTR 无填充，与明文等长），全程不解密、不物化明文。
+     * （CTR 无填充，与明文等长）；附件只读取 size 元数据，全程不解密、不物化明文。
+     * 负尺寸或单项估算超出 Long 范围时稳定拒绝，不允许回绕后绕过预算。
      */
     private fun estimateHistoryItemSize(entry: KdbxEntry): Long {
         var size = ENTRY_FIXED_OVERHEAD_BYTES
         for ((key, value) in entry.fields) {
-            size += key.length + value.length
+            size = addHistorySize(size, key.length.toLong() + value.length.toLong())
         }
         for (customField in entry.customFields) {
-            size += customField.key.length + customField.value.length
+            size = addHistorySize(size, customField.key.length.toLong() + customField.value.length.toLong())
         }
         for (attachment in entry.attachments) {
-            size += attachment.name.length + attachment.data.size
+            size = addHistorySize(size, attachment.name.length.toLong())
+            size = addHistorySize(size, attachment.size)
         }
         for (tag in entry.tags) {
-            size += tag.length
+            size = addHistorySize(size, tag.length.toLong())
         }
         entry.autoType?.let { autoType ->
-            size += autoType.defaultSequence.length
+            size = addHistorySize(size, autoType.defaultSequence.length.toLong())
             for (association in autoType.associations) {
-                size += association.window.length + association.keystrokeSequence.length
+                size = addHistorySize(size, association.window.length.toLong() + association.keystrokeSequence.length.toLong())
             }
         }
         return size
+    }
+
+    private fun addHistorySize(size: Long, additional: Long): Long {
+        require(additional >= 0L && size <= Long.MAX_VALUE - additional) {
+            "历史尺寸元数据无效或超出 Long 范围"
+        }
+        return size + additional
     }
 }

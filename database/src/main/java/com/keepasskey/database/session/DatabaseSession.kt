@@ -11,6 +11,8 @@ import com.keepasskey.database.file.KdbxDatabase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -18,7 +20,6 @@ import java.io.File
 /**
  * 活动数据库会话状态机与生命周期管理者。
  * 维护内存中活动密码库的生命周期：CLOSED ↔ LOCKED ↔ OPENED ↔ DIRTY
- *
  * 实现下沉同包协作类；会话建立见 [SessionOpener]，持久化见 [SessionPersistence]。
  */
 class DatabaseSession(
@@ -29,7 +30,6 @@ class DatabaseSession(
      */
     private val binaryStore: BinaryStore? = null
 ) {
-
     enum class SessionState {
         CLOSED,
         LOCKED,
@@ -39,9 +39,7 @@ class DatabaseSession(
 
     private val core = SessionCore()
     val state: StateFlow<SessionState> = core.state.asStateFlow()
-
     val databaseFlow: StateFlow<KdbxDatabase?> = core.database.asStateFlow()
-
     /** 流式/降级写入结果不确定：当前会话禁止继续保存，须重新打开核实或恢复文件。 */
     val credentialWriteUncertain: StateFlow<Boolean> = core.credentialWriteUncertain.asStateFlow()
 
@@ -120,6 +118,29 @@ class DatabaseSession(
     /** 注销会话终止观察者；未注册时返回 false */
     fun removeLockObserver(observer: SessionLockObserver): Boolean = lockRegistry.remove(observer)
 
+    /** 受理时同步固定当前会话及凭据代次；请求不持有密码或数据库树。 */
+    fun captureCredentialRequest(): SessionCredentialRequest = SessionCredentialRequest(core.credentialTicket)
+
+    /** 只传播票据，不获取 mutex；仓库可以在块内正常调用会话写入入口。 */
+    suspend fun <T> withCredentialRequest(request: SessionCredentialRequest, block: suspend () -> T): T {
+        val enclosing = currentCoroutineContext()[SessionCredentialRequest]
+        check(enclosing == null || enclosing === request) { "禁止嵌套覆盖已受理凭据请求" }
+        return withContext(request) { block() }
+    }
+
+    /**
+     * 本地收尾的窄临界区；调用者须限时。闭包只可同步维护本地封印存储，禁止重入数据库、
+     * 获取同步 mutex、弹提示、启动网络或等待生物识别。
+     */
+    suspend fun useCredentialTicket(ticket: SessionCredentialTicket, block: suspend () -> Unit): Boolean = mutex.withLock {
+        if (core.credentialTicket !== ticket) return@withLock false
+        block()
+        true
+    }
+
+    /** 无挂起点的前置探测只用于跳过过期工作，最终发布仍须 [useCredentialTicket]。 */
+    fun isCredentialTicketCurrent(ticket: SessionCredentialTicket): Boolean = core.credentialTicket === ticket
+
     /**
      * ISSUE-P2-77：换库前置释放——语义与 [lock] 的清理部分**对齐**
      * （擦除旧库明文树与二进制池、清空凭据缓存、置 `LOCKED`、通知锁观察者驱逐派生数据），
@@ -133,6 +154,7 @@ class DatabaseSession(
      * `FileBinaryStore.onSessionLocked()` 会删除刚为新库落盘的附件（静默数据损坏）。
      */
     private fun releaseSessionStateForReplacement() {
+        core.invalidateSessionTicket()
         core.readOnlyMode = false
         credentials.clear()
         core.database.value?.clearSensitiveData()
@@ -183,9 +205,7 @@ class DatabaseSession(
         trackedSaveWriter
     )
 
-    /**
-     * 打开并解密已有 KDBX 文件（支持直接传入 File）。
-     */
+    /** 打开并解密已有 KDBX 文件（支持直接传入 File）。 */
     suspend fun open(
         file: File,
         passwordChars: CharArray?,
@@ -225,9 +245,7 @@ class DatabaseSession(
      */
     suspend fun save(): KdbxResult<Unit> = persistence.save()
 
-    /**
-     * 更新或保存条目
-     */
+    /** 更新或保存条目 */
     suspend fun saveEntry(entry: KdbxEntry) = mutations.saveEntry(entry)
 
     /**
@@ -244,9 +262,7 @@ class DatabaseSession(
     suspend fun updateEntryById(entryId: KdbxUuid, transform: (KdbxEntry) -> KdbxEntry): KdbxEntry? =
         mutations.updateEntryById(entryId, transform)
 
-    /**
-     * 删除条目
-     */
+    /** 删除条目 */
     suspend fun deleteEntry(entryId: KdbxUuid) = mutations.deleteEntry(entryId)
 
     /**
@@ -275,20 +291,14 @@ class DatabaseSession(
         replacement: KdbxDatabase
     ): Boolean = mutations.adoptDatabaseIfUnchanged(expectedAtCycleStart, replacement)
 
-    /**
-     * 删除分组
-     */
+    /** 删除分组 */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutations.deleteGroup(groupId)
 
-    /**
-     * 批量移动条目
-     */
+    /** 批量移动条目 */
     suspend fun batchMoveEntries(entryIds: Set<KdbxUuid>, targetGroupId: KdbxUuid?) =
         mutations.batchMoveEntries(entryIds, targetGroupId)
 
-    /**
-     * 批量删除条目
-     */
+    /** 批量删除条目 */
     suspend fun batchDeleteEntries(entryIds: Set<KdbxUuid>) = mutations.batchDeleteEntries(entryIds)
 
     /**
@@ -297,6 +307,7 @@ class DatabaseSession(
      */
     @androidx.annotation.VisibleForTesting
     fun setDatabaseForTesting(db: KdbxDatabase) {
+        core.establishSessionTicket(core.activePathIdentifier.orEmpty())
         core.database.value = db
         core.state.value = SessionState.OPENED
     }
@@ -317,10 +328,9 @@ class DatabaseSession(
      */
     fun exportKeyFileBytes(): ByteArray? = credentials.exportKeyFileBytes()
 
-    /**
-     * 锁定当前数据库：保留文件路径引用，但物理销毁内存中的敏感主密码、数据库明文树与二进制池
-     */
+    /** 锁定当前数据库：保留文件路径引用，但物理销毁内存中的敏感主密码、数据库明文树与二进制池 */
     suspend fun lock() = mutex.withLock {
+        core.invalidateSessionTicket()
         core.readOnlyMode = false
         credentials.clear()
         core.database.value?.clearSensitiveData()
@@ -330,10 +340,9 @@ class DatabaseSession(
         lockRegistry.notifySessionLocked()
     }
 
-    /**
-     * 完全关闭数据库会话并置空一切关联
-     */
+    /** 完全关闭数据库会话并置空一切关联 */
     suspend fun close() = mutex.withLock {
+        core.invalidateSessionTicket()
         core.readOnlyMode = false
         credentials.clear()
         core.database.value?.clearSensitiveData()

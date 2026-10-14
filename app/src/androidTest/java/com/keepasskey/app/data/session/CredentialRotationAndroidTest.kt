@@ -58,9 +58,11 @@ class CredentialRotationAndroidTest {
                 passwordChars = oldPassword
             ).isSuccess)
             var cancellation: CancellationException? = null
+            val request = session.captureCredentialRequest()
+            val oldTicket = request.ticket!!
             coroutineScope {
                 launch {
-                    try { session.changeCredentials(newPassword) }
+                    try { session.withCredentialRequest(request) { session.changeCredentials(newPassword) } }
                     catch (error: CancellationException) { cancellation = error }
                 }.join()
             }
@@ -72,8 +74,14 @@ class CredentialRotationAndroidTest {
             if (committed) {
                 assertEquals(SessionWriteReceipt.Status.COMMITTED,
                     (cancellation as CredentialRotationCancellationException).writeStatus)
+                assertEquals(oldTicket.pathIdentifier, request.committedTicket?.pathIdentifier)
+                assertEquals(oldTicket.credentialGeneration + 1, request.committedTicket?.credentialGeneration)
+                assertSame(request.committedTicket, session.captureCredentialRequest().ticket)
                 assertFalse(File(directory, "synthetic.kdbx.bak").exists())
-            } else assertArrayEquals(before, target.readBytes())
+            } else {
+                assertNull(request.committedTicket)
+                assertArrayEquals(before, target.readBytes())
+            }
             val loaded = KdbxFile.load(target.inputStream(), expected)
             try { assertEquals("Rotation", loaded.databaseName) } finally { loaded.clearSensitiveData() }
             assertThrows(KdbxInvalidCredentialsException::class.java) {
