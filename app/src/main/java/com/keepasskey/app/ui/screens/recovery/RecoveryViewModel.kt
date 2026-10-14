@@ -71,7 +71,7 @@ class RecoveryViewModel @Inject constructor(
     /** 解锁并比较差异（密码副本由调用方所有，本方法用毕清零）。 */
     fun preview(target: VaultRecoveryCoordinator.Pending, password: CharArray) {
         viewModelScope.launch {
-            _uiState.update { it.copy(busy = true, selectedKey = keyOf(target)) }
+            _uiState.update { it.copy(busy = true, selectedKey = keyOf(target), preview = null, previewText = null, message = null) }
             val result = try {
                 coordinator.preview(target, password)
             } finally {
@@ -97,6 +97,8 @@ class RecoveryViewModel @Inject constructor(
 
     /** 恢复为正式库；首次（未确认覆盖）失败于 RECOVERY_OVERWRITE_BLOCKED 时要求确认。 */
     fun restore(target: VaultRecoveryCoordinator.Pending, forceOverwrite: Boolean) {
+        val current = _uiState.value
+        if (current.selectedKey != keyOf(target) || current.preview == null || current.busy) return
         viewModelScope.launch {
             _uiState.update { it.copy(busy = true) }
             when (val result = coordinator.restore(target, forceOverwrite)) {

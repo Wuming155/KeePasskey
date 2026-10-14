@@ -1,0 +1,5 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuite name="com.keepasskey.app.security.SessionRecoveryProductUiProcessRestartDeviceTest#resume" tests="1" failures="0" errors="0" skipped="0" time="21.240" timestamp="2026-10-15T07:55:51+0800">
+  <properties />
+  <testcase classname="com.keepasskey.app.security.SessionRecoveryProductUiProcessRestartDeviceTest" name="forceStop后从产品UI预览确认并恢复副本" time="0.000" />
+</testsuite>

@@ -134,7 +134,7 @@ private fun RecoveryDialog(viewModel: RecoveryViewModel, state: RecoveryViewMode
             if (selected != null) {
                 Button(
                     onClick = { viewModel.restore(selected, forceOverwrite = false) },
-                    enabled = !state.busy
+                    enabled = !state.busy && state.preview != null
                 ) { Text(stringResource(R.string.recovery_restore_action)) }
             } else {
                 TextButton(onClick = viewModel::keep) { Text(stringResource(R.string.btn_close)) }
