@@ -5,6 +5,8 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.PasskeyImportDraft
 import com.keepasskey.app.passkey.PasskeyImportDraftHost
 import com.keepasskey.app.passkey.PasskeyImportFactory
+import com.keepasskey.core.result.KdbxError
+import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -82,8 +84,9 @@ internal class EntryEditPasskeyImport(
     /**
      * 用户点「替换」：草案 → [com.keepasskey.core.model.PasskeyData] → **按当前条目 id** 原地替换。
      *
-     * 草案在**每一条**路径上都被擦除（含前置校验失败与写库返回 null）——它是私钥明文的唯一持有者。
-     * 写库返回 null＝条目已被删除 / id 非法，此时如实提示且**不重载、不假装成功**。
+     * 草案在**每一条**路径上都被擦除（含前置校验失败与写库失败）——它是私钥明文的唯一持有者。
+     * 写库失败（`ISSUE-P1-590` 起按错误码分型）＝条目已被删除 / id 非法（未命中）或落盘失败，
+     * 此时如实提示且**不重载、不假装成功**。
      */
     fun confirm() {
         val draft = drafts.takeForImport() ?: return
@@ -101,14 +104,21 @@ internal class EntryEditPasskeyImport(
         val data = PasskeyImportFactory.toPasskeyData(draft.credential)
         draft.wipe()
         scope.launch {
-            if (repository.replacePasskeyOnEntry(requireNotNull(entryId), data) == null) {
-                host.onNotice(R.string.passkey_import_entry_missing)
-                return@launch
+            when (val replaced = repository.replacePasskeyOnEntry(requireNotNull(entryId), data)) {
+                is KdbxResult.Success -> {
+                    // ISSUE-P3-342：文案须**如实说明这条通路不经「保存」**——用户此前据此认为
+                    // 右上角保存与导入按钮功能重叠（实际两者写的是完全不同的字段集）。
+                    host.onNotice(R.string.edit_passkey_import_saved_now)
+                    host.onReplaced()
+                }
+                is KdbxResult.Failure -> host.onNotice(
+                    if (replaced.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND) {
+                        R.string.passkey_import_entry_missing
+                    } else {
+                        R.string.passkey_write_failed
+                    }
+                )
             }
-            // ISSUE-P3-342：文案须**如实说明这条通路不经「保存」**——用户此前据此认为
-            // 右上角保存与导入按钮功能重叠（实际两者写的是完全不同的字段集）。
-            host.onNotice(R.string.edit_passkey_import_saved_now)
-            host.onReplaced()
         }
     }
 }

@@ -5,11 +5,12 @@ import com.keepasskey.app.passkey.PasskeyImportFactory
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.result.KdbxError
+import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,11 +62,13 @@ class PasskeyImportWritePathTest {
     fun `一 顶栏新建落调用方给的分组 落库形状与保护位逐键合规`() = runTest {
         val repository = FakeVaultRepository()
         val group = KdbxUuid.random()
-        val entry = repository.saveNewPasskeyEntry(
-            data = PasskeyImportFactory.toPasskeyData(imported()),
-            boundPackage = null,
-            parentGroupId = group
-        )
+        val entry = requireNotNull(
+            repository.saveNewPasskeyEntry(
+                data = PasskeyImportFactory.toPasskeyData(imported()),
+                boundPackage = null,
+                parentGroupId = group
+            ).getOrNull()
+        ) { "落盘成功必须交付 Success（ISSUE-P1-590）" }
         assertEquals("顶栏要求落在用户当下所在分组", group, entry.parentGroupId)
 
         val fields = requireNotNull(repository.lastSavedPasskeyByEntry[entry.id.toHexString()]) {
@@ -102,12 +105,14 @@ class PasskeyImportWritePathTest {
     @Test
     fun `二 编辑页按 entryId 整体替换 保留其它字段且 schema 键不残留`() = runTest {
         val repository = FakeVaultRepository()
-        val first = repository.saveNewPasskeyEntry(PasskeyImportFactory.toPasskeyData(imported()), null)
+        val first = requireNotNull(
+            repository.saveNewPasskeyEntry(PasskeyImportFactory.toPasskeyData(imported()), null).getOrNull()
+        )
         val titleBefore = first.title
         val urlBefore = first.url
 
         val second = PasskeyImportFactory.toPasskeyData(imported(rpId = "second.example", userName = "other"))
-        val replaced = repository.replacePasskeyOnEntry(first.id.toHexString(), second)
+        val replaced = repository.replacePasskeyOnEntry(first.id.toHexString(), second).getOrNull()
         assertNotNull("按 id 定位必须命中刚建好的那条", replaced)
         val target = requireNotNull(replaced)
         assertEquals("非 passkey 字段（标题）必须保留", titleBefore, target.title)
@@ -119,21 +124,26 @@ class PasskeyImportWritePathTest {
 
         // 旧值不得残留：先造一条带旧 PrfNoUv 的库，替换后必须是新值而非两值并存
         val third = PasskeyImportFactory.toPasskeyData(imported(rpId = "third.example"))
-        val again = requireNotNull(repository.replacePasskeyOnEntry(first.id.toHexString(), third))
+        val again = requireNotNull(repository.replacePasskeyOnEntry(first.id.toHexString(), third).getOrNull())
         val noUvValues = again.customFields.filter { it.key == PasskeyData.FIELD_PRF_NO_UV }
         assertEquals("同一 schema 键只允许一份（残留即 isPasskeyFieldKey 覆盖面漏了它）", 1, noUvValues.size)
         assertEquals(third.credentialId, requireNotNull(PasskeyData.fromCustomFields(again.customFields)).credentialId)
     }
 
     @Test
-    fun `三 未命中 entryId 时返回 null 且零写入`() = runTest {
+    fun `三 未命中 entryId 时返回分型 Failure 且零写入`() = runTest {
         val repository = FakeVaultRepository()
         repository.saveNewPasskeyEntry(PasskeyImportFactory.toPasskeyData(imported()), null)
         val observedBefore = repository.lastSavedPasskeyByEntry.size
         val missing = KdbxUuid.random().toHexString()
-        assertNull("条目不存在必须返回 null（调用方据此如实提示，不得假装成功）", repository.replacePasskeyOnEntry(missing, PasskeyImportFactory.toPasskeyData(imported())))
+        val missResult = repository.replacePasskeyOnEntry(missing, PasskeyImportFactory.toPasskeyData(imported()))
+        assertTrue(
+            "条目不存在必须返回带 PASSKEY_ENTRY_NOT_FOUND 码的 Failure（调用方据此如实提示，不得假装成功）",
+            missResult is KdbxResult.Failure && missResult.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND
+        )
         assertEquals("未命中路径不得产生任何写库观测", observedBefore, repository.lastSavedPasskeyByEntry.size)
-        assertNull(repository.replacePasskeyOnEntry("not-a-uuid", PasskeyImportFactory.toPasskeyData(imported())))
+        val badIdResult = repository.replacePasskeyOnEntry("not-a-uuid", PasskeyImportFactory.toPasskeyData(imported()))
+        assertTrue(badIdResult is KdbxResult.Failure && badIdResult.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND)
     }
 
     /**
@@ -144,13 +154,17 @@ class PasskeyImportWritePathTest {
     @Test
     fun `四 现成的按内容检索会命中另一条目而非当前条目`() = runTest {
         val repository = FakeVaultRepository()
-        val first = repository.saveNewPasskeyEntry(PasskeyImportFactory.toPasskeyData(imported()), null)
+        val first = requireNotNull(
+            repository.saveNewPasskeyEntry(PasskeyImportFactory.toPasskeyData(imported()), null).getOrNull()
+        )
         // 同 rpId + 同用户名的第二条（生产中这不常发生，但正是「按内容检索」与「按 id 定位」的分岔点）
-        val editing = repository.saveNewPasskeyEntry(PasskeyImportFactory.toPasskeyData(imported()), null)
+        val editing = requireNotNull(
+            repository.saveNewPasskeyEntry(PasskeyImportFactory.toPasskeyData(imported()), null).getOrNull()
+        )
         assertFalse(first.id == editing.id)
 
         val incoming = PasskeyImportFactory.toPasskeyData(imported(rpId = "webauthn.io", userName = "johndoe"))
-        val touched = repository.saveOrReplacePasskeyEntry(incoming, null)
+        val touched = requireNotNull(repository.saveOrReplacePasskeyEntry(incoming, null).getOrNull())
         assertEquals(
             "saveOrReplace 命中的是「同 rpId+同用户名」检索到的第一条，而不是正在编辑的那一条",
             first.id,
@@ -159,7 +173,7 @@ class PasskeyImportWritePathTest {
         assertNotEquals(equals = editing.id, other = touched.id)
 
         // 按 id 的入口只动被点名的那一条
-        val exact = requireNotNull(repository.replacePasskeyOnEntry(editing.id.toHexString(), incoming))
+        val exact = requireNotNull(repository.replacePasskeyOnEntry(editing.id.toHexString(), incoming).getOrNull())
         assertEquals("按 id 的入口只动这一条", editing.id, exact.id)
     }
 

@@ -7,7 +7,10 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.app.passkey.ImportedPasskey
+import com.keepasskey.app.passkey.PasskeyImportFactory
 import com.keepasskey.core.model.PasskeyKeyText
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
@@ -29,6 +32,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import java.util.Base64
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
@@ -96,6 +100,27 @@ class PasskeyEntryCoordinatorSignCountTest {
 
     private fun coordinatorOf(session: DatabaseSession): PasskeyEntryCoordinator =
         PasskeyEntryCoordinator(session, DebugLogBuffer()) { KdbxResult.Success(Unit) }
+
+    /** `ISSUE-P1-590` 失败注入点：以可编排的落盘结果构造协调器。 */
+    private fun coordinatorWithPersist(
+        session: DatabaseSession,
+        persist: suspend () -> KdbxResult<Unit>
+    ): PasskeyEntryCoordinator = PasskeyEntryCoordinator(session, DebugLogBuffer(), persist)
+
+    /** 合法的样本 Passkey 数据（`ISSUE-P1-590` 新建入口用例用）。 */
+    private fun samplePasskeyData(): PasskeyData = PasskeyImportFactory.toPasskeyData(
+        ImportedPasskey(
+            relyingPartyId = "example.com",
+            credentialId = "Y3JlZGVudGlhbElkRXhhbXBsZQ",
+            userHandle = "handle",
+            userName = "alice",
+            userDisplayName = "Alice",
+            privateKeyPemChars = "-----BEGIN PRIVATE KEY-----\nQUJD\n-----END PRIVATE KEY-----\n".toCharArray(),
+            algorithmId = PasskeyData.ALGORITHM_ES256,
+            prfWithUv = ByteArray(32) { 1 },
+            prfWithoutUv = ByteArray(32) { 2 }
+        )
+    )
 
     /** 直接读库内现值（不经协调器，避免与被测逻辑共用同一路径） */
     private fun storedSignCount(session: DatabaseSession): Int {
@@ -268,7 +293,9 @@ class PasskeyEntryCoordinatorSignCountTest {
 
         // 真实并行：32 个协程在 Default 线程池上同时进入原子递增路径
         val applied = withContext(Dispatchers.Default) {
-            List(concurrency) { async { coordinator.incrementPasskeySignCount(entryId.toHexString()) } }.awaitAll()
+            List(concurrency) {
+                async { coordinator.incrementPasskeySignCount(entryId.toHexString()).getOrNull() }
+            }.awaitAll()
         }
         val values = applied.filterNotNull()
 
@@ -312,7 +339,9 @@ class PasskeyEntryCoordinatorSignCountTest {
             List(concurrency) { async { PasskeyData.nextSignCount(snapshot) } }.awaitAll()
         }
         val coordinatorSide = withContext(Dispatchers.Default) {
-            List(concurrency) { async { coordinator.incrementPasskeySignCount(entryId.toHexString()) } }.awaitAll()
+            List(concurrency) {
+                async { coordinator.incrementPasskeySignCount(entryId.toHexString()).getOrNull() }
+            }.awaitAll()
         }
 
         assertEquals(
@@ -335,8 +364,8 @@ class PasskeyEntryCoordinatorSignCountTest {
         val session = newSession(signCountText = PasskeyData.MAX_SIGN_COUNT.toString())
         val coordinator = coordinatorOf(session)
 
-        val first = coordinator.incrementPasskeySignCount(entryId.toHexString())
-        val second = coordinator.incrementPasskeySignCount(entryId.toHexString())
+        val first = coordinator.incrementPasskeySignCount(entryId.toHexString()).getOrNull()
+        val second = coordinator.incrementPasskeySignCount(entryId.toHexString()).getOrNull()
 
         assertEquals("饱和后不得回绕为负", PasskeyData.MAX_SIGN_COUNT, first)
         assertEquals("上界处的重复是饱和语义的必然结果（非并发缺陷）", first, second)
@@ -415,7 +444,7 @@ class PasskeyEntryCoordinatorSignCountTest {
                 Thread {
                     try {
                         startBarrier.await()
-                        runBlocking { coordinator.incrementPasskeySignCount(entryId.toHexString()) }
+                        runBlocking { coordinator.incrementPasskeySignCount(entryId.toHexString()).getOrNull() }
                             ?.let(applied::add)
                     } catch (t: Throwable) {
                         failures += t
@@ -457,8 +486,9 @@ class PasskeyEntryCoordinatorSignCountTest {
             val coordinator = coordinatorOf(session)
 
             val values = withContext(Dispatchers.Default) {
-                List(concurrency) { async { coordinator.incrementPasskeySignCount(entryId.toHexString()) } }
-                    .awaitAll()
+                List(concurrency) {
+                    async { coordinator.incrementPasskeySignCount(entryId.toHexString()).getOrNull() }
+                }.awaitAll()
             }.filterNotNull()
 
             assertEquals("第 $round 轮：并发递增必须全部落账", concurrency, values.size)
@@ -496,7 +526,7 @@ class PasskeyEntryCoordinatorSignCountTest {
         val session = newSessionWith(legacyFields(HEX_SCALAR_64))
         val staleLegacyPrivateKey = customFieldValue(session, PasskeyData.LEGACY_FIELD_PRIVATE_KEY)
 
-        val applied = coordinatorOf(session).incrementPasskeySignCount(entryId.toHexString())
+        val applied = coordinatorOf(session).incrementPasskeySignCount(entryId.toHexString()).getOrNull()
 
         assertEquals("迁移不得影响计数器语义", 1, applied)
         val fields = fieldsOf(session)
@@ -579,7 +609,7 @@ class PasskeyEntryCoordinatorSignCountTest {
     fun `私钥无法重包时保持旧 schema 不迁移_但计数器照常写入`() = runTest {
         val session = newSessionWith(legacyFields("!!not-a-private-key!!"))
 
-        val applied = coordinatorOf(session).incrementPasskeySignCount(entryId.toHexString())
+        val applied = coordinatorOf(session).incrementPasskeySignCount(entryId.toHexString()).getOrNull()
 
         assertEquals("迁移失败不得阻断计数器写入（fail-safe 而非 fail-closed）", 1, applied)
         val fields = fieldsOf(session)
@@ -594,6 +624,105 @@ class PasskeyEntryCoordinatorSignCountTest {
             fields[PasskeyData.KPEX_FIELD_RELYING_PARTY]
         )
         assertEquals(1, storedSignCount(session))
+    }
+
+    // ===== ISSUE-P1-590：写入口持久化交付契约（落盘失败不得交付成功，AUD-02） =====
+
+    @Test
+    fun `落盘成功时新建条目交付 Success`() = runTest {
+        val session = newSession(signCountText = null)
+
+        val saved = coordinatorOf(session).saveNewPasskeyEntry(samplePasskeyData(), boundPackage = null)
+
+        assertTrue(
+            "落盘成功必须交付 Success（正向对照：否则失败路径断言会因入口恒返 Failure 而空转）",
+            saved is KdbxResult.Success
+        )
+        val entry = (saved as KdbxResult.Success).data
+        assertNotNull("交付的条目必须是可解析的 Passkey 条目", PasskeyData.fromCustomFields(entry.customFields))
+    }
+
+    @Test
+    fun `落盘失败时新建条目返回 Failure 且不交付成功条目`() = runTest {
+        val session = newSession(signCountText = null)
+        val coordinator = coordinatorWithPersist(session) {
+            KdbxResult.Failure(IOException("disk full"), code = KdbxError.SAVE_FAILED)
+        }
+
+        val saved = coordinator.saveNewPasskeyEntry(samplePasskeyData(), boundPackage = null)
+
+        assertTrue("落盘失败绝不交付成功条目（此前只写日志仍返回条目，AUD-02）", saved is KdbxResult.Failure)
+        assertEquals("保存失败码须原样上浮供上层分型", KdbxError.SAVE_FAILED, (saved as KdbxResult.Failure).code)
+        assertEquals(
+            "条目仍留在内存树（保留 DIRTY 供后续重试），但不交付为已持久化",
+            DatabaseSession.SessionState.DIRTY,
+            session.state.value
+        )
+    }
+
+    @Test
+    fun `落盘失败时计数器递增返回 Failure 且不交付未提交值`() = runTest {
+        val session = newSession(signCountText = "4")
+        val coordinator = coordinatorWithPersist(session) {
+            KdbxResult.Failure(IOException("disk full"), code = KdbxError.SAVE_FAILED)
+        }
+
+        val applied = coordinator.incrementPasskeySignCount(entryId.toHexString())
+
+        assertTrue(
+            "落盘失败不得回传已提交计数器（否则断言链会交 RP 一个未落盘的 signCount，重启即回退）",
+            applied is KdbxResult.Failure
+        )
+        assertEquals(KdbxError.SAVE_FAILED, (applied as KdbxResult.Failure).code)
+        assertEquals("内存树里的递增保留供重试（保留 DIRTY）", 5, storedSignCount(session))
+    }
+
+    @Test
+    fun `落盘失败时解除绑定返回 Failure 且不假装成功`() = runTest {
+        val session = newSession(signCountText = "4")
+        val coordinator = coordinatorWithPersist(session) {
+            KdbxResult.Failure(IOException("disk full"), code = KdbxError.SAVE_FAILED)
+        }
+
+        val cleared = coordinator.clearPasskeyOnEntry(entryId.toHexString())
+
+        assertTrue(cleared is KdbxResult.Failure)
+        assertEquals(KdbxError.SAVE_FAILED, (cleared as KdbxResult.Failure).code)
+        assertEquals(
+            "内存树已摘除凭据字段（保留供重试），但不交付成功",
+            0,
+            entryIn(session).customFields.count { PasskeyData.isPasskeyFieldKey(it.key) }
+        )
+    }
+
+    @Test
+    fun `未命中条目时各写入口返回 PASSKEY_ENTRY_NOT_FOUND 分型 Failure`() = runTest {
+        val session = newSession(signCountText = "0")
+        val coordinator = coordinatorOf(session)
+        val missing = KdbxUuid.random().toHexString()
+
+        val incremented = coordinator.incrementPasskeySignCount(missing)
+        val patched = coordinator.patchPasskeySignCount(missing, 3)
+        val replaced = coordinator.replacePasskeyOnEntry(missing, samplePasskeyData())
+        val cleared = coordinator.clearPasskeyOnEntry(missing)
+
+        assertTrue(
+            "未命中必须与「落盘失败」分型：带 PASSKEY_ENTRY_NOT_FOUND 码",
+            incremented is KdbxResult.Failure && incremented.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND
+        )
+        assertTrue(
+            "patch 入口不得静默成功",
+            patched is KdbxResult.Failure && patched.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND
+        )
+        assertTrue(
+            "replace 入口不得返回「条目不存在」以外的语义",
+            replaced is KdbxResult.Failure && replaced.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND
+        )
+        assertTrue(
+            "clear 入口不得静默成功",
+            cleared is KdbxResult.Failure && cleared.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND
+        )
+        assertEquals("未命中一律无写入（库内终态不变）", 0, storedSignCount(session))
     }
 
     private companion object {

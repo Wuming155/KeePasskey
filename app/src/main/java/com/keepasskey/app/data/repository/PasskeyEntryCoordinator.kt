@@ -7,6 +7,7 @@ import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
@@ -18,6 +19,9 @@ import kotlinx.coroutines.flow.first
  * 职责单一：按 RP-ID/凭据 ID 检索 Passkey 条目、新建 Passkey 条目落库、
  * 签名计数器（signCount）就地修补（并顺带把 v1 旧 schema 条目就地迁移到 KPEX，ISSUE-P3-213）。
  * 落盘统一经 [persistSession] 回传仓库出口。
+ *
+ * `ISSUE-P1-590`：全部写入口返回 [KdbxResult]，未命中 / 只读（[KdbxError.PASSKEY_ENTRY_NOT_FOUND] /
+ * [KdbxError.SAVE_READ_ONLY]）与落盘失败分型；只有 [persistSession] 成功才交付 `Success`。
  */
 internal class PasskeyEntryCoordinator(
     private val databaseSession: DatabaseSession,
@@ -40,6 +44,14 @@ internal class PasskeyEntryCoordinator(
         return db.rootGroup.allEntries().filterNot { it.parentGroupId in binGroupIds }
     }
 
+    /** 落盘交付（`ISSUE-P1-590`，实现见 [PasskeyWriteCommit.commit]） */
+    private suspend fun commitEntry(entry: KdbxEntry, what: String): KdbxResult<KdbxEntry> =
+        PasskeyWriteCommit.commit(entry, what, debugLog, persistSession)
+
+    private fun missingEntryFailure(): KdbxResult.Failure = PasskeyWriteCommit.missingEntry()
+
+    private fun readOnlyFailure(): KdbxResult.Failure = PasskeyWriteCommit.readOnly()
+
     /**
      * 新建或在**既有条目**上原地替换 Passkey 数据（整改：同站点重复注册曾产生重复条目）。
      *
@@ -47,7 +59,7 @@ internal class PasskeyEntryCoordinator(
      * 内容（标题 / 备注 / 密码 / 标签 / 历史 / 附件等），仅整体换新 Passkey schema 字段；
      * 未命中则按原口径新建条目。
      */
-    suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
+    suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxResult<KdbxEntry> {
         val existing = findReusablePasskeyEntry(data) ?: return saveNewPasskeyEntry(data, boundPackage)
 
         val preserved = existing.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
@@ -66,11 +78,7 @@ internal class PasskeyEntryCoordinator(
         }
 
         databaseSession.saveEntry(updated)
-        val saved = persistSession()
-        if (saved is KdbxResult.Failure) {
-            debugLog.warn(TAG, "Passkey 条目替换成功但落盘失败: ${saved.error.javaClass.simpleName}")
-        }
-        return updated
+        return commitEntry(updated, "Passkey 条目替换")
     }
 
     /**
@@ -130,7 +138,7 @@ internal class PasskeyEntryCoordinator(
         data: PasskeyData,
         boundPackage: String?,
         parentGroupId: KdbxUuid? = null
-    ): KdbxEntry {
+    ): KdbxResult<KdbxEntry> {
         val title = passkeyTitle(data)
         val url = passkeyUrl(data, boundPackage)
         val fields = mapOf(
@@ -145,11 +153,7 @@ internal class PasskeyEntryCoordinator(
             customFields = data.toCustomFields()
         )
         databaseSession.saveEntry(newEntry)
-        val saved = persistSession()
-        if (saved is KdbxResult.Failure) {
-            debugLog.warn(TAG, "Passkey 条目创建成功但落盘失败: ${saved.error.javaClass.simpleName}")
-        }
-        return newEntry
+        return commitEntry(newEntry, "Passkey 条目创建")
     }
 
     /**
@@ -166,10 +170,11 @@ internal class PasskeyEntryCoordinator(
      * [DatabaseSession.updateEntryById] 的**会话 Mutex 内单次原子替换**，与计数器补丁同源：
      * 被替换下线的旧条目敏感实例由该入口的定点擦除清零（私钥不留第二份驻留实例）。
      *
-     * @return 落树上线的条目；`entryId` 非法 / 条目不存在 / 只读态时返回 null 且**无任何写入**。
+     * @return 命中且落盘成功才 `Success`；未命中 / 只读 ⇒ 分型 `Failure`；落盘失败 ⇒ 上浮保存失败码。
      */
-    suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
+    suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxResult<KdbxEntry> {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return missingEntryFailure()
+        if (databaseSession.isReadOnly) return readOnlyFailure()
         val replacement = databaseSession.updateEntryById(targetUuid) { entry ->
             val preserved = entry.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
             entry.copy(
@@ -179,13 +184,9 @@ internal class PasskeyEntryCoordinator(
         }
         if (replacement == null) {
             debugLog.warn(TAG, "按 entryId 替换通行密钥字段未命中条目，未做任何写入")
-            return null
+            return missingEntryFailure()
         }
-        val saved = persistSession()
-        if (saved is KdbxResult.Failure) {
-            debugLog.warn(TAG, "通行密钥字段已替换但落盘失败: ${saved.error.javaClass.simpleName}")
-        }
-        return replacement
+        return commitEntry(replacement, "通行密钥字段替换")
     }
 
     /**
@@ -206,10 +207,13 @@ internal class PasskeyEntryCoordinator(
      *   因此调用方**必须**先经确认对话框，且不得在只读会话调用。
      * * 判定"哪些字段属于凭据"复用 [PasskeyData.isPasskeyFieldKey] —— 与 `replacePasskeyOnEntry`
      *   的保留集**同一把尺子**，避免两处对"什么算凭据"给出不同答案。
-     * * 未命中条目 / id 非法 ⇒ 返回 null 且**无任何写入**（与 `replacePasskeyOnEntry` 同形）。
+     * * 未命中 / id 非法 / 只读 ⇒ 分型 `Failure` 且无写入（与 `replacePasskeyOnEntry` 同形）。
+     *
+     * @return 命中且落盘成功（或幂等无写）才 `Success`；落盘失败 ⇒ 上浮保存失败码。
      */
-    suspend fun clearPasskeyOnEntry(entryId: String): KdbxEntry? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
+    suspend fun clearPasskeyOnEntry(entryId: String): KdbxResult<KdbxEntry> {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return missingEntryFailure()
+        if (databaseSession.isReadOnly) return readOnlyFailure()
         val cleared = databaseSession.updateEntryById(targetUuid) { entry ->
             val preserved = entry.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
             if (preserved.size == entry.customFields.size) {
@@ -221,13 +225,9 @@ internal class PasskeyEntryCoordinator(
         }
         if (cleared == null) {
             debugLog.warn(TAG, "解除通行密钥绑定未命中条目，未做任何写入")
-            return null
+            return missingEntryFailure()
         }
-        val saved = persistSession()
-        if (saved is KdbxResult.Failure) {
-            debugLog.warn(TAG, "通行密钥字段已摘除但落盘失败: ${saved.error.javaClass.simpleName}")
-        }
-        return cleared
+        return commitEntry(cleared, "通行密钥字段摘除")
     }
 
     /**
@@ -247,15 +247,15 @@ internal class PasskeyEntryCoordinator(
      * `库内现值 + 1`（[PasskeyData.nextSignCount]，饱和不回退）为下界取较大者，
      * 因此任何入参都不可能写入负值、超上界值，也不会让已推进的计数器回退。
      *
-     * ISSUE-P3-27 子项 2：本入口保留原签名（仓库接口 [VaultRepository.patchPasskeySignCount] 的
-     * 既有调用点以表达式体覆写，返回类型不可变），落库逻辑与 [incrementPasskeySignCount]
-     * **完全同源**（同一私有原子核心），只是不向调用方回传落库值。
+     * ISSUE-P3-27 子项 2：本入口落库逻辑与 [incrementPasskeySignCount] **完全同源**
+     * （同一私有原子核心），只是不向调用方回传落库值。
      * 需要把计数器写进断言响应（AuthenticatorData）的调用方必须改用
      * [incrementPasskeySignCount]，否则会以锁外快照自行计算而向 RP 交出重复值。
+     *
+     * `ISSUE-P1-590`：未命中 / 只读 / 落盘失败一律 `Failure`，调用方不得据「无返回值即成功」推定已提交。
      */
-    suspend fun patchPasskeySignCount(entryId: String, newCount: Int) {
-        applySignCountPatch(entryId, PasskeyData.clampSignCount(newCount))
-    }
+    suspend fun patchPasskeySignCount(entryId: String, newCount: Int): KdbxResult<Unit> =
+        applySignCountPatch(entryId, PasskeyData.clampSignCount(newCount)).map { }
 
     /**
      * 原子递增签名计数器并返回**本次实际落库的计数器值**（ISSUE-P3-27 子项 2）。
@@ -269,10 +269,11 @@ internal class PasskeyEntryCoordinator(
      * （或「已签名成功、落盘前进程中断」后的重试）会向 RP 交出**重复**的 signCount，
      * 而库内计数器仍在推进——签名值与库内值就此错位。故断言路径的唯一正确取值来源是本方法。
      *
-     * @return 本次实际落库的计数器值；条目不存在 / UUID 非法时返回 null，且不写入、不落盘
-     *   （调用方此时不得签发断言）。
+     * @return `Success` 携带本次实际落库值；未命中 / 只读 ⇒ `Failure`（无写入）；
+     *   [persistSession] 失败 ⇒ 上浮保存失败码——调用方不得据此签发断言（否则重启后计数器回退）。
      */
-    suspend fun incrementPasskeySignCount(entryId: String): Int? = applySignCountPatch(entryId, null)
+    suspend fun incrementPasskeySignCount(entryId: String): KdbxResult<Int> =
+        applySignCountPatch(entryId, null)
 
     /**
      * 签名计数器原子读-改-写核心：在会话 Mutex 内的单次受控变换中完成
@@ -296,10 +297,11 @@ internal class PasskeyEntryCoordinator(
      * 「读回值严格等于已提交状态」的语义**不因此损失**（读的正是本次落树的同一实例）。
      *
      * @param requested 调用方期望值（已钳制到合法区间）；null 表示「以库内现值为基准纯递增」。
-     * @return 实际落库值；条目不存在 / UUID 非法时返回 null（本次无任何写入、无落盘调用）。
+     * @return `Success` 携带实际落库值；未命中 / 只读 ⇒ `Failure`（无写入）；落盘失败 ⇒ 上浮保存失败码。
      */
-    private suspend fun applySignCountPatch(entryId: String, requested: Int?): Int? {
-        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
+    private suspend fun applySignCountPatch(entryId: String, requested: Int?): KdbxResult<Int> {
+        val targetUuid = parseKdbxUuidOrNull(entryId) ?: return missingEntryFailure()
+        if (databaseSession.isReadOnly) return readOnlyFailure()
         // 回传值在临界区内确定并落到局部量：临界区外只搬运该 Int，不再触碰任何落树实例
         var applied: Int? = null
         databaseSession.updateEntryById(targetUuid) { entry ->
@@ -308,13 +310,15 @@ internal class PasskeyEntryCoordinator(
             val replacement = entryWithSignCount(entry, value)
             applied = PasskeyData.readSignCount(replacement.customFields)
             replacement
-        } ?: return null
+        } ?: return missingEntryFailure()
 
-        val saved = persistSession()
-        if (saved is KdbxResult.Failure) {
-            debugLog.warn(TAG, "签名计数器已更新但落盘失败: ${saved.error.javaClass.simpleName}")
+        return when (val saved = persistSession()) {
+            is KdbxResult.Success -> KdbxResult.Success(checkNotNull(applied) { "计数器读回值缺失" })
+            is KdbxResult.Failure -> {
+                debugLog.warn(TAG, "签名计数器已更新但落盘失败，拒绝回传已提交值: ${saved.error.javaClass.simpleName}")
+                saved
+            }
         }
-        return applied
     }
 
     /**

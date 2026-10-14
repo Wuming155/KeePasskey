@@ -14,6 +14,7 @@ import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxKdfStrengthAssessment
@@ -566,7 +567,7 @@ class FakeVaultRepository(
         data: PasskeyData,
         boundPackage: String?,
         parentGroupId: KdbxUuid?
-    ): KdbxEntry {
+    ): KdbxResult<KdbxEntry> {
         val title = "${data.userName}@${data.relyingPartyId}"
         val url = if (boundPackage.isNullOrBlank()) "https://${data.relyingPartyId}" else "android://$boundPackage"
         val fields = mapOf(
@@ -583,7 +584,7 @@ class FakeVaultRepository(
         lastSavedPasskeyByEntry = lastSavedPasskeyByEntry +
             (newEntry.id.toHexString() to newEntry.customFields)
         extraKdbxEntries.value = extraKdbxEntries.value + newEntry
-        return newEntry
+        return KdbxResult.Success(newEntry)
     }
 
     /**
@@ -596,7 +597,7 @@ class FakeVaultRepository(
      * 按 id 定位，两侧走的是同一替换语义，故替身不得只认一支——否则 Q1 的「挂当前条目」
      * 在单测里永远走 null 分支，替换语义就成了没测过的空话。
      */
-    override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? {
+    override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxResult<KdbxEntry> {
         val current = extraKdbxEntries.value
         val index = current.indexOfFirst { it.id.toHexString() == entryId }
         if (index >= 0) {
@@ -604,11 +605,11 @@ class FakeVaultRepository(
             val updated = current[index].copy(customFields = preserved + data.toCustomFields())
             lastSavedPasskeyByEntry = lastSavedPasskeyByEntry + (entryId to updated.customFields)
             extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
-            return updated
+            return KdbxResult.Success(updated)
         }
         val uiEntries = entriesFlow.value
         val uiIndex = uiEntries.indexOfFirst { it.id == entryId }
-        if (uiIndex < 0) return null
+        if (uiIndex < 0) return entryNotFoundFailure()
         val ui = uiEntries[uiIndex]
         val preservedUi = ui.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
         val incomingFields = data.toCustomFields()
@@ -623,69 +624,72 @@ class FakeVaultRepository(
         val updatedUi = ui.copy(customFields = preservedUi + incoming, isPasskey = true)
         lastSavedPasskeyByEntry = lastSavedPasskeyByEntry + (entryId to incomingFields)
         entriesFlow.value = uiEntries.toMutableList().also { it[uiIndex] = updatedUi }
-        return KdbxEntry(
-            id = try {
-                KdbxUuid.fromHexString(entryId)
-            } catch (_: Exception) {
-                KdbxUuid.random()
-            },
-            fields = mapOf(
-                KdbxConstants.Fields.TITLE to ProtectedString(updatedUi.title, isProtected = false)
-            ),
-            customFields = preservedUi.map {
-                KdbxCustomField(it.key, ProtectedString(it.value, isProtected = it.isProtected))
-            } + incomingFields
+        return KdbxResult.Success(
+            KdbxEntry(
+                id = try {
+                    KdbxUuid.fromHexString(entryId)
+                } catch (_: Exception) {
+                    KdbxUuid.random()
+                },
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString(updatedUi.title, isProtected = false)
+                ),
+                customFields = preservedUi.map {
+                    KdbxCustomField(it.key, ProtectedString(it.value, isProtected = it.isProtected))
+                } + incomingFields
+            )
         )
     }
 
     /**
      * 测试替身：**解除绑定**——摘掉既有条目的全部 Passkey schema 字段（`ISSUE-P3-342`，
-     * 与生产 `PasskeyEntryCoordinator.clearPasskeyOnEntry` 同语义：非凭据字段全保留、
-     * 未命中返回 null 且无写入、本就没有凭据字段时幂等）。
+     * 与生产 `PasskeyEntryCoordinator.clearPasskeyOnEntry` 同语义（`ISSUE-P1-590`）：非凭据字段
+     * 全保留、幂等无写亦为 `Success`、未命中 ⇒ `Failure`（`PASSKEY_ENTRY_NOT_FOUND`）且无写入。
      *
      * 与 [replacePasskeyOnEntry] 同样**两支存储都要认**（`extraKdbxEntries` 与 `entriesFlow`），
-     * 否则编辑页用例里的解除永远走 null 分支。
+     * 否则编辑页用例里的解除永远走失败分支。
      */
-    override suspend fun clearPasskeyOnEntry(entryId: String): KdbxEntry? {
+    override suspend fun clearPasskeyOnEntry(entryId: String): KdbxResult<KdbxEntry> {
         val current = extraKdbxEntries.value
         val index = current.indexOfFirst { it.id.toHexString() == entryId }
         if (index >= 0) {
             val target = current[index]
             val preserved = target.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
             if (preserved.size == target.customFields.size) {
-                return target
+                return KdbxResult.Success(target)
             }
             val updated = target.copy(customFields = preserved)
             lastSavedPasskeyByEntry = lastSavedPasskeyByEntry - entryId
             extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
-            return updated
+            return KdbxResult.Success(updated)
         }
         val uiEntries = entriesFlow.value
         val uiIndex = uiEntries.indexOfFirst { it.id == entryId }
-        if (uiIndex < 0) return null
+        if (uiIndex < 0) return entryNotFoundFailure()
         val ui = uiEntries[uiIndex]
         val preservedUi = ui.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
-        if (preservedUi.size == ui.customFields.size) {
-            return null
-        }
-        entriesFlow.value = uiEntries.toMutableList().also {
-            it[uiIndex] = ui.copy(customFields = preservedUi, isPasskey = false, passkeyRpId = null)
-        }
-        lastSavedPasskeyByEntry = lastSavedPasskeyByEntry - entryId
-        // 与 replacePasskeyOnEntry 同形：UI 侧命中也要回传一条落树后的 KdbxEntry，
-        // 否则调用方按 null 判"未命中"，解除成功的分支在单测里永远走不到。
-        return KdbxEntry(
-            id = try {
-                KdbxUuid.fromHexString(entryId)
-            } catch (_: Exception) {
-                KdbxUuid.random()
-            },
-            fields = mapOf(
-                KdbxConstants.Fields.TITLE to ProtectedString(ui.title, isProtected = false)
-            ),
-            customFields = preservedUi.map {
-                KdbxCustomField(it.key, ProtectedString(it.value, isProtected = it.isProtected))
+        if (preservedUi.size != ui.customFields.size) {
+            entriesFlow.value = uiEntries.toMutableList().also {
+                it[uiIndex] = ui.copy(customFields = preservedUi, isPasskey = false, passkeyRpId = null)
             }
+            lastSavedPasskeyByEntry = lastSavedPasskeyByEntry - entryId
+        }
+        // 与 replacePasskeyOnEntry 同形：UI 侧命中也要回传一条落树后的 KdbxEntry，
+        // 否则调用方按「未命中」判失败，解除成功的分支在单测里永远走不到。
+        return KdbxResult.Success(
+            KdbxEntry(
+                id = try {
+                    KdbxUuid.fromHexString(entryId)
+                } catch (_: Exception) {
+                    KdbxUuid.random()
+                },
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString(ui.title, isProtected = false)
+                ),
+                customFields = preservedUi.map {
+                    KdbxCustomField(it.key, ProtectedString(it.value, isProtected = it.isProtected))
+                }
+            )
         )
     }
 
@@ -693,7 +697,7 @@ class FakeVaultRepository(
      * 测试替身：同 rpId + 用户名命中既有条目时**原地替换**其 Passkey schema 字段，
      * 否则与 [saveNewPasskeyEntry] 同语义新建（与生产 [RealVaultRepository] 契约一致）。
      */
-    override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry {
+    override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxResult<KdbxEntry> {
         val cleanTarget = DomainMatcher.extractDomain(data.relyingPartyId)
         val current = extraKdbxEntries.value
         val index = current.indexOfFirst { entry ->
@@ -707,7 +711,7 @@ class FakeVaultRepository(
         lastSavedPasskeyByEntry = lastSavedPasskeyByEntry +
             (updated.id.toHexString() to updated.customFields)
         extraKdbxEntries.value = current.toMutableList().also { it[index] = updated }
-        return updated
+        return KdbxResult.Success(updated)
     }
 
     /** 测试替身：`excludeCredentials` 查重的单趟扫描语义（与生产实现一致） */
@@ -725,12 +729,13 @@ class FakeVaultRepository(
      * 替身刻意**不写死返回值**：按 [PasskeyData.readSignCount] + [PasskeyData.nextSignCount]
      * 的真实饱和语义递增，使「断言路径必须使用回传值」这一回归锁在替身上同样成立
      * （若写死常量，回归用例会退化为空转，无法证伪）。
-     * 条目不存在时返回 null 且不写入（与 [RealVaultRepository] 的契约一致）。
+     * `ISSUE-P1-590`：条目不存在 ⇒ `Failure`（`PASSKEY_ENTRY_NOT_FOUND`）且不写入
+     * （与 [VaultPasskeyRepository.incrementPasskeySignCount] 的契约一致）。
      */
-    override suspend fun incrementPasskeySignCount(entryId: String): Int? {
+    override suspend fun incrementPasskeySignCount(entryId: String): KdbxResult<Int> {
         val current = extraKdbxEntries.value.toMutableList()
         val index = current.indexOfFirst { it.id.toHexString() == entryId }
-        if (index < 0) return null
+        if (index < 0) return entryNotFoundFailure()
 
         val entry = current[index]
         val hasField = entry.customFields.any { it.key == PasskeyData.FIELD_SIGN_COUNT }
@@ -748,25 +753,31 @@ class FakeVaultRepository(
         }
         current[index] = entry.copy(customFields = updated)
         extraKdbxEntries.value = current
-        return next
+        return KdbxResult.Success(next)
     }
 
-    override suspend fun patchPasskeySignCount(entryId: String, newCount: Int) {
+    override suspend fun patchPasskeySignCount(entryId: String, newCount: Int): KdbxResult<Unit> {
         val current = extraKdbxEntries.value.toMutableList()
         val index = current.indexOfFirst { it.id.toHexString() == entryId }
-        if (index >= 0) {
-            val entry = current[index]
-            val updated = entry.customFields.map { cf ->
-                if (cf.key == PasskeyData.FIELD_SIGN_COUNT) {
-                    KdbxCustomField(cf.key, ProtectedString(newCount.toString(), isProtected = false))
-                } else {
-                    cf
-                }
+        if (index < 0) return entryNotFoundFailure()
+        val entry = current[index]
+        val updated = entry.customFields.map { cf ->
+            if (cf.key == PasskeyData.FIELD_SIGN_COUNT) {
+                KdbxCustomField(cf.key, ProtectedString(newCount.toString(), isProtected = false))
+            } else {
+                cf
             }
-            current[index] = entry.copy(customFields = updated)
-            extraKdbxEntries.value = current
         }
+        current[index] = entry.copy(customFields = updated)
+        extraKdbxEntries.value = current
+        return KdbxResult.Success(Unit)
     }
+
+    /** 测试替身：通行密钥写入口未命中目标条目（`ISSUE-P1-590` 分型码，与生产一致）。 */
+    private fun entryNotFoundFailure(): KdbxResult.Failure = KdbxResult.Failure(
+        NoSuchElementException("fake: passkey entry not found"),
+        code = KdbxError.PASSKEY_ENTRY_NOT_FOUND
+    )
 
     override suspend fun saveAutofillCredential(
         packageName: String,

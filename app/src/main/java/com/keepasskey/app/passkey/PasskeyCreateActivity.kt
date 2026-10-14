@@ -13,6 +13,7 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.crypto.passkey.PasskeyPrf
@@ -251,7 +252,8 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
             onVerified = { verification ->
                 if (settled) return@requestCredentialUserVerification
                 settled = true
-                bindCallerForRegistration(callerPackage)
+                // ISSUE-P1-590：调用方信任绑定推迟到**落盘确认之后**（见 createAndReturn），
+                // 避免保存失败仍写入信任登记。
                 createAndReturn(callerPackage = callerPackage, verification = verification)
             },
             onRejected = {
@@ -340,11 +342,23 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     )
                 }.let { if (prfSecret == null) it else it.copy(prfSecret = prfSecret) }
 
-                // 2. 存储至 KDBX 密码库（原子落盘）；同 rpId + 用户名已有条目则原地替换
-                vaultRepository.saveOrReplacePasskeyEntry(
+                // 2. 存储至 KDBX 密码库（原子落盘）；同 rpId + 用户名已有条目则原地替换。
+                // ISSUE-P1-590：**只有落盘成功**才继续——保存失败时既不向 Credential Manager
+                // 回传成功，也不写入调用方信任绑定，避免 RP 登记一把本机未持久化的私钥。
+                val saveResult = vaultRepository.saveOrReplacePasskeyEntry(
                     data = generated,
                     boundPackage = if (CallingOriginResolver.isBrowserOrigin(origin)) null else callerPackage
                 )
+                if (saveResult is KdbxResult.Failure) {
+                    AppLog.e(
+                        TAG,
+                        "通行密钥落库失败（${saveResult.error.javaClass.simpleName}），拒绝回传成功"
+                    )
+                    rejectAndFinish(CredentialRejectionReason.PASSKEY_PERSISTENCE_FAILED)
+                    return@launch
+                }
+                // 落盘确认后才登记 CM 调用方信任绑定（ISSUE-P2-83；次序见 ISSUE-P1-590 步骤 6）
+                bindCallerForRegistration(callerPackage)
 
                 // 3. 构建证明数据 (Attestation) 并回传（确定性 CBOR 编码在 Default 执行）
                 val regResponseJson = withContext(Dispatchers.Default) {

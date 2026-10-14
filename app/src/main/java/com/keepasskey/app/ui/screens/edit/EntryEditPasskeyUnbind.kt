@@ -2,6 +2,8 @@ package com.keepasskey.app.ui.screens.edit
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.core.result.KdbxError
+import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,8 +68,9 @@ internal class EntryEditPasskeyUnbind(
     /**
      * 确认：摘掉本条目的凭据字段。
      *
-     * 未命中条目 / 落库未生效 ⇒ 如实提示且**不改草稿、不假装成功**；
-     * 成功才触发重载回显。对话框在动作发起前即关闭（两条结果路径都不留悬空态）。
+     * 未命中条目 / 落库失败 ⇒ 如实提示且**不改草稿、不假装成功**（`ISSUE-P1-590` 起按错误码
+     * 分型：未命中→「条目不存在」，落盘失败→「保存失败」）；成功才触发重载回显。
+     * 对话框在动作发起前即关闭（两条结果路径都不留悬空态）。
      */
     fun confirmUnbind() {
         val entryId = uiState.value.entryId
@@ -77,12 +80,19 @@ internal class EntryEditPasskeyUnbind(
             return
         }
         scope.launch {
-            if (repository.clearPasskeyOnEntry(entryId) == null) {
-                onNotice(R.string.edit_passkey_unbind_failed)
-                return@launch
+            when (val cleared = repository.clearPasskeyOnEntry(entryId)) {
+                is KdbxResult.Success -> {
+                    onNotice(R.string.edit_passkey_unbind_done)
+                    onReload()
+                }
+                is KdbxResult.Failure -> onNotice(
+                    if (cleared.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND) {
+                        R.string.edit_passkey_unbind_failed
+                    } else {
+                        R.string.passkey_write_failed
+                    }
+                )
             }
-            onNotice(R.string.edit_passkey_unbind_done)
-            onReload()
         }
     }
 

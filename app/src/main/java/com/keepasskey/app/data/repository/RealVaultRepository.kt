@@ -371,34 +371,37 @@ class RealVaultRepository @Inject constructor(
 
     override fun isSessionReadOnly(): Boolean = databaseSession.isReadOnly
 
+    /** `ISSUE-P1-590`：落盘成功才交付 `Success`（详见 [VaultPasskeyRepository] 写入口契约）。 */
     override suspend fun saveNewPasskeyEntry(
         data: PasskeyData,
         boundPackage: String?,
         parentGroupId: KdbxUuid?
-    ): KdbxEntry = passkeyEntries.saveNewPasskeyEntry(data, boundPackage, parentGroupId)
+    ): KdbxResult<KdbxEntry> = passkeyEntries.saveNewPasskeyEntry(data, boundPackage, parentGroupId)
 
-    override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxEntry? =
+    override suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxResult<KdbxEntry> =
         passkeyEntries.replacePasskeyOnEntry(entryId, data)
 
     /** ISSUE-P3-342：解除绑定下沉 [PasskeyEntryCoordinator]（与替换同一保留集尺子）。 */
-    override suspend fun clearPasskeyOnEntry(entryId: String): KdbxEntry? =
+    override suspend fun clearPasskeyOnEntry(entryId: String): KdbxResult<KdbxEntry> =
         passkeyEntries.clearPasskeyOnEntry(entryId)
 
-    override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxEntry =
+    override suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxResult<KdbxEntry> =
         passkeyEntries.saveOrReplacePasskeyEntry(data, boundPackage)
 
     override suspend fun findExistingPasskeyCredentialIds(credentialIds: Set<String>): Set<String> =
         passkeyEntries.findExistingCredentialIds(credentialIds)
 
-    override suspend fun patchPasskeySignCount(entryId: String, newCount: Int) =
+    override suspend fun patchPasskeySignCount(entryId: String, newCount: Int): KdbxResult<Unit> =
         passkeyEntries.patchPasskeySignCount(entryId, newCount)
 
     /**
      * ISSUE-P3-27 子项 2：原子递增并回传**实际落库**的签名计数器。
      * 委托 [PasskeyEntryCoordinator.incrementPasskeySignCount]（递增与落库同处一个受控变换），
      * 使断言路径能取得唯一值而不必用锁外快照自算。
+     *
+     * `ISSUE-P1-590`：落盘失败返回 `Failure`——断言链据此拒签，不再回传未提交的计数器。
      */
-    override suspend fun incrementPasskeySignCount(entryId: String): Int? =
+    override suspend fun incrementPasskeySignCount(entryId: String): KdbxResult<Int> =
         passkeyEntries.incrementPasskeySignCount(entryId)
 
     override suspend fun saveAutofillCredential(

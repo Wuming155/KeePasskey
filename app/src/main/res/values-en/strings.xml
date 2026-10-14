@@ -948,6 +948,7 @@
     <string name="err_drift_file_unreadable">File is unreadable</string>
     <string name="err_drift_no_active_database">No active database</string>
     <string name="err_drift_session_tree_changed">In-memory tree changed during the merge window</string>
+    <string name="err_passkey_entry_not_found">Passkey entry not found (it may have been deleted)</string>
     <string name="err_lifecycle_no_change">No change specified</string>
     <string name="sync_feedback_offline">Offline or network unreachable; local changes kept safe</string>
     <!-- §410 walkthrough: honest notice when pull-to-refresh fires with cloud sync unconfigured -->
@@ -1669,6 +1670,10 @@
     <string name="passkey_reject_request_invalid">The create request does not conform to the passkey specification; creation was refused.</string>
     <string name="passkey_reject_credential_exists">A passkey for this site already exists in this vault; no need to create another.</string>
     <string name="passkey_reject_caller_browser_not_trusted">The browser that started this request is not on the privileged browser allowlist; using this passkey was refused.</string>
+    <!-- ISSUE-P1-590: persistence failure (disk full / drift refusal / read-only) refuses signing or success -->
+    <string name="passkey_reject_persistence_failed">The passkey could not be written to the vault (save failed); this operation was rolled back. Check storage space or the vault file, then retry.</string>
+    <!-- ISSUE-P1-590: edit-page import / unbind save-failure notice (distinct from the "entry not found" strings) -->
+    <string name="passkey_write_failed">The passkey could not be written to the vault (save failed); nothing was changed</string>
     <!-- ISSUE-P3-221：拒绝原因页的就地补救（窗口内授权、无跳转）；%1$s = 系统背书包的应用展示名 -->
     <string name="cred_reject_exit">Exit</string>
     <string name="cred_reject_action_add_browser">Add to allowlist</string>

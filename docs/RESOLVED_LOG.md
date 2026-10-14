@@ -613,5 +613,6 @@
 | §513 | 全部写入口文件漂移保护批次 | `ISSUE-P1-601`（整条闭环；P1 5 → 4） | [513-全部写入口文件漂移保护批次.md](resolved/batches/513-全部写入口文件漂移保护批次.md) |
 | §514 | Argon2 参数读写接受域统一批次 | `ISSUE-P1-595`（整条闭环；P1 4 → 3） | [514-Argon2参数读写接受域统一批次.md](resolved/batches/514-Argon2参数读写接受域统一批次.md) |
 | §515 | 数据库设置保存失败反馈批次 | `ISSUE-P2-602`（整条闭环；P2 1 → 0） | [515-数据库设置保存失败反馈批次.md](resolved/batches/515-数据库设置保存失败反馈批次.md) |
+| §516 | 通行密钥持久化成功回传批次 | `ISSUE-P1-590`（整条闭环；P1 3 → 2） | [516-通行密钥持久化成功回传批次.md](resolved/batches/516-通行密钥持久化成功回传批次.md) |
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58 起，滚动）· [`05`](resolved/BATCH_158_PLUS.md)（§158 起，滚动）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起）。

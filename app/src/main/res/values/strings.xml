@@ -960,6 +960,7 @@
     <string name="err_drift_file_unreadable">文件不可读</string>
     <string name="err_drift_no_active_database">无活动数据库</string>
     <string name="err_drift_session_tree_changed">合并窗口内会话树已变化</string>
+    <string name="err_passkey_entry_not_found">未找到该通行密钥条目（可能已被删除）</string>
     <string name="err_lifecycle_no_change">未指定任何改动</string>
     <string name="sync_feedback_offline">当前处于离线模式或网络不可达，已保留本地修改</string>
     <!-- §410 走查：未配置云同步时下拉刷新的如实提示（不进同步周期） -->

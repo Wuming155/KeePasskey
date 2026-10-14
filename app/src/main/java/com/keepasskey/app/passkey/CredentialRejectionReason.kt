@@ -61,6 +61,13 @@ enum class CredentialRejectionReason(@StringRes val messageRes: Int) {
      */
     CALLER_BROWSER_NOT_TRUSTED(R.string.passkey_reject_caller_browser_not_trusted),
 
+    /**
+     * `ISSUE-P1-590`：通行密钥**未能写入密码库**（保存失败 / 漂移拒绝 / 只读）——创建与断言
+     * 两条链路共用。此前保存失败只写日志仍回传成功，RP 随即登记了一把本机未持久化的私钥；
+     * 现在落盘失败一律拒签 / 拒绝回传成功，并给出本页可恢复提示。
+     */
+    PASSKEY_PERSISTENCE_FAILED(R.string.passkey_reject_persistence_failed),
+
     /** 创建过程内部异常（fail-closed 兜底） */
     INTERNAL_ERROR(R.string.cred_error_unknown);
 

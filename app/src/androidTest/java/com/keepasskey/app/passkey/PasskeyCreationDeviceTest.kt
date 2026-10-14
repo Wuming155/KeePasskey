@@ -121,8 +121,8 @@ class PasskeyCreationDeviceTest {
             persistSession = { com.keepasskey.core.result.KdbxResult.Success(Unit) }
         )
 
-        val savedEntry = coordinator.saveNewPasskeyEntry(passkeyData, boundPackage = null)
-        assertNotNull("创建的新条目必须成功落入会话", savedEntry)
+        val savedEntry = coordinator.saveNewPasskeyEntry(passkeyData, boundPackage = null).getOrNull()
+        assertNotNull("创建的新条目必须成功落入会话（ISSUE-P1-590：落盘成功才交付数据）", savedEntry)
 
         // 3. 验证从库中通过 rpId 可以准确匹配到该通行密钥条目
         val matchedEntries = coordinator.findEntriesForRpId("passkeys.io")

@@ -12,6 +12,8 @@ import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.result.KdbxError
+import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -271,11 +273,26 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 }
 
                 // ISSUE-P3-27 子项 2：先把签名计数器**原子递增并落库**，再据其返回值签名。
-                val signCount = vaultRepository.incrementPasskeySignCount(entryId)
-                if (signCount == null) {
-                    AppLog.e(TAG, "签名计数器未能原子递增并落库，拒绝签发断言")
-                    failAndFinish()
-                    return@launch
+                // ISSUE-P1-590：只有计数器真正落盘才签发——落盘失败一律拒签（否则签名值已交 RP
+                // 而库内计数器未提交，重启后即回退），并按「未命中」与「落盘失败」分型收尾。
+                val signCount = when (val signResult = vaultRepository.incrementPasskeySignCount(entryId)) {
+                    is KdbxResult.Success -> signResult.data
+                    is KdbxResult.Failure -> {
+                        if (signResult.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND) {
+                            AppLog.e(TAG, "签名计数器未能原子递增并落库，拒绝签发断言")
+                            failAndFinish()
+                        } else {
+                            AppLog.e(
+                                TAG,
+                                "签名计数器已递增但未落盘（${signResult.error.javaClass.simpleName}），拒绝签发断言"
+                            )
+                            rejectAndFinish(
+                                CredentialRejectionReason.PASSKEY_PERSISTENCE_FAILED,
+                                titleRes = R.string.cred_reject_get_title
+                            )
+                        }
+                        return@launch
+                    }
                 }
 
                 // 密码学运算调度至 Default，杜绝在系统回调线程上执行 CPU 密集签名

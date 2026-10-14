@@ -427,11 +427,16 @@ internal class VaultListActionController(
         draft.wipe()
         scope.launch {
             val groupId = currentGroupId()?.let { parseKdbxUuidOrNull(it) }
-            val saved = repository.saveNewPasskeyEntry(data, boundPackage = null, parentGroupId = groupId)
-            // 落盘失败由协调器内部留痕（PasskeyEntryCoordinator 的既有契约：条目已在会话内生效，
-            // 序列化失败只记日志），故此处按「已建条目」如实提示并交出导航意图，不再二次探测。
-            onMessage(UiMessage(R.string.passkey_import_created, listOf(passkeyImportTitle(data))))
-            openEntryEditIdFlow.value = saved.id.toHexString()
+            // ISSUE-P1-590：只有落盘成功才提示成功并交出导航意图；失败如实上浮保存失败码，
+            // 绝不按「已建条目」谎报成功（此前保存失败只记日志仍报成功）。
+            when (val saved = repository.saveNewPasskeyEntry(data, boundPackage = null, parentGroupId = groupId)) {
+                is KdbxResult.Success -> {
+                    onMessage(UiMessage(R.string.passkey_import_created, listOf(passkeyImportTitle(data))))
+                    openEntryEditIdFlow.value = saved.data.id.toHexString()
+                }
+                is KdbxResult.Failure ->
+                    onMessage(UiMessage(R.string.op_failed, listOf(saved.textArg(strings))))
+            }
         }
     }
 

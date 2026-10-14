@@ -71,4 +71,12 @@ object KdbxError {
      */
     const val DRIFT_SAVE_ABORTED = "kdbx.drift.save_aborted"
 
+    // ---- 通行密钥写路径（app/data/repository/PasskeyEntryCoordinator，ISSUE-P1-590）----
+    /**
+     * 通行密钥写入口未命中目标条目（id 非法 / 条目不存在）——与「落盘失败」**分型**表达：
+     * 前者是定位失败（无写入），后者是已改内存但未提交磁盘（`ISSUE-P1-590` 要求二者可区分，
+     * 调用方据此分别提示「条目不存在」与「保存失败」）。
+     */
+    const val PASSKEY_ENTRY_NOT_FOUND = "kdbx.passkey.entry_not_found"
+
 }
