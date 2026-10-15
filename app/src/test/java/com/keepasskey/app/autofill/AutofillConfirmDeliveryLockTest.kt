@@ -147,9 +147,9 @@ class AutofillConfirmDeliveryLockTest {
         // 而非其函数定义）与「会话授权写入」——ISSUE-P3-201：锁定后这两项副作用均不应发生
         val deliverStart = pickerSource.indexOf("private fun deliver(")
         val gateInDeliver = pickerSource.indexOf("canDeliverAuthResult(", deliverStart)
-        // ISSUE-P3-528：调用点改为「取回摘要快照 + 写入绑定」的赋值形式（`val x = bindCallerForPackageDimension()`），
-        // 判据（调用点晚于锁定门控）不变
-        val bindCall = Regex("""(?m)^\s+(?:val\s+\w+\s*=\s*)?bindCallerForPackageDimension\(\)""")
+        // ISSUE-P3-528：调用点改为「取回摘要快照 + 写入绑定」的赋值形式（`val x = bindCallerForPackageDimension(…)`），
+        // 判据（调用点晚于锁定门控）不变；调用形态变更（行数闸门拆分带参）时同步放宽括号形态
+        val bindCall = Regex("""(?m)^\s+(?:val\s+\w+\s*=\s*)?bindCallerForPackageDimension\(""")
             .find(pickerSource, deliverStart)?.range?.first ?: -1
         val grantCall = pickerSource.indexOf("AutofillSessionGrants.grant(grantContext)", deliverStart)
         // ISSUE-P3-528：本批新增的第二处交付副作用（关联记忆写入）同口径——必须晚于锁定门控

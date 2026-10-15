@@ -38,9 +38,12 @@ class AutofillAuthResultRecheckWiringTest {
 
     @Test
     fun `确认页交付前必须复检字段屏蔽`() {
+        // 复检实现自 Activity 拆至 AutofillConfirmAuthResolver（行数闸门，零行为变更）；
+        // 仓库注入仍在 Activity，判据位置随搬运更新
+        val resolveSource = readSource(CONFIRM_RESOLVER_PATH)
         assertTrue(
-            "确认页 resolveAuthResultIntent 必须调用 AutofillAuthDeliveryBlockPolicy.filter",
-            confirmSource.contains("AutofillAuthDeliveryBlockPolicy.filter")
+            "确认页 resolveConfirmAuthResultIntent 必须调用 AutofillAuthDeliveryBlockPolicy.filter",
+            resolveSource.contains("AutofillAuthDeliveryBlockPolicy.filter")
         )
         assertTrue(
             "确认页必须注入字段屏蔽仓库",
@@ -48,11 +51,11 @@ class AutofillAuthResultRecheckWiringTest {
         )
         assertTrue(
             "确认页必须把复检结果传给 AutofillConfirmAuthDelivery.build（Dataset 构造唯一入口）",
-            confirmSource.contains("AutofillConfirmAuthDelivery.build") &&
-                confirmSource.contains("deliverable = deliverable")
+            resolveSource.contains("AutofillConfirmAuthDelivery.build") &&
+                resolveSource.contains("deliverable = deliverable")
         )
-        val filterIdx = confirmSource.indexOf("AutofillAuthDeliveryBlockPolicy.filter")
-        val buildIdx = confirmSource.indexOf("AutofillConfirmAuthDelivery.build")
+        val filterIdx = resolveSource.indexOf("AutofillAuthDeliveryBlockPolicy.filter")
+        val buildIdx = resolveSource.indexOf("AutofillConfirmAuthDelivery.build")
         assertTrue(
             "确认页必须在 Dataset 构造之前完成复检",
             filterIdx >= 0 && buildIdx >= 0 && filterIdx < buildIdx
@@ -120,6 +123,8 @@ class AutofillAuthResultRecheckWiringTest {
             "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt"
         const val CONFIRM_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt"
+        const val CONFIRM_RESOLVER_PATH =
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthResolver.kt"
         const val CONFIRM_DELIVERY_PATH =
             "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthDelivery.kt"
         const val POLICY_PATH =

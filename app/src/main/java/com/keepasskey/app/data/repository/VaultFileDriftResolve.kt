@@ -9,6 +9,8 @@ import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.app.security.VaultFileMetadataProbe
 import com.keepasskey.app.sync.eraseDiscardedDatabase
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.app.util.StreamLimitExceededException
+import com.keepasskey.app.util.readBoundedBytes
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
@@ -44,7 +46,12 @@ internal class VaultFileDriftResolve(
      * `ISSUE-P3-447` AC②：SAF 通道重载 / 合并所需的上下文。null（纯 JVM 单测未装配）时
      * SAF 通道按「磁盘库文件不可读」fail-closed——不得静默放行。
      */
-    private val context: Context? = null
+    private val context: Context? = null,
+    /**
+     * `ISSUE-P3-617`：源文件读取上限；默认生产上限 [MAX_DRIFT_READ_BYTES]，
+     * 单测注入更小值即可低成本覆盖超限分支（与 `ImportJson.Limits` 同构）。
+     */
+    private val maxDriftReadBytes: Long = MAX_DRIFT_READ_BYTES
 ) {
 
     suspend fun resolve(
@@ -193,11 +200,36 @@ internal class VaultFileDriftResolve(
     /**
      * 当前库的**可读字节**（本地 `File` 直读；SAF 经 `ContentResolver` 读入）。
      * 不可读返回 null，由调用方按 fail-closed 报「磁盘库文件不可读」。
+     *
+     * `ISSUE-P3-617`：两处整流 `readBytes()` 改为带硬上限的分块读取——未知或错误申报长度
+     * 可绕过读取前检查，超大输入会在解析限制生效前分配完整 `ByteArray`（OOM/ANR）。
+     * 本地文件先按 `length()` 快拒（精确长度已知，不建流）；SAF 流（含未知长度）一律由
+     * [readBoundedBytes] 累计封顶，超限按不可读同口径返回 null（`resolve` 侧报合并 / 重载失败，
+     * 不抛 OOM）。上限见 [MAX_DRIFT_READ_BYTES]。
      */
     private fun readCurrentBytes(localFile: File?, pathId: String): ByteArray? {
-        if (localFile != null) return if (localFile.exists()) localFile.readBytes() else null
+        if (localFile != null) {
+            if (!localFile.exists()) return null
+            // 快拒：本地文件长度精确已知，超限根本不读进内存
+            if (localFile.length() > maxDriftReadBytes) {
+                AppLog.w(TAG, "漂移源文件超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
+                return null
+            }
+            return runCatching { localFile.inputStream().use { it.readBoundedBytes(maxDriftReadBytes) } }
+                .onFailure { AppLog.w(TAG, "漂移源文件读取失败: ${it.javaClass.simpleName}") }
+                .getOrNull()
+        }
         val saf = safChannel(pathId) ?: return null
-        return runCatching { saf.openInput().use { it.readBytes() } }.getOrNull()
+        return runCatching { saf.openInput().use { it.readBoundedBytes(maxDriftReadBytes) } }
+            .onFailure {
+                // 超限与 IO 失败同按不可读处置（日志只记类型与上限，不记路径——ISSUE-P3-550）
+                if (it is StreamLimitExceededException) {
+                    AppLog.w(TAG, "漂移源 SAF 流超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
+                } else {
+                    AppLog.w(TAG, "漂移源 SAF 流读取失败: ${it.javaClass.simpleName}")
+                }
+            }
+            .getOrNull()
     }
 
     /** SAF 文档句柄（读流 + 写回）；非 `content://` 或未装配上下文时返回 null */
@@ -227,5 +259,19 @@ internal class VaultFileDriftResolve(
 
         val saveWriter: suspend (ByteArray) -> Unit
             get() = SafVaultCreation.saveWriter(context, uri, uri.lastPathSegment.orEmpty())
+    }
+
+    internal companion object {
+        /**
+         * 漂移源文件读取上限：160 MiB（`ISSUE-P3-617`）。
+         *
+         * 取值推导（禁字面量拍脑袋）：`KdbxFile` 解析侧以 128 MiB 解压输出守卫封顶任何可解析库
+         * （`MAX_DECOMPRESSED_PAYLOAD_BYTES`，database 模块内部常量，此处按值引用）；
+         * 密文体 ≈ 明文体（不压缩时）或更小（GZip 时）+ HMAC 块帧与头部开销（< 1%），
+         * 故任何可被解析的库其源文件必远小于 160 MiB——超限即合并 / 重载失败 fail-closed，
+         * 不再无界分配。与同步下载上限（`SyncDownloadLimits.MAX_DOWNLOAD_BYTES = 128 MiB`，
+         * 约束**远端**响应体）不冲突：本上限约束本地 / SAF 源文件的**物化**，合法库两侧恒通过。
+         */
+        const val MAX_DRIFT_READ_BYTES: Long = 160L * 1024 * 1024
     }
 }

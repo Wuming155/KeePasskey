@@ -17,7 +17,9 @@ import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 「打开方式」外部打开入口（ISSUE-P3-298 ①）：文件管理器 / 云盘应用对 `.kdbx` 文件选择
@@ -69,15 +71,19 @@ class OpenVaultEntryActivity : FragmentActivity() {
             rejectAndFallback()
             return
         }
-        val displayName = resolveDisplayName(uri)
-        if (displayName == null ||
-            VaultOpenUriPolicy.acceptDisplayName(displayName) !is VaultOpenUriPolicy.Decision.Accept
-        ) {
-            rejectAndFallback()
-            return
+        // ISSUE-P3-616：显示名查询经外部 Provider（任意应用可注册且可能缓慢/无响应），
+        // 移出主线程并伴随 Activity 生命周期取消；查询完成前不弹确认、不登记任何状态。
+        lifecycleScope.launch {
+            val displayName = resolveDisplayName(uri)
+            if (displayName == null ||
+                VaultOpenUriPolicy.acceptDisplayName(displayName) !is VaultOpenUriPolicy.Decision.Accept
+            ) {
+                rejectAndFallback()
+                return@launch
+            }
+            // ISSUE-P3-575 AC②：登记 / 覆写活动库指针前必须用户确认，外部输入不得静默改状态
+            confirmThenImport(uri, displayName)
         }
-        // ISSUE-P3-575 AC②：登记 / 覆写活动库指针前必须用户确认，外部输入不得静默改状态
-        confirmThenImport(uri, displayName)
     }
 
     /** 只接受 VIEW（data URI）与 SEND（EXTRA_STREAM）；其余 action / 文字 extras 一律忽略 */
@@ -126,15 +132,19 @@ class OpenVaultEntryActivity : FragmentActivity() {
     /**
      * 解析显示名：**仅** `content://` 经 OpenableColumns 查询（`file://` 已在准入时被拒，
      * 故不再有「取路径末段」分支）。查询不到（Provider 异常 / 权限缺失）返回 null，按非法输入拒绝。
+     *
+     * `ISSUE-P3-616`：查询固定落 [Dispatchers.IO]——本页消费任意应用可发的 Intent，其 Provider
+     * 可缓慢甚至无响应；块内无挂起点，取消经 `withContext` 边界传播（底层 Binder 调用未必即时
+     * 中断，但结果必被丢弃）。
      */
-    private fun resolveDisplayName(uri: Uri): String? {
-        return try {
+    private suspend fun resolveDisplayName(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
             contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { cursor ->
                     val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
                 }
-        } catch (t: Throwable) {
+        } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式 Provider 查询（块内无挂起点）
             AppLog.w(TAG, "外部打开显示名解析失败: ${t.javaClass.simpleName}")
             null
         }

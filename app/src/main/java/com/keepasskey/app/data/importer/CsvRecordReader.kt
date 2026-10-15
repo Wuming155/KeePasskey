@@ -8,7 +8,9 @@ package com.keepasskey.app.data.importer
  * - `CRLF` / `LF` / 裸 `CR` 混用（引号内的换行原样保留，不做归一，保持值忠实）；
  * - 引号出现在非引号字段中时按字面量处理（宽容，不崩溃）；
  * - UTF-8 BOM 由 [ImportTextDecoder] 在解码阶段剥离；
- * - 单字段长度封顶 [ImportLimits.MAX_FIELD_CHARS]（畸形未闭合引号即 fail-closed）。
+ * - 单字段长度封顶 [ImportLimits.MAX_FIELD_CHARS]（畸形未闭合引号即 fail-closed）；
+ * - 单条记录字段数封顶 [ImportLimits.MAX_FIELDS_PER_RECORD]（`ISSUE-P2-619`：逗号密集行
+ *   在字段对象分配前即拒绝，防海量 `CharArray` 撑爆堆）。
  *
  * **所有权与敏感数据**：调用方经 [forEachRow] 收到的每个字段都是**独占的 `CharArray`**，
  * 由调用方负责清零（密码字段可径直转交 [ImportedEntry]，全程不产生 `String`）；
@@ -16,7 +18,8 @@ package com.keepasskey.app.data.importer
  */
 internal class CsvRecordReader(
     private val text: String,
-    private val maxFieldChars: Int = ImportLimits.MAX_FIELD_CHARS
+    private val maxFieldChars: Int = ImportLimits.MAX_FIELD_CHARS,
+    private val maxFieldsPerRecord: Int = ImportLimits.MAX_FIELDS_PER_RECORD
 ) {
 
     private var state = CsvState.FIELD_START
@@ -99,6 +102,9 @@ internal class CsvRecordReader(
     }
 
     private fun endField() {
+        if (currentRecord.size >= maxFieldsPerRecord) {
+            throw ImportLimitExceededException(OVER_FIELD_COUNT)
+        }
         val field = fieldBuffer.copyOf(fieldLength)
         if (fieldLength > 0) fieldBuffer.fill(NUL_CHAR, 0, fieldLength)
         fieldLength = 0
@@ -139,5 +145,6 @@ internal class CsvRecordReader(
         const val LINE_FEED = '\n'
         const val NUL_CHAR = '\u0000'
         const val OVER_FIELD_LIMIT = "CSV 单个字段超出导入长度上限"
+        const val OVER_FIELD_COUNT = "CSV 单条记录字段数超出上限"
     }
 }

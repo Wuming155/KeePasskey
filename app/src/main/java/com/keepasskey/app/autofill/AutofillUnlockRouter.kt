@@ -20,7 +20,7 @@ import com.keepasskey.core.model.KdbxEntry
  *   本判据只消费、不新造；
  * - **调用方绑定状态** = [AndroidPackageBindingPolicy.isPackageDimensionAuthorized] 的结论
  *   （ISSUE-P2-46：「包名 + 签名摘要」首次绑定）。该绑定的**补救写入点**是选择器
- *   [AutofillPickerActivity.bindCallerForPackageDimension]（P2-46 指定的唯一补救入口；
+ *   [bindCallerForPackageDimension]（P2-46 指定的唯一补救入口；实现寄于请求方解析文件；
  *   确认页 P1-24「记住此应用」勾选虽写同一信任存储，但那是授权语义的副产品、非 P2-46 补救入口）
  *   ——故**未绑定调用方必须继续走 PICKER**（fail-closed）：否则未绑定者永远不会经过选择器，
  *   `android://` 首次绑定便无从写入；

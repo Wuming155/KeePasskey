@@ -206,6 +206,14 @@ class OnePasswordPuxImporterTest {
     }
 
     @Test
+    fun `export data 单容器成员数超生产预算时以上限异常归一为失败`() = runTest {
+        // 条目数组恰越过容器成员预算（16 384）：JSON 解析闸门在条目数计数闸门之前拦下
+        val items = List(ImportLimits.MAX_JSON_CONTAINER_MEMBERS + 1) { "{}" }.joinToString(",")
+
+        assertLimitExceeded(archive(exportEntry(exportJson(items))))
+    }
+
+    @Test
     fun `警告数量超上限时折叠为一条截断汇总项且跳过计数不受影响`() = runTest {
         val skippedCount = ImportLimits.MAX_WARNINGS * 2
         val items = List(skippedCount) { puxItem(title = "非登录", categoryUuid = "002") }.joinToString(",")

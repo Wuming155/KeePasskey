@@ -81,10 +81,12 @@ class AutofillPickerEntryInvariantTest {
     }
 
     @Test
-    fun `非匹配准入只有关联记忆一条且键含签名`() {
+    fun `非匹配准入只有关联记忆一条且键含签名与域`() {
         // ISSUE-P3-528 立规：本批新增的关联记忆档是**唯一**不经匹配的准入来源，
         // 故此处把「其唯一性 + 键含签名摘要 + 记忆条目仍走强制确认」三条固化为不变量，
         // 防止日后被扩成第二条旁路（那正是 P2-46 绑定门被绕过的形态）。
+        // ISSUE-P2-617 收紧：召回必须绑定归属校验后的域——传表单自报域或不传域，
+        // 同浏览器下他站记忆即可被召回（包级记忆绕过网站来源匹配）。
         assertEquals(
             "非匹配准入来源只允许一处（多一处即意味着又开了一条旁路）",
             1,
@@ -92,7 +94,7 @@ class AutofillPickerEntryInvariantTest {
         )
         assertTrue(
             "记忆召回必须以调用方签名摘要集合为键（换签名即不命中）",
-            candidates.contains("autofillCallerEntryMemory.recall(callingPkg, callerCertDigests)")
+            candidates.contains("autofillCallerEntryMemory.recall(callingPkg, callerCertDigests, webDomain)")
         )
         assertTrue(
             "记忆档不得豁免二次确认：数据集装配仍须走 attachConfirmationAuth",

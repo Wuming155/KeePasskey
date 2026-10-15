@@ -12,6 +12,9 @@ import org.junit.Test
  * 同包名同签名召回；**同包名换签名不召回**（重打包 / 侧载冒名不得继承记忆）；
  * 包名非法 fail-closed；摘要不可读退回「仅包名」降级键且摘要可读时不回退；
  * 多摘要任一命中即召回（签名轮换）；容量上限按记录时刻淘汰最旧。
+ *
+ * ISSUE-P2-617 追加域隔离：浏览器记忆绑定归属校验后的域，同包同签名跨域不得召回；
+ * 纯 App 记忆（无域）与浏览器域记忆互不可见；域归一（大小写 / scheme / 末点）读写同口径。
  */
 class AutofillCallerEntryMemoryTest {
 
@@ -110,5 +113,51 @@ class AutofillCallerEntryMemoryTest {
         memory.clear()
 
         assertNull(memory.recall("com.example.app", digests("ABCD")))
+    }
+
+    // ── ISSUE-P2-617：浏览器记忆绑定归属校验后的域 ──────────────
+
+    @Test
+    fun `同包同签名同域记录后可召回`() {
+        memory.remember("com.android.chrome", "ABCD", "entry-1", "github.com")
+
+        assertEquals("entry-1", memory.recall("com.android.chrome", digests("ABCD"), "github.com"))
+    }
+
+    @Test
+    fun `同包同签名跨域不得召回`() {
+        // 核心用例：在 A 站确认填充后，恶意 B 站（同浏览器同签名）不得召回 A 站条目
+        memory.remember("com.android.chrome", "ABCD", "entry-1", "github.com")
+
+        assertNull(memory.recall("com.android.chrome", digests("ABCD"), "evil.example"))
+        assertNull(memory.recall("com.android.chrome", digests("ABCD"), "other.example.org"))
+    }
+
+    @Test
+    fun `纯应用记忆与浏览器域记忆互不可见`() {
+        memory.remember("com.example.app", "ABCD", "entry-app")
+        memory.remember("com.example.app", "ABCD", "entry-web", "github.com")
+
+        // 纯 App 表单（无域）不得召回浏览器域记忆
+        assertEquals("entry-app", memory.recall("com.example.app", digests("ABCD")))
+        assertEquals("entry-app", memory.recall("com.example.app", digests("ABCD"), null))
+        // 浏览器表单不得召回纯 App 记忆
+        assertEquals("entry-web", memory.recall("com.example.app", digests("ABCD"), "github.com"))
+    }
+
+    @Test
+    fun `域归一读写同口径`() {
+        memory.remember("com.android.chrome", "ABCD", "entry-1", "https://GitHub.com/login/")
+
+        assertEquals("entry-1", memory.recall("com.android.chrome", digests("ABCD"), "github.com"))
+        assertEquals("entry-1", memory.recall("com.android.chrome", digests("ABCD"), "GITHUB.COM."))
+    }
+
+    @Test
+    fun `空域与 null 域视为同一纯应用键`() {
+        memory.remember("com.example.app", "ABCD", "entry-1", null)
+
+        assertEquals("entry-1", memory.recall("com.example.app", digests("ABCD"), ""))
+        assertEquals("entry-1", memory.recall("com.example.app", digests("ABCD"), "   "))
     }
 }

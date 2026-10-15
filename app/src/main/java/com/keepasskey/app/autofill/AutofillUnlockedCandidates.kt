@@ -52,10 +52,14 @@ internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
     // ISSUE-P3-39：候选打分排序——严格匹配（DomainMatcher）通过的条目按
     // 「精确域名 > 精确包名 > 父域」打分并截断；匹配条件一字未放宽，
     // 未通过 isDomainMatch / isPackageMatch 的条目不会进入结果。
-    // ISSUE-P3-528：调用方关联记忆（键＝包名 + 签名摘要，见 AutofillCallerEntryMemory）命中时，
-    // 该条目**不经匹配**即入选并置首——准入依据是用户此前在该调用方上已发生的显式交付；
-    // 这是唯一的非匹配准入来源，且记忆条目仍挂强制二次确认（见 attachConfirmationAuth）。
-    val rememberedEntryId = autofillCallerEntryMemory.recall(callingPkg, callerCertDigests)
+    // ISSUE-P3-528：调用方关联记忆（键＝包名 + 签名摘要 + 域，见 AutofillCallerEntryMemory）命中时，
+    // 该条目按 [AutofillCandidateRanker] 的记忆档规则入选并置首——准入依据是用户此前在该调用方上
+    // 已发生的显式交付；这是唯一的非匹配准入来源（纯 App 上下文），浏览器上下文还须过当前域匹配
+    // （`ISSUE-P2-617`：召回即按已校验域隔离，排序器另有第二道门），且记忆条目仍挂强制二次确认
+    // （见 attachConfirmationAuth）。
+    // 召回传入的必须是归属校验后的 [webDomain]（`ISSUE-P2-617`）——表单自报域未经校验，
+    // 不得作为记忆键，否则恶意站自报他站域名即可召回他站记忆。
+    val rememberedEntryId = autofillCallerEntryMemory.recall(callingPkg, callerCertDigests, webDomain)
     if (rememberedEntryId != null) {
         // 只记事实（不含条目名 / 包名 / 摘要等标识）
         AppLog.d(TAG, "调用方关联记忆命中，本条候选含该条目")

@@ -14,11 +14,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
 import com.keepasskey.app.sync.WebDavDefaults
+import kotlinx.coroutines.launch
 
 /**
  * 打开已有 KDBX 文件对话框 (支持本地/WebDAV/S3 自动展示并填写连接配置)
@@ -63,6 +65,8 @@ internal fun OpenExistingVaultDialog(
     onSourceSelected: (OpenVaultSourceType) -> Unit = {}
 ) {
     val context = LocalContext.current
+    // ISSUE-P3-616：SAF 选取回调的展示名查询用组合作用域协程承载（对话框离场即取消）
+    val scope = rememberCoroutineScope()
     var selectedSource by remember { mutableStateOf(OpenVaultSourceType.LOCAL) }
 
     val local = remember { LocalVaultFormState() }
@@ -73,8 +77,14 @@ internal fun OpenExistingVaultDialog(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
-            local.name = queryDocumentDisplayName(context, uri)
-            local.path = uri.toString()
+            // ISSUE-P3-616：展示名查询（外部 Provider 调用）落 IO 调度器；组合作用域随对话框
+            // 离场取消。查询完成前不置表单态——确认按钮要求 name+path 同时非空，不存在
+            // 「只有路径没有名字」的可提交半态。
+            scope.launch {
+                val name = queryDocumentDisplayName(context, uri)
+                local.name = name
+                local.path = uri.toString()
+            }
         }
     }
 

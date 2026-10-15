@@ -15,7 +15,6 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricStatus
-import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.app.ui.localizedContextForAppLanguage
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
@@ -76,7 +75,8 @@ class AutofillPickerActivity : FragmentActivity() {
     @Inject
     lateinit var totpPostFillActions: AutofillPostFillTotpActions
 
-    // ISSUE-P3-528：调用方关联记忆写入点（本页是用户显式选中条目的唯一入口；键＝包名 + 签名摘要）
+    // ISSUE-P3-528：调用方关联记忆写入点（本页是用户显式选中条目的唯一入口；
+    // 键＝包名 + 签名摘要 + 表单域，ISSUE-P2-617）
     @Inject
     lateinit var autofillCallerEntryMemory: AutofillCallerEntryMemory
 
@@ -257,7 +257,8 @@ class AutofillPickerActivity : FragmentActivity() {
         // 维度后续自动命中的唯一前提，也是未绑定调用方唯一的补救路径。
         // ISSUE-P3-528：本次读取的签名摘要快照**由本调用返回**，供交付成功时的关联记忆写入复用
         // （摘要读取含一次 getPackageInfo + 逐签名者 SHA-256，per-request 只读一次，ISSUE-P3-170 同口径）
-        val callerDigests = bindCallerForPackageDimension()
+        // 实现已拆至 AutofillPickerRequesterResolver（行数闸门，零行为变更）
+        val callerDigests = bindCallerForPackageDimension(intent, autofillOriginResolver, callerTrustStore)
         lifecycleScope.launch {
             // ISSUE-P3-186：回传前按偏好执行 TOTP 二次动作（与确认页共用实现：500ms 硬超时 +
             // 双开关闸门 + 库锁定不触碰，任何异常 / 超时都不阻断回传——实现内部已兜底）
@@ -327,8 +328,10 @@ class AutofillPickerActivity : FragmentActivity() {
                 AutofillSessionGrants.grant(grantContext)
             }
             // ISSUE-P3-528：交付成功即写入关联记忆（Monica「互动记忆」）——下次该调用方无需重选；
-            // 摘要复用上文快照（本页不再第二次读取）
-            autofillCallerEntryMemory.remember(callingPackage, callerDigests, entryId)
+            // 摘要复用上文快照（本页不再第二次读取）。
+            // ISSUE-P2-617：同时绑定表单域（自报域，与确认页已校验域同归一口径；召回侧以已校验域查，
+            // 不一致即不命中 fail-closed）。本次是用户显式选中，写入自报域无放行风险。
+            autofillCallerEntryMemory.remember(callingPackage, callerDigests, entryId, formDomain)
             setResult(RESULT_OK, authenticationResultIntent(dataset))
             finish()
         }
@@ -353,29 +356,6 @@ class AutofillPickerActivity : FragmentActivity() {
     private fun discardPendingResult() {
         setResult(RESULT_CANCELED, authenticationCanceledIntent())
         finish()
-    }
-
-    /**
-     * ISSUE-P2-46：写入调用方「首次绑定」（包名 + 主签名摘要），供 `android://` 维度后续放行。
-     *
-     * **fail-closed**：签名摘要不可读（空集）时**不写入**降级键（`pkg|`）——「只认包名」正是
-     * 本项要消灭的形态；包名非法时存储自身拒绝写入（返回 false）。两种情况一律保持「未绑定」，
-     * 该调用方的 `android://` 候选继续不命中。
-     *
-     * @return 本次读取的签名摘要快照（ISSUE-P3-528 起下传交付点复用，避免同页二次读取）
-     */
-    private fun bindCallerForPackageDimension(): CallerCertDigests {
-        val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty()
-        if (callingPackage.isBlank()) return CallerCertDigests.EMPTY
-        val digests = autofillOriginResolver.callingAppCertDigests(callingPackage)
-        if (digests.isEmpty) {
-            // 日志不携带包名 / 摘要等调用方标识（ISSUE-P1-10 语义）
-            AppLog.w(TAG, "调用方签名摘要不可读，android:// 维度保持未绑定（fail-closed）")
-            return digests
-        }
-        val written = callerTrustStore.trust(callingPackage, digests.primary)
-        AppLog.i(TAG, "android:// 维度首次绑定写入结果=$written")
-        return digests
     }
 
     companion object {

@@ -264,6 +264,41 @@ class BrowserCsvImporterTest {
         assertTrue("超出条目上限必须 fail-closed", result.isFailure)
     }
 
+    @Test
+    fun `表头字段数超出防御性上限时整批 fail-closed`() = runTest {
+        // 字段数恰好越过上限（首行即超限，解析须在字段对象分配前中止）
+        val csv = "name,password" + ",".repeat(ImportLimits.MAX_FIELDS_PER_RECORD) + "\n"
+
+        val failure = parseFailure(csv)
+
+        assertEquals(ImportFailureReason.LIMIT_EXCEEDED, ImportFailureReason.classify(failure.error))
+    }
+
+    @Test
+    fun `数据行字段数超出防御性上限时整批 fail-closed`() = runTest {
+        val csv = HEADER_LINE +
+            "站点,https://a.example,user,$FAKE_PASSWORD" +
+            ",".repeat(ImportLimits.MAX_FIELDS_PER_RECORD) + "\n"
+
+        val failure = parseFailure(csv)
+
+        assertEquals(ImportFailureReason.LIMIT_EXCEEDED, ImportFailureReason.classify(failure.error))
+    }
+
+    @Test
+    fun `字段数恰为上界的记录可正常导入`() = runTest {
+        // 表头与数据行均恰含上限数量的字段（255 个逗号 + 行尾字段 = 256），证明无 off-by-one
+        val extraHeaderColumns = (3..ImportLimits.MAX_FIELDS_PER_RECORD).joinToString(",") { "col_$it" }
+        val extraRowColumns = (3..ImportLimits.MAX_FIELDS_PER_RECORD).joinToString(",") { "v$it" }
+        val csv = "name,password,$extraHeaderColumns\n" +
+            "站点,$FAKE_PASSWORD,$extraRowColumns\n"
+
+        val batch = parseSuccess(csv)
+
+        assertEquals(1, batch.report.parsed)
+        assertEquals("站点", batch.entries.single().title)
+    }
+
     // ---------- ISSUE-P3-312 项 1：CSV 公式注入只告警、不改写 ----------
 
     /** 触发字符取自「导出的 CSV 再被表格软件打开」这一后续动作，故命中即行级警告一条。 */

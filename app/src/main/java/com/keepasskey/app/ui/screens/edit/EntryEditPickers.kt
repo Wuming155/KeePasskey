@@ -19,6 +19,8 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.vault.PasskeyImportConfirmDialog
+import com.keepasskey.app.util.StreamLimitExceededException
+import com.keepasskey.app.util.readBoundedBytes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -86,10 +88,12 @@ private fun iconTooLargeMessage(): UiMessage =
  *
  * [sizeBytes] 语义二选一，均为「已申报 / 已实读到的大小」：
  * - **读前闸门**：传 `ContentResolver.openAssetFileDescriptor(uri, "r")?.length`；`null`（描述符
- *   不可得）与 `-1`（`AssetFileDescriptor.UNKNOWN_LENGTH`）都视为「长度未知」放行，交读后闸门兜底；
- * - **读后闸门**：传 `readBytes()` 得到的大小（恒非负）。
+ *   不可得）与 `-1`（`AssetFileDescriptor.UNKNOWN_LENGTH`）都视为「长度未知」放行，
+ *   交累计上限兜底；
+ * - **累计上限**：`readBoundedBytes(MAX_CUSTOM_ICON_UPLOAD_BYTES)` 在读取中途累计越过上限即抛
+ *   超限异常（`ISSUE-P3-617` 起替代旧「整流后判 `rawBytes.size`」形态——旧形态先分配完整超大缓冲）。
  *
- * null / 负值一律放行：闸门的 fail-closed 面是「实读之后必判」，而非「申报可疑即拒」。
+ * null / 负值一律放行：闸门的 fail-closed 面是「实读累计必判」，而非「申报可疑即拒」。
  */
 internal fun exceedsCustomIconUploadLimit(sizeBytes: Long?): Boolean =
     sizeBytes != null && sizeBytes > MAX_CUSTOM_ICON_UPLOAD_BYTES
@@ -210,17 +214,20 @@ private fun rememberAttachmentPicker(
                         withContext(Dispatchers.Main) { viewModel.showMessage(attachmentTooLargeMessage()) }
                         return@launch
                     }
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    // ISSUE-P3-617：整流改带硬上限的分块读取——申报长度未知（UNKNOWN_LENGTH）或
+                    // 撒谎（申报小于实际）时，旧 `readBytes()` 会在读后兜底之前分配完整超大缓冲
+                    // （OOM 点）；现累计越过上限即抛超限异常（内部缓冲已清零），与读前闸门同文案拒绝。
+                    // 实读上限已由 readBoundedBytes 保证，此处不再二次判定 `bytes.size`。
+                    val bytes = try {
+                        context.contentResolver.openInputStream(uri)?.use { it.readBoundedBytes(MAX_ATTACHMENT_BYTES) }
+                    } catch (large: StreamLimitExceededException) {
+                        withContext(Dispatchers.Main) { viewModel.showMessage(attachmentTooLargeMessage()) }
+                        return@launch
+                    }
                     if (bytes == null || bytes.isEmpty()) {
                         withContext(Dispatchers.Main) {
                             viewModel.showMessage(UiMessage(R.string.edit_attachment_empty))
                         }
-                        return@launch
-                    }
-                    // 兜底：申报长度不可得（provider 返回 UNKNOWN_LENGTH）或流实际更长时二次判定
-                    if (bytes.size > MAX_ATTACHMENT_BYTES) {
-                        bytes.fill(0)
-                        withContext(Dispatchers.Main) { viewModel.showMessage(attachmentTooLargeMessage()) }
                         return@launch
                     }
                     val displayName = queryDisplayName(context, uri) ?: "attachment.bin"
@@ -278,11 +285,12 @@ private fun rememberCustomIconPicker(
                         withContext(Dispatchers.Main) { viewModel.showMessage(iconTooLargeMessage()) }
                         return@launch
                     }
-                    val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    // ISSUE-P3-576 闸门②：申报长度不可得（UNKNOWN_LENGTH / 描述符为 null）或流实际
-                    // 更长时按实读大小二次判定，超限先把字节清零再拒绝（不把超限字节留在堆上）。
-                    if (rawBytes != null && exceedsCustomIconUploadLimit(rawBytes.size)) {
-                        rawBytes.fill(0)
+                    // ISSUE-P3-617：与附件通道同型——整流改带硬上限的分块读取（上限为图标专用上界，
+                    // 远小于附件上限），累计越过即抛超限异常（内部缓冲已清零）并同文案拒绝；
+                    // 实读上限已由 readBoundedBytes 保证，不再二次判定 `rawBytes.size`。
+                    val rawBytes = try {
+                        context.contentResolver.openInputStream(uri)?.use { it.readBoundedBytes(MAX_CUSTOM_ICON_UPLOAD_BYTES) }
+                    } catch (large: StreamLimitExceededException) {
                         withContext(Dispatchers.Main) { viewModel.showMessage(iconTooLargeMessage()) }
                         return@launch
                     }

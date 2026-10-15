@@ -14,9 +14,13 @@ import com.keepasskey.core.model.PasskeyData
  *   入选项必须先通过既有的严格匹配（[DomainMatcher.isDomainMatch] / [DomainMatcher.isAndroidPackageMatch]，
  *   无任何 title/notes 启发式）。`webDomain` 的归属校验由调用方（[AutofillOriginResolver]）负责，
  *   进入本类时已被判定为可用；
- * - **唯一例外且是刻意例外**（ISSUE-P3-528）：`rememberedEntryId` 命中的条目不经匹配即入选。
- *   其准入依据**不是**任何形式的模糊匹配，而是「用户在**同一调用方**（包名 + 签名摘要）上
- *   此前已显式选中并交付过这一条」这一既成事实——该授权强度不低于 `android://` 首次绑定
+ * - **记忆档同样受来源约束**（`ISSUE-P2-617`，`ISSUE-P3-528` 的收紧）：
+ *   `rememberedEntryId` 命中的条目在**纯 App 上下文**（`webDomain == null`）不经匹配即入选——
+ *   准入依据是「用户在**同一调用方**（包名 + 签名摘要）上此前已显式选中并交付过这一条」这一既成事实；
+ *   在**浏览器上下文**（`webDomain != null`）该条目还必须通过当前域匹配（条目 URL 或通行密钥
+ *   RP ID 经 [DomainMatcher.isDomainMatch] 命中），否则不入选——调用方记忆（键＝包名 + 签名摘要 + 域，
+ *   见 [AutofillCallerEntryMemory]）已按域隔离召回，本条是第二道门：即使记忆键被绕过，
+ *   他站条目也不得借包级记忆进入本域候选。该授权强度不低于 `android://` 首次绑定
  *   （`ISSUE-P2-46`），且不构成对未授权调用方的放行：记忆键含签名摘要，换签名 / 重打包不命中，
  *   包名非法一律 null（见 [AutofillCallerEntryMemory]）。记忆条目进入候选后**仍挂强制二次确认**，
  *   用户仍看到调用方归属。**不得**在此基础上再引入 title / 应用名一类的准入档（那会绕过
@@ -73,11 +77,13 @@ object AutofillCandidateRanker {
 
         /**
          * `ISSUE-P3-528`：调用方关联记忆命中（Monica `resolveLastFilledEntry` 吸收，
-         * 键＝包名 + 签名摘要，见 [AutofillCallerEntryMemory]）。
+         * 键＝包名 + 签名摘要 + 域，见 [AutofillCallerEntryMemory]）。
          *
          * **本档的准入依据不是匹配**，而是「用户此前在该调用方上**显式选中并交付过**这一条」这一
-         * 已发生的事实（记忆由选择器 / 确认页在交付成功后写入）。它不受
-         * `webDomain` / `android://` 绑定是否存在约束，故纯 App 场景首次手选后即可持续命中。
+         * 已发生的事实（记忆由选择器 / 确认页在交付成功后写入）。纯 App 上下文它不受
+         * `webDomain` / `android://` 绑定是否存在约束，故纯 App 场景首次手选后即可持续命中；
+         * 浏览器上下文（`rank` 入参 `webDomain != null`）它还须通过当前域匹配
+         * （`ISSUE-P2-617`：包级记忆不得绕过网站来源匹配）。
          */
         REMEMBERED_CALLER_ENTRY
     }
@@ -132,9 +138,11 @@ object AutofillCandidateRanker {
      *   （[WifiFillBoostPolicy.isWifiSettingsPackage]）；true 时对携带 Wi-Fi 信号词的条目
      *   给排序加成，同样**只改排序不改准入**
      * @param rememberedEntryId ISSUE-P3-528：调用方关联记忆命中的条目标识（hex）。
-     *   **唯一一条不依赖匹配的准入来源**——依据是用户在该调用方上的既有显式交付
-     *   （记忆键含包名 + 签名摘要，见 [AutofillCallerEntryMemory]）；传入时该条目恒成为候选并置首位，
-     *   但仍受「已过期条目排除」约束。传 null（未命中）时本参数对结果零影响。
+     *   纯 App 上下文（`webDomain == null`）它是**唯一一条不依赖匹配的准入来源**——依据是用户
+     *   在该调用方上的既有显式交付（记忆键含包名 + 签名摘要 + 域，见 [AutofillCallerEntryMemory]）；
+     *   传入时该条目恒成为候选并置首位，但仍受「已过期条目排除」约束。浏览器上下文
+     *   （`webDomain != null`）它还须通过当前域匹配（`ISSUE-P2-617`），未通过即不入选。
+     *   传 null（未命中）时本参数对结果零影响。
      * @return 按优先级降序排列的候选，长度 ≤ [limit]
      */
     fun rank(
@@ -158,13 +166,25 @@ object AutofillCandidateRanker {
             if (rememberedEntryId != null &&
                 entry.id.toHexString().equals(rememberedEntryId, ignoreCase = true)
             ) {
-                // 记忆命中：不参与匹配判定（准入依据是用户已发生的显式交付），但仍排除已过期条目
+                // 记忆命中：纯 App 上下文不参与匹配判定（准入依据是用户已发生的显式交付），
+                // 但仍排除已过期条目；浏览器上下文还须通过当前域匹配（ISSUE-P2-617 第二道门——
+                // 即使包级记忆被绕过，他站条目也不得进入本域候选）
                 if (isEntryExpired(entry)) null
-                else Ranked(
-                    entry = entry,
-                    score = SCORE_REMEMBERED_CALLER_ENTRY,
-                    reasons = setOf(MatchReason.REMEMBERED_CALLER_ENTRY)
-                )
+                else {
+                    // ISSUE-P3-171 同口径：url 属性 getter 每次访问都是一次解密，只读一次并下传
+                    val rememberedUrl = entry.displayUrl()
+                    if (normalizedDomain != null &&
+                        !entryMatchesWebDomain(entry, rememberedUrl, normalizedDomain)
+                    ) {
+                        null
+                    } else {
+                        Ranked(
+                            entry = entry,
+                            score = SCORE_REMEMBERED_CALLER_ENTRY,
+                            reasons = setOf(MatchReason.REMEMBERED_CALLER_ENTRY)
+                        )
+                    }
+                }
             } else {
                 scoreEntry(
                     entry, callingPackage, normalizedDomain, packageDimensionAuthorized,

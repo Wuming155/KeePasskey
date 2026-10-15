@@ -93,7 +93,8 @@ class AutofillConfirmActivity : FragmentActivity() {
     @Inject
     lateinit var autofillLastFilledStore: AutofillLastFilledStore
 
-    // ISSUE-P3-528：调用方关联记忆（键＝包名 + 签名摘要）写入点——数据集路径的真实交付点是本页
+    // ISSUE-P3-528：调用方关联记忆（键＝包名 + 签名摘要 + 域）写入点——数据集路径的真实交付点是本页
+    //（ISSUE-P2-617：域取归属校验后的 EXTRA_GRANT_DOMAIN，见 completeAuthResult）
     @Inject
     lateinit var autofillCallerEntryMemory: AutofillCallerEntryMemory
 
@@ -144,6 +145,13 @@ class AutofillConfirmActivity : FragmentActivity() {
                 callerAttribution?.let {
                     append('\n')
                     append(localizedContext.getString(R.string.autofill_confirm_caller_package, it.packageName))
+                    // ISSUE-P2-617：已信任调用方的生物识别提示此前不显示当前网站——用户无法分辨
+                    // 本次是向哪个网站交凭据；现把归属校验后的域（无域即纯应用表单，如实标注）并入副标题
+                    append('\n')
+                    val domainText = it.webDomain?.takeIf { domain -> domain.isNotBlank() }?.let { domain ->
+                        localizedContext.getString(R.string.autofill_confirm_caller_domain, domain)
+                    } ?: localizedContext.getString(R.string.autofill_confirm_domain_none)
+                    append(domainText)
                 }
             }
             val manualHint = localizedContext.getString(R.string.autofill_confirm_manual_hint, credentialTitle)
@@ -225,9 +233,11 @@ class AutofillConfirmActivity : FragmentActivity() {
         // （仅影响候选排序，不改变任何匹配与放行判定）
         intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() }?.let { entryId ->
             autofillLastFilledStore.record(entryId)
-            // ISSUE-P3-528：同点写入关联记忆（键＝包名 + 签名摘要；摘要取自归属快照，快照缺失即不写）
+            // ISSUE-P3-528：同点写入关联记忆（键＝包名 + 签名摘要 + 域；摘要与域取自归属快照，
+            // 快照缺失即不写）。ISSUE-P2-617：域取归属校验后的 EXTRA_GRANT_DOMAIN（非表单自报），
+            // 使浏览器记忆绑定已验证域名——同浏览器下他站不得召回。
             callerAttribution?.let {
-                autofillCallerEntryMemory.remember(it.packageName, it.certSha256Hex, entryId)
+                autofillCallerEntryMemory.remember(it.packageName, it.certSha256Hex, entryId, it.webDomain)
             }
         }
 
@@ -269,7 +279,13 @@ class AutofillConfirmActivity : FragmentActivity() {
             discardPendingResult()
             return
         }
-        val resultIntent = resolveAuthResultIntent()
+        val resultIntent = resolveConfirmAuthResultIntent(
+            intent = intent,
+            packageName = packageName,
+            vaultRepository = vaultRepository,
+            autofillFieldBlocklistStore = autofillFieldBlocklistStore,
+            pickerViewModel = pickerViewModel
+        )
         if (resultIntent == null) {
             AppLog.w(TAG, "确认后无可交付字段，按取消回传（不构造空数据集）")
             setResult(RESULT_CANCELED, authenticationCanceledIntent())
@@ -278,84 +294,6 @@ class AutofillConfirmActivity : FragmentActivity() {
         }
         setResult(RESULT_OK, resultIntent)
         finish()
-    }
-
-    /**
-     * ISSUE-P2-88：按认证 Intent 下发的目标字段 id 与条目标识取回凭据，构造待回传数据集。
-     *
-     * 复用选择器同一条取数路径（[AutofillPickerViewModel.resolveCredentials]）与同一份载荷构造
-     * （[buildAuthenticationResultDataset]）——这两处都是经真机验证可填充的形态。
-     *
-     * @return 无目标框 / 凭据不可用 / 无可写字段时返回 null（调用方按取消处置）
-     */
-    private suspend fun resolveAuthResultIntent(): Intent? {
-        val entryId = intent.getStringExtra(EXTRA_ENTRY_ID)?.takeIf { it.isNotBlank() } ?: return null
-        val usernameId = intent.readAutofillId(EXTRA_TARGET_USERNAME_ID)
-        val passwordId = intent.readAutofillId(EXTRA_TARGET_PASSWORD_ID)
-        val otpId = intent.readAutofillId(EXTRA_TARGET_OTP_ID)
-        // ISSUE-P3-375：结构化目标（读取实现拆至 AutofillConfirmStructuredTargets）
-        val structured = readStructuredTargetsFrom(intent)
-        if (usernameId == null && passwordId == null && structured.isEmpty()) return null
-
-        // ISSUE-P2-384 AC①：认证回传构造 Dataset 前复检字段级屏蔽（fail-closed）。
-        // 确认页是「再次确认」路径——屏蔽写入后系统缓存重放 / 用户再次确认时，
-        // 被屏蔽字段不得再出现在回传数据集里（与选择器 deliver 同一策略对象）。
-        // 域取表单**自报**域（与屏蔽写入键同源）；确认页仅有归属校验后域时回落之。
-        val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE)
-            ?: intent.getStringExtra(EXTRA_GRANT_PACKAGE)
-            ?: packageName
-        val formDomain = intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
-            ?: intent.getStringExtra(EXTRA_GRANT_DOMAIN)?.takeIf { it.isNotBlank() }
-        val deliverable = AutofillAuthDeliveryBlockPolicy.filter(
-            usernameId = usernameId,
-            passwordId = passwordId
-        ) { role ->
-            autofillFieldBlocklistStore.isBlocked(callingPackage, formDomain, role)
-        }
-        if (deliverable.blocksEntireForm && structured.isEmpty()) {
-            AppLog.w(TAG, "确认页回传复检：字段已被屏蔽，按取消回传")
-            return null
-        }
-
-        val credentials = pickerViewModel.resolveCredentials(entryId) ?: return null
-        val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
-        // ISSUE-P3-298 ⑤：回传时刻现算 TOTP（值新鲜度以交付时刻为准）；仅 TOTP 参与
-        // 直填——HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值
-        val otpCode = if (otpId != null) {
-            vaultRepository.calculateEntryTotp(entryId)
-                ?.takeIf { !it.isHotp }?.code.orEmpty()
-        } else {
-            ""
-        }
-        // ISSUE-P3-375 AC③：结构化字段值只在确认成功后按条目取回（实现拆至 AutofillConfirmStructuredTargets）
-        val structuredValues: Map<AutofillId, String> = if (structured.isEmpty()) emptyMap() else {
-            val entry = vaultRepository.getKdbxEntry(entryId) ?: return null
-            buildStructuredFieldValues(structured, entry)
-        }
-        val dataset = AutofillConfirmAuthDelivery.build(
-            packageName = packageName,
-            // ISSUE-P3-330：用户名为空时标题行即条目标题，副行留空——避免两行同文
-            menuTitle = credentials.username.ifBlank { credentialTitle },
-            menuSubtitle = if (credentials.username.isNotBlank()) credentialTitle else "",
-            username = credentials.username,
-            password = credentials.password,
-            deliverable = deliverable,
-            otpId = otpId,
-            otpCode = otpCode,
-            structuredFields = structuredValues
-        ) ?: return null
-        // 只记录「哪些字段真的有值」，不含任何凭据内容 / 用户名 / 条目名 / 包名
-        AutofillConfirmAuthDelivery.logDelivery(
-            tag = TAG,
-            usernameHasValue = credentials.username.isNotEmpty(),
-            passwordHasValue = credentials.password.isNotEmpty(),
-            otpHasValue = otpCode.isNotEmpty(),
-            structuredCount = structuredValues.size,
-            usernameIdPresent = deliverable.usernameId != null,
-            passwordIdPresent = deliverable.passwordId != null,
-            otpIdPresent = otpId != null
-        )
-        return authenticationResultIntent(dataset)
     }
 
     /**

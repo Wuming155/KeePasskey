@@ -6,7 +6,7 @@ import com.keepasskey.core.log.AppLog
 
 /**
  * 确认页认证回传数据集组装（ISSUE-P2-384 复检后收口；纯结构性拆分自
- * [AutofillConfirmActivity.resolveAuthResultIntent]，规模闸门回压）。
+ * `resolveConfirmAuthResultIntent`，规模闸门回压）。
  *
  * 职责单一：按复检后的可交付框 id + 条目凭据构造待回传 Dataset；
  * 复检闸门（字段级屏蔽）在调用方完成，本文件**不再**做屏蔽判定。

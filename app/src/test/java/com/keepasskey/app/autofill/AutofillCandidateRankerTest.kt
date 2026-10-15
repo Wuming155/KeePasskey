@@ -2,9 +2,11 @@ package com.keepasskey.app.autofill
 
 import com.keepasskey.app.data.repository.RealVaultRepository
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -405,7 +407,8 @@ class AutofillCandidateRankerTest {
         assertTrue("纯信号词不构成入选条件", ranked.isEmpty())
     }
 
-    // ── ISSUE-P3-528：调用方关联记忆档（唯一一条不依赖匹配的准入来源） ──────────────
+    // ── ISSUE-P3-528：调用方关联记忆档（纯 App 上下文唯一一条不依赖匹配的准入来源；
+    //    ISSUE-P2-617 起浏览器上下文还须过当前域匹配） ──────────────
 
     @Test
     fun `关联记忆命中条目不经匹配即入选`() {
@@ -430,13 +433,13 @@ class AutofillCandidateRankerTest {
     }
 
     @Test
-    fun `关联记忆命中置于严格匹配候选之前`() {
+    fun `浏览器上下文同域记忆条目置于严格匹配候选之前`() {
         val exact = entry(hexIdOf(1), "https://github.com")
-        val remembered = entry(hexIdOf(2), "https://other.example.org")
+        val remembered = entry(hexIdOf(2), "https://github.com/settings")
 
         val ranked = AutofillCandidateRanker.rank(
             entries = listOf(exact, remembered),
-            callingPackage = "",
+            callingPackage = "com.android.chrome",
             webDomain = "github.com",
             packageDimensionAuthorized = false,
             rememberedEntryId = remembered.id.toHexString()
@@ -445,6 +448,25 @@ class AutofillCandidateRankerTest {
         assertEquals(2, ranked.size)
         assertEquals(remembered.id.toHexString(), ranked.first().entry.id.toHexString())
         assertTrue(AutofillCandidateRanker.MatchReason.EXACT_DOMAIN in ranked[1].reasons)
+    }
+
+    @Test
+    fun `浏览器上下文他站记忆条目不得入选`() {
+        // ISSUE-P2-617：同浏览器在 A 站确认填充后，恶意 B 站不得借包级记忆召回 A 站条目。
+        // 即使调用方传了该条目 id（记忆键被绕过），排序器第二道门仍按当前域排除。
+        val exact = entry(hexIdOf(1), "https://github.com")
+        val remembered = entry(hexIdOf(2), "https://other.example.org")
+
+        val ranked = AutofillCandidateRanker.rank(
+            entries = listOf(exact, remembered),
+            callingPackage = "com.android.chrome",
+            webDomain = "github.com",
+            packageDimensionAuthorized = false,
+            rememberedEntryId = remembered.id.toHexString()
+        )
+
+        assertEquals(1, ranked.size)
+        assertEquals(exact.id.toHexString(), ranked.first().entry.id.toHexString())
     }
 
     @Test
@@ -484,7 +506,7 @@ class AutofillCandidateRankerTest {
     @Test
     fun `关联记忆命中不被候选上限截断`() {
         val strictEntries = (1..9).map { entry(hexIdOf(it), "https://github.com") }
-        val remembered = entry(hexIdOf(20), "https://other.example.org")
+        val remembered = entry(hexIdOf(20), "https://github.com/settings")
 
         val ranked = AutofillCandidateRanker.rank(
             entries = strictEntries + remembered,
@@ -496,5 +518,99 @@ class AutofillCandidateRankerTest {
 
         assertEquals(AutofillCandidateRanker.DEFAULT_LIMIT, ranked.size)
         assertEquals(remembered.id.toHexString(), ranked.first().entry.id.toHexString())
+    }
+
+    // ── ISSUE-P2-617：交付复检判据 entryMatchesDeliveryOrigin ──────────────
+
+    @Test
+    fun `交付复检纯应用表单无域约束恒通过`() {
+        val remembered = entry(hexIdOf(30), "https://other.example.org")
+
+        assertTrue(
+            entryMatchesDeliveryOrigin(
+                remembered, remembered.displayUrl(), null, "com.example.app"
+            )
+        )
+        assertTrue(
+            entryMatchesDeliveryOrigin(
+                remembered, remembered.displayUrl(), "  ", "com.example.app"
+            )
+        )
+    }
+
+    @Test
+    fun `交付复检浏览器表单命中当前域才通过`() {
+        val same = entry(hexIdOf(31), "https://github.com/settings")
+        val child = entry(hexIdOf(32), "https://github.com")
+        val other = entry(hexIdOf(33), "https://other.example.org")
+
+        assertTrue(
+            entryMatchesDeliveryOrigin(
+                same, same.displayUrl(), "github.com", "com.android.chrome"
+            )
+        )
+        // 子域方向：条目域为目标域父域同样命中（与 scoreEntry 同口径）
+        assertTrue(
+            entryMatchesDeliveryOrigin(
+                child, child.displayUrl(), "login.github.com", "com.android.chrome"
+            )
+        )
+        assertFalse(
+            "他站条目不得向当前域交付",
+            entryMatchesDeliveryOrigin(
+                other, other.displayUrl(), "github.com", "com.android.chrome"
+            )
+        )
+    }
+
+    @Test
+    fun `交付复检包名绑定条目按包维度通过`() {
+        val bound = entry(hexIdOf(34), "android://com.example.app")
+
+        assertTrue(
+            entryMatchesDeliveryOrigin(
+                bound, bound.displayUrl(), "github.com", "com.example.app"
+            )
+        )
+        assertFalse(
+            "未绑定调用包的条目不得借包维度通过",
+            entryMatchesDeliveryOrigin(
+                bound, bound.displayUrl(), "github.com", "com.other.app"
+            )
+        )
+    }
+
+    @Test
+    fun `交付复检通行密钥 RP 命中当前域通过`() {
+        val passkeyEntry = KdbxEntry(
+            id = KdbxUuid.fromHexString(hexIdOf(35)),
+            fields = mapOf(KdbxConstants.Fields.URL to ProtectedString("", isProtected = false)),
+            times = KdbxTimes(lastModificationTime = baseTime),
+            customFields = listOf(
+                KdbxCustomField(
+                    PasskeyData.KPEX_FIELD_RELYING_PARTY,
+                    ProtectedString("github.com", isProtected = false)
+                ),
+                KdbxCustomField(
+                    PasskeyData.KPEX_FIELD_CREDENTIAL_ID,
+                    ProtectedString("cred-id", isProtected = false)
+                ),
+                KdbxCustomField(
+                    PasskeyData.KPEX_FIELD_PRIVATE_KEY,
+                    ProtectedString("private-key", isProtected = false)
+                )
+            )
+        )
+
+        assertTrue(
+            entryMatchesDeliveryOrigin(
+                passkeyEntry, passkeyEntry.displayUrl(), "github.com", "com.android.chrome"
+            )
+        )
+        assertFalse(
+            entryMatchesDeliveryOrigin(
+                passkeyEntry, passkeyEntry.displayUrl(), "other.example.org", "com.android.chrome"
+            )
+        )
     }
 }

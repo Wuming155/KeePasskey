@@ -40,7 +40,7 @@ import javax.inject.Inject
  * JSON 语法分析前必须把整份文件解码为 String，故密码 / TOTP 在**解析阶段**不可避免地以 String
  * 形态短暂驻留（Java 字符串不可擦除）；本类在字段映射的第一现场即 `toCharArray()`，此后不再参与
  * 任何拼接、比较、日志与异常消息。此为「不新增依赖 + 无流式定制解析器」取舍下的已知残余面。
- * JSON 文本读取器为同包 `PuxArchiveReader.kt` 内的 `ImportJson`（两个 JSON 系解析器共享）。
+ * JSON 文本读取器为同包 `ImportJson.kt` 的 `ImportJson`（两个 JSON 系解析器共享）。
  */
 class BitwardenJsonImporter @Inject constructor() : EntryImporter {
 

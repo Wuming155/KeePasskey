@@ -148,6 +148,9 @@ ALLOWED_DISPLAY_READ_FILES = frozenset(
         "app/src/main/java/com/keepasskey/app/autofill/DuplicateEntryScanner.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt",
         "app/src/main/java/com/keepasskey/app/autofill/StructuredFieldPolicy.kt",
+        # §522：确认页回传构造的交付复检（条目 URL 只进 `entryMatchesDeliveryOrigin` 布尔闸门，
+        # 空串降级为拒绝；凭据值仍走 fail-fast 取数路径，本读口不承载任何下发值）
+        "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthResolver.kt",
     }
 )
 

@@ -17,13 +17,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -205,11 +208,16 @@ private fun rememberCreateVaultWizardLaunchers(
     onVaultDocumentCancelled: () -> Unit
 ): CreateVaultWizardLaunchers {
     val context = LocalContext.current
+    // ISSUE-P3-616：展示名查询（外部 Provider 调用）经组合作用域协程落 IO 调度器；
+    // 向导关闭即取消，查询结果随之作废
+    val scope = rememberCoroutineScope()
     val keyPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
-            onKeyFilePicked(queryDocumentDisplayName(context, uri), uri.toString())
+            scope.launch {
+                onKeyFilePicked(queryDocumentDisplayName(context, uri), uri.toString())
+            }
         }
     }
     // ISSUE-P2-229：ACTION_CREATE_DOCUMENT 通道（与密钥文件另存为同一 contract 口径）；
@@ -217,8 +225,24 @@ private fun rememberCreateVaultWizardLaunchers(
     val vaultCreateLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri: Uri? ->
-        if (uri != null && NewVaultDocumentClaims.record(context, uri)) {
-            onVaultDocumentPicked(queryDocumentDisplayName(context, uri), uri.toString())
+        if (uri != null) {
+            scope.launch {
+                if (NewVaultDocumentClaims.record(context, uri)) {
+                    val name = try {
+                        queryDocumentDisplayName(context, uri)
+                    } catch (cancellation: CancellationException) {
+                        // 声明已登记而向导在查询期间关闭：撤销声明并按既有口径回收空文档，
+                        // 防止「既不交付也不清理」的中间态
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            NewVaultDocumentClaims.discard(context, uri.toString())
+                        }
+                        throw cancellation
+                    }
+                    onVaultDocumentPicked(name, uri.toString())
+                } else {
+                    onVaultDocumentCancelled()
+                }
+            }
         } else {
             onVaultDocumentCancelled()
         }

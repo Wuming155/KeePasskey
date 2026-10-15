@@ -7,7 +7,7 @@ import android.view.autofill.AutofillId
  *
  * 背景：字段级屏蔽（ISSUE-P3-43 ②）此前只挂在 onFillRequest 的目标解析期
  * （[AutofillTargetFieldResolver]），认证回传（picker `confirmAndFill` / 确认页
- * `resolveAuthResultIntent`）构造 Dataset 时**不复检**——屏蔽写入后系统侧缓存响应重放 /
+ * `resolveConfirmAuthResultIntent`）构造 Dataset 时**不复检**——屏蔽写入后系统侧缓存响应重放 /
  * 再次确认时，被屏蔽字段的值仍可交付（Monica `c854ef2a` 同型实证）。
  *
  * 本策略与 [AutofillFieldBlockPolicy] 同族：纯 JVM 可断言、只会收紧不会放宽。

@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.security.CallerCertDigests
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -21,10 +22,19 @@ import javax.inject.Singleton
  * ## 准入口径（本仓改 Monica 的键）
  *
  * Monica 的记忆键是裸 interaction identifier（包名 / 域及其别名）；本仓沿用既有信任模型，
- * **键＝归一化包名 + 签名证书 SHA-256**（与 [AutofillCallerTrustStore] 同一构造）：
+ * **键＝归一化包名 + 签名证书 SHA-256 + 归属校验后的 web 域**（与 [AutofillCallerTrustStore] 同一构造，
+ * 另加域段；`ISSUE-P2-617`）：
  * - 同包名换签名（重打包 / 侧载冒名）**不**命中——记忆不是包名维度的旁路；
+ * - **浏览器场景必须绑定已验证域名**：同一浏览器（同包名同签名）在站点 A 确认填充后，
+ *   恶意站点 B 不得召回 A 的条目——召回侧传入的必须是归属校验后的域（见
+ *   `resolveUnlockedCandidates`），与写入侧（确认页 `EXTRA_GRANT_DOMAIN` / 选择器表单域，
+ *   同口径归一）不一致即不命中；
+ * - 纯 App 表单（域为 null / 空白）沿用「包名 + 签名」键（域段为空），行为与既往一致；
  * - 摘要**全部不可读**时退回「仅包名」降级键（与信任存储同一取舍），摘要可读时不回退到它；
  * - 包名非法（[AutofillPackageNames.normalize] 为 null）一律不记录也不召回（fail-closed）。
+ *
+ * 旧格式键（`包名|摘要`，无域段）升级后自然不可达——按 fail-closed 视为未命中，
+ * 由容量上限 [MAX_ENTRIES] 在后续写入时淘汰，无需迁移（迁移会把无域记忆重解释为某域记忆）。
  *
  * **本记忆不是放行判定**：它只决定「该条目是否进入候选集合」，进入后仍走既有字段级屏蔽、
  * 库锁定复核与**强制二次确认**（`Dataset.setAuthentication`）——用户仍看到调用方归属并要求确认。
@@ -58,9 +68,12 @@ class AutofillCallerEntryMemory @Inject constructor(
      *
      * 调用点必须是**用户显式动作已完成交付**处（选择器选中并回传 / 确认页确认并回传），
      * 不得在候选下发阶段写入——否则「看到候选」会被误记成「用户选了它」。
+     *
+     * @param webDomain 本次交付的归属校验后域（确认页传 `EXTRA_GRANT_DOMAIN`，选择器传表单域；
+     *   纯 App 表单传 null）。`ISSUE-P2-617`：浏览器记忆必须绑定域，否则同浏览器下恶意站可召回。
      */
-    fun remember(packageName: String, certSha256Hex: String?, entryId: String) {
-        val key = memoryKey(packageName, certSha256Hex) ?: return
+    fun remember(packageName: String, certSha256Hex: String?, entryId: String, webDomain: String? = null) {
+        val key = memoryKey(packageName, certSha256Hex, webDomain) ?: return
         val normalizedEntryId = entryId.trim()
         if (normalizedEntryId.isEmpty()) return
         val value = "$normalizedEntryId$VALUE_SEPARATOR${System.currentTimeMillis()}"
@@ -79,8 +92,13 @@ class AutofillCallerEntryMemory @Inject constructor(
      * [remember] 的摘要集合重载：记录落在**主摘要**（[CallerCertDigests.primary]，当前有效签名者）
      * 之上，与 `AutofillCallerTrustStore.trust` 的写入点取值同源；召回侧仍按全部摘要任一命中。
      */
-    fun remember(packageName: String, certDigests: CallerCertDigests, entryId: String) {
-        remember(packageName, certDigests.primary, entryId)
+    fun remember(
+        packageName: String,
+        certDigests: CallerCertDigests,
+        entryId: String,
+        webDomain: String? = null
+    ) {
+        remember(packageName, certDigests.primary, entryId, webDomain)
     }
 
     /**
@@ -88,13 +106,18 @@ class AutofillCallerEntryMemory @Inject constructor(
      *
      * @param certDigests 调用方**全部**签名摘要（当前 + 历史）：任一命中即召回——
      *   与 [AutofillCallerTrustStore.isTrusted] 同口径，签名轮换期不得因只取首个摘要而失配
+     * @param webDomain 本次请求的归属校验后域（调用方传 `resolveUnlockedCandidates` 已校验的
+     *   `webDomain`，**不得**传表单自报域）。`ISSUE-P2-617`：浏览器请求必须带域召回，
+     *   否则同浏览器下他站记忆可被召回（候选排序随后的域复检是第二道门，见
+     *   [AutofillCandidateRanker]）；纯 App 表单传 null。
      */
-    fun recall(packageName: String, certDigests: CallerCertDigests): String? {
+    fun recall(packageName: String, certDigests: CallerCertDigests, webDomain: String? = null): String? {
         val normalized = AutofillPackageNames.normalize(packageName) ?: return null
+        val domain = normalizeDomain(webDomain)
         val keys = if (certDigests.isEmpty) {
-            listOf("$normalized$KEY_SEPARATOR")
+            listOf(assembleMemoryKey(normalized, "", domain))
         } else {
-            certDigests.values.map { "$normalized$KEY_SEPARATOR$it" }
+            certDigests.values.map { assembleMemoryKey(normalized, it, domain) }
         }
         return keys.firstNotNullOfOrNull { readEntryId(it) }
     }
@@ -111,11 +134,22 @@ class AutofillCallerEntryMemory @Inject constructor(
         return entryId.ifEmpty { null }
     }
 
-    /** 记忆键：包名归一化 + 证书摘要（null / 不可读记空段）；包名非法返回 null（fail-closed） */
-    private fun memoryKey(packageName: String, certSha256Hex: String?): String? {
+    /** 记忆键：包名归一化 + 证书摘要（null / 不可读记空段）+ 归属域（null / 空白记空段）；包名非法返回 null（fail-closed） */
+    private fun memoryKey(packageName: String, certSha256Hex: String?, webDomain: String?): String? {
         val normalized = AutofillPackageNames.normalize(packageName) ?: return null
-        return "$normalized$KEY_SEPARATOR${certSha256Hex.orEmpty()}"
+        return assembleMemoryKey(normalized, certSha256Hex.orEmpty(), normalizeDomain(webDomain))
     }
+
+    /** 已归一化分量的键组装（包名已归一，摘要已大写，域已归一；空段保持键结构三段）。 */
+    private fun assembleMemoryKey(normalizedPackage: String, digestHex: String, domain: String): String =
+        "$normalizedPackage$KEY_SEPARATOR$digestHex$KEY_SEPARATOR$domain"
+
+    /**
+     * 域归一（`ISSUE-P2-617` 读写同口径）：`DomainMatcher.extractDomain` 已做小写 / 去 scheme /
+     * 去端口 / 去 DNS 根点；null 与空白一律归为空段（纯 App 表单）。归一后为空即无域记忆。
+     */
+    private fun normalizeDomain(webDomain: String?): String =
+        if (webDomain.isNullOrBlank()) "" else DomainMatcher.extractDomain(webDomain)
 
     /** 容量闸门：按键数超限时按记录时刻淘汰最旧（prefs 无序遍历，故只依赖值内时刻） */
     private fun evictOverflow(p: SharedPreferences) {

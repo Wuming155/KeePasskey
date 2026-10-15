@@ -89,7 +89,8 @@ class StructuredFillWiringTest {
             structuredBlock.contains("attachConfirmationAuth(")
         )
 
-        val confirm = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt")
+        // 回传构造自 Activity 拆至 AutofillConfirmAuthResolver（行数闸门，零行为变更），判据随搬运更新
+        val confirm = readSource("app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthResolver.kt")
         assertTrue(
             "确认页必须读取结构化目标",
             confirm.contains("readStructuredTargetsFrom(intent)")

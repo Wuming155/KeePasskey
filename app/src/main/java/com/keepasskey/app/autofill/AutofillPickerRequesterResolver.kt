@@ -3,6 +3,7 @@ package com.keepasskey.app.autofill
 import android.content.Intent
 import android.content.pm.PackageManager
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 
 /**
@@ -62,4 +63,36 @@ internal suspend fun resolveAutofillPickerGrantContext(
         intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
     )
     return AutofillGrantContext(callingPackage, verifiedDomain)
+}
+
+/**
+ * ISSUE-P2-46：写入调用方「首次绑定」（包名 + 主签名摘要），供 `android://` 维度后续放行。
+ *
+ * 自 `AutofillPickerActivity` 按职责拆出（行数闸门；拆分**零行为变更**，只做结构搬运）：
+ * 选择器是**唯一**由用户显式指认「把这条凭据填给这个调用方」的入口（受保护窗口 + 已展示
+ * 包名 / 应用名 / 签名摘要，见 ISSUE-P2-70），故首次绑定写入落在此处；写入后 `android://`
+ * 维度才对同签名调用方参与自动匹配。
+ *
+ * **fail-closed**：签名摘要不可读（空集）时**不写入**降级键（`pkg|`）——「只认包名」正是
+ * 本项要消灭的形态；包名非法时存储自身拒绝写入（返回 false）。两种情况一律保持「未绑定」，
+ * 该调用方的 `android://` 候选继续不命中。
+ *
+ * @return 本次读取的签名摘要快照（ISSUE-P3-528 起下传交付点复用，避免同页二次读取）
+ */
+internal fun bindCallerForPackageDimension(
+    intent: Intent,
+    autofillOriginResolver: AutofillOriginResolver,
+    callerTrustStore: AutofillCallerTrustStore
+): CallerCertDigests {
+    val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE).orEmpty()
+    if (callingPackage.isBlank()) return CallerCertDigests.EMPTY
+    val digests = autofillOriginResolver.callingAppCertDigests(callingPackage)
+    if (digests.isEmpty) {
+        // 日志不携带包名 / 摘要等调用方标识（ISSUE-P1-10 语义）
+        AppLog.w(TAG, "调用方签名摘要不可读，android:// 维度保持未绑定（fail-closed）")
+        return digests
+    }
+    val written = callerTrustStore.trust(callingPackage, digests.primary)
+    AppLog.i(TAG, "android:// 维度首次绑定写入结果=$written")
+    return digests
 }

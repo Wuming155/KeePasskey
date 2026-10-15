@@ -209,6 +209,16 @@ class BitwardenJsonImporterTest {
     }
 
     @Test
+    fun `单容器成员数超生产预算时以上限异常归一为失败`() = runTest {
+        // 条目数组恰越过容器成员预算（16 384）：JSON 解析闸门在导出层条目数检查之前拦下
+        val items = List(ImportLimits.MAX_JSON_CONTAINER_MEMBERS + 1) { "{}" }.joinToString(",")
+
+        val failure = parseFailure(bitwardenJson(items = items))
+
+        assertTrue(failure.error is ImportLimitExceededException)
+    }
+
+    @Test
     fun `输入体积超上限时以上限异常归一为失败`() = runTest {
         val oversized = ByteArray(ImportLimits.MAX_IMPORT_BYTES + 1)
 

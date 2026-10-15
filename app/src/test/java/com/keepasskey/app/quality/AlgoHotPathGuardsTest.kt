@@ -259,12 +259,17 @@ class AlgoHotPathGuardsTest {
             1,
             Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(candidates).count()
         )
-        // ISSUE-P3-528：选择器路径同样「一次读取、多处共用」（首次绑定写入 + 交付点关联记忆写入）
+        // ISSUE-P3-528：选择器路径同样「一次读取、多处共用」（首次绑定写入 + 交付点关联记忆写入）。
+        // 首次绑定实现已拆至 AutofillPickerRequesterResolver（行数闸门），读取点随搬运迁移——
+        // 判据改为两文件合计恰一次（仍只读一次，快照由调用返回供两处复用）
         val picker = stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt")
+        val pickerResolver =
+            stripped("app/src/main/java/com/keepasskey/app/autofill/AutofillPickerRequesterResolver.kt")
         assertEquals(
             "选择器内调用方证书摘要只允许读一次（首次绑定与关联记忆共用同一份快照）",
             1,
-            Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(picker).count()
+            Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(picker).count() +
+                Regex("autofillOriginResolver\\.callingAppCertDigests\\(").findAll(pickerResolver).count()
         )
         // ISSUE-P3-528：确认页复用归属快照（`callerAttribution.certSha256Hex`），不得再读一次
         val confirm =

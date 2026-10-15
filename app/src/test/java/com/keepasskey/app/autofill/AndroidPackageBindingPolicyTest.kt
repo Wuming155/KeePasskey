@@ -136,21 +136,26 @@ class AndroidPackageBindingWiringTest {
 
     @Test
     fun `选择器必须写入首次绑定且摘要不可读时不写降级键`() {
-        val source = readSource(
+        // 实现自 AutofillPickerActivity 按职责拆至 AutofillPickerRequesterResolver
+        // （行数闸门，零行为变更）；调用仍由选择器 deliver 发起，判据位置随搬运更新
+        val picker = readSource(
             "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt"
+        )
+        val resolver = readSource(
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerRequesterResolver.kt"
         )
 
         assertTrue(
             "选择器（用户显式指认调用方的唯一入口）必须写入首次绑定",
-            source.contains("callerTrustStore.trust(callingPackage, digests.primary)")
+            resolver.contains("callerTrustStore.trust(callingPackage, digests.primary)")
         )
         assertTrue(
             "首次绑定必须在交付数据集之前发生（deliver 内调用）",
-            source.contains("bindCallerForPackageDimension()")
+            picker.contains("bindCallerForPackageDimension(intent, autofillOriginResolver, callerTrustStore)")
         )
         assertTrue(
             "摘要不可读必须不写降级键（保持未绑定，fail-closed）",
-            source.contains("if (digests.isEmpty)")
+            resolver.contains("if (digests.isEmpty)")
         )
     }
 

@@ -41,8 +41,10 @@ class AutofillAuthResultWiringTest {
     @Test
     fun `成功回传必须携带数据集而非空载荷`() {
         // 确认页（ISSUE-P2-88）：认证成功后必须回传真实 Dataset；只回传「成功 + 空 extras」
-        // 会让框架无值可写（真机留痕 `onAuthenticationResult(): empty intent`，输入框恒为空）
-        val confirm = readSource(AUTOFILL_CONFIRM)
+        // 会让框架无值可写（真机留痕 `onAuthenticationResult(): empty intent`，输入框恒为空）。
+        // 回传构造自 Activity 拆至 AutofillConfirmAuthResolver（行数闸门，零行为变更）——
+        // 锁定门控与 setResult 仍在 Activity，构造判据读解析器文件
+        val confirm = readSource(AUTOFILL_CONFIRM) + readSource(AUTOFILL_CONFIRM_RESOLVER)
         val okResultArgs = Regex("""setResult\(\s*RESULT_OK\s*,\s*([^)\n]*)""")
             .findAll(confirm)
             .map { it.groupValues[1] }
@@ -185,8 +187,8 @@ class AutofillAuthResultWiringTest {
         )
         assertTrue(
             "确认页必须真的读取这两个目标框 id",
-            readSource(AUTOFILL_CONFIRM).contains("readAutofillId(EXTRA_TARGET_USERNAME_ID)") &&
-                readSource(AUTOFILL_CONFIRM).contains("readAutofillId(EXTRA_TARGET_PASSWORD_ID)")
+            readSource(AUTOFILL_CONFIRM_RESOLVER).contains("readAutofillId(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID)") &&
+                readSource(AUTOFILL_CONFIRM_RESOLVER).contains("readAutofillId(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID)")
         )
         listOf(
             "AutofillPickerActivity.EXTRA_USERNAME_ID",
@@ -231,6 +233,7 @@ class AutofillAuthResultWiringTest {
     private companion object {
         const val AUTOFILL_UNLOCK = "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockActivity.kt"
         const val AUTOFILL_CONFIRM = "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmActivity.kt"
+        const val AUTOFILL_CONFIRM_RESOLVER = "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthResolver.kt"
         const val AUTOFILL_PICKER = "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerActivity.kt"
         const val AUTOFILL_DELIVERY = "app/src/main/java/com/keepasskey/app/autofill/AutofillAuthResultDelivery.kt"
         const val AUTOFILL_CONFIRM_DELIVERY = "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthDelivery.kt"

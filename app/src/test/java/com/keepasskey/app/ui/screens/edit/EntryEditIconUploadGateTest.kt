@@ -9,16 +9,18 @@ import org.junit.Test
 import java.io.File
 
 /**
- * `ISSUE-P3-576`：自定义图标上传通道的尺寸双闸门纯 JVM 锁定
- * （同款闸门的附件通道见 `EntryEditPickers.rememberAttachmentPicker`，本批逐字未动）。
+ * `ISSUE-P3-576`：自定义图标上传通道的尺寸双闸门纯 JVM 锁定；
+ * `ISSUE-P3-617`：附件通道同型接线一并由本类末两例锁定。
  *
  * 覆盖：
  * ① 申报长度超过图标上限 ⇒ 拒绝（读前闸门判据）——「超限不读流」由源码静态守卫（本类末例）锁定；
  * ② 申报长度未超限 / 恰好等于上限 ⇒ 放行（与附件通道同为 `>` 判）；
- * ③ 申报长度未知（描述符 null 或 `UNKNOWN_LENGTH` = -1）⇒ 放行，交读后闸门兜底；
- * ④ 读后实读大小超限 ⇒ 拒绝（读后闸门判据；`fill(0)` 清零由源码静态守卫锁定）；
+ * ③ 申报长度未知（描述符 null 或 `UNKNOWN_LENGTH` = -1）⇒ 放行，交累计上限兜底；
+ * ④ 累计上限由 `readBoundedBytes` 在读取中途封顶（`ISSUE-P3-617` 起替代旧「整流后判实读大小」
+ *    形态——旧形态先分配完整超限缓冲；超限抛 `StreamLimitExceededException`，内部缓冲已清零）；
  * ⑤ 上限同源派生（恰为附件上限 1/4）且远小于附件上限；
- * ⑥ 源码守卫：图标选择器内「申报长度判定先于读流」——顺序反转即「先读爆内存再判超限」。
+ * ⑥ 源码守卫：图标选择器内「申报长度判定先于读流」——顺序反转即「先读爆内存再判超限」；
+ *    且读流一律经 `readBoundedBytes`（无 `readBytes()` 整流残留），超限走图标超限文案。
  *
  * 宿主侧无 Robolectric，构造不出 `ContentResolver`（SAF 流不可在 JVM 复现）⇒ 判定与接线分别以
  * 纯函数与源码静态守卫锁定；设备侧走查按本批任务禁令未执行（见批次文档 §491.5）。
@@ -67,7 +69,7 @@ class EntryEditIconUploadGateTest {
     }
 
     @Test
-    fun `图标选择器源码中申报长度判定先于读流且读后兜底带清零`() {
+    fun `图标选择器源码中申报长度判定先于读流且读流带累计上限`() {
         val picker = stripCommentsOnly(readSource(PICKERS_SOURCE))
             .substringAfter("fun rememberCustomIconPicker")
         val declaredIdx = picker.indexOf("openAssetFileDescriptor")
@@ -83,11 +85,42 @@ class EntryEditIconUploadGateTest {
             picker.contains("exceedsCustomIconUploadLimit(declaredLength)")
         )
         assertTrue(
-            "读后未按实读大小二次判定（exceedsCustomIconUploadLimit(rawBytes.size)）",
-            picker.contains("exceedsCustomIconUploadLimit(rawBytes.size)")
+            "读流必须经带累计上限的 readBoundedBytes（ISSUE-P3-617：readBytes() 整流" +
+                "会在累计上限生效前分配完整超限缓冲）",
+            picker.contains("readBoundedBytes(MAX_CUSTOM_ICON_UPLOAD_BYTES)")
         )
-        assertTrue("读后超限须先 fill(0) 清零再拒绝", picker.contains("rawBytes.fill(0)"))
+        assertTrue(
+            "图标选择器不得残留无上限整流 readBytes()",
+            !picker.contains(".readBytes()")
+        )
+        assertTrue(
+            "累计超限必须捕获 StreamLimitExceededException 并拒绝（内部缓冲由读取器清零）",
+            picker.contains("StreamLimitExceededException")
+        )
         assertTrue("超限提示未走图标超限文案 iconTooLargeMessage()", picker.contains("iconTooLargeMessage()"))
+    }
+
+    @Test
+    fun `附件选择器源码中读流同样带累计上限`() {
+        // ISSUE-P3-617：附件通道与图标通道同型（读前申报长度快拒 + 累计上限兜底），
+        // 旧「整流后判 bytes.size」形态先分配完整超限缓冲，本守卫锁死新形态。
+        val picker = stripCommentsOnly(readSource(PICKERS_SOURCE))
+            .substringAfter("fun rememberAttachmentPicker")
+            .substringBefore("fun rememberDecodedCustomIcons")
+        assertTrue("附件选择器缺少读前申报长度拦截", picker.contains("openAssetFileDescriptor"))
+        assertTrue(
+            "附件读流必须经带累计上限的 readBoundedBytes（上限为附件上界）",
+            picker.contains("readBoundedBytes(MAX_ATTACHMENT_BYTES)")
+        )
+        assertTrue(
+            "附件选择器不得残留无上限整流 readBytes()",
+            !picker.contains(".readBytes()")
+        )
+        assertTrue(
+            "附件累计超限必须捕获 StreamLimitExceededException 并拒绝",
+            picker.contains("StreamLimitExceededException")
+        )
+        assertTrue("附件超限提示未走 attachmentTooLargeMessage()", picker.contains("attachmentTooLargeMessage()"))
     }
 
     /** 源码全文（路径相对仓库根；app 模块测试工作目录为 app/，向上回溯定位仓库根）。 */

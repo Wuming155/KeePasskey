@@ -1,7 +1,6 @@
 package com.keepasskey.app.ui.screens.database
 
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -377,14 +376,4 @@ fun DatabasePickerContent(
             }
         )
     }
-}
-
-/** 从 SAF 选取结果解析展示名；失败时回退 URI 末段，绝不因异常阻断选择流程 */
-internal fun queryDocumentDisplayName(context: android.content.Context, uri: Uri): String {
-    return runCatching {
-        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
-        }
-    }.getOrNull() ?: uri.lastPathSegment.orEmpty()
 }
