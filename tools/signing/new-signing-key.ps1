@@ -47,7 +47,7 @@ function Find-Bash {
 # 每次调用全新生成——重跑脚本得到的是**不同**口令，对应**新**的密钥库。
 function New-RandomPasswordString {
     param([int]$Length = 24)
-    $pool = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%&*+-=?@^_'
+    $pool = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#%&*+-=?@^_'
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     try {
         $raw = New-Object byte[] $Length
@@ -56,6 +56,15 @@ function New-RandomPasswordString {
     } finally {
         $rng.Dispose()
     }
+}
+
+# bash 单引号转义（ISSUE-P3-618）：把任意字符串包成 bash 单引号字面量。
+# 单引号内 bash 不做任何展开；内嵌单引号按 '\'' 处理（闭合-转义-重开），
+# 全程不引入双引号，避免与外层 bash -c "..." 的 Windows 命令行双引号转义相互作用。
+# 仓库路径由 PSScriptRoot 派生，理论上受信；但路径可含单引号/空格，仍转义做纵深防御。
+function ConvertTo-BashSingleQuoted {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    return "'" + ($Text -replace "'", "'\''") + "'"
 }
 
 # 生成密钥库（核心，无交互，可测试）：口令仅经 stdin 管道喂 keytool。
@@ -87,17 +96,21 @@ function New-SigningKeyMaterial {
     #   逐字正确，keytool 的多行口令提示仍读错行（同机 bash 管道同命令一次成功）——
     #   keytool 每次提示新建 reader 的行为与 .NET 管道组合存在不兼容，不深究。
     #   ✓ **Git Bash 中转管道**：口令仅存在于 bash 命令串（进程内存），不落盘、
-    #     不经 Windows 进程命令行；字符池刻意排除引号/反引号/$/反斜杠，bash 单引号安全。
+    #     不经 Windows 进程命令行；动态值一律经 ConvertTo-BashSingleQuoted 转义
+    #    （ISSUE-P3-618），字符池亦排除引号/反引号/$/反斜杠做纵深。
     #   兜底：无 bash 时退回 -storepass（口令进进程命令行约数秒，仅本机同用户进程可见），
     #   属如实声明的降级，不静默。
     $pwFwd = $KeyStorePath.Replace('\', '/')
     $dnameFwd = $DName.Replace('"', '')
+    $pwQ = ConvertTo-BashSingleQuoted $pwFwd
+    $pwArg = ConvertTo-BashSingleQuoted $password
+    $dnameQ = ConvertTo-BashSingleQuoted $dnameFwd
     $bash = Find-Bash
     if ($bash) {
-        $bashCmd = "printf '%s\n%s\nyes\n\n' '$password' '$password'" +
-            " | keytool -genkeypair -v -keystore '$pwFwd' -storetype PKCS12" +
+        $bashCmd = "printf '%s\n%s\nyes\n\n' $pwArg $pwArg" +
+            " | keytool -genkeypair -v -keystore $pwQ -storetype PKCS12" +
             " -alias keepasskey -keyalg RSA -keysize 4096 -validity 10950" +
-            " -dname '$dnameFwd' -J-Duser.language=en -J-Duser.country=US"
+            " -dname $dnameQ -J-Duser.language=en -J-Duser.country=US"
         $genOut = [KeePasskeyCredManWrite]::RunProcessCapture($bash, '-c "' + ($bashCmd -replace '"', '\"') + '"', '')
     } else {
         Write-Warning '未找到 Git Bash——口令将经 keytool -storepass 传参（进程命令行可见约数秒）。'
@@ -113,8 +126,8 @@ $genOut"
     }
 
     if ($bash) {
-        $listCmd = "printf '%s\n' '$password'" +
-            " | keytool -list -v -keystore '$pwFwd' -storetype PKCS12 -J-Duser.language=en -J-Duser.country=US"
+        $listCmd = "printf '%s\n' $pwArg" +
+            " | keytool -list -v -keystore $pwQ -storetype PKCS12 -J-Duser.language=en -J-Duser.country=US"
         $listOut = [KeePasskeyCredManWrite]::RunProcessCapture($bash, '-c "' + ($listCmd -replace '"', '\"') + '"', '')
     } else {
         $listOut = [KeePasskeyCredManWrite]::RunProcessCapture($keytool,
