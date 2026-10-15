@@ -105,6 +105,7 @@ internal fun ExportDatabaseDialog(
     onExportKdbx: (String) -> Unit,
     onExportXml: (String) -> Unit,
     onExportCsv: (String) -> Unit,
+    onExportSpreadsheet: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -142,7 +143,7 @@ internal fun ExportDatabaseDialog(
                 OutlinedButton(
                     onClick = {
                         onDismiss()
-                        // ISSUE-P3-73：通用明文 CSV（后续经二次确认对话框放行落盘）
+                        // ISSUE-P3-623：原值交换 CSV，保留每个字段原值（后续仍须二次确认）
                         val baseName = databaseName.removeSuffix(".kdbx")
                             .ifBlank { "keepasskey" }
                         onExportCsv("$baseName-export.csv")
@@ -150,6 +151,18 @@ internal fun ExportDatabaseDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(stringResource(R.string.dbset_export_csv_btn))
+                }
+                OutlinedButton(
+                    onClick = {
+                        onDismiss()
+                        // ISSUE-P3-623：独立 XLSX 表格文本导出；不把 CSV 改扩展名
+                        val baseName = databaseName.removeSuffix(".kdbx")
+                            .ifBlank { "keepasskey" }
+                        onExportSpreadsheet("$baseName-spreadsheet-text.xlsx")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.dbset_export_spreadsheet_btn))
                 }
             }
         },

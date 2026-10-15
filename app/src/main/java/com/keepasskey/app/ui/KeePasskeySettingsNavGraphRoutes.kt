@@ -90,6 +90,7 @@ internal fun NavGraphBuilder.settingsImportExportRoute(navController: NavHostCon
             onExportKdbx = settingsViewModel::exportKdbxTo,
             onExportXml = settingsViewModel::exportVaultXmlTo,
             onExportCsv = settingsViewModel::exportVaultCsvTo,
+            onExportSpreadsheet = settingsViewModel::exportVaultSpreadsheetTo,
             onExportKeyFile = settingsViewModel::exportKeyFileTo,
             // ISSUE-P3-436：导入密钥文件——SAF 读取走全仓唯一 KeyFileAccess 通道；提交复用改主密钥控制器
             // 的仅改绑分支（空密码 + Use 意图 → changeKeyFileOnly，忙守卫 / 字节清零 / 记忆同步 /

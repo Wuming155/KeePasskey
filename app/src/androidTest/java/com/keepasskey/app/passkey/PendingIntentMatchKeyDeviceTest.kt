@@ -63,6 +63,42 @@ class PendingIntentMatchKeyDeviceTest {
     }
 
     @Test
+    fun `同 requestCode 的随机 data 身份隔离旧 token 并保留旧 extras`() {
+        val record = RecordingBroadcastProbe(matchRequestIdentity = true)
+        val requestCode = CredentialPendingIntents.nextRequestCode()
+        val firstIntent = record.probeIntent("OLD")
+        val secondIntent = record.probeIntent("NEW")
+        CredentialPendingIntents.attachRequestIdentity(firstIntent)
+        CredentialPendingIntents.attachRequestIdentity(secondIntent)
+
+        val oldToken = PendingIntent.getBroadcast(
+            context, requestCode, firstIntent, CredentialPendingIntents.ENTRY_FLAGS
+        )
+        val newToken = PendingIntent.getBroadcast(
+            context, requestCode, secondIntent, CredentialPendingIntents.ENTRY_FLAGS
+        )
+        try {
+            assertFalse(
+                "同 requestCode 仍须因随机 Intent.data 参与 filterEquals 而形成不同 token",
+                firstIntent.filterEquals(secondIntent)
+            )
+            assertNotEquals("新入口不得更新旧 token", oldToken, newToken)
+
+            record.expect(1)
+            oldToken.send()
+            assertEquals(
+                "后创建的新入口不得把旧候选的 token 改写为新 extras",
+                listOf("OLD"),
+                record.await()
+            )
+        } finally {
+            oldToken.cancel()
+            newToken.cancel()
+            record.close()
+        }
+    }
+
+    @Test
     fun `跨组件落地 Intent 不 filterEquals`() {
         val create = Intent(context, PasskeyCreateActivity::class.java)
         val save = Intent(context, PasswordSaveActivity::class.java)
@@ -167,7 +203,7 @@ class PendingIntentMatchKeyDeviceTest {
      * 「是否被覆写」只能经一次真实投递观察。`RECEIVER_NOT_EXPORTED` 使该探针仅接收
      * 本应用发出的广播，与生产 APK 的导出面无关。
      */
-    private inner class RecordingBroadcastProbe {
+    private inner class RecordingBroadcastProbe(matchRequestIdentity: Boolean = false) {
 
         private val received = Collections.synchronizedList(mutableListOf<String>())
 
@@ -182,7 +218,11 @@ class PendingIntentMatchKeyDeviceTest {
         }
 
         init {
-            context.registerReceiver(receiver, IntentFilter(PROBE_ACTION), Context.RECEIVER_NOT_EXPORTED)
+            val filter = IntentFilter(PROBE_ACTION).apply {
+                // 带入口身份的用例必须把 Intent.data 的 scheme 纳入匹配条件。
+                if (matchRequestIdentity) addDataScheme("keepasskey")
+            }
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         }
 
         fun probeIntent(value: String): Intent = Intent(PROBE_ACTION)

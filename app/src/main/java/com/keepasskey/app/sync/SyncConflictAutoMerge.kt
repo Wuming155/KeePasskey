@@ -33,7 +33,10 @@ internal fun conflictUploadExpectedEtag(conflictMomentEtag: String): String? =
 
 /** [autoMergeAndUpload] 的上传终态（供调用方分派 412 重入）。 */
 internal sealed interface AutoMergeUploadResult {
-    data class Completed(val outcome: SyncOutcome) : AutoMergeUploadResult
+    data class Completed(
+        val outcome: SyncOutcome,
+        val confirmedDatabase: KdbxDatabase? = null
+    ) : AutoMergeUploadResult
 
     /**
      * 合并上传遭 412 且已取到最新远端：合并窗口内远端再次变更。
@@ -152,14 +155,16 @@ internal suspend fun autoMergeAndUpload(
             } else {
                 uploadResult.settlement.accept()
             }
-            AutoMergeUploadResult.Completed(
-                if (saveResult is KdbxResult.Failure) {
+            val outcome = if (saveResult is KdbxResult.Failure) {
                     SyncOutcome.Error(
                         strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.textArg(strings))
                     )
                 } else {
                     SyncOutcome.MergedAndUploaded
                 }
+            AutoMergeUploadResult.Completed(
+                outcome,
+                confirmedDatabase = mergedDb.takeIf { outcome.isInSyncWithRemote() }
             )
         }
         is SyncResolveUploadResult.Failed -> {
@@ -210,14 +215,16 @@ internal suspend fun autoMergeAndUpload(
                         } else {
                             fresh.settlement?.accept()
                         }
-                        AutoMergeUploadResult.Completed(
-                            if (saveResult is KdbxResult.Failure) {
+                        val outcome = if (saveResult is KdbxResult.Failure) {
                                 SyncOutcome.Error(
                                     strings.get(R.string.sync_error_merged_upload_local_save_failed, saveResult.textArg(strings))
                                 )
                             } else {
                                 SyncOutcome.MergedAndUploaded
                             }
+                        AutoMergeUploadResult.Completed(
+                            outcome,
+                            confirmedDatabase = mergedDb.takeIf { outcome.isInSyncWithRemote() }
                         )
                     }
                     is SyncCommitResult.RemoteUnreachable -> {
@@ -247,6 +254,15 @@ internal suspend fun autoMergeAndUpload(
                             SyncOutcome.Error(strings.get(R.string.sync_error_rollback_rejected))
                         )
                     }
+                    SyncCommitResult.RecoveryRequired -> {
+                        eraseDiscardedParseResults(
+                            localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
+                            databaseSession.databaseFlow.value
+                        )
+                        AutoMergeUploadResult.Completed(
+                            SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
+                        )
+                    }
                 }
             }
             // ISSUE-P3-235 G2：上传失败 ⇒ 合并产物与本次判定用的三棵解析树**全部**失去持有者，
@@ -262,6 +278,15 @@ internal suspend fun autoMergeAndUpload(
                     // 只透出**状态码或异常类型名**
                     strings.get(R.string.sync_error_upload_merged_failed, remoteFailureDescriptor(ex))
                 )
+            )
+        }
+        SyncResolveUploadResult.RecoveryRequired -> {
+            eraseDiscardedParseResults(
+                localDb, localDbOwned, remoteDb, trustedBase, mergedDb,
+                databaseSession.databaseFlow.value
+            )
+            AutoMergeUploadResult.Completed(
+                SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
             )
         }
     }

@@ -149,9 +149,10 @@ class SyncConflictController @Inject constructor(
             debugLog.warn(SYNC_LOG_TAG, "冲突解决策略=以云端为准：放弃本地未同步修改，采用远端版本")
             // ISSUE-P2-278：用户显式「以云端为准」策略（覆盖语义已在设置页声明，不计入该条
             // 整改面），不带校验快照直采
-            when (codec.loadAndApplyRemoteBytes(remoteBytes)) {
-                SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
-                    session.lastSyncedDb = databaseSession.databaseFlow.value
+            when (val applied = codec.loadAndApplyRemoteBytes(remoteBytes)) {
+                is SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
+                    session.lastSyncedDb = applied.database
+                    session.checkpointDatabase = applied.database
                     SyncOutcome.UpToDate
                 }
                 else -> SyncOutcome.Error(strings.get(R.string.sync_error_load_remote_failed))
@@ -186,6 +187,8 @@ class SyncConflictController @Inject constructor(
                 // ISSUE-P2-548：401/403、协议错误、5xx 不是「离线」，须出具体失败文案
                 is SyncCommitResult.RemoteRejected -> strings.remoteFailureOutcome(forcedCommit.cause)
                 is SyncCommitResult.ConflictNeedsMerge -> SyncOutcome.Offline
+                SyncCommitResult.RecoveryRequired ->
+                    SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
                 // commitLocalForce 不下载远端，理论不可达；穷尽分支如实映射为拒绝回退提示（ISSUE-P2-18）
                 is SyncCommitResult.RollbackRejected -> SyncOutcome.Error(
                     strings.get(R.string.sync_error_rollback_rejected)
@@ -328,7 +331,12 @@ class SyncConflictController @Inject constructor(
                 conflictEtag = remoteEtag,
                 expectedSessionSnapshot = expectedSessionSnapshot
             )) {
-                is AutoMergeUploadResult.Completed -> upload.outcome
+                is AutoMergeUploadResult.Completed -> {
+                    if (upload.outcome.isInSyncWithRemote()) {
+                        session.checkpointDatabase = upload.confirmedDatabase
+                    }
+                    upload.outcome
+                }
                 is AutoMergeUploadResult.Superseded -> {
                     if (isReentry) {
                         // ISSUE-P1-275 AC③ 深度界限：重入后远端仍再次变更 ⇒ 如实上浮类型化错误，

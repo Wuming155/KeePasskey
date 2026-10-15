@@ -130,6 +130,32 @@ class CredentialRequestCodeWiringTest {
         }
     }
 
+    @Test
+    fun `密码 Passkey 创建与解锁入口均安装随机 filterEquals 身份`() {
+        val assembler = readSource(ASSEMBLER)
+        val createEntries = readSource(CREATE_ENTRIES)
+        val service = readSource(PROVIDER_SERVICE)
+        val identityFactory = readSource(PENDING_INTENTS)
+
+        assertEquals(
+            "断言与密码候选各自必须有随机入口身份",
+            2,
+            Regex("CredentialPendingIntents\\.attachRequestIdentity\\(")
+                .findAll(assembler)
+                .count()
+        )
+        assertEquals(
+            "Passkey 创建、密码保存与密码草稿入口均必须有随机身份",
+            3,
+            Regex("CredentialPendingIntents\\.attachRequestIdentity\\(")
+                .findAll(createEntries)
+                .count()
+        )
+        assertTrue("解锁 Action 必须经过共享随机身份工厂", service.contains("CredentialPendingIntents.attachRequestIdentity("))
+        assertTrue("身份必须写入 Intent.data，参与 filterEquals", identityFactory.contains("intent.data = requestUri(requestId)"))
+        assertTrue("身份生成必须使用随机 UUID", identityFactory.contains("UUID.randomUUID().toString()"))
+    }
+
     // ── 跨通道取值段：避开带必须由机检承载，而非散文承诺（ISSUE-P3-513） ──
 
     @Test

@@ -2,6 +2,7 @@ package com.keepasskey.app.sync
 
 import android.content.Context
 import com.keepasskey.app.R
+import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.database.file.KdbxDatabase
@@ -12,12 +13,11 @@ import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncOpenResult
 import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.merge.SyncConflictStrategy
-import com.keepasskey.sync.provider.SyncProvider
-import com.keepasskey.sync.s3.S3SyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -89,7 +89,9 @@ class SyncCycleRunner @Inject constructor(
      * `ISSUE-P2-536`：「本地库文件自上次成功同步以来未被重写」的进程内检查点（生产由 Hilt 注入）。
      * 为 null（既有手工装配路径 / 单测）时本机制整体旁路，占位态判定与整改前逐字节一致。
      */
-    internal val localFileCheckpoint: SyncLocalFileCheckpoint? = null
+    internal val localFileCheckpoint: SyncLocalFileCheckpoint? = null,
+    /** ISSUE-P2-625：只在本地快照准备段挂锁；网络等待不延迟自动锁定。 */
+    internal val autoLockGuard: AutoLockSessionGuard? = null
 ) {
 
     /**
@@ -99,6 +101,21 @@ class SyncCycleRunner @Inject constructor(
      */
     @Volatile
     internal var lastCycleRemotePath: String? = null
+
+    @Volatile
+    internal var lastCycleTargetIdentity: String? = null
+
+    /** Deterministic race seam for the post-settlement checkpoint boundary. */
+    @androidx.annotation.VisibleForTesting
+    internal var beforeCheckpointRecord: (suspend () -> Unit)? = null
+
+    /** 确定性挂锁截止时间测试缝；生产路径保持为空。 */
+    @androidx.annotation.VisibleForTesting
+    internal var beforeLocalSnapshot: (suspend () -> Unit)? = null
+
+    /** 可注入的本地快照挂锁预算，生产默认值为五秒。 */
+    @androidx.annotation.VisibleForTesting
+    internal var localSnapshotHoldoffBudgetMillis: Long = LOCAL_SNAPSHOT_HOLDOFF_BUDGET_MS
 
     /**
      * 测试钩子（`ISSUE-P2-277` AC③）：注入「记录调用线程」的 [SyncCache] 子类，用于断言缓存
@@ -124,9 +141,24 @@ class SyncCycleRunner @Inject constructor(
      * 记录放在锁外是因为它只读本地文件并写进程内摘要，不触碰任何周期共享状态。
      */
     suspend fun runSyncCycle(): SyncOutcome {
-        val outcome = runCycleUnderLock()
+        session.checkpointDatabase = null
+        var confirmedDatabase: KdbxDatabase? = null
+        val outcome = try {
+            runCycleUnderLock().also { confirmedDatabase = session.checkpointDatabase }
+        } finally {
+            // A canceled or failed cycle cannot leave a candidate for a later cycle to consume.
+            session.checkpointDatabase = null
+        }
         if (outcome.isInSyncWithRemote()) {
-            localFileCheckpoint?.record(lastCycleRemotePath.orEmpty(), databaseSession.currentFile)
+            if (confirmedDatabase != null) {
+                beforeCheckpointRecord?.invoke()
+                val stableRevision = databaseSession.writeIntents.digestStableFileFor(confirmedDatabase)
+                localFileCheckpoint?.record(
+                    lastCycleRemotePath.orEmpty(),
+                    lastCycleTargetIdentity,
+                    stableRevision
+                )
+            }
         }
         return outcome
     }
@@ -134,29 +166,42 @@ class SyncCycleRunner @Inject constructor(
     private suspend fun runCycleUnderLock(): SyncOutcome = session.mutex.withLock {
         val currentDb = databaseSession.databaseFlow.value
             ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_vault_not_unlocked))
+        autoLockGuard?.beginLongTask()
+        var holdoffActive = autoLockGuard != null
         // §411 走查（ISSUE-P3-447 局部收口）：SAF（自选位置）通道的库 `associatedFile == null`，
         // 此前在首行即早退报「当前无打开的密码库文件」，既掩盖真实原因又使 SAF 库完全无法云同步。
         // 同步周期对本地文件的唯一依赖是「远端路径默认名」——本地字节恒由内存树序列化而来，
         // 故以活动文件名优先、库名兜底（`<库名>.kdbx`）解析远端路径，SAF 库得以进入同一周期。
         val vaultFileName = databaseSession.currentFile?.name ?: "${currentDb.databaseName}.kdbx"
 
-        // Wave 14 全站强制 HTTPS：遗留的 http:// 端点在 Provider 构造期被拒，
-        // 此处将类型化错误上浮为用户可理解的同步失败反馈
-        // ISSUE-P1-06 整改：同步周期结束后显式擦除 S3 凭据 CharArray，
-        // 杜绝 Provider 实例被 GC 前凭据长期驻留堆内存（try-finally 保证任何退出路径均擦除）
-        // 取 provider 与装配统一在 setupCycleContext 内完成，此处 finally 擦除持有引用
-        var providerForErase: SyncProvider? = null
         try {
-            // ISSUE-P2-277 AC①：装配段整体下沉 `Dispatchers.IO`。整改前该段在调用方线程上执行，
-            // 而前台入口（下拉刷新 / 解锁后自动 / 设置页）持 `viewModelScope`（`Main.immediate`）
-            // ⇒ Keystore 解密、整库密文读 / 写 + `fd.sync()`、全库逐字段比较全部压在主线程上，
-            // 大库下为数百毫秒至秒级，并与凭据提供者的应答预算争用同一条主线程队列。
-            // 下沉点选在**调用处整体包裹**而非逐个函数改造：装配段内任何后续新增的同步 IO 调用
-            // 自动获得同一保障（对本条四类缺陷一次性收口，且不扩散 `SyncCache` 的 API 变更面）。
-            val setup = withContext(Dispatchers.IO) { setupCycleContext(vaultFileName, currentDb) }
-            if (setup.outcome != null) return@withLock setup.outcome
-            val ctx = setup.context!!
-            providerForErase = ctx.provider
+            val result = providerResolver.useProviderWithTarget(
+                defaultFileName = vaultFileName,
+                testOverride = session.testSyncProvider
+            ) { provider, providerTarget ->
+                // ISSUE-P2-277 AC①：装配段整体下沉 `Dispatchers.IO`。整改前该段在调用方线程上执行，
+                // 而前台入口（下拉刷新 / 解锁后自动 / 设置页）持 `viewModelScope`（`Main.immediate`）
+                // ⇒ Keystore 解密、整库密文读 / 写 + `fd.sync()`、全库逐字段比较全部压在主线程上，
+                // 大库下为数百毫秒至秒级，并与凭据提供者的应答预算争用同一条主线程队列。
+                // 下沉点选在**调用处整体包裹**而非逐个函数改造：装配段内任何后续新增的同步 IO 调用
+                // 自动获得同一保障（对本条四类缺陷一次性收口，且不扩散 `SyncCache` 的 API 变更面）。
+                val setupWithinLockBudget = withContext(Dispatchers.IO) {
+                    withTimeoutOrNull(localSnapshotHoldoffBudgetMillis) {
+                        beforeLocalSnapshot?.invoke()
+                        setupCycleContext(vaultFileName, currentDb, provider, providerTarget)
+                    }
+                }
+                if (holdoffActive) {
+                    // 上下文现在只持有供网络阶段使用的不可变密文快照。
+                    // 在任何 Provider 元数据、下载或上传调用前释放挂锁，避免排队和慢响应延迟用户锁定。
+                    holdoffActive = false
+                    autoLockGuard?.endLongTask()
+                }
+                val setup = setupWithinLockBudget ?: return@useProviderWithTarget SyncOutcome.Error(
+                    strings.get(R.string.sync_error_snapshot_prepare_timeout)
+                )
+                if (setup.outcome != null) return@useProviderWithTarget setup.outcome
+                val ctx = setup.context!!
 
             // ISSUE-P3-168 ①：下面的三方合并可直接以 `currentDb`（**本周期起点的内存树快照**）
             // 充当「本地侧」，无需把 localBytes 重新解析回树——两条路径都已证明二者内容等价：
@@ -167,17 +212,18 @@ class SyncCycleRunner @Inject constructor(
             // 故意**不**在合并内重读 `databaseFlow`：UI 写路径不取本周期持有的 SyncSessionState.mutex，
             // 重读可能拿到与 localBytes 不对应的树（会与即将上传的字节产生分歧）。
 
-            // 2. 首次同步且尚未缓存：若远端尚未创建该文件，直接上传本地库建立基线
-            if (!ctx.isCached) {
-                establishRemoteBaselineIfMissing(
-                    provider = ctx.provider,
-                    syncEngine = ctx.syncEngine,
-                    remotePath = ctx.remotePath,
-                    localBytes = ctx.localBytes,
-                    // ISSUE-P1-591：上传的即周期起点快照，基线结算须以它为准
-                    localDbSnapshot = ctx.currentDb
-                )?.let { return@withLock it }
-            }
+                // 2. 首次同步且尚未缓存：若远端尚未创建该文件，直接上传本地库建立基线
+                if (!ctx.isCached) {
+                    val baselineOutcome = establishRemoteBaselineIfMissing(
+                        provider = ctx.provider,
+                        syncEngine = ctx.syncEngine,
+                        remotePath = ctx.remotePath,
+                        localBytes = ctx.localBytes,
+                        // ISSUE-P1-591：上传的即周期起点快照，基线结算须以它为准
+                        localDbSnapshot = ctx.currentDb
+                    )
+                    if (baselineOutcome != null) return@useProviderWithTarget baselineOutcome
+                }
 
             // 3. 若本地为未落盘的修改态且本地已存在历史缓存基线，尝试快速提交
             // ISSUE-P3-301：本判据 `SyncCache.isCached` = `exists() && length() > 0`，是**一次 stat
@@ -192,39 +238,43 @@ class SyncCycleRunner @Inject constructor(
             // 即「步骤 2 与步骤 3 之间缓存状态不变」依赖一条尚未显式论证 / 断言的不变量——
             // 一旦该分支行为变化，改用 `ctx.isCached` 会让快速提交路径在「刚建立基线」的同一轮
             // 被误判进入，属状态机判定改变（AC② 禁止）。本次不动状态机。
-            val cachedBeforeFastCommit = withContext(Dispatchers.IO) {
-                ctx.syncCache.isCached(ctx.remotePath)
-            }
-            if (ctx.isDirty && cachedBeforeFastCommit) {
-                return@withLock tryFastCommitPath(
+                val cachedBeforeFastCommit = withContext(Dispatchers.IO) {
+                    ctx.syncCache.isCached(ctx.remotePath)
+                }
+                if (ctx.isDirty && cachedBeforeFastCommit) {
+                    return@useProviderWithTarget tryFastCommitPath(
+                        syncEngine = ctx.syncEngine,
+                        syncCache = ctx.syncCache,
+                        remotePath = ctx.remotePath,
+                        localBytes = ctx.localBytes,
+                        localDbSnapshot = ctx.currentDb,
+                        baseSnapshotBytes = ctx.baseSnapshotBytes,
+                        settings = ctx.settings,
+                        conflictStrategy = ctx.conflictStrategy
+                    )
+                }
+
+            // 4. 执行 openRemote 同步状态机决策
+                handleOpenRemote(
                     syncEngine = ctx.syncEngine,
                     syncCache = ctx.syncCache,
                     remotePath = ctx.remotePath,
                     localBytes = ctx.localBytes,
                     localDbSnapshot = ctx.currentDb,
                     baseSnapshotBytes = ctx.baseSnapshotBytes,
-                    settings = ctx.settings,
+                    isDirty = ctx.isDirty,
+                    hasLocalContentChanged = ctx.hasLocalContentChanged,
+                    localChangeState = ctx.localChangeState,
+                    localFileUnchangedSinceSync = ctx.localFileUnchangedSinceSync,
                     conflictStrategy = ctx.conflictStrategy
                 )
-            }
-
-            // 4. 执行 openRemote 同步状态机决策
-            return@withLock handleOpenRemote(
-                syncEngine = ctx.syncEngine,
-                syncCache = ctx.syncCache,
-                remotePath = ctx.remotePath,
-                localBytes = ctx.localBytes,
-                localDbSnapshot = ctx.currentDb,
-                baseSnapshotBytes = ctx.baseSnapshotBytes,
-                isDirty = ctx.isDirty,
-                hasLocalContentChanged = ctx.hasLocalContentChanged,
-                localChangeState = ctx.localChangeState,
-                localFileUnchangedSinceSync = ctx.localFileUnchangedSinceSync,
-                conflictStrategy = ctx.conflictStrategy
-                )
+            } ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials))
+            result
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 协程取消原样重抛（结构化并发契约）
             throw e
+        } catch (e: com.keepasskey.sync.model.SyncException.InvalidEndpointError) {
+            SyncOutcome.Error(strings.get(R.string.sync_error_invalid_endpoint))
         } catch (e: Throwable) {
             // ISSUE-P0-09：openRemote 之外的周期步骤（本地序列化 / 首传基线 / 快速提交与冲突合并）
             // 同样存在 provider-引擎重抛链未覆盖的 Error 面（如合并超深结构栈溢出），
@@ -232,11 +282,16 @@ class SyncCycleRunner @Inject constructor(
             // ISSUE-P3-311 项 3：异常 message 可能携带服务器可控串，UI 只出固定通用文案
             SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
         } finally {
-            // ISSUE-P1-06：同步周期结束（无论成功/失败/异常），显式擦除 S3 凭据 CharArray。
-            // WebDAV 侧密码已在 resolveProvider() 构造完成后即时擦除（passwordChars 借用语义），
-            // S3 侧因 Provider 需在整个同步周期内多次签名复用，故延迟至此处统一擦除。
-            (providerForErase as? S3SyncProvider)?.clearCredentials()
+            if (holdoffActive) {
+                holdoffActive = false
+                autoLockGuard?.endLongTask()
+            }
         }
+    }
+
+    private companion object {
+        /** 本地快照阶段对自动锁定的延期不得超过此预算。 */
+        const val LOCAL_SNAPSHOT_HOLDOFF_BUDGET_MS = 5_000L
     }
 
     /**
@@ -255,20 +310,27 @@ class SyncCycleRunner @Inject constructor(
         // §411：与 runSyncCycle 同口径——SAF 库 currentFile 为 null 时以库名兜底解析远端路径
         val vaultFileName = databaseSession.currentFile?.name ?: "${currentDb.databaseName}.kdbx"
 
-        var providerForErase: SyncProvider? = null
         try {
-            val provider = session.testSyncProvider ?: providerResolver.resolveProvider()
-                ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials))
-            providerForErase = provider
-            val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
-            val vaultScope = vaultBindingStore?.let { currentDb.rootGroup.id.toHexString() }
-            val cacheScope = vaultScope.orEmpty()
+            providerResolver.useProvider(session.testSyncProvider) { provider ->
+                val remotePath = withContext(Dispatchers.IO) {
+                    session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
+                }
+                val vaultScope = vaultBindingStore?.let { currentDb.rootGroup.id.toHexString() }
+                val cacheScope = vaultScope.orEmpty()
 
-            val outcome = withContext(Dispatchers.IO) {
-                val localBytes = codec.serializeLocalDatabase(currentDb)
-                    ?: return@withContext SyncOutcome.Error(
-                        strings.get(R.string.sync_error_local_serialize_failed)
-                    )
+                withContext(Dispatchers.IO) {
+                autoLockGuard?.beginLongTask()
+                var holdoffActive = autoLockGuard != null
+                val localBytes = try {
+                    codec.serializeLocalDatabase(currentDb)
+                } finally {
+                    if (holdoffActive) {
+                        holdoffActive = false
+                        autoLockGuard?.endLongTask()
+                    }
+                } ?: return@withContext SyncOutcome.Error(
+                    strings.get(R.string.sync_error_local_serialize_failed)
+                )
                 // 确认即改绑：此后该远端目标归当前库所有
                 if (vaultScope != null) vaultBindingStore?.saveBinding(remotePath, vaultScope)
 
@@ -292,19 +354,19 @@ class SyncCycleRunner @Inject constructor(
                         }
                     }
                     is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
+                    SyncCommitResult.RecoveryRequired ->
+                        SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
                     // ISSUE-P2-548：整库覆盖被鉴权 / 协议 / 服务端拒绝——不是「离线」
                     is SyncCommitResult.RemoteRejected -> strings.remoteFailureOutcome(takeoverCommit.cause)
                     else -> SyncOutcome.Error(strings.get(R.string.sync_error_vault_takeover_failed))
                 }
             }
-            outcome
+            } ?: SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             // ISSUE-P3-311 项 3：同上——固定通用文案，不透传异常 message
             SyncOutcome.Error(strings.get(R.string.sync_error_vault_takeover_failed))
-        } finally {
-            (providerForErase as? S3SyncProvider)?.clearCredentials()
         }
     }
 
@@ -373,6 +435,8 @@ class SyncCycleRunner @Inject constructor(
                 is SyncOpenResult.RollbackRejected -> SyncOutcome.Error(
                     strings.get(R.string.sync_error_rollback_rejected)
                 )
+                SyncOpenResult.RecoveryRequired ->
+                    SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 协程取消必须原样重抛，绝不可归一为同步失败（结构化并发契约）

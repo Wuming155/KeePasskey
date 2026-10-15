@@ -17,6 +17,7 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.core.security.readCharsForDisplayOrNull
 import com.keepasskey.core.security.readStringForDisplayOrEmpty
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.merge.KdbxMerger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -151,13 +152,26 @@ class ConflictResolutionViewModel @Inject constructor(
         val local = pair.localEntry
         val remote = pair.remoteEntry
         return when {
-            key == KdbxConstants.Fields.PASSWORD -> ConflictedField(
-                fieldKey = key,
-                fieldName = strings.get(R.string.conflict_field_password),
-                localValue = sensitiveValueHint(local.fields[key], R.string.conflict_mask_local),
-                remoteValue = sensitiveValueHint(remote.fields[key], R.string.conflict_mask_remote),
-                isSensitive = true
-            )
+            key == KdbxConstants.Fields.PASSWORD || key == KdbxConstants.Fields.OTP -> {
+                val labelRes = if (key == KdbxConstants.Fields.PASSWORD) {
+                    R.string.conflict_field_password
+                } else {
+                    R.string.conflict_field_otp
+                }
+                ConflictedField(
+                    fieldKey = key,
+                    fieldName = strings.get(labelRes),
+                    localValue = local.fields[key]?.let {
+                        sensitiveValueHint(it, R.string.conflict_mask_local)
+                    } ?: strings.get(R.string.conflict_value_field_missing),
+                    remoteValue = remote.fields[key]?.let {
+                        sensitiveValueHint(it, R.string.conflict_mask_remote)
+                    } ?: strings.get(R.string.conflict_value_field_missing),
+                    isSensitive = true,
+                    localMissing = key !in local.fields,
+                    remoteMissing = key !in remote.fields
+                )
+            }
             key == KdbxConstants.Fields.TITLE || key == KdbxConstants.Fields.USER_NAME ||
                 key == KdbxConstants.Fields.URL || key == KdbxConstants.Fields.NOTES -> {
                 val labelRes = when (key) {
@@ -171,8 +185,14 @@ class ConflictResolutionViewModel @Inject constructor(
                     fieldName = strings.get(labelRes),
                     // ISSUE-P2-534：冲突差异展示面——本页在同步刚结束时渲染，与会话整树替换的
                     // 就地擦除极易并发；裸 readString 撞上已擦实例会崩进程（§473 同型面）
-                    localValue = local.fields[key].readStringForDisplayOrEmpty(),
-                    remoteValue = remote.fields[key].readStringForDisplayOrEmpty()
+                    localValue = local.fields[key]?.readStringForDisplayOrEmpty()
+                        ?.ifEmpty { strings.get(R.string.conflict_value_empty) }
+                        ?: strings.get(R.string.conflict_value_field_missing),
+                    remoteValue = remote.fields[key]?.readStringForDisplayOrEmpty()
+                        ?.ifEmpty { strings.get(R.string.conflict_value_empty) }
+                        ?: strings.get(R.string.conflict_value_field_missing),
+                    localMissing = key !in local.fields,
+                    remoteMissing = key !in remote.fields
                 )
             }
             key.startsWith(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX) -> {
@@ -183,17 +203,23 @@ class ConflictResolutionViewModel @Inject constructor(
                 ConflictedField(
                     fieldKey = key,
                     fieldName = customKey,
-                    localValue = if (sensitive) {
-                        sensitiveValueHint(lv, R.string.conflict_mask_local)
-                    } else {
-                        lv.readStringForDisplayOrEmpty()
+                    localValue = when {
+                        lv == null -> strings.get(R.string.conflict_value_field_missing)
+                        sensitive -> sensitiveValueHint(lv, R.string.conflict_mask_local)
+                        else -> lv.readStringForDisplayOrEmpty().ifEmpty {
+                            strings.get(R.string.conflict_value_empty)
+                        }
                     },
-                    remoteValue = if (sensitive) {
-                        sensitiveValueHint(rv, R.string.conflict_mask_remote)
-                    } else {
-                        rv.readStringForDisplayOrEmpty()
+                    remoteValue = when {
+                        rv == null -> strings.get(R.string.conflict_value_field_missing)
+                        sensitive -> sensitiveValueHint(rv, R.string.conflict_mask_remote)
+                        else -> rv.readStringForDisplayOrEmpty().ifEmpty {
+                            strings.get(R.string.conflict_value_empty)
+                        }
                     },
-                    isSensitive = sensitive
+                    isSensitive = sensitive,
+                    localMissing = lv == null,
+                    remoteMissing = rv == null
                 )
             }
             // 标量 / 联合到期 / AutoType / 颜色键经专用映射；词汇外的键可见呈现（禁静默丢弃差异），
@@ -277,7 +303,9 @@ class ConflictResolutionViewModel @Inject constructor(
             val updated = state.entries.map { entry ->
                 if (entry.id == entryId) {
                     val newFields = entry.fields.map { field ->
-                        if (field.fieldKey == fieldKey) field.copy(selectedChoice = choice) else field
+                        if (field.fieldKey == fieldKey) {
+                            field.copy(selectedChoice = normalizedFieldChoice(field, choice))
+                        } else field
                     }
                     entry.copy(fields = newFields)
                 } else entry
@@ -289,11 +317,19 @@ class ConflictResolutionViewModel @Inject constructor(
     fun selectAll(choice: FieldChoice) {
         _uiState.update { state ->
             val updated = state.entries.map { entry ->
-                val newFields = entry.fields.map { it.copy(selectedChoice = choice) }
+                val newFields = entry.fields.map {
+                    it.copy(selectedChoice = normalizedFieldChoice(it, choice))
+                }
                 entry.copy(fields = newFields)
             }
             state.copy(entries = updated)
         }
+    }
+
+    private fun normalizedFieldChoice(field: ConflictedField, requested: FieldChoice): FieldChoice = when (requested) {
+        FieldChoice.LOCAL -> FieldChoice.LOCAL
+        FieldChoice.REMOTE -> if (field.remoteMissing) FieldChoice.DELETE_REMOTE else FieldChoice.REMOTE
+        FieldChoice.DELETE_REMOTE -> if (field.remoteMissing) FieldChoice.DELETE_REMOTE else FieldChoice.LOCAL
     }
 
     /** ISSUE-P2-281 AC②／AC③：条目级裁决方式（整条兜底入口 / 双方保留）。 */
@@ -329,18 +365,19 @@ class ConflictResolutionViewModel @Inject constructor(
             // ISSUE-P2-281：条目级裁决方式为非逐字段时，整条决策走 resolutions 通道
             // （fieldResolutions 不含该条目 ⇒ resolveConflict 整条分支，DUPLICATE_BOTH 由此可达）
             val resolutions = mutableMapOf<String, ConflictResolutionChoice>()
-            val fieldResolutions = mutableMapOf<String, Map<String, ConflictResolutionChoice>>()
+            val fieldResolutions = mutableMapOf<String, Map<String, FieldResolutionChoice>>()
             _uiState.value.entries.forEach { entry ->
                 when (entry.mode) {
                     EntryResolutionMode.FIELD_BY_FIELD -> {
                         val perField = entry.fields.associate { field ->
                             field.fieldKey to when (field.selectedChoice) {
-                                FieldChoice.LOCAL -> ConflictResolutionChoice.KEEP_LOCAL
-                                FieldChoice.REMOTE -> ConflictResolutionChoice.KEEP_REMOTE
+                                FieldChoice.LOCAL -> FieldResolutionChoice.KEEP_LOCAL
+                                FieldChoice.REMOTE -> FieldResolutionChoice.KEEP_REMOTE
+                                FieldChoice.DELETE_REMOTE -> FieldResolutionChoice.DELETE_REMOTE
                             }
                         }
                         // 条目级决策保留为兜底语义：任一字段选择云端即视为 KEEP_REMOTE
-                        val hasRemote = perField.values.any { it == ConflictResolutionChoice.KEEP_REMOTE }
+                        val hasRemote = perField.values.any { it != FieldResolutionChoice.KEEP_LOCAL }
                         resolutions[entry.id] =
                             if (hasRemote) ConflictResolutionChoice.KEEP_REMOTE else ConflictResolutionChoice.KEEP_LOCAL
                         fieldResolutions[entry.id] = perField

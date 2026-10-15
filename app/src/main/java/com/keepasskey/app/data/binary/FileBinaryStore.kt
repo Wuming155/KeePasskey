@@ -4,12 +4,14 @@ import android.content.Context
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.session.SessionLockObserver
+import com.keepasskey.database.file.AttachmentSpillTransaction
 import com.keepasskey.sync.engine.SyncCache
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,31 +23,51 @@ import javax.inject.Singleton
  * key 为不透明随机串（SyncCache 内部再以 SHA-256 规范键命名文件），
  * 因此 [store] 的返回值不泄漏任何附件内容信息。
  *
- * 生命周期（**两层，缺一不可**）：
- * 1. **运行时终止**：实现 [SessionLockObserver]，会话锁定 / 关闭时清空缓存目录；
- * 2. **进程冷启动**：`MainApplication.onCreate()` 在**任何会话打开之前**调用 [clear]。
+ * 生命周期清理（按次回收与两层兜底）：
+ * 1. **解析事务**：database 记录每次解析成功创建的 key，失败/取消时定点删除；子库投影完成后定点删除。
+ *    若流式写入在 key 返回前失败，本实现自行清理；立即清理失败时保留不透明 key 供安全清扫重试；
+ * 2. **运行时终止**：实现 [SessionLockObserver]，会话锁定 / 关闭时清空缓存目录；
+ * 3. **进程冷启动**：`MainApplication.onCreate()` 在**任何会话打开之前**调用 [clear]。
  *    目录内是**附件解密后的明文**，进程被 kill / force-stop / OOM 回收时
- *    [onSessionLocked] 不会执行，仅靠第 1 层会使上一次运行的明文跨进程存活
- *    到下一次锁定——这是唯一「无需口令即可读取库内容」的已确认路径（F-13）。
+ *    [onSessionLocked] 不会执行；此兜底清理仍负责移除上次进程留下的缓存（F-13）。
  *
- * 两层的清理都走同一收敛路径（[purgeAttachmentCache]）：删除失败只记脱敏日志、绝不外抛。
+ * 目录级清理走同一收敛路径（[purgeAttachmentCache]）：删除失败只记脱敏日志、绝不外抛。
  */
 @Singleton
-class FileBinaryStore @Inject constructor(
-    @ApplicationContext context: Context
+class FileBinaryStore private constructor(
+    private val cache: SyncCache
 ) : BinaryStore, SessionLockObserver {
 
-    private val cache = SyncCache(File(context.cacheDir, CACHE_DIR_NAME))
+    @Inject
+    constructor(@ApplicationContext context: Context) : this(
+        SyncCache(File(context.cacheDir, CACHE_DIR_NAME))
+    )
+
+    /** 仅供 JVM 回归测试注入可观测缓存实现。 */
+    internal constructor(cache: SyncCache, testOnly: Unit) : this(cache)
+
+    /** storeFromStream 未能交付 key 且按次清理失败时，保留不透明 key 以便下次清扫重试。 */
+    private val pendingFailedWriteKeys = ConcurrentHashMap.newKeySet<String>()
 
     override fun store(bytes: ByteArray): String {
         val key = newKey()
-        cache.writeCache(key, bytes)
+        try {
+            cache.writeCache(key, bytes)
+        } catch (failure: Throwable) {
+            cleanupFailedWrite(key, failure)
+            throw failure
+        }
         return key
     }
 
     override fun storeFromStream(input: InputStream, size: Long): String {
         val key = newKey()
-        cache.writeCacheStreaming(key, input, size)
+        try {
+            cache.writeCacheStreaming(key, input, size)
+        } catch (failure: Throwable) {
+            cleanupFailedWrite(key, failure)
+            throw failure
+        }
         return key
     }
 
@@ -81,6 +103,40 @@ class FileBinaryStore @Inject constructor(
             purge = { cache.clearAll() },
             onFailure = ::logPurgeFailure
         )
+        val failedWrites = retryFailedWriteCleanup()
+        val pendingSpills = AttachmentSpillTransaction.retryPendingCleanup()
+        if (failedWrites + pendingSpills > 0) {
+            AppLog.w(TAG, "附件缓存仍有 $failedWrites 个未交付写入和 $pendingSpills 个按次回收项待清理")
+        }
+    }
+
+    /** store 写入异常时 key 尚未交付调用方，因此由本实现立即回滚并保留失败项重试。 */
+    private fun cleanupFailedWrite(key: String, originalFailure: Throwable) {
+        try {
+            cache.clear(key)
+            if (cache.cacheSize(key) == 0L) {
+                pendingFailedWriteKeys.remove(key)
+            } else {
+                pendingFailedWriteKeys.add(key)
+                originalFailure.addSuppressed(IllegalStateException("Failed attachment write cleanup remains pending"))
+            }
+        } catch (cleanupFailure: Throwable) {
+            pendingFailedWriteKeys.add(key)
+            if (cleanupFailure !== originalFailure) originalFailure.addSuppressed(cleanupFailure)
+        }
+    }
+
+    /** Retry failed writes whose opaque keys were never returned to the transaction recorder. */
+    private fun retryFailedWriteCleanup(): Int {
+        pendingFailedWriteKeys.toList().forEach { key ->
+            try {
+                cache.clear(key)
+                if (cache.cacheSize(key) == 0L) pendingFailedWriteKeys.remove(key)
+            } catch (_: Throwable) {
+                // Keep only the opaque key for the next lock/close/cold-start cleanup attempt.
+            }
+        }
+        return pendingFailedWriteKeys.size
     }
 
     /**

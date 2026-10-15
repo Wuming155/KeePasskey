@@ -40,6 +40,7 @@ internal fun settleSyncedVersion(
 ): UploadSettlement {
     if (active === uploaded) {
         session.lastSyncedDb = uploaded
+        session.checkpointDatabase = uploaded
         return UploadSettlement.CONVERGED
     }
     return UploadSettlement.LOCAL_DIVERGED

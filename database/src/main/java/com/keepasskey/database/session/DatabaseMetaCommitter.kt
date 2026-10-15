@@ -173,7 +173,7 @@ internal class DatabaseMetaCommitter(
     private fun clearUncommittedCandidate(current: KdbxDatabase, candidate: KdbxDatabase) {
         if (candidate === current) return
         candidate.rootGroup.clearSupersededSensitiveData(current.rootGroup)
-        candidate.clearBinaryPool(current.binaries)
+        candidate.clearBinaryPool(current)
         candidate.clearCustomIconPool(current.customIcons)
         val candidateKdf = candidate.header.kdfParameters
         val currentKdf = current.header.kdfParameters

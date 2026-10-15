@@ -305,24 +305,35 @@ private fun FieldDiffRow(
         // 本地选项
         ConflictFieldChoiceRow(
             choice = FieldChoice.LOCAL,
-            labelRes = R.string.conflict_local_version,
+            labelRes = if (field.localMissing) R.string.conflict_local_field_missing else R.string.conflict_local_version,
             labelColor = MaterialTheme.colorScheme.primary,
             value = field.localValue,
             selectedChoice = field.selectedChoice,
-            isSensitive = field.isSensitive,
+            isSensitive = field.isSensitive && !field.localMissing,
             onChoiceSelected = onChoiceSelected
         )
 
-        // 云端选项
-        ConflictFieldChoiceRow(
-            choice = FieldChoice.REMOTE,
-            labelRes = R.string.conflict_remote_version,
-            labelColor = MaterialTheme.colorScheme.secondary,
-            value = field.remoteValue,
-            selectedChoice = field.selectedChoice,
-            isSensitive = field.isSensitive,
-            onChoiceSelected = onChoiceSelected
-        )
+        if (field.remoteMissing) {
+            ConflictFieldChoiceRow(
+                choice = FieldChoice.DELETE_REMOTE,
+                labelRes = R.string.conflict_remote_delete_action,
+                labelColor = MaterialTheme.colorScheme.secondary,
+                value = field.remoteValue,
+                selectedChoice = field.selectedChoice,
+                isSensitive = false,
+                onChoiceSelected = onChoiceSelected
+            )
+        } else {
+            ConflictFieldChoiceRow(
+                choice = FieldChoice.REMOTE,
+                labelRes = R.string.conflict_remote_version,
+                labelColor = MaterialTheme.colorScheme.secondary,
+                value = field.remoteValue,
+                selectedChoice = field.selectedChoice,
+                isSensitive = field.isSensitive,
+                onChoiceSelected = onChoiceSelected
+            )
+        }
     }
 }
 

@@ -170,7 +170,7 @@ internal fun eraseDiscardedDatabase(db: KdbxDatabase, live: KdbxDatabase?) {
     if (db === live) return
     eraseDiscardedGroup(db.rootGroup, live?.rootGroup)
     if (db.header !== live?.header) db.header.kdfParameters.clearSensitive()
-    db.clearBinaryPool(live?.binaries ?: emptyList())
+    db.clearBinaryPool(live)
     db.clearCustomIconPool(live?.customIcons ?: emptyList())
 }
 

@@ -66,6 +66,11 @@ class ExternalDatabaseParseSpillTest {
             entries.values.forEach { it.fill(0) }
             entries.clear()
         }
+
+        override fun delete(key: String) {
+            entries.remove(key)?.fill(0)
+            keys.remove(key)
+        }
     }
 
     private val password = "SyncSpill#2026".toCharArray()
@@ -109,6 +114,9 @@ class ExternalDatabaseParseSpillTest {
             "落盘后再读回的字节须与原文逐字一致（落盘不得损坏内容）",
             readBack.size == ATTACHMENT_SIZE && readBack.all { it == ATTACHMENT_FILL }
         )
+
+        parsedDb.clearSensitiveData()
+        assertTrue("外部解析树释放后按次回收其附件 spill", store.keys.isEmpty())
     }
 
     /** 生成含 > 1 MiB 附件（解析期必然落盘）的单条目库字节。 */

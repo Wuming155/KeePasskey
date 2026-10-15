@@ -145,11 +145,14 @@ internal suspend fun SyncCycleRunner.handleRemoteSynced(
 private suspend fun SyncCycleRunner.adoptRemoteBytes(
     ctx: RemoteSyncContext,
     openResult: SyncOpenResult.RemoteSynced
-): SyncOutcome = when (codec.loadAndApplyRemoteBytes(openResult.remoteBytes, ctx.localDbSnapshot)) {
-    SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
+): SyncOutcome = when (
+    val applied = codec.loadAndApplyRemoteBytes(openResult.remoteBytes, ctx.localDbSnapshot)
+) {
+    is SyncDatabaseCodec.ApplyRemoteResult.APPLIED -> {
         // ISSUE-P2-308：采纳确认（远端树已落库且保存成功）后才落地基线三步
         openResult.adoption?.accept()
-        session.lastSyncedDb = databaseSession.databaseFlow.value
+        session.lastSyncedDb = applied.database
+        session.checkpointDatabase = applied.database
         SyncOutcome.UpToDate
     }
     SyncDatabaseCodec.ApplyRemoteResult.SESSION_DIVERGED -> {

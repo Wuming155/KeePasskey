@@ -203,12 +203,34 @@ class ChildReadOnlySessionTest {
                 "（装载未携带 binaryStore 时 count=0；子库与根库共用应用级 FileBinaryStore）",
             store.spillCalls > 0
         )
-        assertTrue("落盘内容不得为空", store.entries.values.all { it.isNotEmpty() })
-        assertEquals(
-            "落盘字节数必须与附件声明尺寸一致",
-            ChildDatabaseFixtures.BIG_ATTACHMENT_BYTES.toLong(),
-            store.entries.values.first().size.toLong()
-        )
+        assertTrue("投影不持有附件，成功后必须回收本次 spill", store.entries.isEmpty())
+        assertEquals("本次新 key 应被定点删除", 1, store.deletedKeys.size)
+    }
+
+    @Test
+    fun `子库解析成功后投影晚失败并连续重试时不留spill且保留活动根库附件`() = runTest {
+        val password = this@ChildReadOnlySessionTest.password
+        val validLargeAttachment = ChildDatabaseFixtures.kdbxBytesWithLargeAttachment(password)
+        val store = RecordingBinaryStore().apply {
+            entries["active-root-key"] = byteArrayOf(11, 12, 13)
+        }
+        val session = session(
+            FakeChildDatabaseStreamSource(payload = validLargeAttachment),
+            binaryStore = store
+        ).apply {
+            beforeProjectionForTest = {
+                throw com.keepasskey.database.exception.KdbxCorruptFileException("测试用的解析后投影失败")
+            }
+        }
+
+        repeat(2) {
+            val result = session.open(password, null)
+            assertEquals(ChildDatabaseFailureReason.CORRUPT_FILE, reasonOf(result))
+            assertEquals("每次失败后只保留活动根库附件", setOf("active-root-key"), store.entries.keys)
+            assertTrue("活动根库附件内容不可变", store.entries.getValue("active-root-key").contentEquals(byteArrayOf(11, 12, 13)))
+        }
+
+        assertEquals("连续两次解析都必须独立回收", 2, store.deletedKeys.size)
     }
 
     /** 投影必须只有非敏感展示字段：任何一条目的任何文本字段都不得出现密码明文 */

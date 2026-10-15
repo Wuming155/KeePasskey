@@ -45,10 +45,10 @@ import java.io.IOException
  *   （含其二进制池，`ISSUE-P3-258` 起）；
  * - **超过 1 MiB 的附件沿用应用级 `FileBinaryStore` 落盘**（与根库会话同一实例，见
  *   `docs/architecture/已知工程限界.md` §1.1）：池中只留 store key，不再整份明文内联驻留堆。
- *   其清理由**会话锁定 / 关闭**与**冷启动**统一收口（同限界 §1.1 / §1.2 口径），
- *   本类**不新增**任何独立清理路径——子库与根库同属应用私有缓存、共享同一清理面；
- *   而**投影仍不携带附件字段**（[ChildDatabaseEntryProjection] 只有展示字段与 `hasPassword`），
- *   落盘只影响对象树在内存中的形态，不扩大对外暴露面；
+ *   本类用 database 的按次解析事务记录本次创建的 key；投影不携带附件字段
+ *   （[ChildDatabaseEntryProjection] 只有展示字段与 `hasPassword`），因此投影成功后清除明文树并
+ *   定点删除本次 spill。解析失败、取消或投影构造失败同样回收本次 key；活动根库及其他子库的 key
+ *   不受影响。会话锁定 / 关闭与冷启动清扫仍作为进程异常终止时的兜底，限界口径见 §1.1 / §1.2；
  * - 投影刻意不携带密码字段（只有 `hasPassword` 布尔事实），不提供任何读取子库密码的 API
  *   ——首版无需该能力，少一条明文通道即少一份暴露面；
  * - [terminate] 是**同步**终止路径（供根库锁定的 `SessionLockObserver` 回调直接调用）：
@@ -80,6 +80,10 @@ internal class ChildReadOnlySession(
 
     /** 世代号：任何 [terminate] 或新一次打开都会使其自增，令在途结果失效 */
     private var generation: Long = 0L
+
+    /** 确定性注入解析成功后、投影开始前的失败；生产路径保持为空。 */
+    @androidx.annotation.VisibleForTesting
+    internal var beforeProjectionForTest: (suspend () -> Unit)? = null
 
     private var snapshot: ChildDatabaseSnapshot? = null
 
@@ -144,23 +148,32 @@ internal class ChildReadOnlySession(
         classify(t)
     }
 
-    private suspend fun loadProjection(password: CharArray?, keyFile: ByteArray?): Attempt = try {
-        val projected = withContext(Dispatchers.Default) {
-            streamSource.open(mount).use { input ->
-                KdbxFile.load(input, password, keyFile, binaryStore)
-            }.let { database ->
+    private suspend fun loadProjection(password: CharArray?, keyFile: ByteArray?): Attempt {
+        val spillTransaction = KdbxFile.beginAttachmentSpillTransaction(binaryStore)
+        return try {
+            val projected = withContext(Dispatchers.Default) {
+                val database = streamSource.open(mount).use { input ->
+                    spillTransaction.load(input, password, keyFile)
+                }
                 try {
+                    beforeProjectionForTest?.invoke()
                     project(database)
                 } finally {
-                    // 子库明文树不驻留内存：投影完成后立即定点擦除
+                    // 投影不保留附件：先清明文树，再回收本次独占 spill key。
                     database.clearSensitiveData()
                 }
             }
+            spillTransaction.purge()
+            Attempt.Loaded(projected)
+        } catch (t: Throwable) {
+            try {
+                spillTransaction.purge()
+            } catch (cleanupFailure: Throwable) {
+                t.addSuppressed(cleanupFailure)
+            }
+            if (t is CancellationException) throw t
+            classify(t)
         }
-        Attempt.Loaded(projected)
-    } catch (t: Throwable) {
-        if (t is CancellationException) throw t
-        classify(t)
     }
 
     private fun settle(token: Long, attempt: Attempt): KdbxResult<ChildDatabaseSnapshot> {

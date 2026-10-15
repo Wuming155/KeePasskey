@@ -42,6 +42,13 @@ class SyncSessionState @Inject constructor() {
     var lastSyncedDb: KdbxDatabase? = null
 
     /**
+     * ISSUE-P2-624：本轮经结算确认与远端一致的确切数据库实例。
+     * 周期收尾在 DatabaseSession 提交锁内复核此身份后才允许发布文件检查点。
+     */
+    @Volatile
+    var checkpointDatabase: KdbxDatabase? = null
+
+    /**
      * ISSUE-P3-381：上次同步周期记录的远端 ETag（回前台探测的比对基线）。
      * 会话锁定时随 [clear] 一并清空。
      */
@@ -66,6 +73,7 @@ class SyncSessionState @Inject constructor() {
      */
     fun clear() {
         lastSyncedDb = null
+        checkpointDatabase = null
         lastSyncEngine = null
         lastRemoteEtag = ""
     }

@@ -73,6 +73,8 @@ class ExportTicketSinkGuardTest {
         listOf(
             "fun exportVaultXmlTo(" to """fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket)""",
             "fun exportVaultCsvTo(" to """fun exportVaultCsvTo(targetUri: Uri, ticket: ExportTicket)""",
+            "fun exportVaultSpreadsheetTo(" to
+                """fun exportVaultSpreadsheetTo(targetUri: Uri, ticket: ExportTicket)""",
             // ISSUE-P3-128：密钥文件同属 PLAINTEXT 风险等级，必须一并受令牌门控
             "fun exportKeyFileTo(" to """fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket)"""
         ).forEach { (signature, expected) ->
@@ -95,16 +97,32 @@ class ExportTicketSinkGuardTest {
         )
     }
 
+    @Test
+    fun `原值CSV保留原序列化路径且表格导出走独立格式转换`() {
+        val source = stripComments(readSource(CONTROLLER_SOURCE))
+        val rawCsv = functionBody(source, "fun exportVaultCsvTo(")
+        val spreadsheet = functionBody(source, "fun exportVaultSpreadsheetTo(")
+        val conversion = functionBody(source, "private suspend fun exportVaultSpreadsheetBytes(")
+
+        assertTrue("原值 CSV 必须继续返回仓库原始 CSV 字节", rawCsv.contains("vaultRepository.exportVaultCsvBytes()"))
+        assertFalse("原值 CSV 路径不得套用表格转换", rawCsv.contains("SpreadsheetTextWorkbookExporter"))
+        assertTrue("表格导出必须绑定独立的确认制品类型", spreadsheet.contains("SAFE_SPREADSHEET_XLSX"))
+        assertTrue("表格导出必须使用独立序列化入口", spreadsheet.contains("exportVaultSpreadsheetBytes()"))
+        assertTrue("表格转换必须以仓库原值 CSV 为输入", conversion.contains("vaultRepository.exportVaultCsvBytes()"))
+        assertTrue("表格转换必须由独立 XLSX 适配器写出", conversion.contains("SpreadsheetTextWorkbookExporter.exportCsv(csvBytes)"))
+        assertTrue("CSV 输入缓冲必须在转换成功或失败后清零", conversion.contains("csvBytes.fill(0)"))
+    }
+
     /**
      * ISSUE-P3-128：密钥文件导出在 **UI 侧**也必须先经二次确认——
      * 否则控制器虽要求令牌，UI 仍可在 SAF 回调里凭空签发一个（等于没确认）。
      *
-     * **§156 搬家后的等价改写**：三处同形确认弹窗（明文 XML / 明文 CSV / 密钥文件）已收敛为
+     * **§156 搬家后的等价改写**：同形确认弹窗（明文 XML / 原值 CSV / 表格文本 XLSX / 密钥文件）已收敛为
      * 同包共享组件 `ExportConfirmationDialog`，故「签发点」与「取消清理点」移到该文件、
-     * `kind` 改由调用方传入。**定位串随搬家更新，断言强度只增不减**：除原有三条外，另钉
+     * `kind` 改由调用方传入。**定位串随搬家更新，断言强度只增不减**：另钉
      * ① 密钥文件调用点必须把 `artifactKind` 钉为 `KEY_FILE` 且 `targetUri` / `onConfirmed`
      * 分别是 `pendingKeyFileUri` / `onExportKeyFile`（防「弹了确认框却导出别的对象」），
-     * ② 三类明文导出各一处调用点（多一处即存在旁路），③ UI 侧签发点在整个 `subscreens` 目录**唯一**，
+     * ② 四类明文导出各一处调用点（多一处即存在旁路），③ UI 侧签发点在整个 `subscreens` 目录**唯一**，
      * ④ 目标或令牌缺失一律不放行（fail-closed），⑤ 取消分支必清理 SAF 空文档（ISSUE-P2-20）。
      */
     @Test
@@ -126,8 +144,8 @@ class ExportTicketSinkGuardTest {
             KEY_FILE_CALL_SITE.containsMatchIn(code)
         )
         assertEquals(
-            "[$SCREEN_SOURCE] 三类明文导出（XML / CSV / 密钥文件）各一处确认调用点，多一处即存在旁路",
-            3,
+            "[$SCREEN_SOURCE] 四类明文导出（XML / 原值 CSV / 表格文本 XLSX / 密钥文件）各一处确认调用点，多一处即存在旁路",
+            4,
             Regex("ExportConfirmationDialog\\(").findAll(code).count()
         )
 
@@ -148,6 +166,30 @@ class ExportTicketSinkGuardTest {
         assertTrue(
             "[$CONFIRM_DIALOG_SOURCE] 取消分支必须清理 SAF 已创建的空目标文档（ISSUE-P2-20）",
             dialog.contains("SafDocumentCleanup.deleteCreatedDocument(localContext, it)")
+        )
+    }
+
+    @Test
+    fun `表格文本导出使用独立XLSX目标和明文确认令牌`() {
+        val rawSource = readSource(SCREEN_SOURCE)
+        val code = stripComments(rawSource)
+        assertTrue(
+            "XLSX 必须通过电子表格 MIME 类型另存为",
+            Regex(
+                """ActivityResultContracts\.CreateDocument\(\s*"application/vnd.openxmlformats-officedocument\.spreadsheetml\.sheet"\s*\)"""
+            ).containsMatchIn(rawSource)
+        )
+        assertTrue(
+            "SAF 回调必须进入独立待确认状态",
+            code.contains("pendingSpreadsheetUri = uri") && code.contains("showSpreadsheetConfirm = true")
+        )
+        assertTrue(
+            "确认框必须绑定 XLSX 制品、XLSX 目标和 XLSX 回调",
+            Regex(
+                """ExportConfirmationDialog\(\s*titleResId = R\.string\.dbset_export_spreadsheet_warn_title,""" +
+                    """[\s\S]*?artifactKind = ExportArtifactKind\.SAFE_SPREADSHEET_XLSX,""" +
+                    """[\s\S]*?targetUri = pendingSpreadsheetUri,[\s\S]*?onConfirmed = onExportSpreadsheet"""
+            ).containsMatchIn(code)
         )
     }
 

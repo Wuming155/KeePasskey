@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.importer
 
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxTimes
@@ -10,6 +11,8 @@ import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.sync.merge.KdbxDatabaseLite
+import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.merge.KdbxMerger
 import java.io.File
 import java.security.MessageDigest
@@ -67,8 +70,13 @@ class KdbxMergeInteropProbeTest {
                 customIcons = remoteDb.customIcons
             )
             val merged = KdbxMerger.mergeDatabases(base, localLite, remoteLite)
+            val deletionPair = buildDeletionPair(localDb.rootGroup.id)
+            val resolvedDeletion = KdbxMerger.resolveConflictByFields(
+                deletionPair,
+                mapOf("custom:$DELETION_PROBE_FIELD" to FieldResolutionChoice.DELETE_REMOTE)
+            )
             val outDb = localDb.copy(
-                rootGroup = merged.mergedRoot,
+                rootGroup = merged.mergedRoot.copy(entries = merged.mergedRoot.entries + resolvedDeletion),
                 deletedObjects = merged.mergedDeletedObjects,
                 customIcons = merged.mergedCustomIcons
             )
@@ -82,6 +90,12 @@ class KdbxMergeInteropProbeTest {
             val titles = outDb.rootGroup.allEntries().map { it.title }
             assertTrue("合并产物须含本地条目", titles.contains("merge-local"))
             assertTrue("合并产物须含对端独有条目", titles.contains("merge-remote-unique"))
+            assertTrue("删除冲突探针必须保留目标条目", titles.contains(DELETION_PROBE_TITLE))
+            assertTrue(
+                "DELETE_REMOTE 结果不得含已删除的自定义字段",
+                outDb.rootGroup.allEntries().single { it.title == DELETION_PROBE_TITLE }
+                    .customFields.none { it.key == DELETION_PROBE_FIELD }
+            )
             assertTrue("探针文件必须落盘", probeFile.exists() && probeFile.length() > 0)
 
             val sha = MessageDigest.getInstance("SHA-256")
@@ -102,7 +116,9 @@ class KdbxMergeInteropProbeTest {
                   app/build/interop-probe/$PROBE_FILE_NAME \\
                   $password \\
                   --expect-entry merge-local \\
-                  --expect-entry merge-remote-unique
+                  --expect-entry merge-remote-unique \\
+                  --expect-entry $DELETION_PROBE_TITLE \\
+                  --expect-no-custom-property $DELETION_PROBE_TITLE $DELETION_PROBE_FIELD
                 ```
 
                 - keepassxc-cli：
@@ -151,8 +167,29 @@ class KdbxMergeInteropProbeTest {
         return KdbxFile.load(file.inputStream(), password.clone(), null, null)
     }
 
+    private fun buildDeletionPair(parentGroupId: KdbxUuid): ConflictedEntryPair {
+        val entryId = KdbxUuid.random()
+        val local = KdbxEntry(
+            id = entryId,
+            parentGroupId = parentGroupId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString(DELETION_PROBE_TITLE, false)),
+            customFields = listOf(
+                KdbxCustomField(DELETION_PROBE_FIELD, ProtectedString("synthetic-secret", true))
+            )
+        )
+        val remote = local.copy(customFields = emptyList())
+        return ConflictedEntryPair(
+            entryId = entryId.toHexString(),
+            localEntry = local,
+            remoteEntry = remote,
+            modifiedFields = listOf("custom:$DELETION_PROBE_FIELD")
+        )
+    }
+
     companion object {
         const val PROBE_FILE_NAME = "keepasskey-kdbx-merge-probe.kdbx"
         const val PROBE_NOTE_NAME = "KDBX_MERGE_PROBE.md"
+        const val DELETION_PROBE_TITLE = "merge-delete-target"
+        const val DELETION_PROBE_FIELD = "ProbeDeletedField"
     }
 }

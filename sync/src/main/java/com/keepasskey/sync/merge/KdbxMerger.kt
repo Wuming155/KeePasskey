@@ -18,6 +18,13 @@ enum class ConflictResolutionChoice {
     DUPLICATE_BOTH
 }
 
+/** Explicit field-level resolution; DELETE_REMOTE is valid only when the remote snapshot lacks the key. */
+enum class FieldResolutionChoice {
+    KEEP_LOCAL,
+    KEEP_REMOTE,
+    DELETE_REMOTE
+}
+
 /**
  * 差异检测条目模型
  *
@@ -77,6 +84,15 @@ data class MergeResult(
  * [KdbxGroupMerger] / [KdbxEntryMerger] / [KdbxTombstoneMerger]（同包 internal 单元）。
  */
 object KdbxMerger {
+
+    private val DELETABLE_STANDARD_FIELDS = setOf(
+        KdbxConstants.Fields.TITLE,
+        KdbxConstants.Fields.USER_NAME,
+        KdbxConstants.Fields.PASSWORD,
+        KdbxConstants.Fields.URL,
+        KdbxConstants.Fields.NOTES,
+        KdbxConstants.Fields.OTP
+    )
 
     /**
      * ISSUE-P2-281：冲突差异键的词汇常量（[ConflictedEntryPair.modifiedFields] 的单一词汇表，
@@ -226,13 +242,15 @@ object KdbxMerger {
         KdbxEntryMerger.isModified(base, current)
 
     /**
-     * 字段级冲突解决（TASK-30 整改；`ISSUE-P2-281` 扩词汇）：按字段粒度应用用户决策——
-     * 以本地条目为底版，用户选择「云端」的字段用远端值覆写，其余字段保留本地值。
+     * 字段级冲突解决（TASK-30 / ISSUE-P2-281 / ISSUE-P3-629）：按字段粒度应用显式决策——
+     * 以本地条目为底版，采用远端值时覆写；仅当本次差异键的远端字段确实缺失时才可删除本地键。
      *
      * 合并条目保留本地 UUID（同一冲突条目的就地裁决）；任一字段采用远端值时
      * lastModificationTime 刷新为当前时刻（产物相对两侧均有变化，需触发他端再次合并）。
-     * [fieldChoices] 键的词汇与 [ConflictedEntryPair.modifiedFields] 同表
-     * （单一真相源，禁止另造）：标准字段键（[KdbxConstants.Fields.*]）、
+     * [fieldChoices] 键的词汇与 [ConflictedEntryPair.modifiedFields] 同表，伪造/未知键安全忽略；
+     * `DELETE_REMOTE` 对远端仍存在的字段不生效，也不作用于条目标量。
+     *
+     * 决策词汇（单一真相源，禁止另造）包括标准字段键（[KdbxConstants.Fields.*]）、
      * [CUSTOM_FIELD_CONFLICT_PREFIX] 前缀的自定义字段键、条目语义键（标量 / 联合到期 / AutoType / 颜色）
      * （[CONFLICT_KEY_ICON_ID] / [CONFLICT_KEY_CUSTOM_ICON_ID] /
      * [CONFLICT_KEY_OVERRIDE_URL] / [CONFLICT_KEY_QUALITY_CHECK]）。
@@ -240,12 +258,38 @@ object KdbxMerger {
      */
     fun resolveConflictByFields(
         pair: ConflictedEntryPair,
-        fieldChoices: Map<String, ConflictResolutionChoice>
+        fieldChoices: Map<String, FieldResolutionChoice>
     ): KdbxEntry {
         var merged = pair.localEntry
         var adoptedRemote = false
+        val knownConflictFields = pair.modifiedFields.toHashSet()
         for ((fieldKey, choice) in fieldChoices) {
-            if (choice != ConflictResolutionChoice.KEEP_REMOTE) continue
+            if (fieldKey !in knownConflictFields || choice == FieldResolutionChoice.KEEP_LOCAL) continue
+            if (choice == FieldResolutionChoice.DELETE_REMOTE) {
+                val deleted = when {
+                    fieldKey.startsWith(CUSTOM_FIELD_CONFLICT_PREFIX) -> {
+                        val customKey = fieldKey.removePrefix(CUSTOM_FIELD_CONFLICT_PREFIX)
+                        val remoteHasField = pair.remoteEntry.customFields.any { it.key == customKey }
+                        val localHasField = merged.customFields.any { it.key == customKey }
+                        if (!remoteHasField && localHasField) {
+                            merged = merged.copy(customFields = merged.customFields.filterNot { it.key == customKey })
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    fieldKey !in DELETABLE_STANDARD_FIELDS -> false
+                    fieldKey in pair.remoteEntry.fields -> false
+                    fieldKey in merged.fields -> {
+                        merged = merged.copy(fields = merged.fields - fieldKey)
+                        true
+                    }
+                    else -> false
+                }
+                adoptedRemote = adoptedRemote || deleted
+                continue
+            }
+            if (choice != FieldResolutionChoice.KEEP_REMOTE) continue
             when {
                 fieldKey.startsWith(CUSTOM_FIELD_CONFLICT_PREFIX) -> {
                     val customKey = fieldKey.removePrefix(CUSTOM_FIELD_CONFLICT_PREFIX)

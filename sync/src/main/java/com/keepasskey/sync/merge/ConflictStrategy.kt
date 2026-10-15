@@ -115,11 +115,22 @@ object BothModifiedEntryCollector {
      * 面（如 `times` / 标签并集 / 附件并集）。
      */
     private fun differingConflictFields(local: KdbxEntry, remote: KdbxEntry): List<String> = buildList {
-        if (local.title != remote.title) add(KdbxConstants.Fields.TITLE)
-        if (local.userName != remote.userName) add(KdbxConstants.Fields.USER_NAME)
-        if (local.password != remote.password) add(KdbxConstants.Fields.PASSWORD)
-        if (local.url != remote.url) add(KdbxConstants.Fields.URL)
-        if (local.notes != remote.notes) add(KdbxConstants.Fields.NOTES)
+        // Compare map presence as well as value: convenience getters fold absent and empty fields together.
+        if (local.fields[KdbxConstants.Fields.TITLE] != remote.fields[KdbxConstants.Fields.TITLE]) {
+            add(KdbxConstants.Fields.TITLE)
+        }
+        if (local.fields[KdbxConstants.Fields.USER_NAME] != remote.fields[KdbxConstants.Fields.USER_NAME]) {
+            add(KdbxConstants.Fields.USER_NAME)
+        }
+        if (local.fields[KdbxConstants.Fields.PASSWORD] != remote.fields[KdbxConstants.Fields.PASSWORD]) {
+            add(KdbxConstants.Fields.PASSWORD)
+        }
+        if (local.fields[KdbxConstants.Fields.URL] != remote.fields[KdbxConstants.Fields.URL]) {
+            add(KdbxConstants.Fields.URL)
+        }
+        if (local.fields[KdbxConstants.Fields.NOTES] != remote.fields[KdbxConstants.Fields.NOTES]) {
+            add(KdbxConstants.Fields.NOTES)
+        }
         // 自定义字段：按名比对值（ProtectedString.equals 为内容比较，不物化明文）
         val localCustom = local.customFields.associateBy { it.key }
         val remoteCustom = remote.customFields.associateBy { it.key }

@@ -53,6 +53,9 @@ class SyncDatabaseCodec @Inject constructor(
      * 未传 `binaryStore`，远端库里超过落盘阈值的附件无论多大都内联进堆（`InnerHeader` 池
      * 持有明文）且从不零化。
      *
+     * 成功返回的 spill key 随 `KdbxDatabase` 池条目移交：调用方采用该库时由会话生命周期释放；
+     * 比较后丢弃时须走数据库身份判定擦除，最终按 key 删除不再被活动池引用的附件。
+     *
      * 失败仍只落调试日志（不向调用方抛裸异常）；凭据克隆与清零由会话层承担。
      */
     suspend fun parseKdbxBytes(bytes: ByteArray): KdbxDatabase? =
@@ -84,7 +87,7 @@ class SyncDatabaseCodec @Inject constructor(
         // 按身份集合判定擦除树与池（`ISSUE-P3-258`）。
         if (expectedSessionSnapshot != null) {
             if (!databaseSession.adoptDatabaseIfUnchanged(expectedSessionSnapshot, remoteDb)) {
-                // 未采用：远端解析树失去持有者，必须显式擦除（不得留给 GC）
+        // 未采用：远端解析树失去持有者，显式擦除并回收其不被活动池引用的 spill。
                 remoteDb.clearSensitiveData()
                 return ApplyRemoteResult.SESSION_DIVERGED
             }
@@ -92,19 +95,19 @@ class SyncDatabaseCodec @Inject constructor(
             databaseSession.updateDatabaseMeta { remoteDb }
         }
         return if (databaseSession.save() is KdbxResult.Success) {
-            ApplyRemoteResult.APPLIED
+            ApplyRemoteResult.APPLIED(remoteDb)
         } else {
             ApplyRemoteResult.SAVE_FAILED
         }
     }
 
     /** [loadAndApplyRemoteBytes] 的终态（调用方据此前馈用户可理解的错误文案）。 */
-    enum class ApplyRemoteResult {
-        APPLIED,
-        PARSE_FAILED,
-        SAVE_FAILED,
+    sealed interface ApplyRemoteResult {
+        data class APPLIED(val database: KdbxDatabase) : ApplyRemoteResult
+        data object PARSE_FAILED : ApplyRemoteResult
+        data object SAVE_FAILED : ApplyRemoteResult
 
         /** ISSUE-P2-278：采用前校验发现会话树在同步窗口内已被本地编辑替换，本轮如实中止。 */
-        SESSION_DIVERGED
+        data object SESSION_DIVERGED : ApplyRemoteResult
     }
 }

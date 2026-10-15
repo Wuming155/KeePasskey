@@ -30,12 +30,14 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import com.keepasskey.app.coroutines.guardedScope
@@ -62,6 +64,9 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
 
     @Inject
     lateinit var vaultRepository: VaultRepository
+
+    @Inject
+    lateinit var databaseSession: DatabaseSession
 
     @Inject
     lateinit var responseAssembler: CredentialResponseAssembler
@@ -149,6 +154,18 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         //    （解锁成功后由该 Activity 直接回传凭据候选，系统随即继续呈现，无需用户二次发起）
         if (vaultRepository.isLocked()) {
             val unlockIntent = Intent(this, CredentialUnlockActivity::class.java)
+            val sessionTicket = databaseSession.captureCredentialRequest().ticket
+            CredentialPendingIntents.attachRequestIdentity(
+                unlockIntent,
+                CredentialEntryRequestContext(
+                    requestType = CredentialEntryRequestType.UNLOCK,
+                    databaseId = sessionTicket?.pathIdentifier ?: activeDatabaseId(),
+                    entryId = null,
+                    expectedOrigin = extractOrigin(request.callingAppInfo),
+                    expectedPackage = callingPackage,
+                    sessionTicket = sessionTicket
+                )
+            )
             val pendingIntent = PendingIntent.getActivity(
                 this,
                 // ISSUE-P2-199：requestCode 进程级单调（原为常量 100，会与后续响应的候选条目记录互相覆写）
@@ -218,6 +235,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         // ISSUE-P1-10：不记录调用包名 / origin（会暴露用户安装应用清单与注册站点）
         val callingAppInfo = request.callingAppInfo
         val callingOrigin = extractOrigin(callingAppInfo)
+        val sessionTicket = databaseSession.captureCredentialRequest().ticket
+        val databaseId = sessionTicket?.pathIdentifier ?: activeDatabaseId()
         // ISSUE-P3-188：入口装配下沉同包协作对象，本函数只保留「门控 → 分派 → 收口」编排；
         // 分派不命中任何已知请求类型时不追加条目（与拆分前的空 `when` 完全一致）
         val createEntry = when (request) {
@@ -225,13 +244,26 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             // 同一收敛语义：系统侧等价于「本提供方不处理该请求」）；密码类创建不受影响。
             is BeginCreatePublicKeyCredentialRequest ->
                 if (settingsStore.isPasskeySupportEnabled()) {
-                    CredentialCreateEntries.passkeyEntry(this, request, callingOrigin)
+                    CredentialCreateEntries.passkeyEntry(
+                        context = this,
+                        request = request,
+                        callingOrigin = callingOrigin,
+                        callingPackage = callingAppInfo?.packageName.orEmpty(),
+                        databaseId = databaseId,
+                        sessionTicket = sessionTicket
+                    )
                 } else {
                     null
                 }
 
             is BeginCreatePasswordCredentialRequest ->
-                CredentialCreateEntries.passwordEntry(this, callingAppInfo?.packageName.orEmpty(), callingOrigin)
+                CredentialCreateEntries.passwordEntry(
+                    context = this,
+                    callingPackage = callingAppInfo?.packageName.orEmpty(),
+                    callingOrigin = callingOrigin,
+                    databaseId = databaseId,
+                    sessionTicket = sessionTicket
+                )
 
             // §241：未识别的创建请求**必须留痕**——`androidx.credentials.provider`
             // 对「类型是公钥凭据、但载荷缺 `BUNDLE_KEY_REQUEST_JSON`」的请求会以
@@ -277,6 +309,13 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
             privilegedBrowserStore.allowlistJson()
         )
     }
+
+    /** 活动库身份仅用于入口绑定，不写入 Intent 或日志。 */
+    private suspend fun activeDatabaseId(): String? = vaultRepository.getDatabases()
+        .first()
+        .firstOrNull { it.isActive }
+        ?.id
+        ?.takeIf { it.isNotBlank() }
 
     /**
      * 根据调用来源 (Origin 或 Package) 严格安全匹配条目 (供既有单元测试与内部查询复用)。

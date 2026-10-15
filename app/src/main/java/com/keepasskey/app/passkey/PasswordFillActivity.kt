@@ -9,11 +9,12 @@ import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
+import com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
-import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -45,6 +46,9 @@ class PasswordFillActivity : BaseCredentialActivity() {
     lateinit var vaultRepository: VaultRepository
 
     @Inject
+    lateinit var databaseSession: DatabaseSession
+
+    @Inject
     lateinit var biometricAuthManager: BiometricAuthManager
 
     @Inject
@@ -56,6 +60,10 @@ class PasswordFillActivity : BaseCredentialActivity() {
     /** ISSUE-P2-83：CM 通道调用方签名绑定存储（`android://` 维度回传前二次校验） */
     @Inject
     lateinit var callerTrustStore: CredentialManagerCallerTrustStore
+
+    /** 最终系统请求的可信 origin 解析使用与候选组装相同的浏览器白名单。 */
+    @Inject
+    lateinit var privilegedBrowserStore: PasskeyPrivilegedBrowserStore
 
     /** ISSUE-P3-298 ⑥：条目上次使用时刻记录（回传成功即真实使用点） */
     @Inject
@@ -69,20 +77,23 @@ class PasswordFillActivity : BaseCredentialActivity() {
         // ISSUE-P3-188：`onCreate` 收敛为「读请求 → 调用方核对 → 黑名单复核 → 派发」编排，
         // 各段职责下沉私有函数；判定**顺序**与 fail-closed 口径逐字不变
         val request = readFillRequest()
+        if (request == null) {
+            AppLog.w(TAG, "凭据入口身份或最终系统请求不可验证，拒绝回填密码")
+            failAndFinish()
+            return
+        }
         if (rejectsAttestedCaller(request)) {
             failAndFinish()
             return
         }
-        if (request.entryId.isBlank()) {
+        if (request.context.entryId.isNullOrBlank()) {
             AppLog.e(TAG, "缺少密码凭据 entryId")
             failAndFinish()
             return
         }
         // ISSUE-P0-02：与 Autofill 通道一致的 fail-closed 黑名单复核。
         // 候选组装侧已拦截一次；此处对回传路径再校验，杜绝「组装后被加入黑名单」的窗口被利用。
-        if (request.expectedPackage.isNotBlank() &&
-            autofillBlocklistStore.isBlocked(request.expectedPackage)
-        ) {
+        if (autofillBlocklistStore.isBlocked(request.context.expectedPackage)) {
             AppLog.w(TAG, "调用应用已列入自动填充黑名单，拒绝回传密码")
             failAndFinish()
             return
@@ -98,64 +109,86 @@ class PasswordFillActivity : BaseCredentialActivity() {
         }
     }
 
-    /** 填充请求入参（ISSUE-P3-188：仅把原 `onCreate` 局部量收拢，取值口径不变） */
+    /** 最终下发请求与候选身份（仅含非秘密元数据）。 */
     private data class FillRequest(
-        val entryId: String,
-        val expectedDomain: String,
-        val expectedPackage: String,
-        val providerReq: ProviderGetCredentialRequest?
+        val requestId: String,
+        val context: CredentialEntryRequestContext,
+        val providerReq: ProviderGetCredentialRequest,
+        val attestedOrigin: String,
+        val attestedPackage: String
     )
 
-    private fun readFillRequest(): FillRequest = FillRequest(
-        entryId = intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty(),
-        expectedDomain = intent.getStringExtra(EXTRA_EXPECTED_DOMAIN).orEmpty(),
-        expectedPackage = intent.getStringExtra(EXTRA_EXPECTED_PACKAGE).orEmpty(),
-        providerReq = try {
+    private fun readFillRequest(): FillRequest? {
+        val context = CredentialPendingIntents.requestContext(
+            intent,
+            CredentialEntryRequestType.PASSWORD_FILL
+        ) ?: return null
+        if (context.databaseId.isNullOrBlank() || context.entryId.isNullOrBlank() ||
+            context.expectedOrigin.isBlank() || context.expectedPackage.isBlank() ||
+            context.sessionTicket == null
+        ) {
+            return null
+        }
+        // Extras 是候选构建时的副本，只用于发现不一致；身份和绑定权威来自注册上下文。
+        if (intent.getStringExtra(EXTRA_ENTRY_ID) != context.entryId ||
+            intent.getStringExtra(EXTRA_EXPECTED_DOMAIN) != context.expectedDomain ||
+            intent.getStringExtra(EXTRA_EXPECTED_PACKAGE) != context.expectedPackage
+        ) {
+            return null
+        }
+        val requestId = CredentialPendingIntents.requestIdFromIntent(intent) ?: return null
+        val providerReq = try {
             PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
         } catch (_: Exception) {
             null
+        } ?: return null
+        if (providerReq.credentialOptions.none { it.type == PasswordCredential.TYPE_PASSWORD_CREDENTIAL }) {
+            return null
         }
-    )
+        val callingAppInfo = providerReq.callingAppInfo ?: return null
+        val attestedPackage = CallingOriginResolver.systemAttestedPackageName(callingAppInfo) ?: return null
+        val attestedOrigin = CallingOriginResolver.resolveTrustedOrigin(
+            callingAppInfo,
+            privilegedBrowserStore.allowlistJson()
+        )
+        if (attestedOrigin.isBlank()) return null
+        return FillRequest(
+            requestId = requestId,
+            context = context,
+            providerReq = providerReq,
+            attestedOrigin = attestedOrigin,
+            attestedPackage = attestedPackage
+        )
+    }
 
     /**
-     * ISSUE-P3-111：检索系统在本窗口 PendingIntent 上注入的**原始请求**，取平台背书的
-     * `CallingAppInfo` 包名，与组装阶段写入 extras 的预期包名交叉核对——与
-     * [PasskeyAssertionActivity]（ISSUE-P2-72 起已具备）对称，补齐密码填充这条滞后链路。
-     *
-     * 第四轮复核对 P3-111 的定版提醒必须遵守：`retrieve*` 取不到（例如系统未以 fillIn
-     * 方式注入）时**不得**据此拒绝——否则会把「能填充」变成「不能填充」。故仅在
-     * **两者均可得且不一致**时 fail-closed；取不到即保持既有判定面不变。
+     * ISSUE-P2-620：最终下发必须有系统注入请求，且系统背书 origin/package 与随机入口身份
+     * 注册的候选上下文完全一致。缺失系统请求、非法 origin 或身份不符均取消并让系统重取候选。
      */
     private fun rejectsAttestedCaller(request: FillRequest): Boolean {
-        val attestedPackage = CallingOriginResolver.systemAttestedPackageName(request.providerReq?.callingAppInfo)
-        if (attestedPackage != null &&
-            request.expectedPackage.isNotBlank() &&
-            attestedPackage != request.expectedPackage.trim()
-        ) {
-            AppLog.e(TAG, "系统认证调用方与预期包名不一致，拒绝回填密码")
+        if (!request.context.matchesPasswordFillCaller(request.attestedOrigin, request.attestedPackage)) {
+            AppLog.e(TAG, "最终系统请求与候选调用方身份不一致，拒绝回填密码")
             return true
         }
         return false
     }
 
+    /** 使用当前白名单重新派生最终系统请求身份，覆盖用户验证期间的白名单变更。 */
+    private fun isCurrentAttestedCaller(request: FillRequest): Boolean {
+        val callingAppInfo = request.providerReq.callingAppInfo ?: return false
+        val currentPackage = CallingOriginResolver.systemAttestedPackageName(callingAppInfo) ?: return false
+        val currentOrigin = CallingOriginResolver.resolveTrustedOrigin(
+            callingAppInfo,
+            privilegedBrowserStore.allowlistJson()
+        )
+        return request.context.matchesPasswordFillCaller(currentOrigin, currentPackage)
+    }
+
     /** 库解锁 → 条目定位 → 绑定校验 → 用户验证，全部通过后才回传明文 */
     private suspend fun performFill(request: FillRequest) {
-        if (vaultRepository.isLocked()) {
-            AppLog.w(TAG, "密码库处于锁定状态，无法填充密码")
-            failAndFinish()
-            return
-        }
-
-        // ISSUE-P2-341：口令填充执行侧同样只认「可用条目」（与候选装配同口径）
-        val allEntries = vaultRepository.getUsableKdbxEntries()
-        val entry = allEntries.firstOrNull { it.id.toHexString() == request.entryId }
+        val entry = findCurrentlyBoundEntry(request)
         if (entry == null) {
-            AppLog.e(TAG, "未找到目标密码条目")
-            failAndFinish()
-            return
-        }
-        if (!passesCallerBinding(request, entry)) {
-            AppLog.e(TAG, "条目与调用方不匹配，拒绝回传密码")
+            AppLog.w(TAG, "会话、活动库、请求或目标条目已变化，拒绝回填密码")
             failAndFinish()
             return
         }
@@ -175,7 +208,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
             manualHint = getString(R.string.cred_fill_confirm_manual_hint, credentialLabel),
             confirmText = getString(R.string.autofill_confirm_ok),
             cancelText = getString(R.string.autofill_confirm_cancel),
-            onVerified = { deliverPassword(entry) },
+            onVerified = { deliverPassword(request) },
             onRejected = { failAndFinish() }
         )
     }
@@ -189,20 +222,52 @@ class PasswordFillActivity : BaseCredentialActivity() {
      * （与候选组装同一判据，杜绝组装与回传之间的窗口被利用）。
      */
     private fun passesCallerBinding(request: FillRequest, entry: KdbxEntry): Boolean {
-        val domainOk = request.expectedDomain.isNotBlank() && entry.url.isNotBlank() &&
-                DomainMatcher.isDomainMatch(entry.url, request.expectedDomain)
+        val context = request.context
+        val callingAppInfo = request.providerReq.callingAppInfo ?: return false
+        val domainOk = context.expectedDomain.isNotBlank() && entry.url.isNotBlank() &&
+                DomainMatcher.isDomainMatch(entry.url, context.expectedDomain)
         val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
-            callingPackage = request.expectedPackage,
-            certDigests = request.providerReq?.callingAppInfo
-                ?.let { CallingOriginResolver.certDigests(it) }
-                ?: CallerCertDigests.EMPTY,
+            callingPackage = context.expectedPackage,
+            certDigests = CallingOriginResolver.certDigests(callingAppInfo),
             isTrusted = callerTrustStore::isTrusted,
             hasAnyBinding = callerTrustStore::hasAnyBindingFor
         )
         val packageOk = packageDimensionAllowed &&
-                request.expectedPackage.isNotBlank() && entry.url.isNotBlank() &&
-                DomainMatcher.isAndroidPackageMatch(entry.url, request.expectedPackage)
+                context.expectedPackage.isNotBlank() && entry.url.isNotBlank() &&
+                DomainMatcher.isAndroidPackageMatch(entry.url, context.expectedPackage)
         return domainOk || packageOk
+    }
+
+    /**
+     * 验证前后都从当前会话重读活动库和可用条目，不能沿用验证前捕获的 KdbxEntry。
+     * 入口身份过期、进程重建、锁库、换库、黑名单变化或 URL/package 绑定变化均取消。
+     */
+    private suspend fun findCurrentlyBoundEntry(request: FillRequest): KdbxEntry? {
+        if (vaultRepository.isLocked()) return null
+        if (!isCurrentAttestedCaller(request)) return null
+        val sessionTicket = request.context.sessionTicket ?: return null
+        if (request.context.databaseId != sessionTicket.pathIdentifier ||
+            !databaseSession.isCredentialTicketCurrent(sessionTicket)
+        ) {
+            return null
+        }
+        if (CredentialPendingIntents.requestIdFromIntent(intent) != request.requestId ||
+            CredentialPendingIntents.requestContext(
+                intent,
+                CredentialEntryRequestType.PASSWORD_FILL
+            ) != request.context
+        ) {
+            return null
+        }
+        if (autofillBlocklistStore.isBlocked(request.context.expectedPackage)) return null
+
+        // ISSUE-P2-341：交付执行侧同样只认可用条目，排除回收站子树。
+        val entryId = request.context.entryId ?: return null
+        val entry = vaultRepository.getUsableKdbxEntries()
+            .firstOrNull { it.id.toHexString() == entryId }
+            ?: return null
+        if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) return null
+        return entry.takeIf { passesCallerBinding(request, it) }
     }
 
     /**
@@ -213,27 +278,64 @@ class PasswordFillActivity : BaseCredentialActivity() {
      * [lifecycleScope] 内完成；**先验证、后取密**次序不变（展开仍在 onVerified 之后）。
      * 展开 / 组装任一异常按 fail-closed 收尾（绝不回传半截凭据）。
      */
-    private fun deliverPassword(entry: KdbxEntry) {
+    private fun deliverPassword(request: FillRequest) {
         if (settled) return
         settled = true
 
         lifecycleScope.launch {
             try {
+                // ISSUE-P2-620：验证完成后重新确认请求、库、会话和条目，覆盖用户交互期间的状态变化。
+                val entryBeforeExpansion = findCurrentlyBoundEntry(request)
+                if (entryBeforeExpansion == null) {
+                    AppLog.w(TAG, "验证后凭据请求或目标状态已变化，拒绝回填密码")
+                    failAndFinish()
+                    return@launch
+                }
                 // ISSUE-P3-371 ①：CM 回传两通道补 {REF:} 展开（与 Autofill DatasetBuilders
                 // 消费点同口径）。用户名走 USER_NAME 面（非口令通道，{REF:P@…} 掩码输出）；
                 // 密码走 PASSWORD 面（口令消费点按 KDBX 语义展开）。条目 / 会话不可用时
                 // resolveFieldReferences 返回 null ⇒ 回退原文，与既有消费点兜底一致。
-                val entryIdHex = entry.id.toHexString()
-                val rawUsername = entry.userName
+                val entryIdHex = entryBeforeExpansion.id.toHexString()
+                val rawUsername = entryBeforeExpansion.userName
                 val username = vaultRepository.resolveFieldReferences(
                     entryIdHex, rawUsername, RefField.USER_NAME
                 ) ?: rawUsername
-                val rawPassword = entry.password?.readString().orEmpty()
+                // 用户名 REF 展开可能挂起；取密前用当前库重新定位并复核同一条目及调用方绑定。
+                val entryBeforePassword = findCurrentlyBoundEntry(request)
+                if (entryBeforePassword == null || entryBeforePassword.id.toHexString() != entryIdHex) {
+                    AppLog.w(TAG, "取密前凭据请求或目标状态已变化，拒绝回填密码")
+                    failAndFinish()
+                    return@launch
+                }
+                val rawPassword = entryBeforePassword.password?.readString().orEmpty()
                 val password = vaultRepository.resolveFieldReferences(
                     entryIdHex, rawPassword, RefField.PASSWORD
                 ) ?: rawPassword
 
-                // ISSUE-P3-298 ⑥：回传成功 = 用户真实选用了本条目，记录上次使用时刻供候选置顶
+                // 密码解析可能挂起；结果提交前再次确认请求与绑定仍有效。
+                val entryBeforeDelivery = findCurrentlyBoundEntry(request)
+                if (entryBeforeDelivery == null || entryBeforeDelivery.id.toHexString() != entryIdHex) {
+                    AppLog.w(TAG, "回传前凭据请求或目标状态已变化，拒绝回填密码")
+                    failAndFinish()
+                    return@launch
+                }
+
+                val sessionTicket = request.context.sessionTicket
+                if (sessionTicket == null || vaultRepository.isLocked() ||
+                    !databaseSession.isCredentialTicketCurrent(sessionTicket) ||
+                    CredentialPendingIntents.requestContext(
+                        intent,
+                        CredentialEntryRequestType.PASSWORD_FILL
+                    ) != request.context ||
+                    autofillBlocklistStore.isBlocked(request.context.expectedPackage) ||
+                    !isCurrentAttestedCaller(request)
+                ) {
+                    AppLog.w(TAG, "最终提交前会话代次变化，拒绝回填密码")
+                    failAndFinish()
+                    return@launch
+                }
+
+                // ISSUE-P3-298 ⑥：进入唯一成功回传路径后记录本次真实使用。
                 credentialLastUsedStore.record(entryIdHex)
 
                 val response = GetCredentialResponse(PasswordCredential(username, password))

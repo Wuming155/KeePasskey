@@ -324,7 +324,7 @@
     <!-- ISSUE-P3-467：列表/导航偏好自主题页拆为独立二级页 -->
     <string name="settings_theme_sub">深浅色主题、动态取色、语言偏好</string>
     <string name="settings_import_export">数据导入与导出</string>
-    <string name="settings_import_export_sub">从其他密码管理器迁入，导出 KDBX / XML / CSV 与密钥文件</string>
+    <string name="settings_import_export_sub">从其他密码管理器迁入，导出 KDBX / XML / 原值 CSV / 表格 XLSX 与密钥文件</string>
     <string name="settings_list_nav">列表与导航</string>
     <string name="settings_list_nav_sub">列表字段显隐、密度、底部导航排序与搜索行为</string>
     <string name="settings_about">关于 KeePasskey</string>
@@ -550,11 +550,14 @@
     <string name="conflict_btn_merging">正在合并...</string>
     <string name="conflict_btn_merge_push">确认合并并推送</string>
     <string name="conflict_detected_count">检测到两端同时修改了 %1$d 个条目</string>
-    <string name="conflict_instruction">请核对下列差异字段，勾选要保留的版本。合并后将生成完整新版本同步至云端。</string>
+    <string name="conflict_instruction">请核对下列差异字段，选择保留本地、采用云端值或采用云端删除。云端缺失与空值会分别显示。合并后将生成新版本同步至云端。</string>
     <string name="conflict_keep_all_local">全部保留本地</string>
     <string name="conflict_keep_all_remote">全部保留云端</string>
     <string name="conflict_local_version">本地版本 (修改项)</string>
     <string name="conflict_remote_version">云端版本 (远程副本)</string>
+    <string name="conflict_local_field_missing">本地未设置此字段</string>
+    <string name="conflict_remote_delete_action">采用云端删除</string>
+    <string name="conflict_value_empty">（空值）</string>
     <!-- ISSUE-P2-281：条目级裁决方式（整条兜底入口） -->
     <string name="conflict_entry_mode_field">按字段裁决</string>
     <string name="conflict_entry_keep_local">整条取本地</string>
@@ -569,7 +572,7 @@
     <string name="conflict_confirm_all_local_title">全部保留本地？</string>
     <string name="conflict_confirm_all_local_msg">将把 %1$d 个冲突条目的全部差异字段设为「保留本地版本」，覆盖你此前的逐字段选择；推送后这些字段的云端修改将被本地版本取代。推送前仍可逐字段改回。</string>
     <string name="conflict_confirm_all_remote_title">全部保留云端？</string>
-    <string name="conflict_confirm_all_remote_msg">将把 %1$d 个冲突条目的全部差异字段设为「保留云端版本」，覆盖你此前的逐字段选择；推送后这些字段的本地修改将被云端版本取代。推送前仍可逐字段改回。</string>
+    <string name="conflict_confirm_all_remote_msg">将把 %1$d 个冲突条目的全部差异字段设为「采用云端状态」，覆盖你此前的逐字段选择；云端缺失的字段会从本地删除，存在的字段采用云端值。推送前仍可逐字段改回。</string>
     <string name="conflict_confirm_merge_title">确认合并并推送？</string>
     <string name="conflict_confirm_merge_msg">将按当前选择合并 %1$d 个冲突条目并推送为云端新版本：未逐字段调整的字段默认保留本地版本，其云端修改会被覆盖。此操作即时生效。</string>
     <!-- ISSUE-P3-360 AC①：敏感字段的安全差异线索（掩码 + 长度 + 字符形态，不揭示明文） -->
@@ -712,16 +715,21 @@
     <string name="dbset_export_running">正在导出…</string>
     <string name="dbset_export_xml_btn">导出 XML (明文)</string>
     <string name="dbset_export_xml_done">XML 明文导出成功，请立即转移至安全位置</string>
-    <!-- ISSUE-P3-73：通用明文 CSV 导出 -->
-    <string name="dbset_export_csv_btn">导出 CSV (明文)</string>
-    <string name="dbset_export_csv_done">CSV 明文导出成功，请立即转移至安全位置</string>
+    <!-- ISSUE-P3-623：原值交换 CSV 保持逐字符原值 -->
+    <string name="dbset_export_csv_btn">导出原值 CSV (明文)</string>
+    <string name="dbset_export_csv_done">原值 CSV 明文导出成功，请立即转移至安全位置</string>
     <!-- ISSUE-P2-10 (ZT-15)：明文 XML 导出二次确认（明示明文 / 不受保护 / 需自行删除） -->
     <string name="dbset_export_plain_warn_title">确认导出明文 XML</string>
     <string name="dbset_export_plain_warn_message">即将导出的是未加密的明文 XML，包含密码库的全部字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
     <string name="dbset_export_plain_warn_confirm">我已知悉，仍要导出</string>
-    <!-- ISSUE-P3-73：明文 CSV 导出二次确认（文案须明确「明文」） -->
-    <string name="dbset_export_csv_plain_warn_title">确认导出明文 CSV</string>
-    <string name="dbset_export_csv_plain_warn_message">即将导出的是未加密的明文 CSV，包含密码库的全部条目字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站；\n· 公式风险（ISSUE-P3-312）：以 = + - @ 或制表符开头的字段，用表格软件打开该文件时单元格可能被当作公式执行，导出前请在导入报告中核对该警告。</string>
+    <!-- ISSUE-P3-623：原值 CSV 明文二次确认与表格公式风险提示 -->
+    <string name="dbset_export_csv_plain_warn_title">确认导出原值 CSV</string>
+    <string name="dbset_export_csv_plain_warn_message">即将导出的是未加密的原值 CSV，包含密码库的全部条目字段值：\n· 明文：文件内容可直接阅读，不受主密码保护；\n· 不受保护：写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 需自行删除：本应用不会代为清理，请用毕立即删除并清空云盘回收站；\n· 公式风险：以 =、+、-、@、制表符或回车开头的字段，打开时可能被表格软件解释为公式；CSV 引号不能可靠地禁用公式。若要在表格软件中打开，请将所有列按文本导入并关闭公式求值。本导出保留原值，不会增删前缀。</string>
+    <!-- ISSUE-P3-623：表格文本 XLSX 单独格式，明文制品仍需确认 -->
+    <string name="dbset_export_spreadsheet_btn">导出表格安全 XLSX (文本单元格)</string>
+    <string name="dbset_export_spreadsheet_done">表格文本 XLSX 导出成功；文件未加密，请立即转移至安全位置</string>
+    <string name="dbset_export_spreadsheet_warn_title">确认导出表格文本 XLSX</string>
+    <string name="dbset_export_spreadsheet_warn_message">即将导出未加密的 XLSX，包含密码库的全部条目字段值：\n· 字段按文本单元格写入，公式前缀保留原值并作为文本存储；不会生成公式或外部链接；\n· 为避免静默截断，超出表格单元格、行列或换行容量，或含 XML 无法表示的控制字符时，将拒绝生成 XLSX；请用原值 CSV 保留完整值；\n· 文件内容可直接阅读，不受主密码保护；\n· 写入下载目录或云盘后，任何可访问该位置的应用或人员都能读取；\n· 本应用不会代为清理，请用毕立即删除并清空云盘回收站。</string>
     <!-- ISSUE-P3-128：密钥文件导出二次确认（密钥文件是开库第二因子） -->
     <string name="dbset_keyfile_export_warn_title">确认导出密钥文件</string>
     <string name="dbset_keyfile_export_warn_message">即将导出的是本库的密钥文件（第二重凭据）：\n· 单文件即可配合库文件尝试开库，请与 .kdbx 分开存放；\n· 写入下载目录或云盘后，任何可访问该位置的应用或人员都能取得该因子；\n· 需自行删除：本应用不会代为清理。</string>
@@ -1013,7 +1021,7 @@
     <string name="sync_auto_sync_title">自动同步</string>
     <string name="sync_auto_sync_sub">解锁后自动与云端同步一次；关闭后仅手动同步</string>
     <string name="sync_periodic_title">周期性后台同步</string>
-    <string name="sync_periodic_sub">按固定间隔在后台检查云端变更</string>
+    <string name="sync_periodic_sub">由系统按间隔调度；锁定时仅探测远端元数据，发现变化后需解锁同步（执行时间可能延迟）</string>
     <string name="sync_interval_title">后台同步间隔</string>
     <string name="sync_interval_current">每 %1$d 分钟</string>
     <string name="sync_interval_15">每 15 分钟</string>
@@ -1459,6 +1467,7 @@
     <string name="repo_no_active_db_for_export">当前无活动数据库（已锁定或未打开）</string>
     <string name="repo_export_xml_failed">导出 XML 失败: %1$s</string>
     <string name="repo_export_csv_failed">导出 CSV 失败: %1$s</string>
+    <string name="repo_export_spreadsheet_failed">导出表格 XLSX 失败: %1$s</string>
     <string name="repo_no_keyfile_to_export">当前会话未使用密钥文件，无密钥文件可导出</string>
     <string name="repo_templates_already_installed">模板分组「%1$s」已存在，无需重复安装</string>
     <string name="repo_sync_type_local">本地存储</string>

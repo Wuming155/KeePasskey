@@ -50,20 +50,20 @@ private val TEST_STRINGS = StringsProvider { _, _ -> "" }
  * 上执行，而前台入口（下拉刷新 / 解锁后自动同步 / 设置页触发）持 `viewModelScope`＝`Main.immediate`
  * ⇒ 大库下主线程被阻塞数百毫秒至秒级，并与凭据提供者的应答预算争用同一条主线程队列。
  *
- * ## 判据设计（四类各一个探针，缺一即红）
+ * ## 判据设计（五个探针，缺一即红）
  *
  * | 类别 | 探针落点 | 观测方式 |
  * |---|---|---|
- * | 凭据读取 | `SyncCredentialSealer.decrypt` | 已有 `@VisibleForTesting` 钩子 `customDecryptor` 记录线程 |
+ * | 凭据读取 | `SyncCredentialSealer.decrypt` | Provider Resolver 的 IO 边界外已独立建立；记录线程并确认不在 Main |
  * | 整库缓存读 | `SyncCache.readCache`（`:68`，本就 `open`） | 记录型子类经 `syncCacheFactory` 注入 |
  * | 内容比较 | `KdbxContentComparator.changed` 的**首条判据** `current.deletedObjects != reference.deletedObjects` | 记录型 `List` 替身挂在 `deletedObjects` 上，其 `equals` 即比较执行点 |
  * | 原子写 | `SyncCache.writeCache`（`:112`，本批 `open` 化） | 同记录型子类 |
  *
  * ## 两条断言，缺一不可
  *
- * ① **非空性**：五类探针都必须被观测到，且**归因于装配段**（栈上存在 `setupCycleContext`
- * ——ISSUE-P3-305 起其实现位于同包 `SyncCycleSetup.kt`，归因按入口类集合判定）
- * ——否则断言会在「装配段根本没跑到那一步」的情况下空转通过；
+ * ① **非空性**：五个探针都必须被观测到；缓存读、内容比较和原子写探针还必须**归因于装配段**
+ * （栈上存在 `setupCycleContext` 所在的 `SyncCycleSetup.kt` 帧），否则断言会在装配段未运行时空转通过。
+ * Provider 凭据读取现由 Resolver 自身的 IO 边界保护，不再要求它出现在装配段栈帧内；
  * ② **零主线程 IO**：所有记录（含引擎侧经同一 `SyncCache` 实例的同名调用）的执行线程都**不得**等于
  * 本用例的主线程。
  *
@@ -210,11 +210,15 @@ class SyncAssemblyOffMainThreadTest {
         val second = cycle.runSyncCycle()
         assertTrue("离线且已缓存时本轮应为 Offline: $second", second is SyncOutcome.Offline)
 
-        // ① 非空性 + 归因：五类探针都必须来自装配段，否则断言②会空转通过
+        // ① 五个探针都须被观测；装配段拥有的缓存/比较/写入探针还必须有正确栈帧归因。
         val diagnostics = "deletedObjects=${databaseSession.databaseFlow.value?.deletedObjects?.javaClass?.simpleName}" +
             ", lastSyncedDb=${session.lastSyncedDb != null}" +
             ", refDeleted=${session.lastSyncedDb?.deletedObjects?.javaClass?.simpleName}"
-        PROBES.forEach { probe ->
+        assertTrue(
+            "凭据解封探针必须执行并保持在非 Main 线程: $records",
+            records.any { it.probe == PROBE_CREDENTIAL && it.thread !== mainThread }
+        )
+        (PROBES - PROBE_CREDENTIAL).forEach { probe ->
             assertTrue(
                 "探针「$probe」未在装配段内被观测到，本用例对该类不成立: $records || $diagnostics",
                 records.any { it.probe == probe && it.fromAssemblySegment }

@@ -1,7 +1,14 @@
 package com.keepasskey.app.sync
 
 import com.keepasskey.app.testutil.MainDispatcherGuard
+import com.keepasskey.app.testutil.InMemorySharedPreferences
 import android.content.Context
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.data.repository.FakeSettingsRepository
+import com.keepasskey.app.security.AutoLockHoldoff
+import com.keepasskey.app.security.AutoLockSessionGuard
+import com.keepasskey.app.ui.screens.settings.ConflictResolution
+import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
@@ -12,16 +19,20 @@ import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -61,6 +72,11 @@ class SyncCoordinatorTest {
     private class MemorySyncProvider : SyncProvider {
         val remoteStorage = mutableMapOf<String, Pair<ByteArray, String>>()
         var isReachable = true
+        var metadataCalls: Int = 0
+        var downloadCalls: Int = 0
+        var uploadCalls: Int = 0
+        var uploadStarted: CompletableDeferred<Unit>? = null
+        var continueUpload: CompletableDeferred<Unit>? = null
 
         // ISSUE-P0-09：模拟「provider 的 runCatching 捕到 Error 后包成 Result.failure」——
         // 与真实 WebDavSyncProvider/S3SyncProvider 在超深 XML / 超大响应下的失败形态同构
@@ -81,6 +97,7 @@ class SyncCoordinatorTest {
         }
 
         override suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata> {
+            metadataCalls++
             metadataFailure?.let { return Result.failure(it) }
             if (!isReachable) return Result.failure(SyncException.NetworkError("Network error"))
             val item = remoteStorage[remotePath] ?: return Result.failure(
@@ -98,6 +115,7 @@ class SyncCoordinatorTest {
 
         // ISSUE-P3-206 流式契约：内容边读边写进 sink
         override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> {
+            downloadCalls++
             downloadFailure?.let { return Result.failure(it) }
             if (!isReachable) return Result.failure(SyncException.NetworkError("Network error"))
             val item = remoteStorage[remotePath] ?: return Result.failure(
@@ -108,6 +126,9 @@ class SyncCoordinatorTest {
         }
 
         override suspend fun upload(remotePath: String, data: ByteArray, expectedEtag: String?): Result<String> {
+            uploadCalls++
+            uploadStarted?.complete(Unit)
+            continueUpload?.await()
             lastExpectedEtag = expectedEtag
             if (!isReachable) return Result.failure(SyncException.NetworkError("Network error"))
             val existing = remoteStorage[remotePath]
@@ -166,6 +187,143 @@ class SyncCoordinatorTest {
 
         credentialsStore = SyncCredentialsStore(fakeContext, null)
         coordinator = SyncCoordinator(fakeContext, databaseSession, credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer(), TEST_STRINGS)
+    }
+
+    @Test
+    fun `锁定周期只探测元数据并持久记录待解锁状态`() = runTest(testDispatcher) {
+        val provider = MemorySyncProvider()
+        val remotePath = "/remote/locked-probe.kdbx"
+        val remoteBytes = (databaseSession.exportToBytes() as com.keepasskey.core.result.KdbxResult.Success).data
+        provider.remoteStorage[remotePath] = remoteBytes.clone() to "\"etag-a\""
+        val vaultIdentity = requireNotNull(databaseSession.currentPathIdentifier)
+        val probeStore = PeriodicSyncProbeStore(InMemorySharedPreferences().context())
+        val session = SyncSessionState().apply {
+            testSyncProvider = provider
+            testRemotePath = remotePath
+        }
+        val periodicCoordinator = SyncCoordinator(
+            fakeContext,
+            databaseSession,
+            credentialsStore,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            TEST_STRINGS,
+            syncSession = session,
+            periodicSyncProbeStore = probeStore
+        )
+        try {
+            databaseSession.lock()
+
+            val first = periodicCoordinator.runPeriodicSync()
+
+            assertEquals(
+                PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.INITIAL_BASELINE_REQUIRED),
+                first
+            )
+            assertEquals("锁态仅请求一次元数据", 1, provider.metadataCalls)
+            assertEquals("锁态不得下载 KDBX", 0, provider.downloadCalls)
+            assertEquals("锁态不得上传", 0, provider.uploadCalls)
+            val stored = probeStore.read(vaultIdentity) as PeriodicSyncProbeRead.Stored
+            assertEquals("etag-a", stored.record.observedEtag)
+            assertTrue(stored.record.needsUnlock)
+
+            assertEquals(
+                PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.PENDING_UNLOCK),
+                periodicCoordinator.runPeriodicSync()
+            )
+            assertEquals("待解锁状态不能继续发网络请求", 1, provider.metadataCalls)
+            assertEquals("锁定态不能修改正式库", null, databaseSession.databaseFlow.value)
+        } finally {
+            remoteBytes.fill(0)
+            provider.remoteStorage.values.forEach { it.first.fill(0) }
+            provider.remoteStorage.clear()
+            databaseSession.close()
+        }
+    }
+
+    @Test
+    fun `用户裁决上传网络等待不持有自动锁定挂锁`() = runTest(testDispatcher) {
+        val provider = MemorySyncProvider()
+        val remotePath = "/remote/conflict-lock.kdbx"
+        val settings = ExtendedSettingsStore(null).apply {
+            publish(ExtendedSettings(conflictResolution = ConflictResolution.PROMPT_USER))
+        }
+        val debugLog = com.keepasskey.app.data.logger.DebugLogBuffer()
+        val holdoff = AutoLockHoldoff()
+        val guard = AutoLockSessionGuard(
+            databaseSession,
+            FakeSettingsRepository(),
+            debugLog,
+            holdoff = holdoff
+        )
+        val session = SyncSessionState().apply {
+            testSyncProvider = provider
+            testRemotePath = remotePath
+        }
+        val guardedCoordinator = SyncCoordinator(
+            fakeContext,
+            databaseSession,
+            credentialsStore,
+            debugLog,
+            TEST_STRINGS,
+            extendedSettingsStore = settings,
+            syncSession = session,
+            autoLockGuard = guard
+        )
+        val entryId = KdbxUuid.random()
+        val baseEntry = KdbxEntry(
+            id = entryId,
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("lock test", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("Base#Password1", true)
+            )
+        )
+        databaseSession.saveEntry(baseEntry)
+        assertTrue(databaseSession.save().isSuccess)
+        assertTrue(guardedCoordinator.syncNow() is SyncOutcome.UploadedLocal)
+
+        databaseSession.saveEntry(
+            baseEntry.withField(KdbxConstants.Fields.PASSWORD, ProtectedString("Local#Password2", true))
+        )
+        assertTrue(databaseSession.save().isSuccess)
+        val remoteBase = requireNotNull(databaseSession.databaseFlow.value)
+        val remoteEntry = baseEntry.withField(
+            KdbxConstants.Fields.PASSWORD,
+            ProtectedString("Remote#Password3", true)
+        )
+        val remoteRoot = remoteBase.rootGroup.copy(
+            entries = remoteBase.rootGroup.entries.map { if (it.id == entryId) remoteEntry else it }
+        )
+        val remoteBytes = ByteArrayOutputStream().also { output ->
+            KdbxFile.save(output, remoteBase.copy(rootGroup = remoteRoot), masterPassword)
+        }.toByteArray()
+        provider.remoteStorage[remotePath] = remoteBytes to "etag-remote-conflict"
+        val detected = guardedCoordinator.syncNow()
+        assertTrue("并发修改应先进入待决冲突: $detected", detected is SyncOutcome.ConflictNeedsUser)
+
+        val uploadStarted = CompletableDeferred<Unit>()
+        val continueUpload = CompletableDeferred<Unit>()
+        provider.uploadStarted = uploadStarted
+        provider.continueUpload = continueUpload
+        val resolution = async {
+            guardedCoordinator.resolveConflicts(
+                mapOf(entryId.toHexString() to ConflictResolutionChoice.KEEP_LOCAL)
+            )
+        }
+        uploadStarted.await()
+
+        assertFalse("云端上传等待阶段不得持有自动锁定挂锁", holdoff.isHolding)
+        assertTrue(
+            "上传网络等待期间的锁定应立即完成",
+            guard.triggerLock("冲突上传慢响应期间锁定") != com.keepasskey.app.security.LockOutcome.Deferred
+        )
+        continueUpload.complete(Unit)
+        val resolved = resolution.await()
+        assertTrue("锁库后不得发布过期合并树: $resolved", resolved is SyncOutcome.Error)
+        assertEquals(DatabaseSession.SessionState.LOCKED, databaseSession.state.value)
+        assertFalse("结束后挂锁计数必须归零", holdoff.isHolding)
+        remoteBytes.fill(0)
+        provider.remoteStorage.values.forEach { it.first.fill(0) }
+        provider.remoteStorage.clear()
     }
 
     @After
@@ -324,6 +482,86 @@ class SyncCoordinatorTest {
 
         // 6. 验证冲突列表已清空
         assertTrue(coordinator.conflictFlow.value.isEmpty())
+    }
+
+    @Test
+    fun `逐字段采纳云端删除后上传并重解析仍缺失字段`() = runTest(testDispatcher) {
+        val memoryProvider = MemorySyncProvider()
+        val remotePath = "/remote/field-delete.kdbx"
+        val preferences = ExtendedSettingsStore(null).apply {
+            publish(ExtendedSettings(conflictResolution = ConflictResolution.PROMPT_USER))
+        }
+        val promptCoordinator = SyncCoordinator(
+            fakeContext,
+            databaseSession,
+            credentialsStore,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            TEST_STRINGS,
+            extendedSettingsStore = preferences
+        ).apply {
+            testSyncProvider = memoryProvider
+            testRemotePath = remotePath
+        }
+
+        val entryId = KdbxUuid.random()
+        val baseEntry = KdbxEntry(
+            id = entryId,
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Keep this title", false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("BasePassword#1", true)
+            )
+        )
+        databaseSession.saveEntry(baseEntry)
+        assertTrue(databaseSession.save().isSuccess)
+        assertTrue(promptCoordinator.syncNow() is SyncOutcome.UploadedLocal)
+        val baselineDatabase = requireNotNull(databaseSession.databaseFlow.value)
+
+        databaseSession.saveEntry(
+            baseEntry.withField(KdbxConstants.Fields.PASSWORD, ProtectedString("LocalPassword#2", true))
+        )
+        assertTrue(databaseSession.save().isSuccess)
+
+        val remoteEntry = baseEntry.copy(fields = baseEntry.fields - KdbxConstants.Fields.PASSWORD)
+        val remoteDatabase = baselineDatabase.copy(
+            rootGroup = baselineDatabase.rootGroup.copy(
+                entries = baselineDatabase.rootGroup.entries.map { if (it.id == entryId) remoteEntry else it }
+            )
+        )
+        val remoteBytes = ByteArrayOutputStream().use { output ->
+            KdbxFile.save(output, remoteDatabase, masterPassword)
+            output.toByteArray()
+        }
+        memoryProvider.remoteStorage[remotePath] = remoteBytes to "etag-password-deleted"
+
+        val conflictOutcome = promptCoordinator.syncNow()
+        assertTrue("双方密码分歧应进入冲突裁决: $conflictOutcome", conflictOutcome is SyncOutcome.ConflictNeedsUser)
+        val conflict = (conflictOutcome as SyncOutcome.ConflictNeedsUser).conflicts.single()
+        assertTrue(KdbxConstants.Fields.PASSWORD in conflict.modifiedFields)
+
+        val resolved = promptCoordinator.resolveConflicts(
+            resolutions = mapOf(entryId.toHexString() to ConflictResolutionChoice.KEEP_LOCAL),
+            fieldResolutions = mapOf(
+                entryId.toHexString() to mapOf(
+                    KdbxConstants.Fields.PASSWORD to FieldResolutionChoice.DELETE_REMOTE
+                )
+            )
+        )
+        assertTrue("字段删除决策应条件上传成功: $resolved", resolved is SyncOutcome.MergedAndUploaded)
+
+        val uploadedBytes = requireNotNull(memoryProvider.remoteStorage[remotePath]).first
+        val uploadedFile = File(tempFolder.root, "field-delete-uploaded.kdbx").apply {
+            writeBytes(uploadedBytes)
+        }
+        val verifier = DatabaseSession()
+        try {
+            assertTrue("上传的 KDBX 应可重新打开", verifier.open(uploadedFile, masterPassword).isSuccess)
+            val uploadedEntry = requireNotNull(verifier.databaseFlow.value)
+                .rootGroup.allEntries().single { it.id == entryId }
+            assertFalse("远端删除的密码字段不得在本地或上传产物中复活", uploadedEntry.fields.containsKey(KdbxConstants.Fields.PASSWORD))
+            assertEquals("未选字段仍保持本地值", "Keep this title", uploadedEntry.fields[KdbxConstants.Fields.TITLE]?.readString())
+        } finally {
+            verifier.close()
+        }
     }
 
     @Test

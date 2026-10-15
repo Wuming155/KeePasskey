@@ -313,7 +313,7 @@
     <!-- ISSUE-P3-467: list/navigation preferences split from theme page into their own subpage -->
     <string name="settings_theme_sub">Theme mode, dynamic color, language preference</string>
     <string name="settings_import_export">Import &amp; Export</string>
-    <string name="settings_import_export_sub">Migrate from other password managers, export KDBX / XML / CSV &amp; key files</string>
+    <string name="settings_import_export_sub">Import from other password managers; export KDBX / XML / raw-value CSV / spreadsheet XLSX &amp; key files</string>
     <string name="settings_list_nav">List &amp; Navigation</string>
     <string name="settings_list_nav_sub">List fields, density, bottom nav order &amp; search behavior</string>
     <string name="settings_about">About KeePasskey</string>
@@ -539,11 +539,15 @@
     <string name="conflict_btn_merging">Merging...</string>
     <string name="conflict_btn_merge_push">Merge &amp; Push</string>
     <string name="conflict_detected_count">%1$d entries were modified on both ends</string>
-    <string name="conflict_instruction">Review the conflicting fields below and pick the version to keep. Merging creates a new version that will be synced to the cloud.</string>
+    <string name="conflict_instruction">Review each field and choose the local value, remote value, or remote deletion. A missing cloud field is shown separately from an empty value. Merging creates a new version synced to the cloud.</string>
     <string name="conflict_keep_all_local">Keep all local</string>
     <string name="conflict_keep_all_remote">Keep all remote</string>
     <string name="conflict_local_version">Local version (modified)</string>
     <string name="conflict_remote_version">Remote version (cloud copy)</string>
+    <string name="conflict_local_field_missing">Local field is not set</string>
+    <string name="conflict_remote_delete_action">Apply remote deletion</string>
+    <string name="conflict_value_empty">(empty value)</string>
+    <string name="conflict_value_field_missing">This side does not contain the field</string>
     <!-- ISSUE-P2-281：条目级裁决方式（整条兜底入口） -->
     <string name="conflict_entry_mode_field">Per-field</string>
     <string name="conflict_entry_keep_local">Keep entire local</string>
@@ -558,7 +562,7 @@
     <string name="conflict_confirm_all_local_title">Keep all local?</string>
     <string name="conflict_confirm_all_local_msg">Every differing field of the %1$d conflicted entries will be set to \"keep local version\", overwriting your earlier per-field choices; after pushing, the cloud-side edits of these fields will be replaced by the local versions. You can still switch individual fields before pushing.</string>
     <string name="conflict_confirm_all_remote_title">Keep all cloud?</string>
-    <string name="conflict_confirm_all_remote_msg">Every differing field of the %1$d conflicted entries will be set to \"keep cloud version\", overwriting your earlier per-field choices; after pushing, the local-side edits of these fields will be replaced by the cloud versions. You can still switch individual fields before pushing.</string>
+    <string name="conflict_confirm_all_remote_msg">Every differing field of the %1$d conflicted entries will use the current cloud state, overwriting your earlier per-field choices; cloud-missing fields will be removed locally and present fields will use cloud values. You can still switch individual fields before pushing.</string>
     <string name="conflict_confirm_merge_title">Merge and push now?</string>
     <string name="conflict_confirm_merge_msg">The %1$d conflicted entries will be merged according to your current choices and pushed as a new cloud version: fields you have not adjusted individually keep the local version by default, so their cloud-side edits will be overwritten. This takes effect immediately.</string>
     <!-- ISSUE-P3-360 AC①：敏感字段的安全差异线索（掩码 + 长度 + 字符形态，不揭示明文） -->
@@ -700,16 +704,21 @@
     <string name="dbset_export_running">Exporting…</string>
     <string name="dbset_export_xml_btn">Export XML (plaintext)</string>
     <string name="dbset_export_xml_done">XML plaintext exported. Move it to a safe location immediately</string>
-    <!-- ISSUE-P3-73: generic plaintext CSV export -->
-    <string name="dbset_export_csv_btn">Export CSV (plaintext)</string>
-    <string name="dbset_export_csv_done">CSV plaintext exported. Move it to a safe location immediately</string>
+    <!-- ISSUE-P3-623: raw-value exchange CSV preserves each field value -->
+    <string name="dbset_export_csv_btn">Export raw-value CSV (plaintext)</string>
+    <string name="dbset_export_csv_done">Raw-value CSV exported as plaintext. Move it to a safe location immediately</string>
     <!-- ISSUE-P2-10 (ZT-15): plaintext XML export confirmation (plaintext / unprotected / delete it yourself) -->
     <string name="dbset_export_plain_warn_title">Confirm plaintext XML export</string>
     <string name="dbset_export_plain_warn_message">You are about to export an unencrypted XML file containing every field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
     <string name="dbset_export_plain_warn_confirm">I understand, export anyway</string>
-    <!-- ISSUE-P3-73: plaintext CSV export confirmation (wording must say "plaintext") -->
-    <string name="dbset_export_csv_plain_warn_title">Confirm plaintext CSV export</string>
-    <string name="dbset_export_csv_plain_warn_message">You are about to export an unencrypted CSV file containing every entry field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin;\n- Formula risk (ISSUE-P3-312): a field starting with = + - @ or a tab may be executed as a formula once this CSV is opened in a spreadsheet app.</string>
+    <!-- ISSUE-P3-623: raw-value CSV plaintext confirmation and formula-risk guidance -->
+    <string name="dbset_export_csv_plain_warn_title">Confirm raw-value CSV export</string>
+    <string name="dbset_export_csv_plain_warn_message">You are about to export an unencrypted raw-value CSV containing every entry field value in the vault:\n- Plaintext: its contents are directly readable and are not protected by the master password;\n- Unprotected: once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- Delete it yourself: this app will not clean it up. Delete it immediately after use and empty the cloud recycle bin;\n- Formula risk: a field starting with =, +, -, @, a tab, or a carriage return may be interpreted as a formula by spreadsheet software. CSV quotes do not reliably disable formulas. Before opening it in a spreadsheet app, import every column as text and disable formula evaluation. This export preserves the original values without adding or removing prefixes.</string>
+    <!-- ISSUE-P3-623: separate spreadsheet-text XLSX format; the plaintext export still requires confirmation -->
+    <string name="dbset_export_spreadsheet_btn">Export spreadsheet-safe XLSX (text cells)</string>
+    <string name="dbset_export_spreadsheet_done">Spreadsheet-text XLSX exported; the file is unencrypted, so move it to a safe location immediately</string>
+    <string name="dbset_export_spreadsheet_warn_title">Confirm spreadsheet-text XLSX export</string>
+    <string name="dbset_export_spreadsheet_warn_message">You are about to export an unencrypted XLSX containing every entry field value in the vault:\n- Fields are stored as text cells; formula prefixes remain unchanged as text, and no formulas or external links are generated;\n- To avoid silent truncation, values exceeding spreadsheet cell, row, column, or line-feed limits, or containing XML-disallowed control characters, cause XLSX export to fail. Use raw-value CSV to preserve the complete values;\n- The contents are directly readable and are not protected by the master password;\n- Once written to Downloads or a cloud drive, any app or person with access to that location can read it;\n- This app will not clean it up. Delete it immediately after use and empty the cloud recycle bin.</string>
     <!-- ISSUE-P3-128: key file export confirmation (the key file is the second unlock factor) -->
     <string name="dbset_keyfile_export_warn_title">Confirm key file export</string>
     <string name="dbset_keyfile_export_warn_message">You are about to export this vault\u2019s key file (the second unlock factor):\n- This single file can be combined with the vault file to attempt an unlock, so store it separately from the .kdbx;\n- Once written to Downloads or a cloud drive, any app or person with access to that location can obtain the factor;\n- Delete it yourself: this app will not clean it up.</string>
@@ -997,7 +1006,7 @@
     <string name="sync_auto_sync_title">Auto sync</string>
     <string name="sync_auto_sync_sub">Sync with the cloud once after unlock; when off, manual sync only</string>
     <string name="sync_periodic_title">Periodic background sync</string>
-    <string name="sync_periodic_sub">Check cloud changes at a fixed interval</string>
+    <string name="sync_periodic_sub">Scheduled by Android at intervals; while locked, only metadata is checked and changes require unlock to sync</string>
     <string name="sync_interval_title">Background sync interval</string>
     <string name="sync_interval_current">Every %1$d minutes</string>
     <string name="sync_interval_15">Every 15 minutes</string>
@@ -1603,6 +1612,7 @@
     <!-- %1$s = 失败原因 -->
     <string name="repo_export_xml_failed">Failed to export XML: %1$s</string>
     <string name="repo_export_csv_failed">Failed to export CSV: %1$s</string>
+    <string name="repo_export_spreadsheet_failed">Failed to export spreadsheet XLSX: %1$s</string>
     <string name="repo_no_keyfile_to_export">This session has no key file in use, so there is nothing to export</string>
     <!-- %1$s = 分组名 -->
     <string name="repo_templates_already_installed">The template group %1$s already exists; no need to install it again</string>
@@ -1646,10 +1656,12 @@
     <string name="sync_error_no_sync_credentials">Cloud sync credentials are not configured</string>
     <string name="sync_error_test_no_credentials">Sync credentials are not configured</string>
     <string name="sync_error_local_serialize_failed">Failed to serialize the local database</string>
+    <string name="sync_error_snapshot_prepare_timeout">Preparing the sync snapshot exceeded the lock deadline and was safely stopped. Try again later.</string>
     <string name="sync_error_first_upload_failed">Failed to upload to the cloud on the first sync</string>
     <!-- %1$s = 失败原因 -->
     <string name="sync_error_remote_updated_local_save_failed">The cloud was updated but saving locally failed: %1$s</string>
     <string name="sync_error_rollback_rejected">Cloud content appears to have been rolled back to an older version. It was rejected to protect your local data; please check your cloud storage.</string>
+    <string name="sync_error_recovery_required">A previous local sync commit did not finish. Sync for this target is paused to protect your local data. Back up the current database and resolve the recovery state.</string>
     <!-- %1$s = 失败原因 -->
     <string name="sync_error_conflict_presave_failed">Failed to save before starting the conflict session: %1$s</string>
     <string name="sync_error_load_remote_failed">Failed to load the cloud database: password or format mismatch</string>
@@ -1745,6 +1757,7 @@
     <string name="conflict_field_title">Title</string>
     <string name="conflict_field_username">Username</string>
     <string name="conflict_field_password">Password</string>
+    <string name="conflict_field_otp">One-time password (OTP)</string>
     <string name="conflict_field_url">URL</string>
     <string name="conflict_field_notes">Notes</string>
     <!-- ISSUE-P2-281：标量字段与自定义字段差异的标签 / 取值呈现 -->

@@ -3,11 +3,13 @@ package com.keepasskey.app.data.repository
 import com.keepasskey.app.security.ExternalModificationChoice
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.model.CustomIcon
+import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.session.DatabaseSession
@@ -18,8 +20,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
 import java.io.File
+import java.io.InputStream
 
 private const val PWD = KdbxConstants.Fields.PASSWORD
 private const val TITLE = KdbxConstants.Fields.TITLE
@@ -33,6 +38,28 @@ private val UUID_LOCAL_ONLY = uuidOf("00000000000000000000000000000003")
 private val UUID_REMOTE_ONLY = uuidOf("00000000000000000000000000000004")
 
 private val STRINGS = StringsProvider { _, _ -> "" }
+
+private class DriftAttachmentStore : BinaryStore {
+    val entries = LinkedHashMap<String, ByteArray>()
+    var afterStore: (() -> Unit)? = null
+    private var counter = 0
+
+    override fun store(bytes: ByteArray): String = "drift-${counter++}".also {
+        entries[it] = bytes.copyOf()
+    }
+
+    override fun storeFromStream(input: InputStream, size: Long): String {
+        val bytes = ByteArray(size.toInt())
+        DataInputStream(input).readFully(bytes)
+        return store(bytes).also { afterStore?.invoke() }
+    }
+
+    override fun load(key: String): ByteArray = entries[key]?.copyOf() ?: ByteArray(0)
+    override fun openStream(key: String): InputStream = ByteArrayInputStream(load(key))
+    override fun sizeOf(key: String): Long = (entries[key]?.size ?: 0).toLong()
+    override fun clear() = entries.clear()
+    override fun delete(key: String) { entries.remove(key) }
+}
 
 /**
  * `ISSUE-P3-471` 的 app 侧回归：**漂移合并的丢弃擦除必须走身份集合判定**。
@@ -65,7 +92,8 @@ class VaultFileDriftMergeErasureTest {
     fun `漂移合并采用磁盘独有条目与图标后，丢弃磁盘解析树不得清零活动库`() = runBlocking {
         val workDir = tempFolder.newFolder()
         val vaultFile = File(workDir, "drift.kdbx")
-        val session = DatabaseSession()
+        val attachmentStore = DriftAttachmentStore()
+        val session = DatabaseSession(attachmentStore)
         val created = session.create(
             file = vaultFile,
             name = "Drift",
@@ -89,7 +117,10 @@ class VaultFileDriftMergeErasureTest {
 
         // 磁盘被外部改写：在磁盘版本基础上**追加**磁盘独有条目与磁盘独有图标（模拟他端写入）
         val diskIcon = CustomIcon(uuid = uuidOf("0000000000000000000000000000000B"), data = byteArrayOf(0x22))
-        val remoteOnlyEntry = entry(UUID_REMOTE_ONLY, "RemoteOnly", "RemoteOnly#pwd")
+        val remoteAttachment = ByteArray(1_200_000) { 0x42 }
+        val remoteOnlyEntry = entry(UUID_REMOTE_ONLY, "RemoteOnly", "RemoteOnly#pwd").copy(
+            attachments = listOf(KdbxAttachment("remote.bin", data = remoteAttachment))
+        )
         val diskRoot = KdbxGroup(
             id = UUID_ROOT,
             name = "Root",
@@ -137,6 +168,52 @@ class VaultFileDriftMergeErasureTest {
             adopted.customIcons.first { it.uuid == diskIcon.uuid }.data
         )
 
+        val adoptedAttachment = adopted.rootGroup.allEntries()
+            .first { it.id == UUID_REMOTE_ONLY }.attachments.single()
+        assertTrue("远端 spill key 必须在 mergedRoot 存活时保留", attachmentStore.entries.isNotEmpty())
+        assertTrue("合并采用的 spill source 仍可读", adoptedAttachment.data.contentEquals(remoteAttachment))
+
+        session.close()
+        assertTrue("活动根库关闭后应按 source owner 清理远端 spill", attachmentStore.entries.isEmpty())
+
+        masterPassword.fill('0')
+    }
+
+    @Test
+    fun `磁盘解析后活动库消失的早退也清理全部临时spill`() = runBlocking {
+        val workDir = tempFolder.newFolder()
+        val vaultFile = File(workDir, "drift-close-during-parse.kdbx")
+        val attachmentStore = DriftAttachmentStore()
+        val session = DatabaseSession(attachmentStore)
+        assertTrue(
+            "前提：建库必须成功",
+            session.create(vaultFile, "Drift", masterPassword, useArgon2 = false) is KdbxResult.Success
+        )
+        val active = session.databaseFlow.value!!
+        val remoteWithAttachment = active.copy(
+            rootGroup = KdbxGroup(
+                id = UUID_ROOT,
+                name = "Root",
+                entries = listOf(
+                    entry(UUID_REMOTE_ONLY, "RemoteOnly", "RemoteOnly#pwd").copy(
+                        attachments = listOf(
+                            KdbxAttachment("remote.bin", data = ByteArray(1_200_000) { 0x51 })
+                        )
+                    )
+                )
+            )
+        )
+        val diskBytes = ByteArrayOutputStream().also {
+            KdbxFile.save(it, remoteWithAttachment, masterPassword)
+        }.toByteArray()
+        vaultFile.writeBytes(diskBytes)
+        attachmentStore.afterStore = { runBlocking { session.close() } }
+
+        val resolver = VaultFileDriftResolve(session, STRINGS, driftCoordinator = null)
+        val result = resolver.resolve(ExternalModificationChoice.MERGE_AND_SAVE)
+
+        assertTrue("活动库在解析期间关闭后，合并应走无活动库失败分支", result is KdbxResult.Failure)
+        assertTrue("finally 必须回收已解析但未采用的附件 spill", attachmentStore.entries.isEmpty())
         masterPassword.fill('0')
     }
 }

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -57,6 +58,9 @@ class ResumeSyncProbeCoordinator @Inject constructor(
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
+    /** 连续前台 / 网络恢复事件合并为一个在途探测。 */
+    private val probeMutex = Mutex()
+
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var initialized = false
     private var resumeListener: (() -> Unit)? = null
@@ -86,24 +90,29 @@ class ResumeSyncProbeCoordinator @Inject constructor(
                 ).takeIf { it.isNotEmpty() }
             }
         ) {
-            val settings = settingsRepository.getSettings().first()
-            val isLocked = autoLockManager.isLocked.value
-            // ISSUE-P2-496：先取**探测前**基线快照，节流判据与 classify 基线同源于它。
-            val plan = ResumeSyncProbePolicy.planProbe(
-                probeEnabled = settings.syncProbeOnResumeEnabled,
-                isLocked = isLocked,
-                lastProbeAtMillis = _lastProbeAtMillis.value
-            )
-            if (!plan.shouldProbe) return@launchGuarded
-            val outcome = probeRemote(
-                probeEnabled = settings.syncProbeOnResumeEnabled,
-                isLocked = isLocked,
-                classifyBaselineMillis = plan.classifyBaselineMillis
-            )
-            // ISSUE-P2-496：时间戳在探测**完成后**才回写——探测内的 classify 复核用的是旧基线，
-            // 不再消费「本次刚刷新」的值（原实现先写时间戳再探测 ⇒ 自败节流）。
-            _lastProbeAtMillis.value = System.currentTimeMillis()
-            _notice.value = describeOutcome(outcome).takeIf { it.isNotEmpty() }
+            if (!probeMutex.tryLock()) return@launchGuarded
+            try {
+                val settings = settingsRepository.getSettings().first()
+                val isLocked = autoLockManager.isLocked.value
+                // ISSUE-P2-496：先取**探测前**基线快照，节流判据与 classify 基线同源于它。
+                val plan = ResumeSyncProbePolicy.planProbe(
+                    probeEnabled = settings.syncProbeOnResumeEnabled,
+                    isLocked = isLocked,
+                    lastProbeAtMillis = _lastProbeAtMillis.value
+                )
+                if (!plan.shouldProbe) return@launchGuarded
+                val outcome = probeRemote(
+                    probeEnabled = settings.syncProbeOnResumeEnabled,
+                    isLocked = isLocked,
+                    classifyBaselineMillis = plan.classifyBaselineMillis
+                )
+                // ISSUE-P2-496：时间戳在探测**完成后**才回写——探测内的 classify 复核用的是旧基线，
+                // 不再消费「本次刚刷新」的值（原实现先写时间戳再探测 ⇒ 自败节流）。
+                _lastProbeAtMillis.value = System.currentTimeMillis()
+                _notice.value = describeOutcome(outcome).takeIf { it.isNotEmpty() }
+            } finally {
+                probeMutex.unlock()
+            }
         }
     }
 
@@ -114,47 +123,59 @@ class ResumeSyncProbeCoordinator @Inject constructor(
         classifyBaselineMillis: Long?
     ): ResumeSyncProbePolicy.ProbeOutcome = withContext(Dispatchers.IO) {
         try {
-            if (!syncCoordinator.isSyncConfigured()) {
-                return@withContext ResumeSyncProbePolicy.ProbeOutcome.Skipped
-            }
-            val provider = syncCoordinator.testSyncProvider
-                ?: return@withContext ResumeSyncProbePolicy.ProbeOutcome.Failed("未配置云同步")
-            val remotePath = syncCoordinator.resolveRemotePathForProbe()
+            val target = syncCoordinator.resolveProbeTarget()
                 ?: return@withContext ResumeSyncProbePolicy.ProbeOutcome.Skipped
-            val meta = provider.getMetadata(remotePath)
-            if (meta.isFailure) {
-                return@withContext ResumeSyncProbePolicy.classify(
-                    probeEnabled = probeEnabled,
-                    isLocked = isLocked,
-                    lastProbeAtMillis = classifyBaselineMillis,
-                    hasRemote = false,
-                    remoteChanged = false
-                )
-            }
-            val etag = meta.getOrNull()?.etag.orEmpty()
-            val lastEtag = syncCoordinator.lastRemoteEtagForProbe()
-            // 无基线时：只记录当前 etag，不提示变化（避免首探误报）
-            if (lastEtag.isBlank()) {
-                if (etag.isNotBlank()) syncCoordinator.rememberRemoteEtagForProbe(etag)
-                return@withContext ResumeSyncProbePolicy.classify(
+            syncCoordinator.useProviderForProbe { provider ->
+                val meta = provider.getMetadata(target.remotePath)
+                // 成功与失败都必须复核：换目标后，旧请求的错误也不能覆盖新目标的提示状态。
+                if (syncCoordinator.resolveProbeTarget()?.identity != target.identity) {
+                    return@useProviderForProbe ResumeSyncProbePolicy.ProbeOutcome.Skipped
+                }
+                if (meta.isFailure) {
+                    val classified = ResumeSyncProbePolicy.classify(
+                        probeEnabled = probeEnabled,
+                        isLocked = isLocked,
+                        lastProbeAtMillis = classifyBaselineMillis,
+                        hasRemote = false,
+                        remoteChanged = false
+                    )
+                    val failureType = meta.exceptionOrNull()?.javaClass?.simpleName
+                        ?: "MetadataFailure"
+                    return@useProviderForProbe if (classified is ResumeSyncProbePolicy.ProbeOutcome.Failed) {
+                        ResumeSyncProbePolicy.ProbeOutcome.Failed(failureType)
+                    } else {
+                        classified
+                    }
+                }
+
+                val etag = meta.getOrNull()?.etag.orEmpty()
+                val lastEtag = syncCoordinator.lastRemoteEtagForProbe(target.identity)
+                // 无本地确认基线时：只记录当前 ETag，不提示变化（历史基线持久化属于 P2-627）。
+                if (lastEtag.isBlank()) {
+                    if (etag.isNotBlank()) {
+                        syncCoordinator.rememberRemoteEtagForProbe(etag, target.identity)
+                    }
+                    return@useProviderForProbe ResumeSyncProbePolicy.classify(
+                        probeEnabled = probeEnabled,
+                        isLocked = isLocked,
+                        lastProbeAtMillis = classifyBaselineMillis,
+                        hasRemote = true,
+                        remoteChanged = false
+                    )
+                }
+
+                val remoteChanged = etag.isNotBlank() && etag != lastEtag
+                if (remoteChanged && etag.isNotBlank()) {
+                    syncCoordinator.rememberRemoteEtagForProbe(etag, target.identity)
+                }
+                ResumeSyncProbePolicy.classify(
                     probeEnabled = probeEnabled,
                     isLocked = isLocked,
                     lastProbeAtMillis = classifyBaselineMillis,
                     hasRemote = true,
-                    remoteChanged = false
+                    remoteChanged = remoteChanged
                 )
-            }
-            val remoteChanged = etag.isNotBlank() && etag != lastEtag
-            if (remoteChanged && etag.isNotBlank()) {
-                syncCoordinator.rememberRemoteEtagForProbe(etag)
-            }
-            ResumeSyncProbePolicy.classify(
-                probeEnabled = probeEnabled,
-                isLocked = isLocked,
-                lastProbeAtMillis = classifyBaselineMillis,
-                hasRemote = true,
-                remoteChanged = remoteChanged
-            )
+            } ?: ResumeSyncProbePolicy.ProbeOutcome.Skipped
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             // ISSUE-P3-550：探测异常常来自 HTTP 层，`message` 内嵌端点 / 主机 / 状态码细节

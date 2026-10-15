@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import com.keepasskey.app.R
+import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
@@ -11,6 +12,7 @@ import com.keepasskey.sync.engine.SyncResolveUploadResult
 import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxMerger
 import kotlinx.coroutines.CancellationException
@@ -43,7 +45,9 @@ import com.keepasskey.app.ui.model.textArg
  */
 internal suspend fun SyncConflictController.resolveConflicts(
     resolutions: Map<String, ConflictResolutionChoice>,
-    fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>> = emptyMap()
+    fieldResolutions: Map<String, Map<String, FieldResolutionChoice>> = emptyMap(),
+    releaseLocalHoldoff: suspend () -> Unit = {},
+    autoLockGuard: AutoLockSessionGuard? = null
 ): SyncOutcome {
     val engine = pendingRemoteEngine ?: return SyncOutcome.Error(strings.get(R.string.sync_error_no_pending_conflict))
     val path = pendingRemotePath ?: return SyncOutcome.Error(strings.get(R.string.sync_error_conflict_path_invalid))
@@ -87,6 +91,9 @@ internal suspend fun SyncConflictController.resolveConflicts(
         val mergedBytes = codec.serializeLocalDatabase(mergedDb)
             ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_conflict_serialize_failed))
 
+        // 合并与加密快照已准备完成，后续只是使用密文字节的网络调用，不应延迟安全锁定。
+        releaseLocalHoldoff()
+
         // E2 整改：If-Match 期望值取冲突发生时刻的远端 ETag——用户决策期间
         // 远端若被再次修改，上传将 412 失败并暴露新冲突，而不是静默覆盖他端更新。
         // ISSUE-P1-275 AC①：期望值经唯一判据产出（与自动合并路径共用）
@@ -96,9 +103,15 @@ internal suspend fun SyncConflictController.resolveConflicts(
             expectedEtag = expectedEtagForConflictUpload(pendingRemoteEtag)
         )
         when (uploadResult) {
-            is SyncResolveUploadResult.Uploaded ->
+            is SyncResolveUploadResult.Uploaded -> {
                 // ISSUE-P2-313：采纳结论随结算句柄回写（adoptMergedDatabase 内 accept/reject）
-                return@withContext adoptMergedDatabase(mergedDb, uploadResult.settlement)
+                autoLockGuard?.beginLongTask()
+                try {
+                    return@withContext adoptMergedDatabase(mergedDb, uploadResult.settlement)
+                } finally {
+                    if (autoLockGuard != null) autoLockGuard.endLongTask()
+                }
+            }
             is SyncResolveUploadResult.Failed -> {
                 val ex = uploadResult.error
                 if (ex is com.keepasskey.sync.model.SyncException.ConflictError) {
@@ -113,6 +126,8 @@ internal suspend fun SyncConflictController.resolveConflicts(
                 // ISSUE-P3-311 项 3：只透出异常类型名，不透传服务器可控 message
                 SyncOutcome.Error(strings.get(R.string.sync_error_upload_resolved_failed, ex.javaClass.simpleName))
             }
+            SyncResolveUploadResult.RecoveryRequired ->
+                SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
         }
     }
 }
@@ -121,7 +136,7 @@ internal suspend fun SyncConflictController.resolveConflicts(
 private fun SyncConflictController.collectResolvedByParent(
     decisionConflicts: List<ConflictedEntryPair>,
     resolutions: Map<String, ConflictResolutionChoice>,
-    fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>>,
+    fieldResolutions: Map<String, Map<String, FieldResolutionChoice>>,
     rootId: KdbxUuid
 ): Map<KdbxUuid, List<KdbxEntry>> {
     val resolvedByParent = mutableMapOf<KdbxUuid, MutableList<KdbxEntry>>()
@@ -251,6 +266,11 @@ private suspend fun SyncConflictController.handleResolveUploadSuperseded(
             eraseSupersededPendingTrees(mergedDb)
             clearPendingConflictSession()
             SyncOutcome.Error(strings.get(R.string.sync_error_rollback_rejected))
+        }
+        SyncCommitResult.RecoveryRequired -> {
+            eraseSupersededPendingTrees(mergedDb)
+            clearPendingConflictSession()
+            SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
         }
     }
 }

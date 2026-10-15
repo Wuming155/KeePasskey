@@ -3,8 +3,10 @@ package com.keepasskey.app.ui.screens.settings
 import android.content.Context
 import android.net.Uri
 import com.keepasskey.app.R
+import com.keepasskey.app.data.export.SpreadsheetTextWorkbookExporter
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.StringsProvider
 import java.security.MessageDigest
@@ -15,10 +17,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import com.keepasskey.app.ui.model.textArg
+import java.util.concurrent.CancellationException
 
 /**
  * TASK-21 拆分：设置页「导出 / 模板安装 / 调试日志导出」动作控制器。
- * 导出三件套走仓库真实序列化 + SAF 落盘，模板安装真实建组落库，
+ * 各导出选项走仓库序列化 + SAF 落盘，模板安装真实建组落库，
  * 调试日志导出经脱敏后写 SAF 目标 Uri；反馈文案经 [StringsProvider] 资源解析（P3-23）。
  */
 internal class SettingsExportController(
@@ -131,6 +134,41 @@ internal class SettingsExportController(
     }
 
     /**
+     * 导出表格文本 XLSX。先生成原值 CSV，再逐单元格写为 OOXML inline string；原值 CSV 路径不变，
+     * 此导出也不为危险前缀增删字符。XLSX 是明文制品，沿用同一二次确认令牌边界。
+     */
+    fun exportVaultSpreadsheetTo(targetUri: Uri, ticket: ExportTicket) {
+        exportPlaintextTo(
+            targetUri,
+            ExportArtifactKind.SAFE_SPREADSHEET_XLSX,
+            ticket,
+            R.string.dbset_export_spreadsheet_done
+        ) {
+            exportVaultSpreadsheetBytes()
+        }
+    }
+
+    /** 将 CSV 转换为文本单元格工作簿，并在任何结果下清零来源字节。 */
+    private suspend fun exportVaultSpreadsheetBytes(): KdbxResult<ByteArray> {
+        val csvResult = vaultRepository.exportVaultCsvBytes()
+        if (csvResult !is KdbxResult.Success) return csvResult
+
+        val csvBytes = csvResult.data
+        return try {
+            KdbxResult.Success(SpreadsheetTextWorkbookExporter.exportCsv(csvBytes))
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            debugLogBuffer.warn(TAG, "表格文本导出失败: ${error.javaClass.simpleName}")
+            KdbxResult.Failure(
+                error,
+                strings.get(R.string.repo_export_spreadsheet_failed, strings.get(R.string.err_unknown))
+            )
+        } finally {
+            csvBytes.fill(0)
+        }
+    }
+
+    /**
      * 明文制品导出的统一入口（ISSUE-P3-110）：**先校验令牌，再序列化**。
      *
      * 校验失败（令牌缺失或与制品不匹配，例如拿免确认的加密导出令牌套明文导出）时
@@ -163,7 +201,7 @@ internal class SettingsExportController(
      * 导出会话绑定的密钥文件并写入 SAF 目标 Uri（ISSUE-P3-128）。
      *
      * `riskOf(KEY_FILE)` 早已把密钥文件归入 `PLAINTEXT` 风险等级（泄漏即可配合密文开库），
-     * 故本入口与明文 XML / CSV 同口径：**必须**携带 [ExportConfirmationPolicy.confirm] 签发的令牌，
+     * 故本入口与明文 XML / CSV / 表格 XLSX 同口径：**必须**携带 [ExportConfirmationPolicy.confirm] 签发的令牌，
      * 未确认不可调用、令牌类型不符一律 fail-closed。
      */
     fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket) {
@@ -266,6 +304,9 @@ enum class ExportArtifactKind(val auditLabel: String) {
     /** ISSUE-P3-73：通用明文 CSV：高级选项，必须先取得显式二次确认 */
     PLAINTEXT_CSV("明文 CSV"),
 
+    /** ISSUE-P3-623：表格文本 XLSX；显式文本单元格仍属于未加密明文 */
+    SAFE_SPREADSHEET_XLSX("表格文本 XLSX"),
+
     /** 会话绑定密钥文件：单独备份，泄漏即可配合密文开库 */
     KEY_FILE("密钥文件"),
 
@@ -297,7 +338,7 @@ private class IssuedExportTicket(
 /**
  * ISSUE-P2-10 (ZT-15)：明文导出二次确认决策内核（纯 Kotlin，可 JVM 单测）。
  *
- * 加密 KDBX 属默认安全路径，无需确认；明文 XML / 明文附件必须先取得显式确认，
+ * 加密 KDBX 属默认安全路径，无需确认；明文 XML / CSV / 表格 XLSX / 附件必须先取得显式确认，
  * 缺失确认一律 fail-closed（不导出）。
  *
  * ISSUE-P3-110：确认结果不再只是布尔判断，而是**签发 [ExportTicket]**——
@@ -343,6 +384,7 @@ internal object ExportConfirmationPolicy {
         ExportArtifactKind.ENCRYPTED_KDBX -> Risk.ENCRYPTED
         ExportArtifactKind.PLAINTEXT_XML,
         ExportArtifactKind.PLAINTEXT_CSV,
+        ExportArtifactKind.SAFE_SPREADSHEET_XLSX,
         ExportArtifactKind.KEY_FILE,
         ExportArtifactKind.ATTACHMENT -> Risk.PLAINTEXT
     }

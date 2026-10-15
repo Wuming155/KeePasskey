@@ -102,13 +102,40 @@ class CredentialManagerCallerBindingWiringTest {
     }
 
     @Test
-    fun `交叉核对不得在检索失败时拒绝填充`() {
+    fun `缺失最终系统请求或候选身份不一致必须拒绝填充`() {
         val source = readSource(PASSWORD_FILL)
 
-        // 第四轮复核对 P3-111 的定版提醒：先保证 retrieve* 可用，否则交叉核对恒失败、
-        // 把「能填充」变成「不能填充」。故拒绝条件必须同时要求 attestedPackage 非 null。
         assertTrue(
-            "拒绝分支必须以 attestedPackage != null 为前提（检索失败不得阻断填充）",
+            "缺少注册上下文时必须取消，而不能用新版 extras 补配",
+            source.contains("CredentialPendingIntents.requestContext(")
+        )
+        assertTrue(
+            "最终 ProviderGetCredentialRequest 缺失时必须 fail-closed",
+            source.contains("PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)") &&
+                source.contains("} ?: return null")
+        )
+        assertTrue(
+            "最终请求必须仍是密码凭据类型",
+            source.contains("providerReq.credentialOptions.none { it.type == PasswordCredential.TYPE_PASSWORD_CREDENTIAL }")
+        )
+        assertTrue(
+            "最终 origin 必须与候选阶段注册值完全一致",
+            source.contains("matchesPasswordFillCaller(request.attestedOrigin, request.attestedPackage)") &&
+                source.contains("isCurrentAttestedCaller(request)")
+        )
+        assertTrue(
+            "验证后必须匹配活动库会话身份并重读可用条目",
+            source.contains("findCurrentlyBoundEntry(request)") &&
+                source.contains("request.context.databaseId != sessionTicket.pathIdentifier") &&
+                source.contains("vaultRepository.getUsableKdbxEntries()")
+        )
+        assertTrue(
+            "必须拒绝验证期间锁库/重开或库内容代次变化的旧请求",
+            source.contains("databaseSession.isCredentialTicketCurrent(sessionTicket)") &&
+                source.contains("context.sessionTicket == null")
+        )
+        assertFalse(
+            "不得在最终系统请求缺失时兼容放行",
             source.contains("attestedPackage != null")
         )
     }

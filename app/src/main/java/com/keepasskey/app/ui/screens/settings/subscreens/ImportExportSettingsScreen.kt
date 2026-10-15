@@ -49,8 +49,10 @@ fun ImportExportSettingsScreen(
     onExportKdbx: (android.net.Uri) -> Unit = {},
     // ISSUE-P3-110：明文导出必须携带确认令牌（由本屏二次确认弹窗经 ExportConfirmationPolicy 签发）
     onExportXml: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
-    // ISSUE-P3-73：通用明文 CSV 导出（同明文 XML 语义，需二次确认）
+    // ISSUE-P3-623：原值交换 CSV 导出（同明文 XML 语义，需二次确认）
     onExportCsv: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
+    // ISSUE-P3-623：表格文本 XLSX 是独立格式，仍需明文导出二次确认
+    onExportSpreadsheet: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     onExportKeyFile: (android.net.Uri, ExportTicket) -> Unit = { _, _ -> },
     // ISSUE-P3-436：导入密钥文件（SAF 读取走 KeyFileAccess 通道，提交复用仅改绑分支 changeKeyFileOnly）
     onReadKeyFile: suspend (String) -> KeyFileReadResult = { _ -> KeyFileReadResult.Unreadable },
@@ -82,6 +84,9 @@ fun ImportExportSettingsScreen(
     // ISSUE-P3-73：明文 CSV 导出的待确认目标（同明文 XML 的二次确认语义）
     var pendingPlaintextCsvUri by remember { mutableStateOf<Uri?>(null) }
     var showPlaintextCsvConfirm by remember { mutableStateOf(false) }
+    // ISSUE-P3-623：表格文本 XLSX 单独选择目标并确认，避免与原值 CSV 共用制品令牌
+    var pendingSpreadsheetUri by remember { mutableStateOf<Uri?>(null) }
+    var showSpreadsheetConfirm by remember { mutableStateOf(false) }
     // ISSUE-P3-128：密钥文件导出的待确认目标（同属明文风险等级）
     var pendingKeyFileUri by remember { mutableStateOf<Uri?>(null) }
     var showKeyFileExportConfirm by remember { mutableStateOf(false) }
@@ -106,6 +111,17 @@ fun ImportExportSettingsScreen(
         if (uri != null) {
             pendingPlaintextCsvUri = uri
             showPlaintextCsvConfirm = true
+        }
+    }
+    // ISSUE-P3-623：真正生成 OOXML 工作簿，不以 CSV 内容伪装 XLSX
+    val exportSpreadsheetLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    ) { uri ->
+        if (uri != null) {
+            pendingSpreadsheetUri = uri
+            showSpreadsheetConfirm = true
         }
     }
     // ISSUE-P3-128：密钥文件导出同属明文风险等级——SAF 选定目标后**先弹二次确认**，
@@ -197,6 +213,7 @@ fun ImportExportSettingsScreen(
             onExportKdbx = { exportKdbxLauncher.launch(it) },
             onExportXml = { exportXmlLauncher.launch(it) },
             onExportCsv = { exportCsvLauncher.launch(it) },
+            onExportSpreadsheet = { exportSpreadsheetLauncher.launch(it) },
             onDismiss = { showExportDialog = false }
         )
     }
@@ -224,6 +241,19 @@ fun ImportExportSettingsScreen(
             onCancel = { showPlaintextCsvConfirm = false },
             onTargetConsumed = { pendingPlaintextCsvUri = null },
             onConfirmed = onExportCsv
+        )
+    }
+
+    // 对话框 6e：文本单元格 XLSX 的明文导出二次确认
+    if (showSpreadsheetConfirm) {
+        ExportConfirmationDialog(
+            titleResId = R.string.dbset_export_spreadsheet_warn_title,
+            messageResId = R.string.dbset_export_spreadsheet_warn_message,
+            artifactKind = ExportArtifactKind.SAFE_SPREADSHEET_XLSX,
+            targetUri = pendingSpreadsheetUri,
+            onCancel = { showSpreadsheetConfirm = false },
+            onTargetConsumed = { pendingSpreadsheetUri = null },
+            onConfirmed = onExportSpreadsheet
         )
     }
 

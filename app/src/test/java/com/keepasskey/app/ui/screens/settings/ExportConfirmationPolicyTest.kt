@@ -50,7 +50,7 @@ class ExportConfirmationPolicyTest {
     }
 
     @Test
-    fun `明文 XML 与附件归入明文风险等级`() {
+    fun `XML附件与表格文本XLSX归入明文风险等级`() {
         assertEquals(
             ExportConfirmationPolicy.Risk.PLAINTEXT,
             ExportConfirmationPolicy.riskOf(ExportArtifactKind.PLAINTEXT_XML)
@@ -58,6 +58,10 @@ class ExportConfirmationPolicyTest {
         assertEquals(
             ExportConfirmationPolicy.Risk.PLAINTEXT,
             ExportConfirmationPolicy.riskOf(ExportArtifactKind.ATTACHMENT)
+        )
+        assertEquals(
+            ExportConfirmationPolicy.Risk.PLAINTEXT,
+            ExportConfirmationPolicy.riskOf(ExportArtifactKind.SAFE_SPREADSHEET_XLSX)
         )
     }
 
@@ -84,19 +88,29 @@ class ExportConfirmationPolicyTest {
             ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_XML, userConfirmed = false)
         )
         assertNull(ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_CSV, userConfirmed = false))
+        assertNull(ExportConfirmationPolicy.confirm(ExportArtifactKind.SAFE_SPREADSHEET_XLSX, userConfirmed = false))
     }
 
     @Test
     fun `确认后签发的令牌绑定制品类型`() {
         val xml = ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_XML, userConfirmed = true)
         val csv = ExportConfirmationPolicy.confirm(ExportArtifactKind.PLAINTEXT_CSV, userConfirmed = true)
+        val spreadsheet = ExportConfirmationPolicy.confirm(
+            ExportArtifactKind.SAFE_SPREADSHEET_XLSX,
+            userConfirmed = true
+        )
 
         assertNotNull(xml)
         assertNotNull(csv)
+        assertNotNull(spreadsheet)
         assertEquals(ExportArtifactKind.PLAINTEXT_XML, xml!!.artifactKind)
         assertEquals(ExportArtifactKind.PLAINTEXT_CSV, csv!!.artifactKind)
+        assertEquals(ExportArtifactKind.SAFE_SPREADSHEET_XLSX, spreadsheet!!.artifactKind)
 
         assertTrue(ExportConfirmationPolicy.ticketMatches(xml, ExportArtifactKind.PLAINTEXT_XML))
+        assertTrue(
+            ExportConfirmationPolicy.ticketMatches(spreadsheet, ExportArtifactKind.SAFE_SPREADSHEET_XLSX)
+        )
         assertFalse(
             "令牌必须绑定制品类型：XML 令牌不得用于 CSV 导出",
             ExportConfirmationPolicy.ticketMatches(xml, ExportArtifactKind.PLAINTEXT_CSV)

@@ -108,6 +108,10 @@ class SyncEngine(
             return@withContext SyncOpenResult.CacheHitOffline(cached)
         }
 
+        if (rollbackGuard?.hasPendingAcceptance(remotePath) == true) {
+            return@withContext SyncOpenResult.RecoveryRequired
+        }
+
         if (!cache.isCached(remotePath)) {
             return@withContext openUncached(remotePath)
         }
@@ -354,6 +358,9 @@ class SyncEngine(
         localBytes: ByteArray,
         remoteExists: Boolean? = null
     ): SyncCommitResult = withContext(Dispatchers.IO) {
+        if (rollbackGuard?.hasPendingAcceptance(remotePath) == true) {
+            return@withContext SyncCommitResult.RecoveryRequired
+        }
         // 1. 先写缓存
         val localHash = cache.writeCache(remotePath, localBytes)
         val state = cache.getState(remotePath)
@@ -432,6 +439,9 @@ class SyncEngine(
         remotePath: String,
         localBytes: ByteArray
     ): SyncCommitResult = withContext(Dispatchers.IO) {
+        if (rollbackGuard?.hasPendingAcceptance(remotePath) == true) {
+            return@withContext SyncCommitResult.RecoveryRequired
+        }
         // 1. 先写缓存（与 commitLocal 同序：本地数据安全优先）
         val localHash = cache.writeCache(remotePath, localBytes)
 
@@ -481,6 +491,9 @@ class SyncEngine(
         mergedBytes: ByteArray,
         expectedEtag: String?
     ): SyncResolveUploadResult = withContext(Dispatchers.IO) {
+        if (rollbackGuard?.hasPendingAcceptance(remotePath) == true) {
+            return@withContext SyncResolveUploadResult.RecoveryRequired
+        }
         try {
             val newEtag = provider.uploadAtomic(remotePath, mergedBytes, expectedEtag?.takeIf { it.isNotBlank() })
                 .getOrThrow()

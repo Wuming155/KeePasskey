@@ -43,7 +43,7 @@ data class InnerHeader(
         val flags: Byte,
         private val inlineData: ByteArray,
         private val store: BinaryStore?,
-        private val spillKey: String?,
+        internal val spillKey: String?,
         private val spilledSize: Long
     ) : BinarySource {
 
@@ -55,6 +55,10 @@ data class InnerHeader(
 
         internal val isSpilled: Boolean
             get() = spillKey != null
+
+        /** Store namespace identity paired with [spillKey] for live-pool alias checks. */
+        internal val spillStoreIdentity: Any?
+            get() = store?.let { (it as? AttachmentSpillKeyOwner)?.spillStoreIdentity ?: it }
 
         /** 内容字节数（落盘条目不触发读取）。 */
         override val size: Long
@@ -115,6 +119,15 @@ data class InnerHeader(
          */
         internal fun clear() {
             inlineData.fill(0)
+        }
+
+        /**
+         * 在池所有权判定确认该 key 无存活引用后，释放事务移交给本条目持有的 spill key。
+         * 非事务 BinaryStore（旧调用方）继续由会话级清扫管理。
+         */
+        internal fun releaseOwnedSpillKey() {
+            val key = spillKey ?: return
+            (store as? AttachmentSpillKeyOwner)?.releaseOwnedSpillKey(key)
         }
 
         /** 序列化时直接写出（落盘条目流式拷贝，不整份物化；ISSUE-P3-483：末端消费点，已 `.use{}` 闭合）。 */

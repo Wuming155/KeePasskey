@@ -4,8 +4,6 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultCopyNaming
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.SecureFileWrite
-import com.keepasskey.sync.provider.SyncProvider
-import com.keepasskey.sync.s3.S3SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -41,58 +39,54 @@ internal suspend fun SyncCycleRunner.backupRemoteVaultCopy(): KdbxResult<String>
                 strings.get(R.string.sync_error_vault_not_unlocked)
             )
         val vaultFileName = databaseSession.currentFile?.name ?: "${currentDb.databaseName}.kdbx"
-        var providerForErase: SyncProvider? = null
         try {
-            val provider = session.testSyncProvider ?: providerResolver.resolveProvider()
-                ?: return@withContext KdbxResult.Failure(
-                    IllegalStateException("无同步凭据"),
-                    strings.get(R.string.sync_error_no_sync_credentials)
-                )
-            providerForErase = provider
-            val filesDir = context.filesDir
-                ?: return@withContext KdbxResult.Failure(
-                    IllegalStateException("No filesDir"),
-                    strings.get(R.string.repo_files_dir_unavailable)
-                )
-            val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
-            val remoteName = remotePath.substringAfterLast('/').ifBlank { vaultFileName }
-            val target = VaultCopyNaming.uniqueCopyTarget(File(filesDir, remoteName), LocalDateTime.now())
-            // ISSUE-P3-582：唯一临时名 + 打开流即收敛 0600（对齐 sync `SyncCacheFiles` 口径，
-            // 不依赖 umask）；失败清理只删自己的 tmp，绝不误删并发写者
-            val tmp = SecureFileWrite.uniqueTmpFor(target, SUFFIX_BACKUP)
-            try {
-                val downloaded = SecureFileWrite.openOwnerOnlyOutput(tmp).use { sink ->
-                    provider.download(remotePath, sink).isSuccess.also { ok ->
-                        if (ok) {
-                            sink.flush()
-                            sink.fd.sync()
+            providerResolver.useProvider(session.testSyncProvider) { provider ->
+                val filesDir = context.filesDir
+                    ?: return@useProvider KdbxResult.Failure(
+                        IllegalStateException("No filesDir"),
+                        strings.get(R.string.repo_files_dir_unavailable)
+                    )
+                val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
+                val remoteName = remotePath.substringAfterLast('/').ifBlank { vaultFileName }
+                val target = VaultCopyNaming.uniqueCopyTarget(File(filesDir, remoteName), LocalDateTime.now())
+                // ISSUE-P3-582：唯一临时名 + 打开流即收敛 0600（对齐 sync `SyncCacheFiles` 口径，
+                // 不依赖 umask）；失败清理只删自己的 tmp，绝不误删并发写者
+                val tmp = SecureFileWrite.uniqueTmpFor(target, SUFFIX_BACKUP)
+                try {
+                    val downloaded = SecureFileWrite.openOwnerOnlyOutput(tmp).use { sink ->
+                        provider.download(remotePath, sink).isSuccess.also { ok ->
+                            if (ok) {
+                                sink.flush()
+                                sink.fd.sync()
+                            }
                         }
                     }
-                }
-                val delivered = if (!downloaded) {
-                    false
-                } else {
-                    try {
-                        SecureFileWrite.moveAtomically(tmp, target)
-                    } catch (e: IOException) {
+                    val delivered = if (!downloaded) {
                         false
+                    } else {
+                        try {
+                            SecureFileWrite.moveAtomically(tmp, target)
+                        } catch (e: IOException) {
+                            false
+                        }
                     }
+                    if (!delivered) {
+                        return@useProvider KdbxResult.Failure(
+                            IllegalStateException("云端副本下载或落盘失败"),
+                            strings.get(R.string.sync_error_vault_copy_backup_failed)
+                        )
+                    }
+                    KdbxResult.Success(target.absolutePath)
+                } finally {
+                    tmp.delete()
                 }
-                if (!delivered) {
-                    return@withContext KdbxResult.Failure(
-                        IllegalStateException("云端副本下载或落盘失败"),
-                        strings.get(R.string.sync_error_vault_copy_backup_failed)
-                    )
-                }
-                KdbxResult.Success(target.absolutePath)
-            } finally {
-                tmp.delete()
-            }
+            } ?: KdbxResult.Failure(
+                IllegalStateException("无同步凭据"),
+                strings.get(R.string.sync_error_no_sync_credentials)
+            )
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             KdbxResult.Failure(e, strings.get(R.string.sync_error_vault_copy_backup_failed))
-        } finally {
-            (providerForErase as? S3SyncProvider)?.clearCredentials()
         }
     }

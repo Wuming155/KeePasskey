@@ -117,6 +117,9 @@ sealed class SyncOpenResult {
         override fun hashCode(): Int = 31 * remoteBytes.contentHashCode() + remoteEtag.hashCode()
     }
 
+    /** Incomplete prior local adoption quarantines all automatic remote processing for this target. */
+    data object RecoveryRequired : SyncOpenResult()
+
     /** 离线模式命中本地缓存 */
     data class CacheHitOffline(val localBytes: ByteArray) : SyncOpenResult() {
         override fun equals(other: Any?): Boolean {
@@ -190,6 +193,9 @@ sealed interface SyncResolveUploadResult {
 
     /** 上传失败（含 412 `SyncException.ConflictError`，调用方按原口径取 [error] 分派重入） */
     data class Failed(val error: Throwable) : SyncResolveUploadResult
+
+    /** Incomplete prior local adoption quarantines writes for this target. */
+    data object RecoveryRequired : SyncResolveUploadResult
 }
 
 /**
@@ -241,4 +247,7 @@ sealed class SyncCommitResult {
      * 已拒绝其参与合并（ISSUE-P2-18）；本地缓存与修改安全保留。
      */
     data class RollbackRejected(val keptLocal: Boolean = true) : SyncCommitResult()
+
+    /** Incomplete prior local adoption quarantines all automatic writes for this target. */
+    data object RecoveryRequired : SyncCommitResult()
 }

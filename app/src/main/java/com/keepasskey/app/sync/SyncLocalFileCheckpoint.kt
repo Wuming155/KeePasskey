@@ -1,8 +1,8 @@
 package com.keepasskey.app.sync
 
-import java.io.File
-import java.io.FileInputStream
-import java.security.MessageDigest
+import com.keepasskey.database.session.StableDatabaseFileDigest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,8 +41,17 @@ import javax.inject.Singleton
 @Singleton
 class SyncLocalFileCheckpoint @Inject constructor() {
 
+    private val mutex = Mutex()
+
     /** 记录归属的远端路径（换绑即视为无记录，防跨库误命中）。 */
     private var recordedRemotePath: String? = null
+
+    /** 记录归属的非秘密 Provider 目标身份（同路径换端点/账号配置后不复用旧证明）。 */
+    private var recordedTargetIdentity: String? = null
+
+    /** 记录归属的会话路径标识与正式文件路径。 */
+    private var recordedPathIdentifier: String? = null
+    private var recordedFilePath: String? = null
 
     /** 上次收敛收尾时的本地库文件摘要（SHA-256 十六进制小写）。 */
     private var recordedDigest: String? = null
@@ -53,48 +62,43 @@ class SyncLocalFileCheckpoint @Inject constructor() {
      * 记录缺失、远端路径不符、文件不可读（无 File / 读取失败 / 非普通文件）一律返回
      * **false**（保守：宁可按「本地可能变过」处理，绝不据此丢弃本地内容）。
      */
-    fun isUnchangedSinceSync(remotePath: String, localFile: File?): Boolean {
-        val recorded = recordedDigest.takeIf { recordedRemotePath == remotePath } ?: return false
-        return recorded == digestOf(localFile)
+    suspend fun isUnchangedSinceSync(
+        remotePath: String,
+        targetIdentity: String?,
+        currentRevision: StableDatabaseFileDigest?
+    ): Boolean = mutex.withLock {
+        val recorded = recordedDigest ?: return@withLock false
+        val currentTarget = targetIdentity ?: return@withLock false
+        currentRevision ?: return@withLock false
+        recordedRemotePath == remotePath &&
+            recordedTargetIdentity == currentTarget &&
+            recordedPathIdentifier == currentRevision.pathIdentifier &&
+            recordedFilePath == currentRevision.filePath &&
+            recorded == currentRevision.sha256
     }
 
-    /** 记录本次成功同步收尾时的本地库文件摘要（文件不可读时置空记录，不留陈旧值）。 */
-    fun record(remotePath: String, localFile: File?) {
+    /** 仅接受数据库提交锁内、与指定活动数据库身份绑定的正式文件摘要。 */
+    suspend fun record(
+        remotePath: String,
+        targetIdentity: String?,
+        revision: StableDatabaseFileDigest?
+    ) = mutex.withLock {
+        val confirmedTarget = targetIdentity ?: return@withLock
+        if (revision == null) return@withLock
         recordedRemotePath = remotePath
-        recordedDigest = digestOf(localFile)
+        recordedTargetIdentity = confirmedTarget
+        recordedPathIdentifier = revision.pathIdentifier
+        recordedFilePath = revision.filePath
+        recordedDigest = revision.sha256
     }
 
     /** 清空记录（同步关系终止 / 换库治理面使用；判定本身已自证，非必需）。 */
-    fun clear() {
+    suspend fun clear() = mutex.withLock {
         recordedRemotePath = null
+        recordedTargetIdentity = null
+        recordedPathIdentifier = null
+        recordedFilePath = null
         recordedDigest = null
-    }
-
-    /**
-     * 逐块计算文件摘要——**不整份物化**（本地库为整库密文，可达数十 MiB，
-     * 对齐 `SyncCache.receiveRemote` 的流式口径）。不可读即 null。
-     */
-    private fun digestOf(file: File?): String? {
-        val target = file ?: return null
-        if (!target.isFile) return null
-        return try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            val buffer = ByteArray(BUFFER_BYTES)
-            FileInputStream(target).use { input ->
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    digest.update(buffer, 0, read)
-                }
-            }
-            digest.digest().toHexString()
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private companion object {
-        const val BUFFER_BYTES = 64 * 1024
     }
 }
 

@@ -1,6 +1,8 @@
 package com.keepasskey.sync.engine
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -21,22 +23,45 @@ internal class DeferredBaselineSettlement(
     private val etag: String,
     private val eventOnAccept: SyncCacheEvent?
 ) : RemoteAdoptionSettlement {
-    private var settled = false
+    private enum class State { PENDING, COMMITTING, COMMITTED, RECOVERY_REQUIRED, REJECTED }
+
+    private val mutex = Mutex()
+    private var state = State.PENDING
 
     override suspend fun accept() {
-        if (settled) return
-        settled = true
-        withContext(Dispatchers.IO) {
-            receipt?.commit()
-            advanceBaseAndPersist(engine.cache, remotePath, etag, contentDigest, bytes)
-            engine.recordAccepted(remotePath, contentDigest)
-            eventOnAccept?.let { engine.events.tryEmit(it) }
+        mutex.withLock {
+            when (state) {
+                State.COMMITTED, State.REJECTED -> return
+                State.RECOVERY_REQUIRED -> throw IllegalStateException("同步采纳事务需要恢复")
+                State.PENDING -> state = State.COMMITTING
+                State.COMMITTING -> error("settlement mutex must serialize committing state")
+            }
+
+            var intentWritten = false
+            try {
+                withContext(Dispatchers.IO) {
+                    // Persist quarantine before the first cache/base/high-water mutation. If a later
+                    // file operation fails, a new engine instance must refuse automatic adoption.
+                    engine.rollbackGuard?.beginAcceptance(remotePath, contentDigest)
+                    intentWritten = true
+                    receipt?.commit()
+                    advanceBaseAndPersist(engine.cache, remotePath, etag, contentDigest, bytes)
+                    engine.recordAccepted(remotePath, contentDigest)
+                    eventOnAccept?.let { engine.events.tryEmit(it) }
+                }
+                state = State.COMMITTED
+            } catch (failure: Throwable) {
+                state = if (intentWritten) State.RECOVERY_REQUIRED else State.PENDING
+                throw failure
+            }
         }
     }
 
     override suspend fun reject() {
-        if (settled) return
-        settled = true
-        receipt?.abort()
+        mutex.withLock {
+            if (state != State.PENDING) return
+            state = State.REJECTED
+            withContext(Dispatchers.IO) { receipt?.abort() }
+        }
     }
 }

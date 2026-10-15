@@ -482,6 +482,8 @@ class SettingsViewModel @Inject constructor(
     fun exportKdbxTo(targetUri: Uri) = exportController.exportKdbxTo(targetUri)
     fun exportVaultXmlTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportVaultXmlTo(targetUri, ticket)
     fun exportVaultCsvTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportVaultCsvTo(targetUri, ticket)
+    fun exportVaultSpreadsheetTo(targetUri: Uri, ticket: ExportTicket) =
+        exportController.exportVaultSpreadsheetTo(targetUri, ticket)
     fun exportKeyFileTo(targetUri: Uri, ticket: ExportTicket) = exportController.exportKeyFileTo(targetUri, ticket)
     fun installEntryTemplates() = exportController.installEntryTemplates()
 

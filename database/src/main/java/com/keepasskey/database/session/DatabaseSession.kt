@@ -175,7 +175,8 @@ class DatabaseSession(
 
     /**
      * 用会话附件存储解析外部密文；不取会话 mutex，凭据副本由 useCredentials 擦除。
-     * 返回树归调用者；未采用前丢弃须 clearSensitiveData，避免附件明文滞留。
+     * 返回树归调用者；解析事务将 spill key 移交给池条目所有者。调用者须把树采用为活动库，
+     * 或在丢弃前调用 `clearSensitiveData()`（按存活池判定释放 spill），避免附件明文滞留。
      */
     suspend fun parseExternalDatabase(bytes: ByteArray): KdbxResult<KdbxDatabase> =
         parseExternalKdbxBytes(bytes, ::useCredentials, binaryStore)

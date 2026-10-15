@@ -7,9 +7,17 @@ import com.keepasskey.app.data.repository.ActiveDatabaseIdStore
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.sync.network.SyncEndpointGuard
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/** 仅由非秘密配置字段派生的当前云目标快照。 */
+data class SyncProviderTarget(
+    val remotePath: String,
+    val identity: String
+)
 
 /**
  * Keystore 封印同步凭据；口令以 CharArray 借用并即时擦除，读取副本由调用方 finally 清零。
@@ -107,14 +115,83 @@ class SyncCredentialsStore @Inject constructor(
     }
 
     fun loadProvider(): CloudSyncProvider {
-        val name = prefs.getString(
-            keyOf(SyncCredentialKeys.PROVIDER, resolveScope(null)),
-            CloudSyncProvider.WEBDAV.name
-        )
+        return readProvider(resolveScope(null))
+    }
+
+    /**
+     * 读取当前 Provider 的非秘密配置描述，不解封凭据、不构造网络客户端。
+     *
+     * `identity` 是 Provider 类型与目标地址字段的摘要，供异步探测在请求后丢弃迟到结果；
+     * 摘要不写日志，也不包含密码、AccessKey 或 SecretKey。
+     */
+    fun describeCurrentProvider(defaultFileName: String): SyncProviderTarget? {
+        val scope = resolveScope(null)
+        val provider = readProvider(scope)
+        return when (provider) {
+            CloudSyncProvider.WEBDAV -> {
+                val url = prefs.getString(keyOf(SyncCredentialKeys.WEBDAV_URL, scope), null)
+                    ?.takeIf(String::isNotBlank) ?: return null
+                SyncEndpointGuard.validateEndpointHost(url)
+                val username = prefs.getString(keyOf(SyncCredentialKeys.WEBDAV_USERNAME, scope), "") ?: ""
+                val remotePath = prefs.getString(
+                    keyOf(SyncCredentialKeys.WEBDAV_REMOTE_PATH, scope),
+                    WebDavDefaults.DEFAULT_REMOTE_PATH
+                )?.trim()?.takeIf(String::isNotBlank)?.let { if (it.startsWith("/")) it else "/$it" }
+                    ?: "/$defaultFileName"
+                SyncProviderTarget(
+                    remotePath = remotePath,
+                    identity = targetIdentity(provider.name, url, username, remotePath)
+                )
+            }
+            CloudSyncProvider.S3_COMPATIBLE -> {
+                val endpoint = prefs.getString(keyOf(SyncCredentialKeys.S3_ENDPOINT, scope), null)
+                    ?.takeIf(String::isNotBlank) ?: return null
+                val bucket = prefs.getString(keyOf(SyncCredentialKeys.S3_BUCKET, scope), "") ?: ""
+                if (bucket.isBlank()) return null
+                SyncEndpointGuard.validateBucketName(bucket)
+                SyncEndpointGuard.validateEndpointHost(endpoint)
+                val region = prefs.getString(keyOf(SyncCredentialKeys.S3_REGION, scope), "us-east-1") ?: "us-east-1"
+                val objectKey = prefs.getString(
+                    keyOf(SyncCredentialKeys.S3_OBJECT_KEY, scope),
+                    WebDavDefaults.DEFAULT_REMOTE_PATH
+                )
+                    ?.trim()?.takeIf(String::isNotBlank) ?: defaultFileName
+                val usePathStyle = prefs.getBoolean(keyOf(SyncCredentialKeys.S3_USE_PATH_STYLE, scope), false)
+                SyncProviderTarget(
+                    remotePath = objectKey,
+                    identity = targetIdentity(
+                        provider.name,
+                        endpoint,
+                        bucket,
+                        region,
+                        objectKey,
+                        usePathStyle.toString()
+                    )
+                )
+            }
+        }
+    }
+
+    private fun readProvider(scope: String?): CloudSyncProvider {
+        val name = prefs.getString(keyOf(SyncCredentialKeys.PROVIDER, scope), CloudSyncProvider.WEBDAV.name)
         return try {
             CloudSyncProvider.valueOf(name ?: CloudSyncProvider.WEBDAV.name)
         } catch (_: Exception) {
             CloudSyncProvider.WEBDAV
+        }
+    }
+
+    internal fun targetIdentity(vararg fields: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        fields.forEach { field ->
+            val bytes = field.toByteArray(Charsets.UTF_8)
+            digest.update(bytes.size.toString().toByteArray(Charsets.US_ASCII))
+            digest.update(0.toByte())
+            digest.update(bytes)
+            digest.update(0.toByte())
+        }
+        return digest.digest().joinToString("") { byte ->
+            (byte.toInt() and 0xff).toString(16).padStart(2, '0')
         }
     }
 

@@ -79,6 +79,34 @@ class ConflictStrategyPolicyTest {
     }
 
     @Test
+    fun `每次询问把标准字段缺失与空值差异保留在字段清单`() {
+        val baseEntry = entry(5, title = "基线", url = "https://base")
+        val localEntry = baseEntry.copy(
+            fields = mapOf(KdbxConstants.Fields.URL to ProtectedString("https://local", false)),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(2000L))
+        )
+        val remoteEntry = baseEntry.copy(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("", false),
+                KdbxConstants.Fields.URL to ProtectedString("https://base", false)
+            ),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(3000L))
+        )
+        val expanded = BothModifiedEntryCollector.collect(
+            trustedBase = KdbxDatabaseLite(group(listOf(baseEntry))),
+            local = KdbxDatabaseLite(group(listOf(localEntry))),
+            remote = KdbxDatabaseLite(group(listOf(remoteEntry))),
+            alreadyConflicted = emptyList()
+        )
+
+        assertEquals(1, expanded.size)
+        assertTrue(
+            "缺键与空值必须形成可裁决的标准字段差异",
+            KdbxConstants.Fields.TITLE in expanded.single().modifiedFields
+        )
+    }
+
+    @Test
     fun `仅单方修改的条目不进入决策清单`() {
         val base = KdbxDatabaseLite(group(listOf(entry(2, title = "T", modifiedAt = 1000L))))
         val local = KdbxDatabaseLite(group(listOf(entry(2, title = "T", modifiedAt = 1000L))))

@@ -58,7 +58,7 @@ class KdbxMergerFieldResolutionTest {
     fun `仅自定义字段选云端：远端值落入产物且本地其余字段不动（AC④ 不丢）`() {
         val resolved = KdbxMerger.resolveConflictByFields(
             pair(),
-            mapOf(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP" to ConflictResolutionChoice.KEEP_REMOTE)
+            mapOf(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP" to FieldResolutionChoice.KEEP_REMOTE)
         )
 
         assertEquals(
@@ -75,9 +75,9 @@ class KdbxMergerFieldResolutionTest {
         val resolved = KdbxMerger.resolveConflictByFields(
             pair(),
             mapOf(
-                KdbxMerger.CONFLICT_KEY_ICON_ID to ConflictResolutionChoice.KEEP_REMOTE,
-                KdbxMerger.CONFLICT_KEY_OVERRIDE_URL to ConflictResolutionChoice.KEEP_REMOTE,
-                KdbxMerger.CONFLICT_KEY_QUALITY_CHECK to ConflictResolutionChoice.KEEP_REMOTE
+                KdbxMerger.CONFLICT_KEY_ICON_ID to FieldResolutionChoice.KEEP_REMOTE,
+                KdbxMerger.CONFLICT_KEY_OVERRIDE_URL to FieldResolutionChoice.KEEP_REMOTE,
+                KdbxMerger.CONFLICT_KEY_QUALITY_CHECK to FieldResolutionChoice.KEEP_REMOTE
             )
         )
 
@@ -92,8 +92,8 @@ class KdbxMergerFieldResolutionTest {
         val resolved = KdbxMerger.resolveConflictByFields(
             pair(),
             mapOf(
-                KdbxConstants.Fields.TITLE to ConflictResolutionChoice.KEEP_LOCAL,
-                KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP" to ConflictResolutionChoice.KEEP_LOCAL
+                KdbxConstants.Fields.TITLE to FieldResolutionChoice.KEEP_LOCAL,
+                KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP" to FieldResolutionChoice.KEEP_LOCAL
             )
         )
 
@@ -103,19 +103,54 @@ class KdbxMergerFieldResolutionTest {
     }
 
     @Test
-    fun `远端缺失的自定义字段：选云端为安全 no-op（不崩、不造空字段）`() {
+    fun `远端缺失的自定义字段：显式采用云端删除`() {
         val p = pair()
         val remoteWithoutOtp = p.remoteEntry.copy(customFields = emptyList())
         val resolved = KdbxMerger.resolveConflictByFields(
             p.copy(remoteEntry = remoteWithoutOtp),
-            mapOf(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP" to ConflictResolutionChoice.KEEP_REMOTE)
+            mapOf(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP" to FieldResolutionChoice.DELETE_REMOTE)
         )
 
-        assertEquals(
-            "远端无该字段时本地值必须保留（no-op）",
-            "local-otp",
-            resolved.customFields.single { it.key == "OTP" }.value.readString()
-        )
+        assertTrue("显式采纳云端删除应移除本地自定义字段", resolved.customFields.none { it.key == "OTP" })
         assertTrue(resolved.customFields.none { it.value.readString() == "remote-otp" })
+    }
+
+    @Test
+    fun `空值与缺失不同且标准字段可显式删除`() {
+        val p = pair()
+        val emptyRemote = p.remoteEntry.copy(
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("", false))
+        )
+        val empty = KdbxMerger.resolveConflictByFields(
+            p.copy(remoteEntry = emptyRemote),
+            mapOf(KdbxConstants.Fields.TITLE to FieldResolutionChoice.KEEP_REMOTE)
+        )
+        assertTrue("云端存在的空值必须仍是一个已存在字段", empty.fields.containsKey(KdbxConstants.Fields.TITLE))
+        assertEquals("", empty.fields.getValue(KdbxConstants.Fields.TITLE).readString())
+
+        val missingRemote = p.remoteEntry.copy(fields = emptyMap())
+        val deleted = KdbxMerger.resolveConflictByFields(
+            p.copy(remoteEntry = missingRemote),
+            mapOf(KdbxConstants.Fields.TITLE to FieldResolutionChoice.DELETE_REMOTE)
+        )
+        assertTrue("缺失字段经用户选择删除后应从条目移除", KdbxConstants.Fields.TITLE !in deleted.fields)
+    }
+
+    @Test
+    fun `删除决策只接受快照中的缺失键`() {
+        val p = pair()
+        val forged = KdbxMerger.resolveConflictByFields(
+            p,
+            mapOf(
+                "UnknownField" to FieldResolutionChoice.DELETE_REMOTE,
+                KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP" to FieldResolutionChoice.DELETE_REMOTE
+            )
+        )
+        assertEquals("伪造未知键不得修改条目", p.localEntry, forged)
+        assertEquals(
+            "云端字段仍存在时 DELETE_REMOTE 必须安全保留本地",
+            "local-otp",
+            forged.customFields.single { it.key == "OTP" }.value.readString()
+        )
     }
 }

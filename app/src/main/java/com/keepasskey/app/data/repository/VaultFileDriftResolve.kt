@@ -132,61 +132,65 @@ internal class VaultFileDriftResolve(
         val diskBytes = readCurrentBytes(localFile, pathId)
             ?: return unreadable(ExternalModificationChoice.MERGE_AND_SAVE)
         val diskDb = databaseSession.parseExternalDatabase(diskBytes).getOrThrow()
-        val localDb = databaseSession.databaseFlow.value
-            ?: return KdbxResult.Failure(
-                IllegalStateException("无活动数据库"),
-                strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_drift_no_active_database))
+        try {
+            val localDb = databaseSession.databaseFlow.value
+                ?: return KdbxResult.Failure(
+                    IllegalStateException("无活动数据库"),
+                    strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_drift_no_active_database))
+                )
+            val baseLite = KdbxDatabaseLite(
+                rootGroup = localDb.rootGroup,
+                deletedObjects = localDb.deletedObjects,
+                customIcons = localDb.customIcons
             )
-        val baseLite = KdbxDatabaseLite(
-            rootGroup = localDb.rootGroup,
-            deletedObjects = localDb.deletedObjects,
-            customIcons = localDb.customIcons
-        )
-        val localLite = KdbxDatabaseLite(
-            rootGroup = localDb.rootGroup,
-            deletedObjects = localDb.deletedObjects,
-            customIcons = localDb.customIcons
-        )
-        val remoteLite = KdbxDatabaseLite(
-            rootGroup = diskDb.rootGroup,
-            deletedObjects = diskDb.deletedObjects,
-            customIcons = diskDb.customIcons
-        )
-        val merged = KdbxMerger.mergeDatabases(
-            base = baseLite,
-            local = localLite,
-            remote = remoteLite
-        )
-        val expected = localDb
-        val adopted = databaseSession.adoptDatabaseIfUnchanged(
-            expectedAtCycleStart = expected,
-            replacement = expected.copy(
-                rootGroup = merged.mergedRoot,
-                deletedObjects = merged.mergedDeletedObjects,
-                customIcons = merged.mergedCustomIcons
+            val localLite = KdbxDatabaseLite(
+                rootGroup = localDb.rootGroup,
+                deletedObjects = localDb.deletedObjects,
+                customIcons = localDb.customIcons
             )
-        )
-        if (!adopted) {
-            return KdbxResult.Failure(
-                IllegalStateException("合并窗口内会话树已变化"),
-                strings.get(
-                    R.string.ext_mod_merge_failed,
-                    strings.get(R.string.err_drift_session_tree_changed)
+            val remoteLite = KdbxDatabaseLite(
+                rootGroup = diskDb.rootGroup,
+                deletedObjects = diskDb.deletedObjects,
+                customIcons = diskDb.customIcons
+            )
+            val merged = KdbxMerger.mergeDatabases(
+                base = baseLite,
+                local = localLite,
+                remote = remoteLite
+            )
+            val expected = localDb
+            val adopted = databaseSession.adoptDatabaseIfUnchanged(
+                expectedAtCycleStart = expected,
+                replacement = expected.copy(
+                    rootGroup = merged.mergedRoot,
+                    deletedObjects = merged.mergedDeletedObjects,
+                    customIcons = merged.mergedCustomIcons
                 )
             )
+            if (!adopted) {
+                return KdbxResult.Failure(
+                    IllegalStateException("合并窗口内会话树已变化"),
+                    strings.get(
+                        R.string.ext_mod_merge_failed,
+                        strings.get(R.string.err_drift_session_tree_changed)
+                    )
+                )
+            }
+            val saveResult = databaseSession.save()
+            if (saveResult is KdbxResult.Success) {
+                refreshBaseline(pathId, localFile)
+            } else {
+                driftCoordinator?.requestPrompt(pathId)
+            }
+            return saveResult
+        } finally {
+            // ISSUE-P3-471：此处**必须**走身份集合判定，不得裸调 `diskDb.clearSensitiveData()`——
+            // 合并器对「磁盘独有 / 磁盘胜出的条目」与「磁盘独有的图标」**复用原实例**，采用后这些
+            // 实例同时可达于活动会话树（`SECURITY_RECHECK_2026-09.md` §9.6 #19 同型）；裸擦会把活动库
+            // 仍在用的口令 / 图标字节清零。finally 同时覆盖解析后的早退、取消和异常；存活侧取**当前**
+            // 会话树（`save()` 可能因历史修剪再换实例），其 root/history attachment sources 也参与 spill 判定。
+            eraseDiscardedDatabase(diskDb, live = databaseSession.databaseFlow.value)
         }
-        val saveResult = databaseSession.save()
-        if (saveResult is KdbxResult.Success) {
-            refreshBaseline(pathId, localFile)
-        } else {
-            driftCoordinator?.requestPrompt(pathId)
-        }
-        // ISSUE-P3-471：此处**必须**走身份集合判定，不得裸调 `diskDb.clearSensitiveData()`——
-        // 合并器对「磁盘独有 / 磁盘胜出的条目」与「磁盘独有的图标」**复用原实例**，采用后这些
-        // 实例同时可达于活动会话树（`SECURITY_RECHECK_2026-09.md` §9.6 #19 同型）；裸擦会把活动库
-        // 仍在用的口令 / 图标字节清零。存活侧取**当前**会话树（`save()` 可能因历史修剪再换实例）。
-        eraseDiscardedDatabase(diskDb, live = databaseSession.databaseFlow.value)
-        return saveResult
     }
 
     /** 处置成功后的基线刷新：本地直读文件属性；SAF 取真实文档元数据（不可读即置空） */

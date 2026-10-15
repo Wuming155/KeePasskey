@@ -161,7 +161,7 @@ class KdbxEntryMergerSemanticsExpansionTest {
 
         val resolved = KdbxMerger.resolveConflictByFields(
             pair,
-            pair.modifiedFields.associateWith { ConflictResolutionChoice.KEEP_REMOTE }
+            pair.modifiedFields.associateWith { FieldResolutionChoice.KEEP_REMOTE }
         )
 
         assertEquals(false, resolved.autoType?.enabled)

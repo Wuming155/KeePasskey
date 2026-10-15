@@ -18,13 +18,21 @@ import java.io.InputStream
  */
 interface BinaryStore {
 
-    /** 以字节内容写入存储并返回 key。 */
+    /**
+     * 以字节内容写入存储并返回新 key。
+     *
+     * 每次成功调用都须返回一个新 key，即使内容与已有项相同也不得复用已有 key；若方法抛出异常且 key 未交付，
+     * 实现必须自行撤销本次写入产生的临时项或已提交项，因为调用方无法获知待清理 key。
+     */
     fun store(bytes: ByteArray): String
 
     /**
      * 从 [input] 精确读取 [size] 字节落盘（**不整份物化**），返回 key。
      *
      * @throws java.io.EOFException 流中实际字节不足 [size]
+     *
+     * 若方法抛出异常且 key 未交付，实现必须自行撤销本次写入产生的临时项或已提交项；
+     * 调用方无法获知待清理 key。
      */
     fun storeFromStream(input: InputStream, size: Long): String
 

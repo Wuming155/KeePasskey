@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.testutil.MainDispatcherGuard
+import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -16,6 +17,8 @@ import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
+import com.keepasskey.sync.network.SyncNetworkOptions
+import com.keepasskey.sync.network.SyncTransferOptions
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -70,6 +73,7 @@ class SyncVaultBindingTest {
     private class FakeSyncProvider : SyncProvider {
 
         val remote = mutableMapOf<String, Pair<ByteArray, String>>()
+        var downloadCalls = 0
 
         override suspend fun testConnection(): Result<Unit> = Result.success(Unit)
 
@@ -87,6 +91,7 @@ class SyncVaultBindingTest {
         }
 
         override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> {
+            downloadCalls++
             val item = remote[remotePath]
                 ?: return Result.failure(SyncException.FileNotFound("远端不存在: $remotePath"))
             sink.write(item.first)
@@ -127,6 +132,44 @@ class SyncVaultBindingTest {
         val cacheDir: File
     )
 
+    private class OwnedProviderFactory(private val provider: FakeSyncProvider) : SyncProviderFactory {
+        var createCalls = 0
+        var releaseCalls = 0
+        var accessKeyClone: CharArray? = null
+        var secretKeyClone: CharArray? = null
+
+        override fun createWebDav(
+            serverUrl: String,
+            username: String,
+            passwordChars: CharArray,
+            networkOptions: SyncNetworkOptions,
+            transferOptions: SyncTransferOptions
+        ): SyncProvider = error("本用例只配置 S3")
+
+        override fun createS3(
+            endpoint: String,
+            bucketName: String,
+            region: String,
+            accessKeyId: CharArray,
+            secretAccessKey: CharArray,
+            usePathStyle: Boolean,
+            networkOptions: SyncNetworkOptions,
+            initialClockOffsetMillis: Long,
+            clockOffsetUpdater: (Long) -> Unit
+        ): SyncProvider {
+            createCalls++
+            accessKeyClone = accessKeyId
+            secretKeyClone = secretAccessKey
+            return provider
+        }
+
+        override fun releaseOwned(provider: SyncProvider) {
+            releaseCalls++
+            accessKeyClone?.fill('0')
+            secretKeyClone?.fill('0')
+        }
+    }
+
     /** 共享同一远端 / 绑定登记 / 缓存目录的装配环境（模拟同一同步配置下先后打开两库）。 */
     private fun newHarness(key: String): Harness {
         val cacheDir = File(tempFolder.root, "$key-cache").apply { mkdirs() }
@@ -166,6 +209,54 @@ class SyncVaultBindingTest {
             strings = BINDING_TEST_STRINGS,
             vaultBindingStore = harness.bindingStore
         )
+    }
+
+    /** 配置真实生产解析路径，只用同接口 Provider 工厂替换 HTTP 实例。 */
+    private fun newProductionCycle(
+        harness: Harness,
+        databaseSession: DatabaseSession
+    ): Pair<SyncCycleRunner, OwnedProviderFactory> {
+        val debugLog = DebugLogBuffer()
+        val session = SyncSessionState()
+        val credentialsStore = SyncCredentialsStore(harness.context, keystoreManager = null)
+        credentialsStore.customEncryptor = { plaintext ->
+            Pair(
+                byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+                plaintext.map { (it.toInt() xor 0x5A).toByte() }.toByteArray()
+            )
+        }
+        credentialsStore.customDecryptor = { _, ciphertext ->
+            ciphertext.map { (it.toInt() xor 0x5A).toByte() }.toByteArray()
+        }
+        assertTrue(
+            credentialsStore.saveS3Config(
+                endpoint = "https://s3.example.test",
+                bucket = "bucket",
+                region = "auto",
+                accessKey = "fake-access".toCharArray(),
+                secretKey = "fake-secret".toCharArray(),
+                objectKey = harness.remotePath
+            )
+        )
+        credentialsStore.saveProvider(CloudSyncProvider.S3_COMPATIBLE)
+
+        val preferences = SyncPreferences(debugLog, null)
+        val codec = SyncDatabaseCodec(databaseSession, debugLog)
+        val factory = OwnedProviderFactory(harness.provider)
+        val cycle = SyncCycleRunner(
+            context = harness.context,
+            databaseSession = databaseSession,
+            session = session,
+            providerResolver = SyncProviderResolver(credentialsStore, preferences, debugLog, factory),
+            codec = codec,
+            conflicts = SyncConflictController(databaseSession, codec, BINDING_TEST_STRINGS, session, debugLog),
+            changes = SyncContentChangeDetector(codec, session),
+            preferences = preferences,
+            strings = BINDING_TEST_STRINGS,
+            vaultBindingStore = harness.bindingStore
+        )
+        assertTrue("生产配置路径不得设置测试 Provider", session.testSyncProvider == null)
+        return cycle to factory
     }
 
     private suspend fun createVault(harness: Harness, key: String, marker: String): DatabaseSession {
@@ -283,10 +374,15 @@ class SyncVaultBindingTest {
 
         // 库 B：与远端归属不符，用户选择「另存云端副本并覆盖」的第一步——另存副本
         val sessionB = createVault(harness, "keepcopy", "库B")
-        val cycleB = newCycle(harness, sessionB)
+        val (cycleB, providerFactory) = newProductionCycle(harness, sessionB)
         val backup = cycleB.backupRemoteVaultCopy()
 
         assertTrue("另存云端副本必须成功: $backup", backup is KdbxResult.Success)
+        assertEquals("应从持久化云配置构造 Provider，而非使用测试覆写", 1, providerFactory.createCalls)
+        assertEquals("拥有式 Provider 必须在备份结束后释放", 1, providerFactory.releaseCalls)
+        assertTrue(providerFactory.accessKeyClone!!.all { it == '0' })
+        assertTrue(providerFactory.secretKeyClone!!.all { it == '0' })
+        assertEquals("备份必须实际下载远端内容", 1, harness.provider.downloadCalls)
         val copyFile = File((backup as KdbxResult.Success).data)
         assertEquals("副本必须落在本地库目录（列表按目录扫描即可见）", harness.context.filesDir, copyFile.parentFile)
         assertTrue("副本名须带「副本」标记: ${copyFile.name}", copyFile.name.startsWith("keepcopy (副本 "))
@@ -311,6 +407,16 @@ class SyncVaultBindingTest {
             "不得留下下载临时件",
             harness.context.filesDir.listFiles()!!.none { it.name.endsWith(".backup") }
         )
+
+        // Provider 已构造后的远端缺失早退也必须释放 S3 clone，并清掉唯一下载临时件。
+        harness.provider.remote.remove(harness.remotePath)
+        val failedBackup = cycleB.backupRemoteVaultCopy()
+        assertTrue("远端缺失应保留既有备份失败映射", failedBackup is KdbxResult.Failure)
+        assertEquals(2, providerFactory.createCalls)
+        assertEquals(2, providerFactory.releaseCalls)
+        assertTrue(providerFactory.accessKeyClone!!.all { it == '0' })
+        assertTrue(providerFactory.secretKeyClone!!.all { it == '0' })
+        assertTrue(harness.context.filesDir.listFiles()!!.none { it.name.endsWith(".backup") })
     }
 
     @Test

@@ -19,8 +19,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 
 /**
  * ISSUE-P2-310 AC②：附件落盘缓存被「设置 → 清空缓存」（不 force-stop）回收后，
@@ -112,5 +114,67 @@ class AttachmentSpillEvictionSaveGuardDeviceTest {
         session.lock()
         store.clear()
         vaultFile.delete()
+    }
+
+    @Test
+    fun 解析成功但流关闭失败时只回收候选附件并保留活动根库附件() = runBlocking<Unit> {
+        val store = FileBinaryStore(context)
+        store.clear()
+        val activeFile = newVaultFile()
+        val candidateFile = newVaultFile()
+        val activeSession = DatabaseSession(binaryStore = store)
+        val candidateSession = DatabaseSession(binaryStore = store)
+        val attachmentDir = File(context.cacheDir, "attachments")
+
+        try {
+            assertTrue("活动根库打开失败", activeSession.open(activeFile, password) is KdbxResult.Success)
+            val activeSpillFiles = attachmentDir.listFiles()
+                .orEmpty()
+                .filter(File::isFile)
+                .map(File::getName)
+                .toSet()
+            assertTrue("活动根库的大附件必须实际写入设备磁盘", activeSpillFiles.isNotEmpty())
+
+            val candidateBytes = candidateFile.readBytes()
+            assertTrue("删除候选源文件失败", candidateFile.delete())
+            val failingStream = object : ByteArrayInputStream(candidateBytes) {
+                override fun close() {
+                    throw IOException("synthetic stream close failure after successful parse")
+                }
+            }
+            val result = candidateSession.openStream(
+                pathIdentifier = "synthetic-candidate.kdbx",
+                inputStreamProvider = { failingStream },
+                passwordChars = password
+            )
+
+            assertTrue("流关闭失败必须让候选开库失败", result is KdbxResult.Failure)
+            assertEquals(DatabaseSession.SessionState.LOCKED, candidateSession.state.value)
+            val remainingSpillFiles = attachmentDir.listFiles()
+                .orEmpty()
+                .filter(File::isFile)
+                .map(File::getName)
+                .toSet()
+            assertEquals("候选 spill 必须回收，活动根库 spill 必须保留", activeSpillFiles, remainingSpillFiles)
+
+            val activeAttachment = activeSession.databaseFlow.value!!
+                .rootGroup.entries.single().attachments.single()
+            val actualBytes = activeAttachment.data
+            try {
+                assertArrayEquals(
+                    "失败候选回收不得破坏活动根库附件",
+                    ByteArray(attachmentBytes.toInt()) { (it % 251).toByte() },
+                    actualBytes
+                )
+            } finally {
+                actualBytes.fill(0)
+            }
+        } finally {
+            candidateSession.lock()
+            activeSession.lock()
+            store.clear()
+            candidateFile.delete()
+            activeFile.delete()
+        }
     }
 }

@@ -60,7 +60,7 @@ class FieldRefConsumerExpansionWiringTest {
         assertTrue("密码通道须以 PASSWORD 面展开", passwordFace)
         assertTrue(
             "展开仍须位于验证通过之后的回传路径（onVerified → deliverPassword）",
-            source.contains("onVerified = { deliverPassword(entry) }")
+            source.contains("onVerified = { deliverPassword(request) }")
         )
     }
 

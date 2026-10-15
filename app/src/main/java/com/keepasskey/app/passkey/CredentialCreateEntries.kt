@@ -9,6 +9,7 @@ import androidx.credentials.provider.BeginCreatePublicKeyCredentialRequest
 import androidx.credentials.provider.CreateEntry
 import com.keepasskey.app.R
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.database.session.SessionCredentialTicket
 import org.json.JSONObject
 
 /**
@@ -25,7 +26,8 @@ import org.json.JSONObject
  * `Intent.filterEquals` 恒为真），叠加 `FLAG_UPDATE_CURRENT` 后第二次创建请求会**就地覆写**
  * 第一次的 PendingIntent 记录，后者携带的陈旧 `origin` / `rpId` 会让 `PasskeyCreateActivity`
  * 的 DAL 门控整段被跳过。现统一取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
- * 从根上消除覆写对象。
+ * 配合共享入口工厂写入的随机 `Intent.data` 身份，避免 requestCode 重置或跨进程后旧 token
+ * 与新入口发生匹配；候选绑定上下文只留在当前进程内存，不写入 Intent。
  */
 internal object CredentialCreateEntries {
 
@@ -42,7 +44,10 @@ internal object CredentialCreateEntries {
     fun passkeyEntry(
         context: Context,
         request: BeginCreatePublicKeyCredentialRequest,
-        callingOrigin: String
+        callingOrigin: String,
+        callingPackage: String = "",
+        databaseId: String? = null,
+        sessionTicket: SessionCredentialTicket? = null
     ): CreateEntry? {
         val fields = parseCreateFields(request.requestJson)
         val rpId = fields.rpId.ifBlank { DomainMatcher.extractDomain(callingOrigin) }
@@ -65,6 +70,17 @@ internal object CredentialCreateEntries {
             // 组装期 origin。**禁止**据此复活读取点：复用陈旧 origin 曾导致 DAL 门控整段跳过。
             putExtra(PasskeyCreateActivity.EXTRA_ORIGIN, callingOrigin)
         }
+        CredentialPendingIntents.attachRequestIdentity(
+            intent,
+            CredentialEntryRequestContext(
+                requestType = CredentialEntryRequestType.PASSKEY_CREATE,
+                databaseId = databaseId,
+                entryId = null,
+                expectedOrigin = callingOrigin,
+                expectedPackage = callingPackage,
+                sessionTicket = sessionTicket
+            )
+        )
         // ISSUE-P1-10：不记录 rpId / 账号标签（会暴露用户注册的站点域）
         AppLog.i(TAG, "已向系统返回 Passkey CreateEntry")
         return CreateEntry.Builder(
@@ -87,12 +103,29 @@ internal object CredentialCreateEntries {
      * FLAG_MUTABLE + 非 ONE_SHOT + 进程级唯一 requestCode）。
      * **文案零插值**（PD-51 裁决 3）：标题不得携带域名 / 包名。
      */
-    fun createPasswordAction(context: Context, callingPackage: String, callingOrigin: String): Action {
+    fun createPasswordAction(
+        context: Context,
+        callingPackage: String,
+        callingOrigin: String,
+        databaseId: String? = null,
+        sessionTicket: SessionCredentialTicket? = null
+    ): Action {
         val intent = Intent(context, PasswordDraftActivity::class.java).apply {
             // 归属数据由本应用下发（组件 exported=false）；落地页再与系统认证值交叉核对
             putExtra(PasswordDraftActivity.EXTRA_PACKAGE_NAME, callingPackage)
             putExtra(PasswordDraftActivity.EXTRA_WEB_DOMAIN, callingOrigin)
         }
+        CredentialPendingIntents.attachRequestIdentity(
+            intent,
+            CredentialEntryRequestContext(
+                requestType = CredentialEntryRequestType.PASSWORD_DRAFT,
+                databaseId = databaseId,
+                entryId = null,
+                expectedOrigin = callingOrigin,
+                expectedPackage = callingPackage,
+                sessionTicket = sessionTicket
+            )
+        )
         val pendingIntent = PendingIntent.getActivity(
             context,
             CredentialPendingIntents.nextRequestCode(),
@@ -106,11 +139,28 @@ internal object CredentialCreateEntries {
     }
 
     /** 传统密码保存入口 */
-    fun passwordEntry(context: Context, callingPackage: String, callingOrigin: String): CreateEntry {
+    fun passwordEntry(
+        context: Context,
+        callingPackage: String,
+        callingOrigin: String,
+        databaseId: String? = null,
+        sessionTicket: SessionCredentialTicket? = null
+    ): CreateEntry {
         val intent = Intent(context, PasswordSaveActivity::class.java).apply {
             putExtra(PasswordSaveActivity.EXTRA_PACKAGE_NAME, callingPackage)
             putExtra(PasswordSaveActivity.EXTRA_WEB_DOMAIN, callingOrigin)
         }
+        CredentialPendingIntents.attachRequestIdentity(
+            intent,
+            CredentialEntryRequestContext(
+                requestType = CredentialEntryRequestType.PASSWORD_SAVE,
+                databaseId = databaseId,
+                entryId = null,
+                expectedOrigin = callingOrigin,
+                expectedPackage = callingPackage,
+                sessionTicket = sessionTicket
+            )
+        )
         return CreateEntry.Builder(
             context.getString(R.string.cred_create_entry_title),
             entryPendingIntent(context, intent)

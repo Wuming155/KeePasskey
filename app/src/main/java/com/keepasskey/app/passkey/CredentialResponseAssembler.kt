@@ -18,6 +18,8 @@ import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.SessionCredentialTicket
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.Instant
 import org.json.JSONObject
@@ -65,6 +67,7 @@ internal fun shouldOfferPasswordCreateAction(
 class CredentialResponseAssembler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val vaultRepository: VaultRepository,
+    private val databaseSession: DatabaseSession,
     private val autofillBlocklistStore: AutofillBlocklistStore,
     /** ISSUE-P2-83：CM 通道 `android://` 包名维度的调用方「包名 + 签名摘要」绑定存储 */
     private val callerTrustStore: CredentialManagerCallerTrustStore,
@@ -109,9 +112,25 @@ class CredentialResponseAssembler @Inject constructor(
             return responseBuilder.build()
         }
 
+        // ISSUE-P2-620：入口绑定活动库身份与本次会话代次。库身份或票据缺失时不发布候选。
+        val sessionTicket = databaseSession.captureCredentialRequest().ticket
+        if (sessionTicket == null) {
+            AppLog.w(TAG, "活动会话票据不可用，拒绝组装凭据候选")
+            return responseBuilder.build()
+        }
+        val activeDatabaseId = sessionTicket.pathIdentifier.takeIf { it.isNotBlank() }
+        if (activeDatabaseId == null) {
+            AppLog.w(TAG, "活动库身份不可用，拒绝组装凭据候选")
+            return responseBuilder.build()
+        }
+
         // ISSUE-P2-341：候选装配必须走「可用条目」读口——回收站子树内的凭据是用户已删除的凭据，
         // 整树读口会让它继续被列进 CM 候选并被选中签名。
         val allEntries = vaultRepository.getUsableKdbxEntries()
+        if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) {
+            AppLog.w(TAG, "组装期间会话代次变化，拒绝发布凭据候选")
+            return BeginGetCredentialResponse.Builder().build()
+        }
 
         // ISSUE-P2-199：requestCode 一律取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
         // 不再在本响应内新建分配器——「每响应复位」会与后续响应碰撞同一 PendingIntent 记录。
@@ -128,6 +147,8 @@ class CredentialResponseAssembler @Inject constructor(
                         callingOrigin,
                         callingPackage,
                         packageDimensionAllowed,
+                        activeDatabaseId,
+                        sessionTicket,
                         allEntries,
                         responseBuilder
                     )
@@ -140,6 +161,8 @@ class CredentialResponseAssembler @Inject constructor(
                         callingPackage,
                         callingOrigin,
                         packageDimensionAllowed,
+                        activeDatabaseId,
+                        sessionTicket,
                         allEntries,
                         responseBuilder
                     )
@@ -155,7 +178,20 @@ class CredentialResponseAssembler @Inject constructor(
                 offerCreateEntryEnabled = settingsStore.isAutofillOfferCreateEntryEnabled()
             )
         ) {
-            responseBuilder.addAction(CredentialCreateEntries.createPasswordAction(context, callingPackage, callingOrigin))
+            responseBuilder.addAction(
+                CredentialCreateEntries.createPasswordAction(
+                    context = context,
+                    callingPackage = callingPackage,
+                    callingOrigin = callingOrigin,
+                    databaseId = activeDatabaseId,
+                    sessionTicket = sessionTicket
+                )
+            )
+        }
+
+        if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) {
+            AppLog.w(TAG, "候选组装结束前会话代次变化，拒绝发布凭据候选")
+            return BeginGetCredentialResponse.Builder().build()
         }
 
         return responseBuilder.build()
@@ -166,6 +202,8 @@ class CredentialResponseAssembler @Inject constructor(
         callingOrigin: String,
         callingPackage: String,
         packageDimensionAllowed: Boolean,
+        databaseId: String,
+        sessionTicket: SessionCredentialTicket,
         allEntries: List<KdbxEntry>,
         responseBuilder: BeginGetCredentialResponse.Builder
     ) {
@@ -193,7 +231,9 @@ class CredentialResponseAssembler @Inject constructor(
                 passkey = passkey,
                 browserFlow = browserFlow,
                 callingOrigin = callingOrigin,
-                callingPackage = callingPackage
+                callingPackage = callingPackage,
+                databaseId = databaseId,
+                sessionTicket = sessionTicket
             )
         }
     }
@@ -256,9 +296,13 @@ class CredentialResponseAssembler @Inject constructor(
         passkey: PasskeyData,
         browserFlow: Boolean,
         callingOrigin: String,
-        callingPackage: String
+        callingPackage: String,
+        databaseId: String,
+        sessionTicket: SessionCredentialTicket
     ) {
-        val intent = passkeyAssertionIntent(option, entry, browserFlow, callingOrigin, callingPackage)
+        val intent = passkeyAssertionIntent(
+            option, entry, browserFlow, callingOrigin, callingPackage, databaseId, sessionTicket
+        )
         val pendingIntent = PendingIntent.getActivity(
             context,
             CredentialPendingIntents.nextRequestCode(),
@@ -298,14 +342,16 @@ class CredentialResponseAssembler @Inject constructor(
         entry: KdbxEntry,
         browserFlow: Boolean,
         callingOrigin: String,
-        callingPackage: String
+        callingPackage: String,
+        databaseId: String,
+        sessionTicket: SessionCredentialTicket
     ): Intent {
         val challenge = try {
             JSONObject(option.requestJson).optString(WebAuthnJson.CHALLENGE)
         } catch (_: Exception) {
             ""
         }
-        return Intent(context, PasskeyAssertionActivity::class.java).apply {
+        val intent = Intent(context, PasskeyAssertionActivity::class.java).apply {
             putExtra(PasskeyAssertionActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
             putExtra(PasskeyAssertionActivity.EXTRA_REQUEST_JSON, option.requestJson)
             putExtra(PasskeyAssertionActivity.EXTRA_CHALLENGE, challenge)
@@ -319,6 +365,18 @@ class CredentialResponseAssembler @Inject constructor(
             // F4 整改：传入预期调用包名，供断言 Activity 签发前二次校验（与密码填充同模式）
             putExtra(PasskeyAssertionActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
         }
+        CredentialPendingIntents.attachRequestIdentity(
+            intent,
+            CredentialEntryRequestContext(
+                requestType = CredentialEntryRequestType.PASSKEY_ASSERTION,
+                databaseId = databaseId,
+                entryId = entry.id.toHexString(),
+                expectedOrigin = callingOrigin,
+                expectedPackage = callingPackage,
+                sessionTicket = sessionTicket
+            )
+        )
+        return intent
     }
 
     private fun buildPasswordEntries(
@@ -326,6 +384,8 @@ class CredentialResponseAssembler @Inject constructor(
         callingPackage: String,
         callingOrigin: String,
         packageDimensionAllowed: Boolean,
+        databaseId: String,
+        sessionTicket: SessionCredentialTicket,
         allEntries: List<KdbxEntry>,
         responseBuilder: BeginGetCredentialResponse.Builder
     ): Int {
@@ -350,6 +410,18 @@ class CredentialResponseAssembler @Inject constructor(
                 putExtra(PasswordFillActivity.EXTRA_EXPECTED_DOMAIN, targetDomain)
                 putExtra(PasswordFillActivity.EXTRA_EXPECTED_PACKAGE, callingPackage)
             }
+            CredentialPendingIntents.attachRequestIdentity(
+                intent,
+                CredentialEntryRequestContext(
+                    requestType = CredentialEntryRequestType.PASSWORD_FILL,
+                    databaseId = databaseId,
+                    entryId = entry.id.toHexString(),
+                    expectedOrigin = callingOrigin,
+                    expectedPackage = callingPackage,
+                    expectedDomain = targetDomain,
+                    sessionTicket = sessionTicket
+                )
+            )
             val pendingIntent = PendingIntent.getActivity(
                 context,
                 CredentialPendingIntents.nextRequestCode(),

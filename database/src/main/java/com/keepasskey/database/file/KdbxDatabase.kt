@@ -2,6 +2,7 @@ package com.keepasskey.database.file
 
 import com.keepasskey.core.model.CustomIcon
 import com.keepasskey.core.model.DeletedObject
+import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.MemoryProtectionConfig
@@ -92,9 +93,10 @@ data class KdbxDatabase(
     /**
      * 池内擦除的**身份集合判定**入口（`ISSUE-P3-258` 准入②；契约 §6.2 / §7 Step 4）。
      *
-     * 以 [liveBinaries] 为存活侧收集 `BinaryItem` 的**实例身份**（引用相等，IdentityHashMap
-     * 支撑——`BinaryItem.equals` 是内容相等，不可用于本判定），只清零本库 [binaries] 中
-     * **不被存活侧以同一实例引用**的条目；[liveBinaries] 为空即全量擦除。
+     * 以内存 `BinaryItem` 的实例身份及落盘条目的「底层 store 身份 + key」建立存活侧集合
+     * （`BinaryItem.equals` 是内容相等，不可用于本判定）。完整数据库重载还会收集活动树中
+     * 所有附件来源，含历史条目；然后清零本库 [binaries] 的非存活内存项，并释放本库池或树中
+     * 不再被存活侧引用的事务-owned spill key。
      *
      * **禁止**把本方法退化为无存活侧参数的 `binaries.forEach { it.clear() }` 裸擦：
      * `KdbxDatabase.copy()` 会共享同一池列表（合并 / copy-on-write 常态发生），
@@ -102,17 +104,83 @@ data class KdbxDatabase(
      * 契约用例：`KdbxBinaryPoolErasureTest`（database 侧原语与收口点）、
      * `SyncPendingTreeErasureTest`（app 侧 `eraseDiscardedDatabase` 链路）。
      *
-     * 落盘条目的清零为 no-op（字节归 `BinaryStore`，随会话终止统一收口）。
+     * 旧的非事务加载调用方仍由会话锁定 / 关闭与冷启动清扫兜底。
      */
     fun clearBinaryPool(liveBinaries: Collection<InnerHeader.BinaryItem>) {
-        if (binaries.isEmpty()) return
+        clearBinaryPool(liveBinaries, liveRoot = null)
+    }
+
+    /**
+     * 存活侧为完整数据库时，连同根树及 history 的附件 source 一并参与 spill key 判定。
+     */
+    fun clearBinaryPool(liveDatabase: KdbxDatabase?) {
+        clearBinaryPool(
+            liveBinaries = liveDatabase?.binaries ?: emptyList(),
+            liveRoot = liveDatabase?.rootGroup
+        )
+    }
+
+    private fun clearBinaryPool(
+        liveBinaries: Collection<InnerHeader.BinaryItem>,
+        liveRoot: KdbxGroup?
+    ) {
+        val ownSpillItems = rootGroup.collectSpillItems()
+        if (binaries.isEmpty() && ownSpillItems.isEmpty()) return
         val live = java.util.Collections.newSetFromMap(
             java.util.IdentityHashMap<InnerHeader.BinaryItem, Boolean>()
         )
         live.addAll(liveBinaries)
+        val liveSpillKeys = java.util.IdentityHashMap<Any, MutableSet<String>>()
+        liveBinaries.forEach { item ->
+            val key = item.spillKey
+            val storeIdentity = item.spillStoreIdentity
+            if (key != null && storeIdentity != null) {
+                liveSpillKeys.getOrPut(storeIdentity) { HashSet() }.add(key)
+            }
+        }
+        liveRoot?.collectSpillKeys(liveSpillKeys)
         for (item in binaries) {
             if (!live.contains(item)) item.clear()
         }
+        val releasedSpillKeys = java.util.IdentityHashMap<Any, MutableSet<String>>()
+        fun releaseIfUnreferenced(item: InnerHeader.BinaryItem) {
+            val key = item.spillKey ?: return
+            val storeIdentity = item.spillStoreIdentity ?: return
+            if (liveSpillKeys[storeIdentity]?.contains(key) == true) return
+            if (releasedSpillKeys.getOrPut(storeIdentity) { HashSet() }.add(key)) {
+                item.releaseOwnedSpillKey()
+            }
+        }
+        ownSpillItems.forEach { releaseIfUnreferenced(it) }
+        binaries.forEach { releaseIfUnreferenced(it) }
+    }
+
+    private fun KdbxGroup.collectSpillKeys(into: java.util.IdentityHashMap<Any, MutableSet<String>>) {
+        collectSpillItems().forEach { item ->
+            val key = item.spillKey ?: return@forEach
+            val storeIdentity = item.spillStoreIdentity ?: return@forEach
+            into.getOrPut(storeIdentity) { HashSet() }.add(key)
+        }
+    }
+
+    private fun KdbxGroup.collectSpillItems(): List<InnerHeader.BinaryItem> = mutableListOf<InnerHeader.BinaryItem>()
+        .also { into -> collectSpillItems(this, into) }
+
+    private fun collectSpillItems(group: KdbxGroup, into: MutableList<InnerHeader.BinaryItem>) {
+        group.entries.forEach { entry ->
+            entry.attachments.forEach { attachment ->
+                (attachment.binarySource() as? InnerHeader.BinaryItem)?.let(into::add)
+            }
+            entry.history.forEach { history -> collectSpillItems(history, into) }
+        }
+        group.subgroups.forEach { subgroup -> collectSpillItems(subgroup, into) }
+    }
+
+    private fun collectSpillItems(entry: KdbxEntry, into: MutableList<InnerHeader.BinaryItem>) {
+        entry.attachments.forEach { attachment ->
+            (attachment.binarySource() as? InnerHeader.BinaryItem)?.let(into::add)
+        }
+        entry.history.forEach { history -> collectSpillItems(history, into) }
     }
 
     /**

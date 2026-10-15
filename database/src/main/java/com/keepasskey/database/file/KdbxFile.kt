@@ -47,6 +47,15 @@ object KdbxFile {
 
     private val secureRandom = SecureRandom()
 
+    /**
+     * 为一次根库、子库或外部库解析创建按次 spill 所有权事务。
+     *
+     * 调用方在消费/接管结果后必须显式 [AttachmentSpillTransaction.commit] 或
+     * [AttachmentSpillTransaction.purge]。事务回收只触及本次成功写入的 key。
+     */
+    fun beginAttachmentSpillTransaction(binaryStore: BinaryStore?): AttachmentSpillTransaction =
+        AttachmentSpillTransaction(binaryStore)
+
     /** KDBX4 内层流密码密钥长度（官方 InnerRandomStreamKey 恒为 64 字节） */
     private const val INNER_RANDOM_STREAM_KEY_SIZE = 64
 

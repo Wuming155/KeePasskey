@@ -45,6 +45,26 @@ class SyncRollbackGuardTest {
         assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, v1))
     }
 
+    @Test
+    fun `未完成采纳事务跨实例隔离并在高水位提交后清除`() {
+        val first = SyncRollbackGuard(stateDir())
+        val accepted = "content-a".toByteArray()
+        val candidate = "content-b".toByteArray()
+        first.recordAccepted(remotePath, accepted)
+
+        first.beginAcceptance(remotePath, SyncCache.sha256Hex(candidate))
+        assertEquals(RollbackVerdict.RecoveryRequired, first.inspect(remotePath, accepted))
+        assertEquals(RollbackVerdict.RecoveryRequired, first.inspect(remotePath, candidate))
+
+        val afterProcessRestart = SyncRollbackGuard(stateDir())
+        assertTrue(afterProcessRestart.hasPendingAcceptance(remotePath))
+        assertEquals(RollbackVerdict.RecoveryRequired, afterProcessRestart.inspect(remotePath, accepted))
+
+        afterProcessRestart.recordAccepted(remotePath, candidate)
+        assertEquals(RollbackVerdict.Unchanged, afterProcessRestart.inspect(remotePath, candidate))
+        assertEquals(RollbackVerdict.ReplayDetected, afterProcessRestart.inspect(remotePath, accepted))
+    }
+
     /**
      * `ISSUE-P3-167`：新增的「摘要由调用方提供」重载必须与字节重载**逐裁决一致**。
      *

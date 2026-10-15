@@ -15,6 +15,9 @@ sealed interface RollbackVerdict {
 
     /** 与设备侧**曾接受过**的历史版本逐字节一致 → 判为回退/重放，拒绝应用 */
     data object ReplayDetected : RollbackVerdict
+
+    /** 上次采纳事务只完成了部分本地提交；必须先恢复，不能自动采纳任何远端版本。 */
+    data object RecoveryRequired : RollbackVerdict
 }
 
 /**
@@ -101,7 +104,8 @@ class SyncRollbackGuard(
     data class State(
         val sequence: Long = 0L,
         val current: String? = null,
-        val recent: List<String> = emptyList()
+        val recent: List<String> = emptyList(),
+        val pendingDigest: String? = null
     )
 
     /**
@@ -134,6 +138,7 @@ class SyncRollbackGuard(
     fun inspect(remotePath: String, contentDigest: String): RollbackVerdict {
         val state = load(remotePath)
         return when {
+            state.pendingDigest != null -> RollbackVerdict.RecoveryRequired
             state.current == null -> RollbackVerdict.Accept
             state.current == contentDigest -> RollbackVerdict.Unchanged
             contentDigest in state.recent -> RollbackVerdict.ReplayDetected
@@ -153,13 +158,30 @@ class SyncRollbackGuard(
     /** 同上，摘要由调用方提供（`ISSUE-P3-167`；摘要须为内容的 SHA-256 十六进制小写摘要）。 */
     fun recordAccepted(remotePath: String, contentDigest: String) {
         val state = load(remotePath)
-        if (state.current == contentDigest) return
+        if (state.current == contentDigest && state.pendingDigest == null) return
         val recent = buildList {
             state.current?.let { add(it) }
             addAll(state.recent)
         }.distinct().take(MAX_RECENT_DIGESTS)
-        persist(remotePath, State(state.sequence + 1, contentDigest, recent))
+        persist(remotePath, State(state.sequence + 1, contentDigest, recent, pendingDigest = null))
     }
+
+    /**
+     * Durably quarantine a baseline settlement before changing any cache/base/high-water component.
+     * If a later atomic write fails, [inspect] returns [RollbackVerdict.RecoveryRequired] on every
+     * subsequent cycle, including after process recreation.
+     */
+    fun beginAcceptance(remotePath: String, contentDigest: String) {
+        val state = load(remotePath)
+        when {
+            state.pendingDigest == contentDigest -> return
+            state.pendingDigest != null -> throw IllegalStateException("同步采纳事务需要恢复")
+        }
+        persist(remotePath, state.copy(pendingDigest = contentDigest))
+    }
+
+    /** True when this path is quarantined by an incomplete settlement. */
+    fun hasPendingAcceptance(remotePath: String): Boolean = load(remotePath).pendingDigest != null
 
     private fun load(remotePath: String): State {
         val file = stateFile(remotePath)
@@ -176,6 +198,7 @@ class SyncRollbackGuard(
         var sequence = 0L
         var current: String? = null
         var recent: List<String> = emptyList()
+        var pendingDigest: String? = null
         payloadLines.forEach { line ->
             val index = line.indexOf('=')
             if (index <= 0) return@forEach
@@ -185,16 +208,18 @@ class SyncRollbackGuard(
                 KEY_SEQUENCE -> sequence = value.toLongOrNull() ?: 0L
                 KEY_CURRENT -> current = value.ifEmpty { null }
                 KEY_RECENT -> recent = value.split(',').filter { it.isNotBlank() }
+                KEY_PENDING -> pendingDigest = value.ifEmpty { null }
             }
         }
-        return State(sequence, current, recent)
+        return State(sequence, current, recent, pendingDigest)
     }
 
     private fun persist(remotePath: String, state: State) {
         val payloadLines = listOf(
             "$KEY_SEQUENCE=${state.sequence}",
             "$KEY_CURRENT=${state.current.orEmpty()}",
-            "$KEY_RECENT=${state.recent.joinToString(",")}"
+            "$KEY_RECENT=${state.recent.joinToString(",")}",
+            "$KEY_PENDING=${state.pendingDigest.orEmpty()}"
         )
         val content = (payloadLines.joinToString("\n") + "\n")
             .toByteArray(Charsets.UTF_8)
@@ -239,6 +264,7 @@ class SyncRollbackGuard(
         private const val KEY_SEQUENCE = "sequence"
         private const val KEY_CURRENT = "current"
         private const val KEY_RECENT = "recent"
+        private const val KEY_PENDING = "pending"
         /** 遗留兼容（ISSUE-P3-326）：升级前状态文件的 MAC 行前缀，仅用于 `load` 过滤，不再产出 */
         private const val PREFIX_MAC = "mac="
 

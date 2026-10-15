@@ -10,6 +10,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxMerger
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +60,7 @@ class ConflictResolutionCustomFieldTest {
         val conflictFlow: MutableStateFlow<List<ConflictedEntryPair>>
     ) {
         var resolvedMap: Map<String, ConflictResolutionChoice>? = null
-        var resolvedFieldMap: Map<String, Map<String, ConflictResolutionChoice>>? = null
+        var resolvedFieldMap: Map<String, Map<String, FieldResolutionChoice>>? = null
     }
 
     private fun newHarness(pairs: List<ConflictedEntryPair>): Harness {
@@ -88,7 +89,7 @@ class ConflictResolutionCustomFieldTest {
 
             override suspend fun resolveConflicts(
                 resolutions: Map<String, ConflictResolutionChoice>,
-                fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>>
+                fieldResolutions: Map<String, Map<String, FieldResolutionChoice>>
             ): SyncOutcome {
                 harness.resolvedMap = resolutions
                 harness.resolvedFieldMap = fieldResolutions
@@ -146,8 +147,38 @@ class ConflictResolutionCustomFieldTest {
         val fieldChoices = harness.resolvedFieldMap?.get(item.id)
         assertEquals(
             "用户对自定义字段的云端选择必须真实下发（不再恒为空表）",
-            ConflictResolutionChoice.KEEP_REMOTE,
+            FieldResolutionChoice.KEEP_REMOTE,
             fieldChoices?.get(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP")
+        )
+        job.cancel()
+    }
+
+    @Test
+    fun `远端缺失自定义字段时全选云端映射为删除且与空值分开`() = runTest(testDispatcher) {
+        val base = customOnlyPair()
+        val missingRemote = base.remoteEntry.copy(customFields = emptyList())
+        val pair = base.copy(
+            remoteEntry = missingRemote,
+            modifiedFields = listOf(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP")
+        )
+        val harness = newHarness(listOf(pair))
+        val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            harness.viewModel.uiState.collect {}
+        }
+        testScheduler.runCurrent()
+
+        val field = harness.viewModel.uiState.value.entries.single().fields.single()
+        assertFalse("本地字段存在", field.localMissing)
+        assertTrue("远端缺键必须与空值状态分开", field.remoteMissing)
+        harness.viewModel.selectAll(FieldChoice.REMOTE)
+        testScheduler.runCurrent()
+        assertEquals(FieldChoice.DELETE_REMOTE, harness.viewModel.uiState.value.entries.single().fields.single().selectedChoice)
+
+        harness.viewModel.applyMerge()
+        testScheduler.runCurrent()
+        assertEquals(
+            FieldResolutionChoice.DELETE_REMOTE,
+            harness.resolvedFieldMap?.get(pair.entryId)?.get(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX + "OTP")
         )
         job.cancel()
     }

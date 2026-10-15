@@ -185,6 +185,7 @@ internal class FakeChildDatabaseStreamSource(
 internal class RecordingBinaryStore : BinaryStore {
 
     val entries = LinkedHashMap<String, ByteArray>()
+    val deletedKeys = mutableListOf<String>()
 
     /** [storeFromStream] 调用次数（大附件流式落盘走这条路径） */
     var storeFromStreamCalls: Int = 0
@@ -226,6 +227,11 @@ internal class RecordingBinaryStore : BinaryStore {
     override fun clear() {
         entries.values.forEach { it.fill(0) }
         entries.clear()
+    }
+
+    override fun delete(key: String) {
+        deletedKeys.add(key)
+        entries.remove(key)?.fill(0)
     }
 }
 

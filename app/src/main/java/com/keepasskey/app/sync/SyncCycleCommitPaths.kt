@@ -57,6 +57,8 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
                 is SyncCommitResult.RemoteUnreachable -> SyncOutcome.Offline
                 // ISSUE-P2-548：首传被鉴权 / 协议 / 服务端拒绝——不是「离线」
                 is SyncCommitResult.RemoteRejected -> strings.remoteFailureOutcome(uploadResult.cause)
+                SyncCommitResult.RecoveryRequired ->
+                    SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
                 else -> SyncOutcome.Error(strings.get(R.string.sync_error_first_upload_failed))
             }
         } else {
@@ -162,5 +164,7 @@ internal suspend fun SyncCycleRunner.tryFastCommitPath(
         is SyncCommitResult.RollbackRejected -> SyncOutcome.Error(
             strings.get(R.string.sync_error_rollback_rejected)
         )
+        SyncCommitResult.RecoveryRequired ->
+            SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
     }
 }

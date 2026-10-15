@@ -248,14 +248,18 @@ internal class SessionOpener(
             releaseCurrentSession()
             // ISSUE-P3-368：进入打开链先清陈旧进度（null = 不确定段），避免上一次进度残留首帧
             progress(null)
+            val spillTransaction = KdbxFile.beginAttachmentSpillTransaction(binaryStore)
+            var candidate: KdbxDatabase? = null
             try {
                 val candidateTicket = SessionCredentialTicket(pathIdentifier)
                 // 文件总长已知（本地 File）⇒ 载荷段确定进度；SAF 等未知长度流传 null 退分段不确定
                 val totalBytes = associatedFile?.length()?.takeIf { it > 0 }
                 val db = inputStreamProvider().use { fis ->
                     // ISSUE-P2-24：大附件在解析期流式落盘（binaryStore 为空则行为与既往一致）
-                    KdbxFile.load(fis, passwordChars, keyFileData, binaryStore, totalBytes, progress)
+                    spillTransaction.load(fis, passwordChars, keyFileData, totalBytes, progress)
+                        .also { candidate = it }
                 }
+                candidate = db
 
                 core.activeFile = associatedFile
                 core.activePathIdentifier = pathIdentifier
@@ -269,8 +273,35 @@ internal class SessionOpener(
                 core.database.value = db
                 core.adoptCredentialTicket(candidateTicket)
                 core.state.value = DatabaseSession.SessionState.OPENED
+                spillTransaction.commit()
+                candidate = null // 数据库与 spill key 已由活动会话接管
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
+                if (candidate != null && core.database.value === candidate) {
+                    core.database.value = null
+                }
+                try {
+                    candidate?.clearSensitiveData()
+                } catch (cleanupFailure: Throwable) {
+                    t.addSuppressed(cleanupFailure)
+                }
+                try {
+                    spillTransaction.purge()
+                } catch (cleanupFailure: Throwable) {
+                    t.addSuppressed(cleanupFailure)
+                }
+                try {
+                    credentials.clear()
+                } catch (cleanupFailure: Throwable) {
+                    t.addSuppressed(cleanupFailure)
+                }
+                core.invalidateSessionTicket()
+                core.activeFile = null
+                core.activePathIdentifier = null
+                core.saveWriter = null
+                core.trackedSaveWriter = null
+                core.readOnlyMode = false
+                core.state.value = DatabaseSession.SessionState.LOCKED
                 if (t is CancellationException) throw t
                 // ISSUE-P3-368：失败清进度（UI 随 isLoading 回落隐藏，不留半程残值）
                 progress(null)

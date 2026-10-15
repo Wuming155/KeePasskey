@@ -8,7 +8,6 @@ import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.merge.SyncConflictStrategy
-import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
 import java.io.File
 
@@ -52,8 +51,8 @@ internal data class SyncCycleContext(
 )
 
 /**
- * 周期前置装配（原 [SyncCycleRunner.runSyncCycle] 主体前段逐行搬运）：Provider 解析、引擎与缓存构造、
- * 偏好快照、基线内容读取与本地字节获取。
+ * 周期前置装配（原 [SyncCycleRunner.runSyncCycle] 主体前段逐行搬运）：Provider 由 runner 的
+ * `useProvider` 作用域提供；本函数负责引擎与缓存构造、偏好快照、基线内容读取与本地字节获取。
  *
  * @return [SyncOutcome] 表示前置步骤即有结论（错误早退）；null 表示装配完成，见 [outcome]。
  */
@@ -63,23 +62,27 @@ internal data class CycleSetup(val outcome: SyncOutcome?, val context: SyncCycle
  * 装配本次同步周期的全部前置条件。
  *
  * ISSUE-P3-305：原 105 行的单体装配按「引擎面 / 内容面」拆为两段——本函数负责
- * Provider 解析、库身份绑定闸与引擎构造，内容快照交由 [buildCycleContext]。
+ * 库身份绑定闸与引擎构造，内容快照交由 [buildCycleContext]。
  * 两段之间的调用点即原内联体的物理分界，早退语义与求值顺序逐行未变。
  */
 internal suspend fun SyncCycleRunner.setupCycleContext(
     vaultFileName: String,
-    currentDb: KdbxDatabase
+    currentDb: KdbxDatabase,
+    provider: SyncProvider,
+    providerTarget: SyncProviderTarget? = null
 ): CycleSetup {
-    val provider = try {
-        session.testSyncProvider ?: providerResolver.resolveProvider()
-    } catch (e: SyncException.InvalidEndpointError) {
-        // ISSUE-P3-311 项 3：e.message 可能内嵌服务器可控的端点内容，UI 只出固定文案
-        return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_invalid_endpoint)))
-    } ?: return CycleSetup(SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials)))
-
-    val remotePath = session.testRemotePath ?: providerResolver.resolveRemotePath(vaultFileName)
+    val remotePath = session.testRemotePath ?: providerTarget?.remotePath
+        ?: providerResolver.resolveRemotePath(vaultFileName)
+    // The checkpoint is a proof for a particular configured endpoint and account, not merely for
+    // a path string. Missing identity disables the optimization conservatively.
+    val targetIdentity = if (session.testSyncProvider != null) {
+        "test-provider:${remotePath}"
+    } else {
+        providerTarget?.identity
+    }
     // ISSUE-P2-536：检查点记录与判定按本轮远端路径归属（换绑即视为无记录，防跨库误命中）
     lastCycleRemotePath = remotePath
+    lastCycleTargetIdentity = targetIdentity
 
     // ISSUE-P2-291 AC①：库身份（根分组 UUID，建库随机生成、跨保存稳定）参与
     // 缓存 / 基线 / 防回滚的键——同一 remotePath 被不同库共用时，各库的同步状态
@@ -138,6 +141,7 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
         remotePath = remotePath,
         settings = settings,
         conflictStrategy = conflictStrategy,
+        targetIdentity = targetIdentity,
         currentDb = currentDb
     )
 }
@@ -153,6 +157,7 @@ private suspend fun SyncCycleRunner.buildCycleContext(
     remotePath: String,
     settings: ExtendedSettings,
     conflictStrategy: SyncConflictStrategy,
+    targetIdentity: String?,
     currentDb: KdbxDatabase
 ): CycleSetup {
     val isCached = syncCache.isCached(remotePath)
@@ -182,8 +187,13 @@ private suspend fun SyncCycleRunner.buildCycleContext(
     // 命中 ⇒ 与远端的内容差异只能来自远端一侧，`handleRemoteSynced` 据此走远端接管
     // （零上传 + 「检测到云端已有更新」文案），绝不把占位投影出的 true 当「本地已修改」的证据。
     // 仅占位态读取（其余态证据已足）；摘要为整库密文流式计算，不整份物化。
+    val stableLocalFileRevision = if (localChangeState == LocalContentChangeState.BASELINE_MISSING) {
+        databaseSession.writeIntents.digestStableFileFor(currentDb)
+    } else {
+        null
+    }
     val localFileUnchangedSinceSync = localChangeState == LocalContentChangeState.BASELINE_MISSING &&
-        localFileCheckpoint?.isUnchangedSinceSync(remotePath, databaseSession.currentFile) == true
+        localFileCheckpoint?.isUnchangedSinceSync(remotePath, targetIdentity, stableLocalFileRevision) == true
     preferences.verbose(
         settings,
         "同步周期开始: cached=$isCached, dirty=${databaseSession.state.value}, " +

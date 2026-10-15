@@ -4,7 +4,9 @@ import com.keepasskey.app.ui.model.UiMessage
 
 enum class FieldChoice {
     LOCAL,
-    REMOTE
+    REMOTE,
+    /** Only offered when the remote snapshot is missing this field. */
+    DELETE_REMOTE
 }
 
 /**
@@ -35,7 +37,10 @@ data class ConflictedField(
     val localValue: String,
     val remoteValue: String,
     val selectedChoice: FieldChoice = FieldChoice.LOCAL,
-    val isSensitive: Boolean = false
+    val isSensitive: Boolean = false,
+    /** Presence is independent of an empty string value. */
+    val localMissing: Boolean = false,
+    val remoteMissing: Boolean = false
 )
 
 data class ConflictedEntryItem(

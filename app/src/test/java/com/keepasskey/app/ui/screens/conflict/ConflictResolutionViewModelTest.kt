@@ -7,6 +7,7 @@ import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import kotlinx.coroutines.Dispatchers
@@ -75,7 +76,7 @@ class ConflictResolutionViewModelTest {
         val conflictFlowInternal = MutableStateFlow<List<ConflictedEntryPair>>(listOf(conflictPair))
 
         var resolvedMap: Map<String, ConflictResolutionChoice>? = null
-        var resolvedFieldMap: Map<String, Map<String, ConflictResolutionChoice>>? = null
+        var resolvedFieldMap: Map<String, Map<String, FieldResolutionChoice>>? = null
 
         // 使用 ContextWrapper + DatabaseSession 创建一个用于测试的 Coordinator 实例
         val tempDir = java.nio.file.Files.createTempDirectory("coord_test").toFile()
@@ -99,7 +100,7 @@ class ConflictResolutionViewModelTest {
 
             override suspend fun resolveConflicts(
                 resolutions: Map<String, ConflictResolutionChoice>,
-                fieldResolutions: Map<String, Map<String, ConflictResolutionChoice>>
+                fieldResolutions: Map<String, Map<String, FieldResolutionChoice>>
             ): SyncOutcome {
                 resolvedMap = resolutions
                 resolvedFieldMap = fieldResolutions
@@ -155,8 +156,8 @@ class ConflictResolutionViewModelTest {
         // 密码（未触碰）保持 KEEP_LOCAL，不再塌缩为整条目二选一
         val fieldChoices = resolvedFieldMap!![entryId.toHexString()]
         assertNotNull(fieldChoices)
-        assertEquals(ConflictResolutionChoice.KEEP_REMOTE, fieldChoices!![KdbxConstants.Fields.TITLE])
-        assertEquals(ConflictResolutionChoice.KEEP_LOCAL, fieldChoices[KdbxConstants.Fields.PASSWORD])
+        assertEquals(FieldResolutionChoice.KEEP_REMOTE, fieldChoices!![KdbxConstants.Fields.TITLE])
+        assertEquals(FieldResolutionChoice.KEEP_LOCAL, fieldChoices[KdbxConstants.Fields.PASSWORD])
 
         job.cancel()
         eventJob.cancel()

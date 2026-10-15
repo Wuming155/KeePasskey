@@ -88,6 +88,62 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `未完成采纳事务阻止远端读取和本地上传`() = runTest {
+        val guard = SyncRollbackGuard(File(tempFolder.root, "recovery-state"))
+        guard.beginAcceptance(remotePath, SyncCache.sha256Hex("candidate".toByteArray()))
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("old-remote".toByteArray(), "etag-old")
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, guard)
+
+        assertEquals(SyncOpenResult.RecoveryRequired, guardedEngine.openRemote(remotePath))
+        assertEquals("隔离检查必须发生在任何远端请求前", 0, fakeProvider.metadataCalls)
+        assertEquals(
+            SyncCommitResult.RecoveryRequired,
+            guardedEngine.commitLocal(remotePath, "local".toByteArray())
+        )
+        assertEquals(
+            SyncCommitResult.RecoveryRequired,
+            guardedEngine.commitLocalForce(remotePath, "local".toByteArray())
+        )
+        assertEquals(0, fakeProvider.uploadAtomicCalls)
+        assertFalse(syncCache.isCached(remotePath))
+    }
+
+    @Test
+    fun `基准摘要已前移但基准内容写入失败后重放被隔离`() = runTest {
+        val rollbackDir = File(tempFolder.root, "partial-settlement-rollback")
+        val guard = SyncRollbackGuard(rollbackDir)
+        val previous = "accepted-a".toByteArray()
+        val candidate = "accepted-b".toByteArray()
+        guard.recordAccepted(remotePath, previous)
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(candidate, "etag-b")
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, guard)
+
+        val opened = guardedEngine.openRemote(remotePath) as SyncOpenResult.RemoteSynced
+        val baseContentTarget = File(
+            cacheDir,
+            SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8)) + SyncCache.SUFFIX_BASE_CACHE
+        ).apply { mkdir() }
+        assertTrue("故障注入应在基准内容目标处建立目录", baseContentTarget.isDirectory)
+
+        try {
+            opened.adoption!!.accept()
+            fail("基准内容原子替换应因目标为目录而失败")
+        } catch (_: Exception) {
+            // 预期：cache/meta 已前移，但持久化采纳意图必须继续隔离该目标。
+        }
+
+        assertTrue("故障点前缓存回执已交付", syncCache.isCached(remotePath))
+        assertEquals("基准摘要已前移到候选版本", SyncCache.sha256Hex(candidate), syncCache.getState(remotePath)?.baseVersion)
+
+        val restartedGuard = SyncRollbackGuard(rollbackDir)
+        assertTrue(restartedGuard.hasPendingAcceptance(remotePath))
+        val callsBeforeReplay = fakeProvider.metadataCalls
+        val replay = SyncEngine(fakeProvider, syncCache, restartedGuard).openRemote(remotePath)
+        assertEquals(SyncOpenResult.RecoveryRequired, replay)
+        assertEquals("恢复隔离必须在再次读取远端前生效", callsBeforeReplay, fakeProvider.metadataCalls)
+    }
+
+    @Test
     fun `测试已缓存无本地修改且远端有更新时刷新缓存`() = runTest {
         // 先首次同步建立缓存
         val v1 = "content-v1".toByteArray()
@@ -746,6 +802,7 @@ class SyncEngineTest {
         /** 仅令 download 失败（模拟 412 冲突响应后网络中断） */
         var downloadError: Boolean = false
         var uploadAtomicCalls: Int = 0
+        var metadataCalls: Int = 0
 
         /** ISSUE-P3-555：令上传抛出协程取消，用于验证引擎不把取消吞成 `Failed` */
         var uploadCancellation: Boolean = false
@@ -773,6 +830,7 @@ class SyncEngineTest {
         override suspend fun testConnection(): Result<Unit> = Result.success(Unit)
 
         override suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata> {
+            metadataCalls++
             if (networkError) return Result.failure(SyncException.NetworkError("Network down"))
             val file = remoteFiles[remotePath]
                 ?: return Result.failure(SyncException.FileNotFound("Not found"))

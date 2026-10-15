@@ -142,7 +142,7 @@ internal class SessionContentMutations(
         // `BinaryItem` 实例引用的条目就地清零（copy 形态共享同一池列表 ⇒ 全部跳过；
         // 远端库整体接管的形态池不相交 ⇒ 旧池全量擦除，不再滞留 GC）。身份集合判定，
         // 与上方树擦除的存活口径一致，禁止退化为裸 forEach 清池。
-        currentDb.clearBinaryPool(updated.binaries)
+        currentDb.clearBinaryPool(updated)
         // ISSUE-P3-471：与树 / 池同一收口点——换下库的**自定义图标池**中，不被新库以同一
         // `CustomIcon` 实例引用的条目就地清零（`copy` 形态共享同一列表 ⇒ 全部跳过；删除单个
         // 图标 / 远端库整体接管的形态 ⇒ 下线图标清零，不再滞留 GC）。判据与上方池擦除同口径。
@@ -160,7 +160,7 @@ internal class SessionContentMutations(
         databaseFlow.value = committed
         stateFlow.value = DatabaseSession.SessionState.OPENED
         expected.rootGroup.clearSupersededSensitiveData(committed.rootGroup)
-        expected.clearBinaryPool(committed.binaries)
+        expected.clearBinaryPool(committed)
         expected.clearCustomIconPool(committed.customIcons)
         val oldKdf = expected.header.kdfParameters
         val newKdf = committed.header.kdfParameters
@@ -198,7 +198,7 @@ internal class SessionContentMutations(
         databaseFlow.value = replacement
         stateFlow.value = DatabaseSession.SessionState.DIRTY
         currentDb.rootGroup.clearSupersededSensitiveData(replacement.rootGroup)
-        currentDb.clearBinaryPool(replacement.binaries)
+        currentDb.clearBinaryPool(replacement)
         // ISSUE-P3-471：图标池与树 / 池同点收口（判据见 updateDatabaseMeta 处注释）
         currentDb.clearCustomIconPool(replacement.customIcons)
         true
