@@ -624,5 +624,6 @@
 | §524 | 字段冲突删除三态与 KDBX 对拍 | `ISSUE-P3-629`（整条闭环） | [524-字段冲突删除三态与KDBX对拍批次.md](resolved/batches/524-字段冲突删除三态与KDBX对拍批次.md) |
 | §525 | 解析附件缓存按次回收实体机验收 | `ISSUE-P3-622`（整条闭环） | [525-解析附件缓存按次回收实体机验收批次.md](resolved/batches/525-解析附件缓存按次回收实体机验收批次.md) |
 | §526 | 同步检查点 IO 与实体机性能测量 | `ISSUE-P2-626`（整条闭环） | [526-同步检查点IO与实体机性能测量批次.md](resolved/batches/526-同步检查点IO与实体机性能测量批次.md) |
+| §527 | 同步检查点修订绑定实体机验收 | `ISSUE-P2-624`（整条闭环） | [527-同步检查点修订绑定实体机验收批次.md](resolved/batches/527-同步检查点修订绑定实体机验收批次.md) |
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58~§157，已封卷）· [`05`](resolved/BATCH_158_PLUS.md)（§158~§504，已封卷·超额册）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起，**当前滚动册**）。
