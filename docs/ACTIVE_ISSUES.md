@@ -19,9 +19,36 @@
 
 ## P2 中危缺陷与协议/测试缺口
 
-暂无。
+### ISSUE-P2-620：进程重建后旧 PendingIntent 可混用另一域的密码请求
+
+- **核实**：2026-10-15，当前工作区静态调用链、独立复核及 [Android 官方 PendingIntent 契约](https://developer.android.com/reference/android/app/PendingIntent)；中危、置信度中，**需要进一步验证真实 Credential Manager 保留窗口**。
+- **位置**：`CredentialPendingIntents.kt:89-96`、`CredentialResponseAssembler.kt:346-359`、`PasswordFillActivity.kt:129-139,191-206,237-243`。
+- **触发与后果**：系统仍持有域 A 的旧候选，提供者普通进程死亡后，新进程从 1000 重发同码，为同浏览器域 B 创建同组件、仅 extras 不同的入口；`FLAG_UPDATE_CURRENT` 可更新旧 token。落地页只比较系统包名，随后用新版 entry/domain 自洽校验；用户点旧项并完成验证后，A 请求可能收到 B 口令。未证明无交互窃取；force-stop 不可替代普通死亡。
+- **建议与验收**：为每条入口设置跨进程唯一且参与 `filterEquals` 的请求标识（如随机 `Intent.data`），交付前绑定最终系统 origin/package/条目，保持系统所需可变标志。用独立持有者和真实两域 CM 流程验证旧请求不能收到新域秘密，保留 PID、系统回执与非空设备测试 XML；Autofill 同形计数器与旧 `AutofillId` 接受条件另行验证，不据此认定同样泄露。
+
+### ISSUE-P2-621：回滚状态写失败后，后续同步可采纳旧版本
+
+- **核实**：2026-10-15，当前同步采纳、缓存比较、错误返回及锁定/重开链静态追踪；中危、置信度中，**需要进一步验证本地故障注入**。
+- **位置**：`SyncEngineAdoptionSettlement.kt:26-34`、`SyncEngineSupport.kt:75-84`、`SyncRollbackGuard.kt:134-162,193-211`、`SyncContentChangeDetector.kt:59-83`、`SyncCycleRemoteOutcomes.kt:145-165`。
+- **触发与后果**：同进程成功同步 A 后锁库并重开未改过的 A，进程内文件 checkpoint 仍在而内存同步参考为空；采用远端 B 并保存、提交 B 缓存/基线后，rollback 写入或改名失败。周期返回 Error，但进程与缓存继续存在；下一轮本地 B 对缓存 B 判未变，远端重放 A 因守卫 `current=A` 判 Unchanged，可再次保存并丢失 B 更新。需本地持久化故障，未证明远端能诱发该故障。
+- **反证边界**：普通进程重建会在开库前清同步缓存且没有进程内 checkpoint，基线缺失时保守走冲突；**不报告仅靠进程死亡即可静默回滚**。正常高水位提交后 A 会进入 recent 并被拒绝；已有状态缺失/不可解析及 32 项窗口限界不等于本次部分提交状态。
+- **建议与验收**：为正式库、缓存基线和高水位建立可恢复的代际/事务状态，高水位失败后禁止继续自动采用旧远端。定点注入 B 基线提交后的 rollback 写/rename 失败，再重放 A，确认拒绝或显式恢复/冲突而非直接覆盖；普通进程重建另列对照。
 
 ## P3 低危问题、特性接线与体验优化
+
+### ISSUE-P3-622：开库失败可留下未被会话接管的明文附件缓存
+
+- **核实**：2026-10-15，当前普通/子库加载、附件落盘及异常清理源码复核；低危、置信度高，未做设备磁盘复现。
+- **位置**：`SessionOpener.kt:254-285`、`ChildReadOnlySession.kt:147-164`、`InnerHeaderReader.kt:85-99`、`KdbxFile.kt:284-290`；对照 `SessionExternalParser.kt:29-44` 的按次记录清理。
+- **触发与后果**：大附件已写入 `cacheDir/attachments` 后，后续字段/XML/终止块认证失败；直接调用方仅返回错误，没有撤销本次 spill，`InnerHeader.clearSensitive` 只擦随机流密钥。残余受 app 私有目录隔离，锁定/关闭/冷启动会清；普通根库重试前会清旧缓存，重复累积只在子库等没有全局重置的路径讨论。不能据此认定普通其他应用可读取。
+- **建议与验收**：统一记录每次解析创建的存储键，失败/取消按次撤销，成功后明确转移所有权；不要全局清理而误删活动根库附件。以虚构大附件和晚失败/取消验证实际磁盘残余，并保留已有根库附件为不得删除的对照。
+
+### ISSUE-P3-623：CSV 导出的库字段可被电子表格当作公式
+
+- **核实**：2026-10-15，当前导入到导出的静态追踪及 [LibreOffice 公式导入选项](https://help.libreoffice.org/latest/en-US/text/shared/00/00000208.html)核对；低危、置信度高，未运行表格公式或外联验证。
+- **位置**：`KdbxCsvExporter.kt:81-95,106-144` 的 String/CharArray 两种写入；`BrowserCsvImporter.kt:130-143` 仅告警而保留字段；`SettingsExportController.kt:139-152` 有效保护明文导出授权。
+- **触发与后果**：不可信条目字段以 `=` 等公式前缀进入库，用户确认导出 CSV 后，在允许公式求值的表格软件中打开。当前仅转义列分隔符/引号/换行，无法保证单元格按文本解释；具体内容伪造、外联或泄露取决于下游策略，不能描述为自动泄露。
+- **建议与验收**：明确区分原值交换与表格安全导出，后者强制单元格文本语义，并向原样 CSV 使用者提示公式风险；不得静默改写互操作密码。用无外联算术公式验证指定软件/选项下按文本导入，同时对拍原值导出再导入保持秘密不变。
 
 ### ISSUE-P3-618：签名脚本路径 shell 注入前提待验证
 
