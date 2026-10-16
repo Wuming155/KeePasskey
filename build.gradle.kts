@@ -6,7 +6,7 @@ buildscript {
     // ISSUE-P3-32：2.4.10 → 2.4.20 为 CVE-2026-53914（Kotlin < 2.4.20 构建缓存元数据
     // 不安全反序列化，CWE-502）的**上游修复版本**，非例行升级。
     dependencies {
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.20")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
     }
 }
 
