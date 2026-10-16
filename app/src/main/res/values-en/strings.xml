@@ -971,6 +971,8 @@
     <string name="err_drift_file_unreadable">File is unreadable</string>
     <string name="err_drift_no_active_database">No active database</string>
     <string name="err_drift_session_tree_changed">In-memory tree changed during the merge window</string>
+    <string name="err_drift_choice_stale">This choice no longer applies (the vault was switched)</string>
+    <string name="err_drift_disk_changed_since_read">The file changed again after it was read (or the vault was switched)</string>
     <string name="err_passkey_entry_not_found">Passkey entry not found (it may have been deleted)</string>
     <string name="err_recovery_payload_corrupt">Recovery copy is missing or corrupted; not adopted automatically</string>
     <string name="err_recovery_unlock_failed">Failed to unlock the recovery copy (wrong credentials or missing key file)</string>

@@ -36,6 +36,20 @@ class VaultFileDriftCoordinator @Inject constructor(
     private val _mergeConflict = MutableStateFlow<VaultFileDriftMergeConflict?>(null)
     val mergeConflict: StateFlow<VaultFileDriftMergeConflict?> = _mergeConflict.asStateFlow()
 
+    /**
+     * `ISSUE-P1-631`（裁决归属）：**最近一次被唤起提示的库路径标识**。
+     *
+     * 与 [pending] / [mergeConflict] 的差异：两者在会话终止（锁定 / 关闭 / 换库）时会被清空，
+     * 而本字段**刻意保留最后一次的归属**——用户对漂移提示作出的处置（三选或裁决）只对该次
+     * 提示所属的库有效。若处置调用（点击与执行之间可能有挂起）落到了另一个已切换的库上，
+     * 处置方（`VaultFileDriftResolve`）据此 fail-closed 拒绝，绝不把「以磁盘为准」之类的决策
+     * 套用到用户从未裁决过的新库上。
+     *
+     * 线程可见性：仅在会话互斥锁外由 UI / 仓库调用，用 [Volatile] 保证跨线程可见。
+     */
+    @Volatile
+    private var lastPromptedPath: String? = null
+
     init {
         // ISSUE-P1-631：会话终止（锁定 / 关闭 / 换库前置释放）时清空待决提示——
         // 裁决已随会话作废，不得跨库残留。回调在会话互斥锁内同步触发，仅做置空（契约见
@@ -94,9 +108,9 @@ class VaultFileDriftCoordinator @Inject constructor(
      * （裁决可随时由合并重算重建，不丢失任何数据；反之两个对话框叠放才是错误状态）。
      */
     fun requestPrompt(pathIdentifier: String?) {
-        _pending.value = VaultFileDriftPrompt(
-            pathIdentifier = pathIdentifier ?: baselineHolder.current()?.pathIdentifier ?: ""
-        )
+        val path = pathIdentifier ?: baselineHolder.current()?.pathIdentifier ?: ""
+        lastPromptedPath = path.ifEmpty { null }
+        _pending.value = VaultFileDriftPrompt(pathIdentifier = path)
         _mergeConflict.value = null
     }
 
@@ -109,6 +123,7 @@ class VaultFileDriftCoordinator @Inject constructor(
         conflictCount: Int,
         titles: List<String>
     ) {
+        lastPromptedPath = pathIdentifier.ifEmpty { null }
         _pending.value = null
         _mergeConflict.value = VaultFileDriftMergeConflict(
             pathIdentifier = pathIdentifier,
@@ -116,6 +131,12 @@ class VaultFileDriftCoordinator @Inject constructor(
             entryTitles = titles
         )
     }
+
+    /**
+     * `ISSUE-P1-631`（裁决归属）：最近一次被唤起提示的库路径标识（从未提示过时为 null）。
+     * 处置方（`VaultFileDriftResolve`）据此拒绝「对已切换库的过期处置」；见 [lastPromptedPath]。
+     */
+    fun lastPromptedPathIdentifier(): String? = lastPromptedPath
 
     /** `ISSUE-P1-631`：关闭合并冲突裁决提示（用户已裁决、取消或转入其它处置） */
     fun clearMergeConflictPrompt() {

@@ -51,7 +51,8 @@ class PersistedDatabaseBaseline(
  */
 internal class PersistedBaselineCapturingInputStream(
     private val delegate: InputStream,
-    private val maxCaptureBytes: Int
+    /** 留存上限；默认即生产上限 [MAX_PERSISTED_BASELINE_BYTES]（打开链调用点仍显式传入以自证口径） */
+    private val maxCaptureBytes: Int = MAX_PERSISTED_BASELINE_BYTES
 ) : InputStream() {
 
     private val sink = WipableByteArrayOutputStream(CAPTURE_INITIAL_BYTES)

@@ -21,10 +21,14 @@ import com.keepasskey.app.security.ExternalModificationChoice
  * - 重载：丢弃内存未落盘改动，重新打开磁盘版本；
  * - 合并：走既有 KdbxMerger 三方合并后保存；
  * - 放弃：本次不写盘，内存改动保留（调用方已中止 save）。
+ *
+ * `ISSUE-P1-631`：[enabled] = false 时全部动作按钮不可用——由挂点在处置**在途期间**置位，
+ * 防「连点 / 重建后重复提交」对同一漂移触发多次处置（挂点侧同一守卫，两对话框共用）。
  */
 @Composable
 fun ExternalModificationDialog(
     onChoice: (ExternalModificationChoice) -> Unit,
+    enabled: Boolean = true,
     modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier
 ) {
     AlertDialog(
@@ -45,16 +49,25 @@ fun ExternalModificationDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onChoice(ExternalModificationChoice.MERGE_AND_SAVE) }) {
+            Button(
+                onClick = { onChoice(ExternalModificationChoice.MERGE_AND_SAVE) },
+                enabled = enabled
+            ) {
                 Text(stringResource(R.string.ext_mod_choice_merge))
             }
         },
         dismissButton = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = { onChoice(ExternalModificationChoice.RELOAD_FROM_DISK) }) {
+                OutlinedButton(
+                    onClick = { onChoice(ExternalModificationChoice.RELOAD_FROM_DISK) },
+                    enabled = enabled
+                ) {
                     Text(stringResource(R.string.ext_mod_choice_reload))
                 }
-                OutlinedButton(onClick = { onChoice(ExternalModificationChoice.ABANDON_SAVE) }) {
+                OutlinedButton(
+                    onClick = { onChoice(ExternalModificationChoice.ABANDON_SAVE) },
+                    enabled = enabled
+                ) {
                     Text(stringResource(R.string.ext_mod_choice_abandon))
                 }
             }

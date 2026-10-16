@@ -353,6 +353,14 @@ class DatabaseSession(
     }
 
     /**
+     * 仅供测试使用：暴露基线内部缓冲的**引用本身**（非克隆），用于断言清除 / 替换 / 会话
+     * 终止后旧密文缓冲是否已被就地清零（`ISSUE-P1-631` 的擦除证据）。生产代码不得调用。
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun persistedBaselineInternalBytesForTesting(): ByteArray? =
+        core.persistedBaselineInternalBytesForTesting()
+
+    /**
      * TASK-13 整改：将当前内存数据库序列化为 KDBX 字节流（SAF 导出用）。
      * 与 [save] 相同的凭据要求与序列化管线（含密钥文件复合密钥），但不落盘到活动文件，
      * 字节交由调用方处置；锁定/关闭状态（内存树已销毁）下如实失败。

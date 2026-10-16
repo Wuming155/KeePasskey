@@ -85,15 +85,6 @@ data class MergeResult(
  */
 object KdbxMerger {
 
-    private val DELETABLE_STANDARD_FIELDS = setOf(
-        KdbxConstants.Fields.TITLE,
-        KdbxConstants.Fields.USER_NAME,
-        KdbxConstants.Fields.PASSWORD,
-        KdbxConstants.Fields.URL,
-        KdbxConstants.Fields.NOTES,
-        KdbxConstants.Fields.OTP
-    )
-
     /**
      * ISSUE-P2-281：冲突差异键的词汇常量（[ConflictedEntryPair.modifiedFields] 的单一词汇表，
      * 产出侧 `KdbxEntryMerger` / `BothModifiedEntryCollector` 与消费侧冲突界面、
@@ -278,7 +269,7 @@ object KdbxMerger {
                             false
                         }
                     }
-                    fieldKey !in DELETABLE_STANDARD_FIELDS -> false
+                    fieldKey !in KdbxConflictFieldResolver.DELETABLE_STANDARD_FIELDS -> false
                     fieldKey in pair.remoteEntry.fields -> false
                     fieldKey in merged.fields -> {
                         merged = merged.copy(fields = merged.fields - fieldKey)
@@ -328,6 +319,24 @@ object KdbxMerger {
         if (!adoptedRemote) return merged
         return merged.copy(times = merged.times.copy(lastModificationTime = Instant.now()))
     }
+
+    /**
+     * `ISSUE-P1-631`（漂移合并裁决）：**只重裁冲突字段**的整批策略——以三方合并产物
+     * [merged] 为底版，把 [pair] 的差异字段（[ConflictedEntryPair.modifiedFields]）整体取
+     * [choice] 一侧，**非冲突字段保持合并产物**。
+     *
+     * 为什么不能直接用 [resolveConflict] 整条目二选一：合并器在双方均有修改时**已经**做过
+     * 字段级合并（[KdbxEntryMerger.mergeConflictedEntry]）——双侧只有一处字段分叉时，另一侧
+     * 对**其它字段**的就近修改也已并入产物。整条目替换会把那些非冲突改动一并丢掉（对侧
+     * 修改静默消失）。本原语把裁决范围收敛到真正的分叉字段，其余保持合并结果。
+     *
+     * 实现与字段词汇表见 [KdbxConflictFieldResolver]（本函数仅为对外入口）。
+     */
+    fun resolveConflictFieldsOnly(
+        merged: KdbxEntry,
+        pair: ConflictedEntryPair,
+        choice: ConflictResolutionChoice
+    ): KdbxEntry = KdbxConflictFieldResolver.resolve(merged, pair, choice)
 
     /**
      * 根据用户在冲突界面中的选择解决冲突

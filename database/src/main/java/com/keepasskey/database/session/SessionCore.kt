@@ -78,10 +78,15 @@ internal class SessionCore {
      * 修订单调前移：登记、清除都会 +1——「读取基线（含修订）→ 计算合并 → 提交」窗口内的
      * 任意持久化或会话变化都能被 `adoptDatabaseIfUnchanged(expectedPersistedBaselineRevision)`
      * 检出（宁可误中止，不可静默以过期基线提交）。
+     *
+     * **异常安全（先克隆后替换）**：克隆在**触碰旧值之前**完成——若克隆失败（如 OOM），
+     * 旧基线保持**原值与原修订**（状态仍是自洽的既有登记），绝不会留下「已被清零、但修订未
+     * 前移」的半损坏状态（那会让下游读到全零字节却误认为仍是有效基线）。
      */
     fun retainPersistedBaseline(bytes: ByteArray?, pathIdentifier: String?) {
+        val replacement = bytes?.clone()
         persistedBaseline?.fill(0)
-        persistedBaseline = bytes?.clone()
+        persistedBaseline = replacement
         persistedBaselinePathValue = pathIdentifier
         persistedBaselineRevisionValue += 1
     }
@@ -100,4 +105,12 @@ internal class SessionCore {
     fun persistedBaselineRevision(): Long = persistedBaselineRevisionValue
 
     fun persistedBaselinePathIdentifier(): String? = persistedBaselinePathValue
+
+    /**
+     * 仅供测试：暴露内部快照**引用本身**（非克隆）——用于断言「清除 / 替换后旧缓冲是否
+     * 已被就地清零」（克隆会给到副本，无法观测内部缓冲的擦除）。
+     * 生产代码不得调用；用例不得对被暴露数组做写入。
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun persistedBaselineInternalBytesForTesting(): ByteArray? = persistedBaseline
 }

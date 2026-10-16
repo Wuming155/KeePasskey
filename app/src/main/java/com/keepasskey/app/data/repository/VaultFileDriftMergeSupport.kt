@@ -1,14 +1,20 @@
 package com.keepasskey.app.data.repository
 
+import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ExternalModificationChoice
+import com.keepasskey.app.security.VaultFileBaseline
 import com.keepasskey.app.security.VaultFileDriftCoordinator
+import com.keepasskey.app.security.VaultFileDriftPolicy
+import com.keepasskey.app.security.VaultFileMetadataProbe
 import com.keepasskey.app.sync.applyResolvedEntriesToGroup
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.merge.ConflictResolutionChoice
@@ -16,6 +22,7 @@ import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
+import java.io.File
 
 /** 漂移处置日志标签（`ISSUE-P3-550`：异常细节只进日志，UI 侧只留错误码映射） */
 internal const val DRIFT_LOG_TAG = "VaultFileDriftResolve"
@@ -142,28 +149,136 @@ internal class VaultFileDriftMergeSupport(
     /**
      * 按用户裁决把冲突条目落回合并树（复用同步裁决的**单趟落树**原语，避免两份实现漂移）。
      * 非冲突条目保持三方合并产物原样。
+     *
+     * `ISSUE-P1-631`（裁决范围收口）：裁决**只重裁差异字段**——以三方合并产物为底版
+     * （`KdbxMerger.resolveConflictFieldsOnly`），冲突条目上**非冲突字段的合并结果保持不变**。
+     * 整改前若整条目取一侧，会把对侧对该条目其它字段的就近修改一并丢弃（合并器已在双侧修改
+     * 分支做过字段级合并，那些改动本已在产物中）。「双方保留」= 本地侧字段版本 + 磁盘侧字段
+     * 版本（换新 UUID、标题加后缀），两份都建在合并产物之上。
+     *
+     * 防御：合并产物中按 id 找不到该冲突条目时（理论不可达），退回以本地条目为底版执行同一
+     * 字段级重裁——语义仍为「只重裁差异字段」，不放大为整树替换。
      */
     private fun applyConflictPolicy(
         mergedRoot: KdbxGroup,
         conflicts: List<ConflictedEntryPair>,
         policy: DriftMergeConflictPolicy
     ): KdbxGroup {
+        val mergedById = mergedRoot.allEntries().associateBy { it.id.toHexString() }
         val byParent = mutableMapOf<KdbxUuid, MutableList<KdbxEntry>>()
         for (pair in conflicts) {
+            val mergedEntry = mergedById[pair.entryId] ?: pair.localEntry
             val resolved = when (policy) {
-                DriftMergeConflictPolicy.KEEP_LOCAL -> listOf(pair.localEntry)
-                DriftMergeConflictPolicy.KEEP_DISK -> listOf(pair.remoteEntry)
-                DriftMergeConflictPolicy.KEEP_BOTH -> KdbxMerger.resolveConflict(
-                    pair = pair,
-                    choice = ConflictResolutionChoice.DUPLICATE_BOTH,
-                    // 本项中 remote = 磁盘版本，副本标题不得沿用同步侧「云端」口径
-                    duplicateTitleSuffix = strings.get(R.string.ext_mod_merge_duplicate_suffix)
+                DriftMergeConflictPolicy.KEEP_LOCAL -> listOf(
+                    KdbxMerger.resolveConflictFieldsOnly(
+                        merged = mergedEntry,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_LOCAL
+                    )
                 )
+                DriftMergeConflictPolicy.KEEP_DISK -> listOf(
+                    KdbxMerger.resolveConflictFieldsOnly(
+                        merged = mergedEntry,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_REMOTE
+                    )
+                )
+                DriftMergeConflictPolicy.KEEP_BOTH -> {
+                    val localSide = KdbxMerger.resolveConflictFieldsOnly(
+                        merged = mergedEntry,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_LOCAL
+                    )
+                    val diskSide = KdbxMerger.resolveConflictFieldsOnly(
+                        merged = mergedEntry,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_REMOTE
+                    )
+                    // 副本必须换新 UUID：KDBX 要求 UUID 全局唯一，且同 UUID 副本在应用回分组树时
+                    // 会与本地原条目命中同一槽位而互相覆盖（同 `KdbxMerger.resolveConflict` 口径）。
+                    val duplicate = diskSide
+                        .copy(id = KdbxUuid.random())
+                        .withField(
+                            KdbxConstants.Fields.TITLE,
+                            ProtectedString(
+                                "${diskSide.title} (${strings.get(R.string.ext_mod_merge_duplicate_suffix)})",
+                                isProtected = false
+                            )
+                        )
+                    listOf(localSide, duplicate)
+                }
             }
             for (entry in resolved) {
                 byParent.getOrPut(entry.parentGroupId ?: mergedRoot.id) { mutableListOf() }.add(entry)
             }
         }
         return applyResolvedEntriesToGroup(mergedRoot, byParent)
+    }
+}
+
+/**
+ * `ISSUE-P1-631`（裁决归属）：该处置是否属于**另一个库**（换库后的过期选择）——返回非空即过期。
+ *
+ * 归属来源为协调器「最近一次被提示的库路径标识」（`ISSUE-P1-631` 字段）。从未提示过时不判过期：
+ * 该路径仅存在于「无提示直调」场景（纯 JVM 用例 / 内部收敛路径），判过期只会误伤合法调用；
+ * 生产侧一切处置都由对话框驱动，必有提示在先。
+ */
+internal fun staleChoiceOwner(coordinator: VaultFileDriftCoordinator?, currentPathId: String): String? {
+    val prompted = coordinator?.lastPromptedPathIdentifier() ?: return null
+    if (currentPathId.isEmpty()) return null
+    return prompted.takeIf { it != currentPathId }
+}
+
+/**
+ * `ISSUE-P1-631`（读取版本钉扎）：合并**读取时点**的通道身份与文件指纹。
+ *
+ * 用途：解析 / 合并是长窗口，窗口内磁盘可能被再次外部改写、会话也可能被换库——提交前
+ * 复核本钉扎，把用旧版本算出的产物 fail-closed 拦下（`VaultFileDriftResolve.adoptAndPersist`）。
+ *
+ * 口径：判据与保存前漂移检测**同一实现**（[VaultFileDriftPolicy.shouldAbortSave]：路径不一致 /
+ * size 不等 / mtime 差 ≥ 1s 均判已变），不另写一份；读取时点元数据不可读（`baseline == null`）
+ * 时不把「不可读」当证据，仅在**当前**仍不可读时放行（与既有「宁可不提示」口径一致）。
+ */
+internal class VaultFileReadPin private constructor(
+    private val pathId: String,
+    /** 捕获时是否走本地 `File` 通道（复核时通道类型变化 ⇔ 已换库/换通道） */
+    private val fileChannel: Boolean,
+    private val baseline: VaultFileBaseline?
+) {
+
+    /**
+     * 复核：通道身份未变且文件指纹未变 ⇒ true（可安全提交）。
+     *
+     * [currentPathId] / [currentFile] 必须取**复核时点**的会话当前值——换库后与捕获值不同，
+     * 直接判拒（并发 barrier 验收里「库 A 的旧任务不得提交到库 B」的第一道闸）。
+     */
+    fun isStillCurrent(context: Context?, currentPathId: String, currentFile: File?): Boolean {
+        if (pathId != currentPathId) return false
+        if (fileChannel != (currentFile != null)) return false
+        val current = if (currentFile != null) {
+            VaultFileBaseline.fromFile(currentFile)
+        } else {
+            VaultFileMetadataProbe.baselineFor(context, currentPathId)
+        }
+        val before = baseline ?: return current == null
+        val after = current ?: return false
+        return !VaultFileDriftPolicy.shouldAbortSave(
+            baseline = before.copy(pathIdentifier = currentPathId),
+            current = after
+        )
+    }
+
+    companion object {
+        /** 读取时点捕获（本地 `File` 直读属性；SAF 取文档元数据；不可读 ⇒ baseline 为 null） */
+        fun capture(context: Context?, pathId: String, localFile: File?): VaultFileReadPin =
+            VaultFileReadPin(
+                pathId = pathId,
+                fileChannel = localFile != null,
+                baseline = if (localFile != null) {
+                    VaultFileBaseline.fromFile(localFile)
+                } else {
+                    VaultFileMetadataProbe.baselineFor(context, pathId)
+                }
+            )
     }
 }

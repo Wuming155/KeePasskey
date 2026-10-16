@@ -26,7 +26,8 @@
 - 影响与触发：用户选择“合并后保存”仍可能丢失未提交本地条目/分组或恢复磁盘旧值；影响本地文件和 SAF 外部漂移处置，不代表普通三方同步均有此缺陷。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`；`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt`。
 - 已实现（2026-10-16）：会话持久化基线（`DatabaseSession.persistedBaselineSnapshot`——打开 / 重载 / 新建 / 保存 / Meta 提交 / 换密六类确认写盘点登记，绑定库身份与持久化修订，会话终止先清零再置空）；`VaultFileDriftResolve` 改按真实 base/local/disk 合并，基线缺失 / 不可信时按空底版双方并集语义（不推断删除）；同字段双侧修改不静默取一侧——以「本地 / 磁盘 / 双方保留」裁决提示（`VaultFileDriftCoordinator.mergeConflict`）驱动同一合并实现重算后提交；提交经实例身份 + 基线修订同一临界区校验（`adoptDatabaseIfUnchanged` 扩展）。本仓 JVM 验收：`VaultFileDriftMergeBaselineTest`（app，8 例，覆盖验收矩阵 1/2/3/4 与删除/修改组合，均重解析正式库核对）与 `PersistedBaselineCaptureTest`（database，8 例）全绿；全量 `test` 读数与门禁读数见方案「实施记录」。裁决口径登记 `PD-87`，边界登记限界 §45。
-- 尚未完成：原路径产品复现（真机外部改写 → 三选 → 裁决链）；SAF（`content://`）通道端到端与「并发换库 / 提交失败」barrier 设备验收（方案 §4 第 3 行）；本轮未触及 Rust/JNI/Native 加密分派与探活，四层 connected 测试义务未触发（未跑，如实声明）。
+- 深化（2026-10-16 第二轮）：裁决由「整条目二选一」收口为**只重裁差异字段**（`KdbxMerger.resolveConflictFieldsOnly`，非差异字段保持合并产物）；新增**读取版本钉扎**（`VaultFileReadPin`）与**裁决归属绑定**（换库后的过期选择一律拒绝，`PD-88`）；采纳 + 落盘为 `NonCancellable` 提交段；UI 重复提交守卫。**真机（Redmi 4X / API 37）**：`VaultFileDriftSafDeviceTest` 3 例（真实 `content://` 全链路 + 三种裁决落盘 + 写故障/损坏边界）与 `VaultFileDriftBackupDeviceTest` 1 例（`.bak` 重解析 + 失败保全）全绿；JVM 新增分组 5 例 / 并发 barrier 4 例（latch 闸门）/ 裁决范围 4 例 / 生命周期 7 例 / 边界 6 例。审查发现并处置：旧会话结果写新会话（已修）、Meta 不参与合并（确认存在、非本项引入，登记限界 §47）、分组双侧修改为 LWW 不提示（登记限界 §46）、SAF 部分写损坏文档后不可自修（既有 §24）。详见方案「实施记录」§8。
+- 尚未完成：Compose 点击级真机 UI 驱动（打开库 → 编辑 → 外部漂移 → 提示 → 合并 → 裁决 → 保存 → 重开）——本轮以生产单例图 + 仓库入口 + 协调器状态流完成**数据层**产品路径，未驱动 Compose 点击（仓库无 Compose UI 测试基建）；160 MiB 留存上限真尺寸未跑（以等价小额边界 + 常量断言覆盖）；物理内存擦除只证明数组就地覆盖（GC 后不可证明）。四层 connected 测试义务未触发（未触及 Rust/JNI/Native 加密分派与探活，未跑如实声明）。
 - [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：目标、模块、步骤、失败处理、验收、回退与实施记录。
 
 ## P2 中危缺陷与协议/测试缺口
