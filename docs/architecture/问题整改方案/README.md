@@ -32,6 +32,22 @@
 | ISSUE-P3-629 | 字段级保留/采纳/删除三态（PD-85） | 本仓上传/重解析用例通过；pykeepass 独立读取实际 KDBX 并确认删除字段 | 已闭环，见 §524 |
 | ISSUE-P3-630 | 认证中间缓冲均由作用域 `finally` 清零；并发与失败用例通过 | 无；最终 Basic header `String` 保持既有 API 边界 | 已闭环，见 §523 |
 
+## 本轮提交变更清单（代码提交 `dbd018cb`）
+
+| 问题 | 本次提交的具体变更 | 关键验收 |
+|---|---|---|
+| P2-620 凭据跨进程隔离 | 新增 Credential Manager 双域独立调用方、系统保留旧候选后的进程死亡测试，以及 Autofill PendingIntent 身份/旧会话测试；新增 A/B browser-origin 设备编排。`AGENTS.md` 和 §533 记录浏览器无关的系统 Autofill 验收口径。 | API 36 AVD 与 Redmi API 37 CM 矩阵各 2/2；Redmi PendingIntent 身份 6/6；真实网页 A/B 经系统 Autofill 分别回执 `RESULT_A`、`RESULT_B`。 |
+| P2-621 采纳事务恢复 | 扩展 `SyncCoordinator`、`SyncEngine`、`SyncRollbackGuard` 的待采纳事务、正式文件/缓存/回滚高水位结算；加入阶段回执、进程恢复设备用例及 `run_p2_621_process_recovery.py`。 | Redmi API 37 五阶段 OS 进程 SIGKILL/冷启动 5/5；正式 B 保全、旧 A 重放拒绝；412 并发后按最新 ETag 显式保留并恢复本地 B。 |
+| P2-624 检查点修订绑定 | 同步结算记录实际数据库和 Provider 目标快照；摘要仅在同一数据库、正式文件修订已提交时登记。 | barrier/cold-start 对照 9/9；Redmi API 37 正式文件提交/重开 1/1。 |
+| P2-625 锁定与网络取消 | 收窄自动锁挂锁范围；新增 `CancellableOkHttpCall`，让 WebDAV/S3 的协程取消终止底层 HTTP 请求；锁库清理会话凭据和明文树。 | JVM 取消/排队/412 用例；Redmi API 37 慢 HTTPS、熄屏/后台锁定及 412 交错设备验收通过，正式库 B 保全。 |
+| P2-626 检查点 IO | 将正式文件检查与 SHA-256 读取调度到 IO，并保留会话锁和修订绑定。 | app JVM 2522 项通过；Redmi API 37 设备用例 2/2；8.39 MB 合成库摘要 55 ms、Main 队列回调 2 ms。 |
+| P2-627 锁态周期同步 | 新增 `PeriodicSyncPendingUploadStore` 密文队列、摘要校验、ETag 条件上传与失败重试；接入 Worker、锁态恢复状态和解锁页提示/手动收敛。 | Redmi API 37 损坏队列冷启恢复 1/1；隔离 API 36 AVD 系统重启恢复；正式库及远端 B 保全。 |
+| P3-623 XLSX 导出 | 归档按 PD-86 保留原值 CSV、文本型 XLSX 的实现边界，并补记 Python `openpyxl` 3.1.5 读写重载验收。 | `+`、`-`、`=`、`@` 前缀样本均以文本单元格往返；未声称表格软件 UI 实测。 |
+| P3-628 恢复探测 | 加入生产 Provider 探测设备桥与用例；回前台、网络恢复共用生产配置和确定性释放路径，目标切换后丢弃迟到结果。 | Redmi API 37 与隔离 API 36 AVD 真实 HTTPS/ETag 路径通过；Redmi 前台、Wi-Fi 重连和在途换库场景各 1/1。 |
+| P3-622 / P3-629 / P3-630 | 补齐各项闭环归档：附件 spill 失败清理；字段级保留/采纳/删除和独立 KDBX 读取；WebDAV 认证中间缓冲按作用域清零。 | 对应实现与验收边界见 §523–§525，索引已登记。 |
+
+代码文件范围包括 `app/src/main`、`app/src/androidTest`、`sync/src/main`、`sync/src/test`、`tools/device` 和本页索引所列方案/批次；debug-only HTTPS 场景使用本机测试信任配置，不修改设备系统 CA。每项的具体 XML、run ID、数据边界和限制见对应归档批次 §523–§533。
+
 ## 推荐实施顺序
 
 1. P3-630、P3-629、P3-622、P2-626、P2-624、P2-625、P3-623、P3-628、P2-627、P2-621 已按 §523–§532 闭环。
