@@ -463,11 +463,27 @@ class RealVaultRepository @Inject constructor(
             return KdbxResult.Success(Unit)
         }
         // ISSUE-P3-447 AC②：SAF 通道的重载 / 合并需要 ContentResolver
-        return VaultFileDriftResolve(databaseSession, strings, driftCoordinator, context).resolve(choice)
+        return VaultFileDriftResolve(
+            databaseSession,
+            strings,
+            driftCoordinator,
+            context,
+            mergeCommitGate = driftMergePhaseGatesForTesting?.beforeCommit,
+            mergeStartGate = driftMergePhaseGatesForTesting?.beforeReread,
+            commitEnteredGate = driftMergePhaseGatesForTesting?.commitEntered
+        ).resolve(choice)
     }
 
     companion object {
         private const val TAG = "RealVaultRepository"
+
+        /**
+         * `ISSUE-P1-631`（生命周期竞态验收）：合并阶段门（见 [DriftMergePhaseGates]）。
+         * 生产恒为 null；仅设备侧 androidTest 注入，`finally` 中必须复位为 null。
+         */
+        @Volatile
+        @androidx.annotation.VisibleForTesting
+        internal var driftMergePhaseGatesForTesting: DriftMergePhaseGates? = null
 
         /** TASK-34：条目收藏标记的 customData 键（随 KDBX 条目持久化与同步） */
         const val FAVORITE_CUSTOM_DATA_KEY = "KeePasskey.Favorite"

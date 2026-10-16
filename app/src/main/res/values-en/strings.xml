@@ -822,7 +822,8 @@
     <string name="ext_mod_merge_hint_fallback">Merge uses the existing KdbxMerger three-way path; Reload discards unsaved in-memory edits; Abandon skips the write and keeps the current session.</string>
     <string name="ext_mod_merge_conflict_pending">Merge paused: %1$d conflicting entr(y/ies) need your decision</string>
     <string name="ext_mod_merge_conflict_title">Merge found conflicts</string>
-    <string name="ext_mod_merge_conflict_body">%1$d entr(y/ies) were modified both locally and on disk; the merge cannot decide automatically. Choose how to proceed (nothing is written before you decide):</string>
+    <string name="ext_mod_merge_conflict_group_prefix">Group: </string>
+    <string name="ext_mod_merge_conflict_body">%1$d item(s) (entries / groups) were modified both locally and on disk; the merge cannot decide automatically. Choose how to proceed (nothing is written before you decide):</string>
     <string name="ext_mod_merge_conflict_keep_local">Keep local version</string>
     <string name="ext_mod_merge_conflict_keep_disk">Keep disk version</string>
     <string name="ext_mod_merge_conflict_keep_both">Keep both (create disk conflict copy)</string>

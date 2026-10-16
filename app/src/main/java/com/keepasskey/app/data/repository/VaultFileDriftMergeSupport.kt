@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.repository
 
 import android.content.Context
+import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ExternalModificationChoice
 import com.keepasskey.app.security.VaultFileBaseline
@@ -9,6 +10,7 @@ import com.keepasskey.app.security.VaultFileDriftPolicy
 import com.keepasskey.app.security.VaultFileMetadataProbe
 import com.keepasskey.app.sync.applyResolvedEntriesToGroup
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.app.util.readBoundedBytes
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -19,10 +21,15 @@ import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.ConflictedGroupPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
+import com.keepasskey.sync.merge.KdbxEntryDuplicator
+import com.keepasskey.sync.merge.KdbxGroupConflictResolver
+import com.keepasskey.sync.merge.KdbxGroupDuplicator
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
 import java.io.File
+import java.security.MessageDigest
 
 /** 漂移处置日志标签（`ISSUE-P3-550`：异常细节只进日志，UI 侧只留错误码映射） */
 internal const val DRIFT_LOG_TAG = "VaultFileDriftResolve"
@@ -117,34 +124,57 @@ internal class VaultFileDriftMergeSupport(
         base?.toMergeLite() ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
 
     /**
-     * 冲突裁决前置——无冲突直接返回合并根；有策略按策略落定冲突条目；
+     * 冲突裁决前置——无冲突直接返回合并根；有策略按策略落定冲突（条目 + **分组**）；
      * 无策略时置待裁决提示并返回 null（调用方不落盘、如实上浮待裁决结果）。
+     *
+     * `ISSUE-P1-631`：**条目与分组必须一并判定**。分组此前无冲突模型，双侧改名 / 改备注 /
+     * 改图标 / 改父组 / 改组级 customData 由 LWW 静默定案——同属「同字段双侧修改静默取一侧」，
+     * 与本项要消除的数据丢失面同类，不得因「实现能力不足」而豁免。
      */
     fun resolveConflictsBeforeAdopt(
         merged: MergeResult,
         policy: DriftMergeConflictPolicy?,
         pathId: String
     ): KdbxGroup? {
-        if (merged.conflicts.isEmpty()) return merged.mergedRoot
+        val total = merged.conflicts.size + merged.groupConflicts.size
+        if (total == 0) return merged.mergedRoot
         if (policy == null) {
             // 同字段双侧修改不静默取一侧——置待裁决提示并**不落盘**；
             // 裁决（本地 / 磁盘 / 双方保留）驱动同一合并实现重算后提交
             driftCoordinator?.requestMergeConflictPrompt(
                 pathIdentifier = pathId,
-                conflictCount = merged.conflicts.size,
-                titles = conflictTitles(merged.conflicts)
+                conflictCount = total,
+                titles = conflictTitles(merged)
             )
-            AppLog.w(DRIFT_LOG_TAG, "漂移合并存在待裁决冲突: count=${merged.conflicts.size}")
+            AppLog.w(
+                DRIFT_LOG_TAG,
+                "漂移合并存在待裁决冲突: 条目=${merged.conflicts.size} 分组=${merged.groupConflicts.size}"
+            )
             return null
         }
-        return applyConflictPolicy(merged.mergedRoot, merged.conflicts, policy)
+        var root = merged.mergedRoot
+        if (merged.conflicts.isNotEmpty()) {
+            root = applyEntryConflictPolicy(root, merged.conflicts, policy)
+        }
+        if (merged.groupConflicts.isNotEmpty()) {
+            root = applyGroupConflictPolicy(root, merged.groupConflicts, policy) ?: return null
+        }
+        return root
     }
 
-    /** 待裁决条目的展示用标题（本地优先，空则取磁盘侧）；仅取前 [MAX_CONFLICT_TITLES] 条 */
-    private fun conflictTitles(conflicts: List<ConflictedEntryPair>): List<String> =
-        conflicts.take(MAX_CONFLICT_TITLES).map { pair ->
+    /**
+     * 待裁决对象的展示用标题（仅展示面，不承载任何字段值 / 明文）；
+     * 条目在前、分组在后，共取前 [MAX_CONFLICT_TITLES] 条（总数仍按真实值展示）。
+     */
+    private fun conflictTitles(merged: MergeResult): List<String> {
+        val entryTitles = merged.conflicts.map { pair ->
             pair.localEntry.displayTitle().ifBlank { pair.remoteEntry.displayTitle() }
         }
+        val groupTitles = merged.groupConflicts.map { pair ->
+            strings.get(R.string.ext_mod_merge_conflict_group_prefix) + pair.groupName
+        }
+        return (entryTitles + groupTitles).take(MAX_CONFLICT_TITLES)
+    }
 
     /**
      * 按用户裁决把冲突条目落回合并树（复用同步裁决的**单趟落树**原语，避免两份实现漂移）。
@@ -159,7 +189,7 @@ internal class VaultFileDriftMergeSupport(
      * 防御：合并产物中按 id 找不到该冲突条目时（理论不可达），退回以本地条目为底版执行同一
      * 字段级重裁——语义仍为「只重裁差异字段」，不放大为整树替换。
      */
-    private fun applyConflictPolicy(
+    private fun applyEntryConflictPolicy(
         mergedRoot: KdbxGroup,
         conflicts: List<ConflictedEntryPair>,
         policy: DriftMergeConflictPolicy
@@ -196,8 +226,10 @@ internal class VaultFileDriftMergeSupport(
                     )
                     // 副本必须换新 UUID：KDBX 要求 UUID 全局唯一，且同 UUID 副本在应用回分组树时
                     // 会与本地原条目命中同一槽位而互相覆盖（同 `KdbxMerger.resolveConflict` 口径）。
-                    val duplicate = diskSide
-                        .copy(id = KdbxUuid.random())
+                    // `ISSUE-P1-631`（审计发现）：history 必须同批跟随——走唯一实现
+                    // `KdbxEntryDuplicator`，否则副本 history 仍带原条目 UUID。
+                    val duplicate = KdbxEntryDuplicator
+                        .duplicateWithNewId(diskSide)
                         .withField(
                             KdbxConstants.Fields.TITLE,
                             ProtectedString(
@@ -214,6 +246,82 @@ internal class VaultFileDriftMergeSupport(
         }
         return applyResolvedEntriesToGroup(mergedRoot, byParent)
     }
+
+    /**
+     * `ISSUE-P1-631`（分组裁决）：按用户裁决把冲突分组落回合并树。
+     *
+     * - 本地 / 磁盘：只重裁差异字段（`KdbxGroupConflictResolver.resolveFieldsOnly`），
+     *   非差异字段保持三方合并产物；
+     * - 双方保留：原分组保留**本地**字段值，另在**同一父组下**插入一棵复制子树，其根取
+     *   **磁盘**字段值、名字带「磁盘冲突副本」后缀；复制体上分组与条目 UUID 全部重生成
+     *   （`KdbxGroupDuplicator`），history 指向新条目 UUID、子树内部引用重映射。
+     *
+     * 任一环节找不到目标节点（树结构与冲突清单不一致，理论不可达）返回 null，
+     * 调用方 fail-closed —— 绝不静默丢掉一条冲突。
+     */
+    private fun applyGroupConflictPolicy(
+        mergedRoot: KdbxGroup,
+        conflicts: List<ConflictedGroupPair>,
+        policy: DriftMergeConflictPolicy
+    ): KdbxGroup? {
+        val byHex = mergedRoot.allGroups().associateBy { it.id.toHexString() }
+        val replacements = mutableMapOf<KdbxUuid, KdbxGroup>()
+        val duplicates = mutableListOf<ConflictedGroupPair>()
+        for (pair in conflicts) {
+            val mergedGroup = byHex[pair.groupId] ?: return null
+            when (policy) {
+                DriftMergeConflictPolicy.KEEP_LOCAL -> {
+                    replacements[mergedGroup.id] = KdbxGroupConflictResolver.resolveFieldsOnly(
+                        merged = mergedGroup,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_LOCAL
+                    )
+                }
+                DriftMergeConflictPolicy.KEEP_DISK -> {
+                    replacements[mergedGroup.id] = KdbxGroupConflictResolver.resolveFieldsOnly(
+                        merged = mergedGroup,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_REMOTE
+                    )
+                }
+                DriftMergeConflictPolicy.KEEP_BOTH -> {
+                    replacements[mergedGroup.id] = KdbxGroupConflictResolver.resolveFieldsOnly(
+                        merged = mergedGroup,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_LOCAL
+                    )
+                    duplicates += pair
+                }
+            }
+        }
+        var root = KdbxGroupConflictResolver.applyResolvedGroupsToTree(mergedRoot, replacements)
+            ?: return null
+        for (pair in duplicates) {
+            val targetId = root.allGroups().firstOrNull { it.id.toHexString() == pair.groupId }?.id
+                ?: return null
+            root = KdbxGroupDuplicator.duplicateSubtreeAsSibling(
+                root = root,
+                targetId = targetId,
+                newName = duplicateGroupName(pair),
+                // 复制体根节点取磁盘侧字段值；parentGroupId 由复制器重挂为原分组的父组
+                resolveTargetFields = { duplicate ->
+                    KdbxGroupConflictResolver.resolveFieldsOnly(
+                        merged = duplicate,
+                        pair = pair,
+                        choice = ConflictResolutionChoice.KEEP_REMOTE
+                    )
+                }
+            ) ?: return null
+        }
+        return root
+    }
+
+    /** 分组冲突副本的显示名：磁盘侧组名 + 后缀（空名与条目侧同口径，退化为仅后缀） */
+    private fun duplicateGroupName(pair: ConflictedGroupPair): String {
+        val suffix = strings.get(R.string.ext_mod_merge_duplicate_suffix)
+        val diskName = pair.remoteGroup.name
+        return if (diskName.isBlank()) suffix else "$diskName ($suffix)"
+    }
 }
 
 /**
@@ -227,58 +335,4 @@ internal fun staleChoiceOwner(coordinator: VaultFileDriftCoordinator?, currentPa
     val prompted = coordinator?.lastPromptedPathIdentifier() ?: return null
     if (currentPathId.isEmpty()) return null
     return prompted.takeIf { it != currentPathId }
-}
-
-/**
- * `ISSUE-P1-631`（读取版本钉扎）：合并**读取时点**的通道身份与文件指纹。
- *
- * 用途：解析 / 合并是长窗口，窗口内磁盘可能被再次外部改写、会话也可能被换库——提交前
- * 复核本钉扎，把用旧版本算出的产物 fail-closed 拦下（`VaultFileDriftResolve.adoptAndPersist`）。
- *
- * 口径：判据与保存前漂移检测**同一实现**（[VaultFileDriftPolicy.shouldAbortSave]：路径不一致 /
- * size 不等 / mtime 差 ≥ 1s 均判已变），不另写一份；读取时点元数据不可读（`baseline == null`）
- * 时不把「不可读」当证据，仅在**当前**仍不可读时放行（与既有「宁可不提示」口径一致）。
- */
-internal class VaultFileReadPin private constructor(
-    private val pathId: String,
-    /** 捕获时是否走本地 `File` 通道（复核时通道类型变化 ⇔ 已换库/换通道） */
-    private val fileChannel: Boolean,
-    private val baseline: VaultFileBaseline?
-) {
-
-    /**
-     * 复核：通道身份未变且文件指纹未变 ⇒ true（可安全提交）。
-     *
-     * [currentPathId] / [currentFile] 必须取**复核时点**的会话当前值——换库后与捕获值不同，
-     * 直接判拒（并发 barrier 验收里「库 A 的旧任务不得提交到库 B」的第一道闸）。
-     */
-    fun isStillCurrent(context: Context?, currentPathId: String, currentFile: File?): Boolean {
-        if (pathId != currentPathId) return false
-        if (fileChannel != (currentFile != null)) return false
-        val current = if (currentFile != null) {
-            VaultFileBaseline.fromFile(currentFile)
-        } else {
-            VaultFileMetadataProbe.baselineFor(context, currentPathId)
-        }
-        val before = baseline ?: return current == null
-        val after = current ?: return false
-        return !VaultFileDriftPolicy.shouldAbortSave(
-            baseline = before.copy(pathIdentifier = currentPathId),
-            current = after
-        )
-    }
-
-    companion object {
-        /** 读取时点捕获（本地 `File` 直读属性；SAF 取文档元数据；不可读 ⇒ baseline 为 null） */
-        fun capture(context: Context?, pathId: String, localFile: File?): VaultFileReadPin =
-            VaultFileReadPin(
-                pathId = pathId,
-                fileChannel = localFile != null,
-                baseline = if (localFile != null) {
-                    VaultFileBaseline.fromFile(localFile)
-                } else {
-                    VaultFileMetadataProbe.baselineFor(context, pathId)
-                }
-            )
-    }
 }

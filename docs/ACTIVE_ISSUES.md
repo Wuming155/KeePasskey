@@ -26,8 +26,10 @@
 - 影响与触发：用户选择“合并后保存”仍可能丢失未提交本地条目/分组或恢复磁盘旧值；影响本地文件和 SAF 外部漂移处置，不代表普通三方同步均有此缺陷。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`；`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt`。
 - 已实现（2026-10-16）：会话持久化基线（`DatabaseSession.persistedBaselineSnapshot`——打开 / 重载 / 新建 / 保存 / Meta 提交 / 换密六类确认写盘点登记，绑定库身份与持久化修订，会话终止先清零再置空）；`VaultFileDriftResolve` 改按真实 base/local/disk 合并，基线缺失 / 不可信时按空底版双方并集语义（不推断删除）；同字段双侧修改不静默取一侧——以「本地 / 磁盘 / 双方保留」裁决提示（`VaultFileDriftCoordinator.mergeConflict`）驱动同一合并实现重算后提交；提交经实例身份 + 基线修订同一临界区校验（`adoptDatabaseIfUnchanged` 扩展）。本仓 JVM 验收：`VaultFileDriftMergeBaselineTest`（app，8 例，覆盖验收矩阵 1/2/3/4 与删除/修改组合，均重解析正式库核对）与 `PersistedBaselineCaptureTest`（database，8 例）全绿；全量 `test` 读数与门禁读数见方案「实施记录」。裁决口径登记 `PD-87`，边界登记限界 §45。
-- 深化（2026-10-16 第二轮）：裁决由「整条目二选一」收口为**只重裁差异字段**（`KdbxMerger.resolveConflictFieldsOnly`，非差异字段保持合并产物）；新增**读取版本钉扎**（`VaultFileReadPin`）与**裁决归属绑定**（换库后的过期选择一律拒绝，`PD-88`）；采纳 + 落盘为 `NonCancellable` 提交段；UI 重复提交守卫。**真机（Redmi 4X / API 37）**：`VaultFileDriftSafDeviceTest` 3 例（真实 `content://` 全链路 + 三种裁决落盘 + 写故障/损坏边界）与 `VaultFileDriftBackupDeviceTest` 1 例（`.bak` 重解析 + 失败保全）全绿；JVM 新增分组 5 例 / 并发 barrier 4 例（latch 闸门）/ 裁决范围 4 例 / 生命周期 7 例 / 边界 6 例。审查发现并处置：旧会话结果写新会话（已修）、Meta 不参与合并（确认存在、非本项引入，登记限界 §47）、分组双侧修改为 LWW 不提示（登记限界 §46）、SAF 部分写损坏文档后不可自修（既有 §24）。详见方案「实施记录」§8。
-- 尚未完成：Compose 点击级真机 UI 驱动（打开库 → 编辑 → 外部漂移 → 提示 → 合并 → 裁决 → 保存 → 重开）——本轮以生产单例图 + 仓库入口 + 协调器状态流完成**数据层**产品路径，未驱动 Compose 点击（仓库无 Compose UI 测试基建）；160 MiB 留存上限真尺寸未跑（以等价小额边界 + 常量断言覆盖）；物理内存擦除只证明数组就地覆盖（GC 后不可证明）。四层 connected 测试义务未触发（未触及 Rust/JNI/Native 加密分派与探活，未跑如实声明）。
+- 深化（2026-10-16 第二轮）：裁决由「整条目二选一」收口为**只重裁差异字段**（`KdbxMerger.resolveConflictFieldsOnly`，非差异字段保持合并产物）；新增**读取版本钉扎**（`VaultFileReadPin`）与**裁决归属绑定**（换库后的过期选择一律拒绝，`PD-88`）；采纳 + 落盘为 `NonCancellable` 提交段；UI 重复提交守卫。**真机（Redmi 4X / API 37）**：`VaultFileDriftSafDeviceTest` 3 例（真实 `content://` 全链路 + 三种裁决落盘 + 写故障/损坏边界）与 `VaultFileDriftBackupDeviceTest` 1 例（`.bak` 重解析 + 失败保全）全绿；JVM 新增分组 5 例 / 并发 barrier 4 例（latch 闸门）/ 裁决范围 4 例 / 生命周期 7 例 / 边界 6 例。审查发现并处置：旧会话结果写新会话（已修）、Meta 不参与合并（第三轮**定级** `ISSUE-P2-659`/P2）、分组双侧修改为 LWW 不提示（第三轮**已在漂移面修复**，同步面另立 `ISSUE-P2-660`）、SAF 部分写损坏文档后不可自修（既有 §24）。详见方案「实施记录」§8/§9。
+- 第三轮（2026-10-16，证据审计 + 收口）：① **分组静默 LWW 已修复**——合并器产出 `MergeResult.groupConflicts`，漂移面同字段双侧异值一律阻断待裁决并支持三种裁决落盘（「双方保留」复制整棵子树、UUID 全新）；② **读取版本钉扎升级为内容级**（整份密文 SHA-256，按同通道重读比对），消除「同尺寸改内容」与 ABA 复原的漏检面（SAF 无 mtime 时纯元数据判据不可靠）；③ **采纳 + 落盘合成同一临界区**（`adoptAndSaveIfUnchanged`，一次取锁），消除 adopt 与 save 之间换库导致「写入后来会话却回报成功」的窗口；④ **新增最小 UI 测试基建**（`src/debug` 宿主 Activity 挂生产对话框组合件）并以无障碍节点真实点击驱动关键路径；⑤ 160 MiB 三边界**真实尺寸实跑**（流式，含 `+1` 贯通与不等量克隆断言）。新发现并处置：Meta 不参与合并 → **定级 P2（`ISSUE-P2-659`）**；同步路径分组差异仍 LWW → **新登记 `ISSUE-P2-660`（P2）**。
+- 第四轮（2026-10-16，生命周期竞态审查与整改）：设备侧反向验收（Redmi 4X / API 37）实测复现**生产缺陷**——裁决（`MERGE_KEEP_*`）提交挂在组合作用域（`rememberCoroutineScope`）且受理即先清冲突提示，用户点击后退出页面即取消在途重算+落盘，形成「选择已被 UI 消费、提示全清、正式文件未变」的数据丢失第三态（复现用例 A/B 未改生产代码即稳定失败，读数 `实测=[Disk#1]；pending=null conflict=null`）。整改（生产代码）：① 处置提交移至协调器 `submitChoice` 的**应用级作用域**（`guardedScope`，按工程规则临界写操作不依赖 UI 生命周期；未用 `GlobalScope`、未扩大 `NonCancellable`）；② UI 状态不得领先持久化事实——受理不再先清提示，提交在途期间裁决对话框保持可见（按钮经 `choiceSubmissionInProgress` 禁用），成功清提示、失败保留裁决上下文可重试（三选路径行为不变）；③ 新增设备用例 6 例（受理后立即 recreate / 立即 destroy、三阶段 latch 门〔重读盘前 / 提交前 / 临界区内〕销毁宿主、保存失败注入），与既有 5 例**全类 11/11 真机通过**；阶段门 `DriftMergePhaseGates` 生产恒 null、仅 androidTest 注入。边界如实声明：提交仍随**进程终止**而终止（此时保留待决状态，由会话锁定路径自然清空）；「全量导航级 UI 路径」等尚未完成项见下条，状态保持「已实现 / 尚未完成」。
+- 尚未完成（**状态保持「已实现 / 尚未完成」**）：全量导航级真机 UI 路径（解锁页 → 列表 → 编辑页的**控件点击**）未驱动——本轮 UI 验收覆盖「漂移提示出现 → 点合并 → 裁决出现 → 点裁决 → 落盘 → 锁库重开」，其中解锁 / 保存 / 锁库三步经生产仓库入口（与 ViewModel 同一组 API）；物理内存擦除只证明数组就地覆盖（GC 后不可证明）；未触及 Rust/JNI/Native 加密分派与探活，四层 connected 测试义务不触发（未跑，如实声明）。逐行矩阵与证据见方案「实施记录」§9。
 - [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：目标、模块、步骤、失败处理、验收、回退与实施记录。
 
 ## P2 中危缺陷与协议/测试缺口
@@ -175,6 +177,26 @@
 - 位置：`app/src/test/java/com/keepasskey/app/ui/screens/settings/SettingsThinOrchestrationTest.kt:112`。
 - 已实现：无（本轮仅登记，未改用例；按测试资产纪律不得放宽断言或改测产品行为）。尚未完成：按同文件既有口径补真实时间缓冲（`Thread.sleep` + 复推）或改 `pumpUntil` 轮询该反馈收敛，并在稳定复现后实跑确认；用例改动随修复一并实跑。
 - 独立整改方案：尚未编制（本轮仅登记；修复前按 AGENTS 补方案或并入相邻批次）。
+
+### ISSUE-P2-659 漂移合并**不合并库级 Meta**：外部工具改动的库名 / 描述 / 默认用户名 / 自定义数据被静默覆盖
+
+- 核实：2026-10-16（Asia/Shanghai），`ISSUE-P1-631` 第三轮审计；静态确认 + 落盘产物逐字段核对；置信度：高。
+- 问题：漂移合并产物为 `localDb.copy(rootGroup=…, deletedObjects=…, customIcons=…)`——库级 Meta（库名 / 描述 / 默认用户名 / 颜色 / 自定义数据 / 回收站配置 / 历史维护参数 / 库级 `customData`）**一律取本地**，`KdbxMerger` 无 Meta 合并面。外部工具（KeePassXC / 官方桌面端）对 Meta 的改动，在用户选择「合并后保存」并写盘后被**永久覆盖且无任何提示**。
+- 影响与触发：多工具协同同一库文件时，外部端的库名 / 描述 / 默认用户名 / 自定义数据改动会丢失；本地一侧的 Meta **不会**丢失（写盘的就是本地库）。触发序列：外部工具改 Meta → 本机继续编辑条目 → 保存触发漂移 → 选「合并后保存」。
+- 定级与处置（第三轮结论）：**P2**（非 P1）。理由：①与本 P1 非同一因果链（即便基线完全真实也照旧发生）；②损失方向与 P1 相反且单向（丢的是外部那一次改动，本地 Meta 永不丢）；③与导入合并 / 同步路径**同源**（`KdbxMergeController` 同形），只改漂移会造出第三套 Meta 口径；④修复需先定义 `recycleBinUuid` / `entryTemplatesGroup` / `masterKeyChanged` 等**不可合并身份字段**的白 / 黑名单，且 Meta 为标量、「双方保留」无对应语义，需要第三类裁决面。登记限界 §47（已由「单纯登记」升级为「定级 + 拆分」）。
+- 位置：`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`（合并产物构造）；`sync/src/main/java/com/keepasskey/sync/merge/KdbxMerger.kt`（`MergeResult` 字段表）；`app/src/main/java/com/keepasskey/app/data/importer/KdbxMergeController.kt`（同形先例）。
+- 已实现：无（本轮定级与登记）。尚未完成：Meta 字段级三方合并实现与标量冲突裁决语义；导入 / 同步两路径同批对齐；产品复现与验收。
+- [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：本项由该方案第三轮审计发现，详见其「实施记录」§9.3。
+
+### ISSUE-P2-660 同步（云端）路径的**分组**同字段双侧异值仍为字段级 LWW，不进冲突面
+
+- 核实：2026-10-16（Asia/Shanghai），`ISSUE-P1-631` 第三轮审计；静态确认；置信度：高。
+- 问题：合并器现已产出 `MergeResult.groupConflicts`，**漂移面**已据此阻断并裁决；但 `sync` 路径的消费方只读 `MergeResult.conflicts`（条目级），**不读** `groupConflicts` ⇒ 云端同步时分组同字段双侧异值仍由 `KdbxGroupFieldMerge` 按 LWW 静默定案，用户无任何提示。
+- 影响与触发：两端各自修改同一分组的组名 / 备注 / 图标 / 父组 / 组级自定义数据且取值不同时，一端修改被静默丢弃。触发序列：设备 A 改分组名 → 设备 B 改同一分组名为另一值 → 任一端同步。
+- 定级：P2（与漂移面同源同型；漂移面已证成可行，同步面照同一条路即可）。范围说明见限界 §46（第三轮已把「分组级差异不产生冲突清单」的旧边界改写为「漂移面已修 / 同步面仍 LWW」）。
+- 位置：`sync/src/main/java/com/keepasskey/sync/merge/KdbxGroupFieldMerge.kt`；`sync/.../KdbxMerger.kt`（`MergeResult.groupConflicts`）；`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt`（消费方）。
+- 已实现：无（本轮登记）。尚未完成：同步冲突页接入分组差异（数据模型 + 逐条裁决落树 + 分组「双方保留」语义）与验收。
+- 关闭条件：同步消费方读 `groupConflicts` 并复用 `KdbxGroupConflictResolver` / `KdbxGroupDuplicator`，且限界 §46 收窄为「已对齐」。
 
 ## P3 低危问题、特性接线与体验优化
 ### ISSUE-P3-642 原生Passkey候选在请求RP不匹配时仍走包名回退

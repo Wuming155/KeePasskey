@@ -121,6 +121,15 @@ internal class PersistedBaselineCapturingInputStream(
         sink.wipe()
     }
 
+    /**
+     * 仅供测试：当前捕获长度（超限已放弃时为 -1）。
+     *
+     * 存在理由：真实尺寸边界用例（160 MiB±1）不能走 [capturedBytes]——那会**再克隆一份**等量
+     * 缓冲（160 MiB 级），把「验证上限行为」变成「验证堆够不够大」，掩盖被测语义。
+     * 本访问口只读内部计数，不产生第二份拷贝。
+     */
+    internal fun capturedLengthForTesting(): Int = if (overflow) -1 else sink.size()
+
     private companion object {
         /** 初始容量与 ByteArrayOutputStream 默认族一致，按需倍增 */
         const val CAPTURE_INITIAL_BYTES = 32

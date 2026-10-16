@@ -68,6 +68,32 @@ internal class SettingsIssueWiring(
 
     fun scanDuplicateEntries() = preferencesController.databaseMetaController.scanDuplicateEntries()
 
+    /**
+     * `ISSUE-P1-631`（生命周期整改）：用户处置的**稳定提交入口**——经协调器
+     * `submitChoice` 把执行体挂到应用级作用域，不随组合 / Activity / ViewModel 生命周期取消；
+     * 在途重入被拒绝（返回 false）。返回 true = 已受理（提交在应用级作用域继续）。
+     */
+    fun submitExternalModificationChoice(
+        choice: com.keepasskey.app.security.ExternalModificationChoice
+    ): Boolean {
+        val coordinator = vaultFileDriftCoordinator ?: return false
+        return coordinator.submitChoice {
+            val result = vaultRepository.applyExternalModificationChoice(choice)
+            // ISSUE-P1-631：dismiss 只清三选提示——合并冲突裁决提示由 resolve 的终结路径显式管理，
+            // 不得在此误杀刚置起的待裁决状态（dismiss 语义见 VaultFileDriftCoordinator）
+            vaultFileDriftCoordinator?.dismiss()
+            result
+        }
+    }
+
+    /** `ISSUE-P1-631`（生命周期整改）：处置提交在途标记（应用级状态，供 UI 禁用按钮） */
+    private val noCoordinatorSubmissionProgress = MutableStateFlow(false)
+
+    /** `ISSUE-P1-631`（生命周期整改）：处置提交在途标记（应用级状态，供 UI 禁用按钮） */
+    val choiceSubmissionInProgress: StateFlow<Boolean>
+        get() = vaultFileDriftCoordinator?.choiceSubmissionInProgress
+            ?: noCoordinatorSubmissionProgress
+
     suspend fun applyExternalModificationChoice(
         choice: com.keepasskey.app.security.ExternalModificationChoice
     ): KdbxResult<Unit> {

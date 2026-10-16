@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.core.session.SessionLockObserver
@@ -85,7 +86,7 @@ class DatabaseSession(
     private val mutations = SessionContentMutations(
         mutex, core.database, core.state, { core.readOnlyMode }
     ) { core.persistedBaselineRevision() }
-    private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress, mutations::publishCommittedDatabaseMeta)
+    private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress, mutations::publishCommittedDatabaseMeta, mutations)
     /** Atomic target snapshot and Meta commit entry points. */
     val writeIntents = DatabaseSessionWriteIntents(mutex, core, persistence)
 
@@ -302,6 +303,36 @@ class DatabaseSession(
     ): Boolean = mutations.adoptDatabaseIfUnchanged(
         expectedAtCycleStart,
         replacement,
+        expectedPersistedBaselineRevision
+    )
+
+    /**
+     * `ISSUE-P1-631`（生命周期收口）：**可取消预备段**——修剪候选并把候选树序列化为密文
+     * （含保存侧 KDF / Argon2 重算）。不取会话锁、不发布、不触碰基线与状态；详见
+     * [SessionPersistence.prepareSerializedSave] 的 KDoc（职责切分与 fail-closed 论证）。
+     *
+     * 返回的 [PreparedSerializedSave] 由调用方拥有：提交消耗或放弃后
+     * 必须 [PreparedSerializedSave.wipe] 清零（整库密文不得滞留）。
+     */
+    suspend fun prepareSerializedSave(
+        candidate: KdbxDatabase
+    ): KdbxResult<PreparedSerializedSave> = persistence.prepareSerializedSave(candidate)
+
+    /**
+     * `ISSUE-P1-631`（生命周期收口）：**最小提交临界区**（调用方包在其 `NonCancellable` 内）——
+     * 同一会话锁内「复检 → 校验实例身份与基线修订 → 采用 → 写预备密文 → 基线前移 → 终态」。
+     * 取代原 `adoptAndSaveIfUnchanged`（序列化已移至 [prepareSerializedSave] 可取消段），
+     * 语义等价性论证见 [SessionPersistence.commitPreparedSave] 的 KDoc。
+     */
+    suspend fun commitPreparedSave(
+        expectedAtCycleStart: KdbxDatabase,
+        candidate: KdbxDatabase,
+        prepared: PreparedSerializedSave,
+        expectedPersistedBaselineRevision: Long? = null
+    ): KdbxResult<Unit> = persistence.commitPreparedSave(
+        expectedAtCycleStart,
+        candidate,
+        prepared,
         expectedPersistedBaselineRevision
     )
 

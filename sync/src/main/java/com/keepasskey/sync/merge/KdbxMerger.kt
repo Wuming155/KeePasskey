@@ -66,7 +66,15 @@ data class MergeResult(
     val mergedDeletedObjects: List<DeletedObject>,
     val conflicts: List<ConflictedEntryPair>,
     // 不设默认值：强制每个构造点显式给出图标池（防「忘了采用合并池」式回归）
-    val mergedCustomIcons: List<CustomIcon>
+    val mergedCustomIcons: List<CustomIcon>,
+    /**
+     * `ISSUE-P1-631`：**分组**同字段双侧异值的冲突清单（与 [conflicts] 并列，条目与分组各一份）。
+     *
+     * 为什么必须带出：分组此前无冲突模型，双侧改名 / 改备注等由 LWW 静默定案而调用方无从察觉。
+     * 消费方（漂移合并）据本清单决定「阻断待裁决」；同步等既有调用方可暂只读 [conflicts]
+     * ——其分组口径为存量行为，不在本项范围（见已知工程限界）。
+     */
+    val groupConflicts: List<ConflictedGroupPair> = emptyList()
 )
 
 /**
@@ -130,7 +138,7 @@ object KdbxMerger {
 
         // 2. 合并分组结构
         val allGroupUuids = (baseGroups.keys + localGroups.keys + remoteGroups.keys).filter { it != rootId }.toSet()
-        val survivingGroups = KdbxGroupMerger.mergeSurvivingGroups(
+        val groupMerge = KdbxGroupMerger.mergeSurvivingGroups(
             allGroupUuids = allGroupUuids,
             baseGroups = baseGroups,
             localGroups = localGroups,
@@ -138,6 +146,7 @@ object KdbxMerger {
             localDeleted = localDeleted,
             remoteDeleted = remoteDeleted
         )
+        val survivingGroups = groupMerge.survivingGroups
 
         // 3. 合并条目
         val allEntryUuids = (baseEntries.keys + localEntries.keys + remoteEntries.keys + localDeleted.keys + remoteDeleted.keys)
@@ -190,7 +199,9 @@ object KdbxMerger {
             mergedDeletedObjects = mergedDeletedObjects,
             conflicts = conflicts,
             // ISSUE-P2-280 AC①：自定义图标池参与合并（对齐官方 MergeInCustomIcons 口径）
-            mergedCustomIcons = mergeCustomIcons(local.customIcons, remote.customIcons)
+            mergedCustomIcons = mergeCustomIcons(local.customIcons, remote.customIcons),
+            // ISSUE-P1-631：分组同字段双侧异值一并带出（不得只给存活集合而吞掉冲突信号）
+            groupConflicts = groupMerge.conflicts
         )
     }
 
@@ -355,9 +366,11 @@ object KdbxMerger {
             ConflictResolutionChoice.KEEP_REMOTE -> listOf(pair.remoteEntry)
             ConflictResolutionChoice.DUPLICATE_BOTH -> {
                 // 冲突副本必须换新 UUID：KDBX 要求 UUID 全局唯一，且同 UUID 副本
-                // 在应用回分组树时会与本地原条目命中同一槽位而互相覆盖
-                val remoteDuplicate = pair.remoteEntry
-                    .copy(id = KdbxUuid.random())
+                // 在应用回分组树时会与本地原条目命中同一槽位而互相覆盖。
+                // `ISSUE-P1-631`：history 必须同批跟随（走唯一实现 `KdbxEntryDuplicator`），
+                // 否则副本的 history 仍带着**原条目**的 UUID（与仍存活的原条目混淆）。
+                val remoteDuplicate = KdbxEntryDuplicator
+                    .duplicateWithNewId(pair.remoteEntry)
                     .withField(
                         KdbxConstants.Fields.TITLE,
                         ProtectedString("${pair.remoteEntry.title} ($duplicateTitleSuffix)", isProtected = false)

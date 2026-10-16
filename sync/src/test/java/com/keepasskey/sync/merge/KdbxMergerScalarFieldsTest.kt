@@ -151,13 +151,15 @@ class KdbxMergerScalarFieldsTest {
             remoteDeleted = emptyMap()
         )
 
-        val merged = surviving.getValue(GROUP_ID)
+        val merged = surviving.survivingGroups.getValue(GROUP_ID)
         assertEquals("本地的 customIconId 改动必须保留（不得静默丢）", localIcon, merged.customIconId)
         assertEquals("远端的 name 改动必须保留", "远端改名", merged.name)
+        // ISSUE-P1-631：单侧各改一个字段 != 同字段分叉，不得产生分组冲突（避免误报把正常合并挡下）
+        assertEquals("单侧各改不同字段不应登记分组冲突", 0, surviving.conflicts.size)
     }
 
     @Test
-    fun `分组同改 customIconId 异值：LWW 取胜`() {
+    fun `分组同改 customIconId 异值：LWW 取胜且必须登记分组冲突`() {
         val localIcon = KdbxUuid.random()
         val remoteIcon = KdbxUuid.random()
         val base = group(mod = t0)
@@ -173,7 +175,18 @@ class KdbxMergerScalarFieldsTest {
             remoteDeleted = emptyMap()
         )
 
-        assertEquals("双侧异值须按 LWW 裁决（远端较新）", remoteIcon, surviving.getValue(GROUP_ID).customIconId)
+        assertEquals(
+            "双侧异值按 LWW 给出临时值（远端较新）",
+            remoteIcon,
+            surviving.survivingGroups.getValue(GROUP_ID).customIconId
+        )
+        // ISSUE-P1-631：LWW 只是临时值——同字段双侧异值必须登记冲突，否则就是静默吞掉本地改名
+        assertEquals("同字段双侧异值必须登记分组冲突", 1, surviving.conflicts.size)
+        assertEquals(
+            "冲突字段键必须指向 customIconId",
+            listOf(KdbxGroupConflictKeys.CUSTOM_ICON_ID),
+            surviving.conflicts.single().modifiedFields
+        )
     }
 
     private companion object {

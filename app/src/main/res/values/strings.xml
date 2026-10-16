@@ -833,7 +833,8 @@
     <string name="ext_mod_merge_hint_fallback">「合并」走既有 KdbxMerger 三方合并；「重载」丢弃未保存的内存改动；「放弃」不写盘并保留当前会话。</string>
     <string name="ext_mod_merge_conflict_pending">合并未完成：%1$d 处条目存在双侧修改冲突，待你裁决</string>
     <string name="ext_mod_merge_conflict_title">合并发现冲突</string>
-    <string name="ext_mod_merge_conflict_body">%1$d 处条目在本地与磁盘上都被修改，无法自动判定保留哪一侧。请选择处理方式（裁决前不会写盘）：</string>
+    <string name="ext_mod_merge_conflict_group_prefix">分组：</string>
+    <string name="ext_mod_merge_conflict_body">%1$d 处内容（条目 / 分组）在本地与磁盘上都被修改，无法自动判定保留哪一侧。请选择处理方式（裁决前不会写盘）：</string>
     <string name="ext_mod_merge_conflict_keep_local">以本地版本为准</string>
     <string name="ext_mod_merge_conflict_keep_disk">以磁盘版本为准</string>
     <string name="ext_mod_merge_conflict_keep_both">双方保留（生成磁盘冲突副本）</string>

@@ -1,10 +1,14 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.app.coroutines.guardedScope
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,6 +39,50 @@ class VaultFileDriftCoordinator @Inject constructor(
     /** `ISSUE-P1-631`：待用户裁决的合并冲突提示（null = 无待决；与 [pending] 互斥） */
     private val _mergeConflict = MutableStateFlow<VaultFileDriftMergeConflict?>(null)
     val mergeConflict: StateFlow<VaultFileDriftMergeConflict?> = _mergeConflict.asStateFlow()
+
+    /**
+     * `ISSUE-P1-631`（生命周期整改）：用户处置（三选 / 裁决）提交**在途**标记。
+     *
+     * 取代整改前挂在组合内的 `remember { mutableStateOf }` 守卫：提交已改由
+     * [submitChoice] 在应用级作用域执行（见其 KDoc），守卫状态必须与之同生命周期——
+     * UI 据此禁用按钮（真值期间禁止重入，含「稍后处理」取消），与组合是否存活无关。
+     */
+    private val _choiceSubmissionInProgress = MutableStateFlow(false)
+    val choiceSubmissionInProgress: StateFlow<Boolean> = _choiceSubmissionInProgress.asStateFlow()
+
+    /**
+     * 处置提交的**应用级作用域**（经 [guardedScope] 统一工厂创建，进程存活期内不取消）。
+     *
+     * 为什么必须是应用级而非组合 / ViewModel 作用域：漂移裁决是**数据层持久化事务**，
+     * 整改前挂在 `rememberCoroutineScope` 上，真机实测（复现用例 A/B）用户点击裁决后
+     * 退出页面即可让在途重算+落盘被取消，形成「选择已被 UI 消费、提示已清、文件未变」
+     * 的第三状态——数据丢失形态。应用级作用域保证提交只随进程终止而终止。
+     */
+    private val submissionScope: CoroutineScope = guardedScope(tag = "VaultFileDriftCoordinator")
+
+    /**
+     * `ISSUE-P1-631`（生命周期整改）：用户处置的**稳定提交入口**。
+     *
+     * [execution] 在 [submissionScope]（应用级）上执行，不随组合离开 / Activity 销毁 /
+     * ViewModel 清除而取消；在途期间重入被拒绝（返回 false，UI 按钮已禁用，此为防御）。
+     * 调用方（生产 `SettingsIssueWiring` / 设备侧 `DriftDialogHostActivity`）把
+     * 「调仓库处置 + 收尾清理」整体作为 [execution] 传入，本方法只负责作用域与重入守卫。
+     *
+     * 取消语义：应用级作用域仅在进程结束时撤销；此时保留全部待决状态（不有意清理），
+     * 由下次会话的锁定 / 换库路径自然清空——不存在「UI 已消费选择而落盘被取消」的中间态。
+     */
+    fun submitChoice(execution: suspend () -> KdbxResult<Unit>): Boolean {
+        if (_choiceSubmissionInProgress.value) return false
+        _choiceSubmissionInProgress.value = true
+        submissionScope.launch {
+            try {
+                execution()
+            } finally {
+                _choiceSubmissionInProgress.value = false
+            }
+        }
+        return true
+    }
 
     /**
      * `ISSUE-P1-631`（裁决归属）：**最近一次被唤起提示的库路径标识**。

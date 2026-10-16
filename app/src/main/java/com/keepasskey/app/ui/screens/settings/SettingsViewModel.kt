@@ -338,10 +338,22 @@ class SettingsViewModel @Inject constructor(
         issueWiring.setDatabaseMeta(databaseName, databaseDescription, defaultUserName)
     /** ISSUE-P3-382：库内重复条目只读扫描 */
     fun scanDuplicateEntries() = issueWiring.scanDuplicateEntries()
-    /** ISSUE-P2-378：外部修改三选处置 */
+    /** ISSUE-P2-378：外部修改三选处置（数据层入口，设备用例 / 数据层直调仍走此 suspend API） */
     suspend fun applyExternalModificationChoice(
         choice: com.keepasskey.app.security.ExternalModificationChoice
     ) = issueWiring.applyExternalModificationChoice(choice)
+
+    /**
+     * `ISSUE-P1-631`（生命周期整改）：用户处置的**稳定提交入口**——应用级作用域执行，
+     * 不随组合 / Activity / ViewModel 生命周期取消（漂移裁决是数据层持久化事务；
+     * UI 组合只发 intent）。返回 true = 已受理。
+     */
+    fun submitExternalModificationChoice(
+        choice: com.keepasskey.app.security.ExternalModificationChoice
+    ): Boolean = issueWiring.submitExternalModificationChoice(choice)
+
+    /** `ISSUE-P1-631`（生命周期整改）：处置提交在途标记（UI 禁用按钮 + 在途「正在保存」语义） */
+    val choiceSubmissionInProgress: StateFlow<Boolean> get() = issueWiring.choiceSubmissionInProgress
     /** ISSUE-P2-378：待决外部修改提示（KeePasskeyApp 全局对话框消费） */
     val externalModificationPending: StateFlow<com.keepasskey.app.security.VaultFileDriftPrompt?> get() = issueWiring.pending
     /** ISSUE-P1-631：待裁决的漂移合并冲突（KeePasskeyApp 全局对话框消费；与三选互斥） */

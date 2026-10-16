@@ -13,6 +13,7 @@ import com.keepasskey.app.util.StreamLimitExceededException
 import com.keepasskey.app.util.readBoundedBytes
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
@@ -67,8 +68,22 @@ internal class VaultFileDriftResolve(
      * 完成换库或二次外部改写后放行，验证 adopt / commit 必然被实例身份、基线修订或
      * 读取版本钉扎拦截——不以概率性 sleep 制造竞态。
      */
-    private val mergeCommitGate: (suspend () -> Unit)? = null
+    private val mergeCommitGate: (suspend () -> Unit)? = null,
+    /**
+     * `ISSUE-P1-631`（生命周期验收）：合并流程入口门——用户点击已受理、**重读磁盘前**。
+     * 生产恒为 null；仅设备侧生命周期竞态验收注入（见 `DriftMergePhaseGates`）。
+     */
+    private val mergeStartGate: (suspend () -> Unit)? = null,
+    /**
+     * `ISSUE-P1-631`（生命周期验收）：提交临界区已进入（`NonCancellable` 区内、元数据复核前）。
+     * 生产恒为 null；仅设备侧生命周期竞态验收注入，用于精确验证「临界区开始后宿主销毁，
+     * 落盘仍完成」——与 [mergeCommitGate] 留在区外的既有设计不冲突（那是同一钩子，本钩子在区内）。
+     */
+    private val commitEnteredGate: (suspend () -> Unit)? = null
 ) {
+
+    /** `ISSUE-P1-631`：磁盘源访问（读字节 / SAF 文档句柄；实现见 [VaultFileDriftSourceAccess]） */
+    private val sourceAccess = VaultFileDriftSourceAccess(context, maxDriftReadBytes)
 
     /** `ISSUE-P1-631`：真实基线解析与冲突裁决支持（实现见 [VaultFileDriftMergeSupport]） */
     private val mergeSupport = VaultFileDriftMergeSupport(databaseSession, strings, driftCoordinator)
@@ -115,14 +130,23 @@ internal class VaultFileDriftResolve(
                 ExternalModificationChoice.MERGE_KEEP_LOCAL,
                 ExternalModificationChoice.MERGE_KEEP_DISK,
                 ExternalModificationChoice.MERGE_KEEP_BOTH -> {
-                    // 裁决已受理：先关提示（重算期间不残留对话框）；失败路径由 requestPrompt 归还三选
-                    driftCoordinator?.clearMergeConflictPrompt()
+                    // `ISSUE-P1-631`（生命周期整改，原「受理即先清提示」已废除）：裁决是数据层
+                    // 持久化事务，UI 状态**不得领先持久化事实**——重算 + 落盘完成前冲突提示保持
+                    // 置起（按钮经 `choiceSubmissionInProgress` 禁用），失败 / 取消时用户仍能
+                    // 看到待裁决上下文并重试；成功路径由 [adoptAndPersist] 显式清提示。
+                    // 整改前「先清提示」配合组合作用域提交，被设备用例实测复现为：
+                    // 宿主销毁 ⇒ 在途提交被取消 ⇒ 「选择已被 UI 消费、提示全清、文件未变」。
                     mergeAndSave(pathId, localFile, choice.mergePolicy)
                 }
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            driftCoordinator?.requestPrompt(pathId)
+            // `ISSUE-P1-631`（生命周期整改）：裁决（KEEP_*）失败时**保留**冲突提示供重试——
+            // 受理不再先清提示，此处不得以 requestPrompt 把仍有效的裁决上下文覆盖成三选；
+            // 会话已在窗口内切换时提示会由锁定观察者清空，同样无需（也不应）重建。
+            if (choice.mergePolicy == null) {
+                driftCoordinator?.requestPrompt(pathId)
+            }
             // ISSUE-P3-550：`t.message` 携带**库文件本地路径**（漂移处置的异常常来自
             // 文件通道），只进日志；UI 侧统一走错误码映射（未归类 ⇒ `err_unknown`）
             AppLog.w(DRIFT_LOG_TAG, "漂移处置失败: choice=$choice", t)
@@ -139,7 +163,7 @@ internal class VaultFileDriftResolve(
         pathId: String,
         localFile: File?
     ): KdbxResult<Unit> {
-        val saf = if (localFile == null) safChannel(pathId) else null
+        val saf = if (localFile == null) sourceAccess.safChannel(pathId) else null
         if (localFile == null && saf == null) return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
         if (localFile != null && !localFile.exists()) {
             return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
@@ -184,12 +208,24 @@ internal class VaultFileDriftResolve(
         localFile: File?,
         policy: DriftMergeConflictPolicy?
     ): KdbxResult<Unit> {
-        val diskBytes = readCurrentBytes(localFile, pathId)
+        // `ISSUE-P1-631`（生命周期验收）：合并入口确定性暂停点（生产恒 null，零开销）。
+        // **仅对裁决重算（policy != null）生效**：生命周期验收针对的是 KEEP_* 提交；
+        // 若对首击三选合并同样生效，验收用例自己的「进入裁决」前置就会卡死在自己的门上。
+        if (policy != null) mergeStartGate?.invoke()
+        val diskBytes = sourceAccess.readCurrentBytes(localFile, pathId)
             ?: return unreadable(ExternalModificationChoice.MERGE_AND_SAVE)
-        // ISSUE-P1-631（读取版本钉扎）：记录**读取时点**的通道身份与文件指纹。解析 / 合并是
-        // 长窗口，窗口内磁盘可能被再次外部改写、会话也可能被换库——提交前复核，把过期产物
-        // fail-closed 拦下，绝不把用旧版本算出的结果写回覆盖新版本。
-        val readFingerprint = VaultFileReadPin.capture(context, pathId, localFile)
+        // ISSUE-P1-631（读取版本钉扎）：记录**读取时点**的通道身份、内容摘要与元数据。
+        // 解析 / 合并是长窗口，窗口内磁盘可能被再次外部改写、会话也可能被换库——提交前复核，
+        // 把过期产物 fail-closed 拦下，绝不把用旧版本算出的结果写回覆盖新版本。
+        // 摘要直接取**本次用于合并的那份字节**（不重读：重读会引入「钉扎的是另一份字节」的错位）。
+        val readFingerprint = VaultFileReadPin.capture(
+            context = context,
+            pathId = pathId,
+            localFile = localFile,
+            content = diskBytes,
+            // 复核与读取**同一实现**（同一上限 / 同一失败语义）：另写读法会在超限与异常边界上分叉
+            reReadContent = { sourceAccess.readCurrentBytes(localFile, pathId) }
+        )
         val diskDb = databaseSession.parseExternalDatabase(diskBytes).getOrThrow()
         var baseDb: KdbxDatabase? = null
         try {
@@ -212,7 +248,7 @@ internal class VaultFileDriftResolve(
                     IllegalStateException("漂移合并存在待裁决冲突"),
                     strings.get(R.string.ext_mod_merge_conflict_pending, merged.conflicts.size)
                 )
-            return adoptAndPersist(localDb, merged, mergedRoot, baseline?.revision, pathId, localFile, readFingerprint)
+            return adoptAndPersist(localDb, merged, mergedRoot, baseline?.revision, pathId, localFile, readFingerprint, policy)
         } finally {
             // ISSUE-P3-471：此处**必须**走身份集合判定，不得裸调 `diskDb.clearSensitiveData()`——
             // 合并器对「磁盘独有 / 磁盘胜出的条目」与「磁盘独有的图标」**复用原实例**，采用后这些
@@ -230,13 +266,16 @@ internal class VaultFileDriftResolve(
     }
 
     /**
-     * `ISSUE-P1-631`：提交侧——先在**确定性同步点**上复核「读取版本钉扎」（通道身份 + 文件
-     * 指纹未变），再于同一临界区校验（会话树实例身份 + 持久化基线修订）后采用合并产物并落盘。
+     * `ISSUE-P1-631`：提交侧——复核「读取版本钉扎」后，在**同一次会话临界区**内完成
+     * 「校验实例身份 + 持久化基线修订 → 采用合并产物 → 落盘」（`adoptAndSaveIfUnchanged`）。
      *
-     * **采用与落盘不可被取消切断**：adopt 与 save 之间若被取消，会留下「内存已是合并产物、
-     * 磁盘仍是外部版本」的分叉状态；两者合成一个 `NonCancellable` 提交段（与
-     * `SessionOpener.createNew` 的「落盘与会话切换是同一临界操作」同口径），提交完成后
-     * 取消由下一挂起点照常传播。
+     * **`NonCancellable` 边界**：只包「钉扎复核 → 采用 → 落盘」这一极小临界区——读盘、解析、
+     * 三方合并、裁决与 `mergeCommitGate` 均在**区外**（取消照常生效）。钉扎复核由区外移入区内，
+     * 是因为「进 `withContext` 前的调度切换」会给「窗口内再次外部改写」留缝。
+     * 采纳与落盘合成一次取锁，消除「adopt 后释放锁 → 换库 → save 写到后来会话」的窗口。
+     * 区内的写盘使**取消被推迟到写回返回**（无安全中断中点，有意取舍，与 `SessionOpener.createNew`
+     * 同口径）；临界区跑完后取消才传播，此调用可能以 `CancellationException` 收场，
+     * 但磁盘与内存已同处合并后状态，提示按成败清除 / 重建，不产生分叉。
      */
     private suspend fun adoptAndPersist(
         localDb: KdbxDatabase,
@@ -245,18 +284,22 @@ internal class VaultFileDriftResolve(
         baselineRevision: Long?,
         pathId: String,
         localFile: File?,
-        readFingerprint: VaultFileReadPin
+        readFingerprint: VaultFileReadPin,
+        policy: DriftMergeConflictPolicy?
     ): KdbxResult<Unit> {
-        // ISSUE-P1-631：并发 barrier 验收的受控暂停点（生产恒 null，不引入任何调度）
+        // ISSUE-P1-631：并发 barrier 验收的受控暂停点（生产恒 null，不引入任何调度）。
+        // 刻意留在 NonCancellable **之外**——取消应能在「尚未开始提交」时正常生效。
         mergeCommitGate?.invoke()
-        // 复核时取**当前**会话的通道与文件（不是捕获时的实参）——换库后二者必然不同
+        // 内容级复核（区外，**可取消**）：按同通道重读当前字节并比对 SHA-256。
+        // 放在区外是有意取舍——重读最大可达读取上限（160 MiB），放进不可取消区会把「用户退出 /
+        // 取消」拖到重读结束；代价是与采纳之间留下极短窗口，该窗口由区内的元数据复核兜底。
         if (!readFingerprint.isStillCurrent(
                 context,
                 databaseSession.currentPathIdentifier.orEmpty(),
                 databaseSession.currentFile
             )
         ) {
-            driftCoordinator?.requestPrompt(pathId)
+            restorePromptsAfterCommitFailure(policy, pathId)
             AppLog.w(DRIFT_LOG_TAG, "读取后磁盘版本已变化（或已换库），放弃本次合并提交")
             return KdbxResult.Failure(
                 IllegalStateException("读取后磁盘版本已变化"),
@@ -266,36 +309,92 @@ internal class VaultFileDriftResolve(
                 )
             )
         }
-        return withContext(NonCancellable) {
-            val adopted = databaseSession.adoptDatabaseIfUnchanged(
-                expectedAtCycleStart = localDb,
-                replacement = localDb.copy(
-                    rootGroup = mergedRoot,
-                    deletedObjects = merged.mergedDeletedObjects,
-                    customIcons = merged.mergedCustomIcons
-                ),
-                // 基线修订与实例身份在同一临界区校验：窗口内确认写盘 / 会话变化 ⇒ fail-closed
-                expectedPersistedBaselineRevision = baselineRevision
-            )
-            if (!adopted) {
-                driftCoordinator?.requestPrompt(pathId)
-                return@withContext KdbxResult.Failure(
-                    IllegalStateException("合并窗口内会话树已变化"),
+        // `ISSUE-P1-631`（生命周期收口）：**可取消预备段**——修剪 + 保存侧 KDF/Argon2 + 序列化
+        // 全部在取消区内完成（真机秒级 CPU 不得包进 NonCancellable）；产物为密文 + 修剪候选根，
+        // 会话状态零触碰。失败 / 取消 ⇒ 密文清零、会话无痕。
+        val replacement = localDb.copy(
+            rootGroup = mergedRoot,
+            deletedObjects = merged.mergedDeletedObjects,
+            customIcons = merged.mergedCustomIcons
+        )
+        val prepared = when (val p = databaseSession.prepareSerializedSave(replacement)) {
+            is KdbxResult.Success -> p.data
+            is KdbxResult.Failure -> {
+                restorePromptsAfterCommitFailure(policy, pathId)
+                return KdbxResult.Failure(p.error, strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_unknown)), p.code)
+            }
+        }
+        try {
+            return withContext(NonCancellable) {
+                // `ISSUE-P1-631`（生命周期验收）：提交临界区已进入的确定性暂停点（生产恒 null；
+                // 同 mergeStartGate，仅对裁决重算生效）。
+                if (policy != null) commitEnteredGate?.invoke()
+                // 区内第一道（无 IO、零成本）：元数据复核兜住「内容级复核 → 采纳」之间那极短窗口
+                if (!readFingerprint.isMetadataStillCurrent(
+                        context,
+                        databaseSession.currentPathIdentifier.orEmpty(),
+                        databaseSession.currentFile
+                    )
+                ) {
+                    restorePromptsAfterCommitFailure(policy, pathId)
+                    AppLog.w(DRIFT_LOG_TAG, "提交前元数据复核未通过，放弃本次合并提交")
+                    return@withContext KdbxResult.Failure(
+                        IllegalStateException("提交前磁盘元数据已变化"),
+                        strings.get(
+                            R.string.ext_mod_merge_failed,
+                            strings.get(R.string.err_drift_disk_changed_since_read)
+                        )
+                    )
+                }
+                // 最小提交临界区：校验实例身份 + 持久化基线修订 → 采用候选 → 写预备密文 → 基线
+                // （同一临界区校验：窗口内确认写盘 / 会话变化 ⇒ fail-closed；预备与提交之间
+                // 会话发生任何确认变更同样 fail-closed，预备密文整份作废清零）
+                val persist = databaseSession.commitPreparedSave(
+                    expectedAtCycleStart = localDb,
+                    candidate = replacement,
+                    prepared = prepared,
+                    // 基线修订与实例身份在同一临界区校验
+                    expectedPersistedBaselineRevision = baselineRevision
+                )
+            if (persist is KdbxResult.Success) {
+                driftCoordinator?.clearMergeConflictPrompt()
+                refreshBaseline(pathId, localFile)
+                return@withContext persist
+            }
+            restorePromptsAfterCommitFailure(policy, pathId)
+            // 校验未通过（实例身份 / 基线修订 / 只读 / 无活动库）与落盘失败要区分如实上报：
+            // 前者是「窗口内会话变了」，后者是「写盘失败」，混成一条会把用户引向错误的处置
+            if (persist is KdbxResult.Failure && persist.code == KdbxError.SAVE_SESSION_CHANGED) {
+                KdbxResult.Failure(
+                    persist.error,
                     strings.get(
                         R.string.ext_mod_merge_failed,
                         strings.get(R.string.err_drift_session_tree_changed)
-                    )
+                    ),
+                    persist.code
                 )
-            }
-            val saveResult = databaseSession.save()
-            if (saveResult is KdbxResult.Success) {
-                driftCoordinator?.clearMergeConflictPrompt()
-                refreshBaseline(pathId, localFile)
             } else {
-                driftCoordinator?.requestPrompt(pathId)
+                persist
             }
-            saveResult
+            }
+        } finally {
+            // 预备密文即整库密文：提交消耗 / 失败 / 取消任何退出路径都必须清零
+            // （commitPreparedSave 内部已兜底，此处覆盖未进入提交段的路径）
+            prepared.wipe()
         }
+    }
+
+    /**
+     * `ISSUE-P1-631`（生命周期整改）：提交失败后的提示归还。
+     *
+     * 三选路径（[policy] == null）：失败即重建三选提示（原行为）。
+     * 裁决路径（KEEP_*）：**保留**置起中的冲突提示供用户重试——受理已不再先清提示
+     * （见 [resolve] 的 KEEP_* 分支），此处若 requestPrompt 会把仍有效的裁决上下文
+     * 覆盖成三选，等于把「失败」伪装成「回到起点」，UI 状态同样不得领先持久化事实。
+     * 窗口内会话已切换时，提示由锁定观察者清空且不应重建（裁决随会话作废，既有语义）。
+     */
+    private fun restorePromptsAfterCommitFailure(policy: DriftMergeConflictPolicy?, pathId: String) {
+        if (policy == null) driftCoordinator?.requestPrompt(pathId)
     }
 
     /** 处置成功后的基线刷新：本地直读文件属性；SAF 取真实文档元数据（不可读即置空） */
@@ -306,49 +405,8 @@ internal class VaultFileDriftResolve(
         driftCoordinator?.refreshBaselineAfterPersist(baseline)
     }
 
-    /**
-     * 当前库的**可读字节**（本地 `File` 直读；SAF 经 `ContentResolver` 读入）。
-     * 不可读返回 null，由调用方按 fail-closed 报「磁盘库文件不可读」。
-     *
-     * `ISSUE-P3-617`：两处整流 `readBytes()` 改为带硬上限的分块读取——未知或错误申报长度
-     * 可绕过读取前检查，超大输入会在解析限制生效前分配完整 `ByteArray`（OOM/ANR）。
-     * 本地文件先按 `length()` 快拒（精确长度已知，不建流）；SAF 流（含未知长度）一律由
-     * [readBoundedBytes] 累计封顶，超限按不可读同口径返回 null（`resolve` 侧报合并 / 重载失败，
-     * 不抛 OOM）。上限见 [MAX_DRIFT_READ_BYTES]。
-     */
-    private fun readCurrentBytes(localFile: File?, pathId: String): ByteArray? {
-        if (localFile != null) {
-            if (!localFile.exists()) return null
-            // 快拒：本地文件长度精确已知，超限根本不读进内存
-            if (localFile.length() > maxDriftReadBytes) {
-                AppLog.w(DRIFT_LOG_TAG, "漂移源文件超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
-                return null
-            }
-            return runCatching { localFile.inputStream().use { it.readBoundedBytes(maxDriftReadBytes) } }
-                .onFailure { AppLog.w(DRIFT_LOG_TAG, "漂移源文件读取失败: ${it.javaClass.simpleName}") }
-                .getOrNull()
-        }
-        val saf = safChannel(pathId) ?: return null
-        return runCatching { saf.openInput().use { it.readBoundedBytes(maxDriftReadBytes) } }
-            .onFailure {
-                // 超限与 IO 失败同按不可读处置（日志只记类型与上限，不记路径——ISSUE-P3-550）
-                if (it is StreamLimitExceededException) {
-                    AppLog.w(DRIFT_LOG_TAG, "漂移源 SAF 流超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
-                } else {
-                    AppLog.w(DRIFT_LOG_TAG, "漂移源 SAF 流读取失败: ${it.javaClass.simpleName}")
-                }
-            }
-            .getOrNull()
-    }
 
-    /** SAF 文档句柄（读流 + 写回）；非 `content://` 或未装配上下文时返回 null */
-    private fun safChannel(pathId: String): SafChannel? {
-        val ctx = context ?: return null
-        if (!VaultFileMetadataProbe.isSafPath(pathId)) return null
-        val uri = runCatching { Uri.parse(pathId) }.getOrNull() ?: return null
-        return SafChannel(ctx, uri)
-    }
-
+    /** 磁盘库文件不可读的统一失败（重载 / 合并各自的文案入口） */
     private fun unreadable(choice: ExternalModificationChoice): KdbxResult.Failure =
         KdbxResult.Failure(
             IllegalStateException("磁盘库文件不可读"),
@@ -358,17 +416,6 @@ internal class VaultFileDriftResolve(
                 strings.get(R.string.err_drift_file_unreadable)
             )
         )
-
-    /** SAF 文档句柄：读流与写回共用同一 Uri 与上下文（写回实现与解锁 / 建库共用同一份） */
-    private class SafChannel(private val context: Context, private val uri: Uri) {
-
-        fun openInput(): InputStream =
-            context.contentResolver.openInputStream(uri)
-                ?: throw IOException("无法打开数据库文件流")
-
-        val saveWriter: suspend (ByteArray) -> Unit
-            get() = SafVaultCreation.saveWriter(context, uri, uri.lastPathSegment.orEmpty())
-    }
 
     internal companion object {
         /**

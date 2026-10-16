@@ -283,108 +283,215 @@ class VaultFileDriftMergeGroupTest {
         }
     }
 
-    @Test
-    fun `分组4 同一分组双侧修改为字段级LWW且不进条目冲突清单`() = runBlocking {
-        // 方向一：本地修改时刻更晚 ⇒ 本地名胜
-        run {
-            val (session, vaultFile) = createdSession()
-            val baseAt = Instant.now().minusSeconds(600)
-            val diskAt = Instant.now().minusSeconds(300)
-            val localAt = Instant.now().minusSeconds(60)
-            persistRoot(session, rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Base Name", at = baseAt))))
-            writeDisk(
-                vaultFile,
-                session,
-                rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Disk Name", at = diskAt)))
-            )
-            session.updateDatabaseMeta {
-                it.copy(rootGroup = rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Local Name", at = localAt))))
-            }
+    private companion object {
+        /** 分组名冲突场景（base=A / local=B / disk=C）——两处以上用例共用，避免各写一份装置 */
+        const val BASE_NAME = "Base Name"
+        const val LOCAL_NAME = "Local Name"
+        const val DISK_NAME = "Disk Name"
+    }
 
-            val coordinator = coordinatorOf(session)
-            val result = resolverOf(session, coordinator)
-                .resolve(ExternalModificationChoice.MERGE_AND_SAVE)
-            assertTrue("分组4：合并必须成功: $result", result is KdbxResult.Success)
-            assertNull(
-                "分组4（边界钉住）：分组冲突不进条目冲突清单——当前口径为字段级 LWW，不置裁决提示",
-                coordinator.mergeConflict.value
+    /**
+     * `ISSUE-P1-631`：分组名分叉场景（base=A / 本地=B / 磁盘=C，共享分组内含一个本地新增条目）。
+     * 时间戳刻意双向错开（本地更新 / 磁盘更新两种都可由调用方构造），以证明裁决结果**不依赖**时间。
+     */
+    private suspend fun nameDivergenceScenario(
+        diskNewer: Boolean = false,
+        withInnerEntry: Boolean = true
+    ): Pair<DatabaseSession, File> {
+        val (session, vaultFile) = createdSession()
+        val baseAt = Instant.now().minusSeconds(900)
+        val localAt = if (diskNewer) Instant.now().minusSeconds(300) else Instant.now().minusSeconds(60)
+        val diskAt = if (diskNewer) Instant.now().minusSeconds(60) else Instant.now().minusSeconds(300)
+        persistRoot(session, rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, BASE_NAME, at = baseAt))))
+        writeDisk(
+            vaultFile,
+            session,
+            rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, DISK_NAME, at = diskAt)))
+        )
+        session.updateDatabaseMeta {
+            it.copy(
+                rootGroup = rootOf(
+                    subgroups = listOf(
+                        group(
+                            GROUP_TEST_SHARED,
+                            LOCAL_NAME,
+                            at = localAt,
+                            entries = if (withInnerEntry) {
+                                listOf(entry(GROUP_TEST_INNER_ENTRY, "Inner", "Inner#1"))
+                            } else {
+                                emptyList()
+                            }
+                        )
+                    )
+                )
             )
-            assertEquals(
-                "分组4：双侧修改按最后修改时间取胜（本地更晚 ⇒ 本地名）",
-                "Local Name",
-                reparse(vaultFile).rootGroup.findGroup(GROUP_TEST_SHARED)?.name
-            )
-            session.close()
         }
-        // 方向二：磁盘修改时刻更晚 ⇒ 磁盘名胜
-        run {
-            val (session, vaultFile) = createdSession()
-            val baseAt = Instant.now().minusSeconds(600)
-            val localAt = Instant.now().minusSeconds(300)
-            val diskAt = Instant.now().minusSeconds(60)
-            persistRoot(session, rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Base Name", at = baseAt))))
-            writeDisk(
-                vaultFile,
-                session,
-                rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Disk Name", at = diskAt)))
-            )
-            session.updateDatabaseMeta {
-                it.copy(rootGroup = rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Local Name", at = localAt))))
-            }
-
-            val result = resolverOf(session, coordinatorOf(session))
-                .resolve(ExternalModificationChoice.MERGE_AND_SAVE)
-            assertTrue("分组4：合并必须成功: $result", result is KdbxResult.Success)
-            assertEquals(
-                "分组4：双侧修改按最后修改时间取胜（磁盘更晚 ⇒ 磁盘名）",
-                "Disk Name",
-                reparse(vaultFile).rootGroup.findGroup(GROUP_TEST_SHARED)?.name
-            )
-            session.close()
-        }
+        return session to vaultFile
     }
 
     @Test
-    fun `分组5 基线缺失不推断删除且双侧修改不崩溃`() = runBlocking {
+    fun `分组4 同一分组同名双侧异值必须进入裁决且裁决前不写盘`() = runBlocking {
+        val (session, vaultFile) = nameDivergenceScenario()
+        val bytesBefore = vaultFile.readBytes()
+        val coordinator = coordinatorOf(session)
+        val blocked = resolverOf(session, coordinator).resolve(ExternalModificationChoice.MERGE_AND_SAVE)
+
+        assertTrue(
+            "分组4：同字段双侧异值必须阻断（不得静默 LWW 定案）: $blocked",
+            blocked is KdbxResult.Failure
+        )
+        val conflict = coordinator.mergeConflict.value
+        assertNotNull("分组4：必须置起分组冲突待裁决提示", conflict)
+        assertEquals("分组4：冲突计数应含该分组", 1, conflict!!.conflictCount)
+        assertTrue(
+            "分组4：提示必须点出分组名（实测=${conflict.entryTitles}）",
+            conflict.entryTitles.any { it.contains(LOCAL_NAME) || it.contains(DISK_NAME) }
+        )
+        assertTrue("分组4：裁决前不得写盘", bytesBefore.contentEquals(vaultFile.readBytes()))
+        assertEquals(
+            "分组4：裁决前会话树保持本地版本",
+            LOCAL_NAME,
+            session.databaseFlow.value!!.rootGroup.findGroup(GROUP_TEST_SHARED)?.name
+        )
+        session.close()
+    }
+
+    @Test
+    fun `分组4b 以本地为准裁决把本地组名落盘（磁盘时间更新也不例外）`() = runBlocking {
+        val (session, vaultFile) = nameDivergenceScenario(diskNewer = true)
+        assertTrue(
+            "分组4b：首轮必须阻断",
+            resolverOf(session, coordinatorOf(session)).resolve(ExternalModificationChoice.MERGE_AND_SAVE)
+                is KdbxResult.Failure
+        )
+        val result = resolverOf(session, coordinatorOf(session))
+            .resolve(ExternalModificationChoice.MERGE_KEEP_LOCAL)
+        assertTrue("分组4b：裁决必须成功: $result", result is KdbxResult.Success)
+        assertEquals(
+            "分组4b：本地组名必须落盘（时间戳更新也不得翻盘）",
+            LOCAL_NAME,
+            reparse(vaultFile).rootGroup.findGroup(GROUP_TEST_SHARED)?.name
+        )
+        session.close()
+    }
+
+    @Test
+    fun `分组4c 以磁盘为准裁决把磁盘组名落盘（本地时间更新也不例外）`() = runBlocking {
+        val (session, vaultFile) = nameDivergenceScenario(diskNewer = false)
+        assertTrue(
+            "分组4c：首轮必须阻断",
+            resolverOf(session, coordinatorOf(session)).resolve(ExternalModificationChoice.MERGE_AND_SAVE)
+                is KdbxResult.Failure
+        )
+        val result = resolverOf(session, coordinatorOf(session))
+            .resolve(ExternalModificationChoice.MERGE_KEEP_DISK)
+        assertTrue("分组4c：裁决必须成功: $result", result is KdbxResult.Success)
+        assertEquals(
+            "分组4c：磁盘组名必须落盘（本地时间更新也不得翻盘）",
+            DISK_NAME,
+            reparse(vaultFile).rootGroup.findGroup(GROUP_TEST_SHARED)?.name
+        )
+        session.close()
+    }
+
+    @Test
+    fun `分组4d 双方保留裁决把两侧组名都落盘且复制体UUID全新`() = runBlocking {
+        val (session, vaultFile) = nameDivergenceScenario()
+        assertTrue(
+            "分组4d：首轮必须阻断",
+            resolverOf(session, coordinatorOf(session)).resolve(ExternalModificationChoice.MERGE_AND_SAVE)
+                is KdbxResult.Failure
+        )
+        val result = resolverOf(session, coordinatorOf(session))
+            .resolve(ExternalModificationChoice.MERGE_KEEP_BOTH)
+        assertTrue("分组4d：裁决必须成功: $result", result is KdbxResult.Success)
+
+        val reparsed = reparse(vaultFile)
+        val names = reparsed.rootGroup.allGroups().map { it.name }
+        assertTrue("分组4d：本地组名必须保留（实测=$names）", names.contains(LOCAL_NAME))
+        assertTrue(
+            "分组4d：磁盘组名必须以冲突副本形式保留（实测=$names）",
+            names.any { it.startsWith(DISK_NAME) && it != DISK_NAME }
+        )
+        // 复制体必须与原分组**同父**且 UUID 全新：同 UUID 会在回树时命中同一槽位互相覆盖
+        val duplicated = reparsed.rootGroup.allGroups()
+            .first { it.name.startsWith(DISK_NAME) && it.name != DISK_NAME }
+        assertEquals("分组4d：复制体必须与原分组同父", GROUP_TEST_ROOT, duplicated.parentGroupId)
+        assertTrue("分组4d：复制体 UUID 必须全新", duplicated.id != GROUP_TEST_SHARED)
+        val ids = reparsed.rootGroup.allGroups().map { it.id.toHexString() }
+        assertEquals("分组4d：不得出现重复分组 UUID（实测=$ids）", ids.size, ids.toSet().size)
+        val entryIds = reparsed.rootGroup.allEntries().map { it.id.toHexString() }
+        assertEquals("分组4d：不得出现重复条目 UUID（实测=$entryIds）", entryIds.size, entryIds.toSet().size)
+        session.close()
+    }
+
+    @Test
+    fun `分组5 基线缺失时同名分叉同样不得静默取一侧且不推断删除`() = runBlocking {
         val (session, vaultFile) = createdSession()
-        persistRoot(session, rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Base Name"))))
-        // 基线缺失（模拟未登记 / 超限未留存）
+        persistRoot(session, rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, BASE_NAME))))
+        // 基线缺失（模拟未登记 / 超限未留存）⇒ 空白底版，任何双侧字段差异都无可信依据
         session.clearPersistedBaselineForTesting()
-        // 磁盘：共享分组改名 + 磁盘独有分组
         writeDisk(
             vaultFile,
             session,
             rootOf(
                 subgroups = listOf(
-                    group(GROUP_TEST_SHARED, "Disk Name"),
+                    group(GROUP_TEST_SHARED, DISK_NAME),
                     group(GROUP_TEST_DISK_ONLY, "Disk Only")
                 )
             )
         )
-        // 本地：共享分组改名 + 本地独有分组
         session.updateDatabaseMeta {
             it.copy(
                 rootGroup = rootOf(
                     subgroups = listOf(
-                        group(GROUP_TEST_SHARED, "Local Name"),
+                        group(GROUP_TEST_SHARED, LOCAL_NAME),
                         group(GROUP_TEST_LOCAL_ONLY, "Local Only")
                     )
                 )
             )
         }
+        val bytesBefore = vaultFile.readBytes()
+        val coordinator = coordinatorOf(session)
+        val blocked = resolverOf(session, coordinator).resolve(ExternalModificationChoice.MERGE_AND_SAVE)
+        assertTrue(
+            "分组5：基线缺失 + 同名分叉必须阻断待裁决（不得静默 LWW）: $blocked",
+            blocked is KdbxResult.Failure
+        )
+        assertNotNull("分组5：必须置起待裁决提示", coordinator.mergeConflict.value)
+        assertTrue("分组5：裁决前不得写盘", bytesBefore.contentEquals(vaultFile.readBytes()))
 
-        val result = resolverOf(session, coordinatorOf(session))
-            .resolve(ExternalModificationChoice.MERGE_AND_SAVE)
-        assertTrue("分组5：基线缺失时无重叠修改必须直接合并成功: $result", result is KdbxResult.Success)
-
+        val resolved = resolverOf(session, coordinatorOf(session))
+            .resolve(ExternalModificationChoice.MERGE_KEEP_LOCAL)
+        assertTrue("分组5：裁决后必须成功: $resolved", resolved is KdbxResult.Success)
         val reparsed = reparse(vaultFile)
         assertNotNull("分组5：本地独有分组不得被推断删除", reparsed.rootGroup.findGroup(GROUP_TEST_LOCAL_ONLY))
         assertNotNull("分组5：磁盘独有分组保留", reparsed.rootGroup.findGroup(GROUP_TEST_DISK_ONLY))
-        val shared = reparsed.rootGroup.findGroup(GROUP_TEST_SHARED)
-        assertNotNull("分组5：双侧均存在的分组不得消失", shared)
-        assertTrue(
-            "分组5：双侧改名必须有确定结果（实测=${shared?.name}）",
-            shared?.name == "Local Name" || shared?.name == "Disk Name"
+        assertEquals(
+            "分组5：以本地为准后组名取本地值",
+            LOCAL_NAME,
+            reparsed.rootGroup.findGroup(GROUP_TEST_SHARED)?.name
+        )
+        session.close()
+    }
+
+    @Test
+    fun `分组6 双侧改成同一组名不构成冲突`() = runBlocking {
+        val (session, vaultFile) = createdSession()
+        val baseAt = Instant.now().minusSeconds(600)
+        persistRoot(session, rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, BASE_NAME, at = baseAt))))
+        writeDisk(vaultFile, session, rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Same Name"))))
+        session.updateDatabaseMeta {
+            it.copy(rootGroup = rootOf(subgroups = listOf(group(GROUP_TEST_SHARED, "Same Name"))))
+        }
+        val coordinator = coordinatorOf(session)
+        val result = resolverOf(session, coordinator).resolve(ExternalModificationChoice.MERGE_AND_SAVE)
+        assertTrue("分组6：双侧同值不构成冲突，必须直接成功: $result", result is KdbxResult.Success)
+        assertNull("分组6：不得置起裁决提示", coordinator.mergeConflict.value)
+        assertEquals(
+            "分组6：结果取双方一致值",
+            "Same Name",
+            reparse(vaultFile).rootGroup.findGroup(GROUP_TEST_SHARED)?.name
         )
         session.close()
     }

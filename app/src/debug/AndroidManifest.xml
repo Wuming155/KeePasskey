@@ -33,6 +33,16 @@
             android:excludeFromRecents="true"
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
+        <!--
+          ISSUE-P1-631：漂移对话框宿主（最小 UI 测试基建）。挂载**生产**组合件
+          `ExternalModificationDialogHost`，由生产单例协调器状态流驱动；用例以无障碍节点
+          真实点击「合并后保存 / 以本地版本为准 / 稍后处理」等按钮。
+        -->
+        <activity
+            android:name="com.keepasskey.app.ui.DriftDialogHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
     </application>
 
 </manifest>

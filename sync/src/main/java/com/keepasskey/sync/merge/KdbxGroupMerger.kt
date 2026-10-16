@@ -17,6 +17,12 @@ internal object KdbxGroupMerger {
      * 按 UUID 逐组裁决三方分组存活集合：
      * 双方均删则消亡；单边删除时仅当对端「删除后重建」或「相对 base 已修改」方胜；
      * 双方均改则走 [mergeGroupsBothModified] 字段级合并；单侧新建（base 与墓碑均无记录）保留。
+     *
+     * `ISSUE-P1-631`：返回 [GroupMergeOutcome]——除存活集合外**必须**带出**同字段双侧异值**的
+     * 冲突清单。此前本方法只给存活集合，调用方无从区分「双方改的都一样」与「双方真的分叉」，
+     * 分组改名 / 备注 / 图标 / 父组 / 组级 customData 的一侧修改会被 LWW **静默**吞掉。
+     * 字段级合并值仍按 LWW 给出（保证树结构完整、无冲突场景零行为变更），但冲突必须被显式登记，
+     * 由调用方决定「阻断待裁决」还是「按策略重裁」。
      */
     fun mergeSurvivingGroups(
         allGroupUuids: Set<KdbxUuid>,
@@ -25,8 +31,9 @@ internal object KdbxGroupMerger {
         remoteGroups: Map<KdbxUuid, KdbxGroup>,
         localDeleted: Map<KdbxUuid, DeletedObject>,
         remoteDeleted: Map<KdbxUuid, DeletedObject>
-    ): Map<KdbxUuid, KdbxGroup> {
+    ): GroupMergeOutcome {
         val survivingGroups = mutableMapOf<KdbxUuid, KdbxGroup>()
+        val groupConflicts = mutableListOf<ConflictedGroupPair>()
 
         for (groupId in allGroupUuids) {
             val bg = baseGroups[groupId]
@@ -69,7 +76,21 @@ internal object KdbxGroupMerger {
                         !lModified && !rModified -> survivingGroups[groupId] = lg
                         lModified && !rModified -> survivingGroups[groupId] = lg
                         !lModified && rModified -> survivingGroups[groupId] = rg
-                        else -> survivingGroups[groupId] = mergeGroupsBothModified(bg, lg, rg)
+                        else -> {
+                            val fieldMerge = mergeGroupsBothModified(bg, lg, rg)
+                            survivingGroups[groupId] = fieldMerge.group
+                            // `ISSUE-P1-631`：同字段双侧异值 ⇒ 登记冲突（值仍按 LWW 临时给出，
+                            // 「静默」由调用方的阻断 / 裁决消除，而不是靠这里挑一侧）
+                            if (fieldMerge.conflictingFields.isNotEmpty()) {
+                                groupConflicts += ConflictedGroupPair(
+                                    groupId = groupId.toHexString(),
+                                    groupName = lg.name.ifBlank { rg.name },
+                                    localGroup = lg,
+                                    remoteGroup = rg,
+                                    modifiedFields = fieldMerge.conflictingFields
+                                )
+                            }
+                        }
                     }
                 }
                 lg != null && rg == null -> {
@@ -83,7 +104,7 @@ internal object KdbxGroupMerger {
             }
         }
 
-        return survivingGroups
+        return GroupMergeOutcome(survivingGroups, groupConflicts)
     }
 
     /**
@@ -215,69 +236,6 @@ internal object KdbxGroupMerger {
         }
 
         return assembleGroup(rootId)
-    }
-
-    /**
-     * ISSUE-P2-279：分组标量字段的**单一词汇表**——[isGroupModified] 的判修改集与
-     * [mergeGroupsBothModified] 的实际合并集由本表驱动，禁止两处各写一份字段清单。
-     * 此前 `customIconId` 判定进修改集却不进合并集（`local.copy` 原样保留本地值）⇒
-     * 他端改分组图标后同步回本端时静默丢失（本仓无分组 `customIconId` 写入者，
-     * 需 KeePassXC / 官方桌面端改组图标方可达，核实见条目正文）。
-     */
-    private class GroupFieldSpec(
-        val read: (KdbxGroup) -> Any?,
-        val write: (KdbxGroup, Any?) -> KdbxGroup
-    )
-
-    private val MERGED_GROUP_FIELDS: List<GroupFieldSpec> = listOf(
-        GroupFieldSpec({ it.name }, { g, v -> g.copy(name = v as String) }),
-        GroupFieldSpec({ it.notes }, { g, v -> g.copy(notes = v as String) }),
-        GroupFieldSpec({ it.iconId }, { g, v -> g.copy(iconId = v as Int) }),
-        GroupFieldSpec({ it.customIconId }, { g, v -> g.copy(customIconId = v as KdbxUuid?) }),
-        GroupFieldSpec({ it.parentGroupId }, { g, v -> g.copy(parentGroupId = v as KdbxUuid?) })
-        // ISSUE-P2-385：组级 customData（Secret Service 暴露组标记等第三方键）由
-        // [mergeCustomDataMap] 单独并入，不进本词汇表——其为 Map 语义、需三方键并集。
-    )
-
-    private fun isGroupModified(base: KdbxGroup?, current: KdbxGroup): Boolean {
-        if (base == null) return true
-        // ISSUE-P2-279：判定与合并共用同一词汇表（禁两份清单）
-        return MERGED_GROUP_FIELDS.any { it.read(base) != it.read(current) } ||
-                base.customData != current.customData ||
-                base.times.lastModificationTime != current.times.lastModificationTime
-    }
-
-    /**
-     * 双方均修改时的分组字段级合并：逐字段三方裁决——单侧变更取该侧，双侧同值取本地，
-     * 双侧异值按最后修改时间（LWW）取胜方；时间戳取较晚者。
-     * 词汇表见 [MERGED_GROUP_FIELDS]（ISSUE-P2-279 起含 `customIconId`）。
-     * ISSUE-P2-385：组级 customData 由 [mergeCustomDataMap] 并入。
-     */
-    private fun mergeGroupsBothModified(
-        base: KdbxGroup?,
-        local: KdbxGroup,
-        remote: KdbxGroup
-    ): KdbxGroup {
-        val lTime = local.times.lastModificationTime
-        val rTime = remote.times.lastModificationTime
-
-        var merged = local
-        for (spec in MERGED_GROUP_FIELDS) {
-            val bv = base?.let(spec.read)
-            val lv = spec.read(local)
-            val rv = spec.read(remote)
-            val winner = when {
-                lv != bv && rv == bv -> lv
-                lv == bv && rv != bv -> rv
-                lv == rv -> lv
-                else -> if (rTime.isAfter(lTime)) rv else lv
-            }
-            merged = spec.write(merged, winner)
-        }
-
-        merged = merged.copy(customData = EntryCustomDataMerge.mergeCustomDataMap(base?.customData, local.customData, remote.customData, lTime, rTime))
-        val maxMod = if (rTime.isAfter(lTime)) rTime else lTime
-        return merged.copy(times = local.times.copy(lastModificationTime = maxMod))
     }
 
     /**
