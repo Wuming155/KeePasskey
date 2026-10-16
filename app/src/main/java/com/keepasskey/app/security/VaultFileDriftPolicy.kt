@@ -86,6 +86,10 @@ object VaultFileDriftPolicy {
 
 /**
  * 用户三选（重载 / 合并 / 放弃）枚举——UI 与会话层共用。
+ *
+ * `ISSUE-P1-631`：合并以**真实共同基线**（最后确认持久化版本）执行；当合并发现
+ * 「本地与磁盘同字段都有修改」的条目级冲突时，不静默取一侧，而是先要求用户裁决——
+ * 追加的三个取值即裁决结果（`MERGE_KEEP_*`），命中同一合并实现、仅冲突条目的取舍不同。
  */
 enum class ExternalModificationChoice {
     /** 放弃本次覆盖，保留磁盘版本；内存树保持打开态或引导关闭 */
@@ -94,6 +98,19 @@ enum class ExternalModificationChoice {
     /** 重载磁盘版本（丢弃内存未落盘改动） */
     RELOAD_FROM_DISK,
 
-    /** 走既有 KdbxMerger 三方/双向合并后继续保存 */
-    MERGE_AND_SAVE
+    /**
+     * 走既有 KdbxMerger 三方/双向合并后继续保存。
+     *
+     * `ISSUE-P1-631`：合并发现冲突时本取值**不落盘**——转为待裁决提示（`MERGE_KEEP_*` 承接）。
+     */
+    MERGE_AND_SAVE,
+
+    /** `ISSUE-P1-631` 冲突裁决：冲突条目以**本地**版本为准 */
+    MERGE_KEEP_LOCAL,
+
+    /** `ISSUE-P1-631` 冲突裁决：冲突条目以**磁盘**版本为准 */
+    MERGE_KEEP_DISK,
+
+    /** `ISSUE-P1-631` 冲突裁决：**双方保留**（磁盘侧版本以新 UUID 生成「磁盘冲突副本」） */
+    MERGE_KEEP_BOTH
 }

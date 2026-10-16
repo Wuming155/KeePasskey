@@ -820,6 +820,15 @@
     <string name="ext_mod_merge_failed">Merge failed: %1$s (in-memory edits kept)</string>
     <string name="ext_mod_save_aborted">Save aborted: vault file was modified externally</string>
     <string name="ext_mod_merge_hint_fallback">Merge uses the existing KdbxMerger three-way path; Reload discards unsaved in-memory edits; Abandon skips the write and keeps the current session.</string>
+    <string name="ext_mod_merge_conflict_pending">Merge paused: %1$d conflicting entr(y/ies) need your decision</string>
+    <string name="ext_mod_merge_conflict_title">Merge found conflicts</string>
+    <string name="ext_mod_merge_conflict_body">%1$d entr(y/ies) were modified both locally and on disk; the merge cannot decide automatically. Choose how to proceed (nothing is written before you decide):</string>
+    <string name="ext_mod_merge_conflict_keep_local">Keep local version</string>
+    <string name="ext_mod_merge_conflict_keep_disk">Keep disk version</string>
+    <string name="ext_mod_merge_conflict_keep_both">Keep both (create disk conflict copy)</string>
+    <string name="ext_mod_merge_conflict_cancel">Decide later</string>
+    <string name="ext_mod_merge_duplicate_suffix">Disk conflict copy</string>
+    <string name="ext_mod_merge_conflict_untitled">(untitled)</string>
     <!-- ISSUE-P3-447 AC③: list-page notice while a save is blocked by external modification -->
     <string name="vault_list_external_modification_pending">Save was aborted: the vault file changed externally — this list may contain changes not yet written to disk</string>
     <!-- ISSUE-P3-382: health check duplicate report -->

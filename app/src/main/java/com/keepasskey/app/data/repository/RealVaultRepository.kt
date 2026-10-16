@@ -451,22 +451,19 @@ class RealVaultRepository @Inject constructor(
     /**
      * ISSUE-P2-378：用户对漂移提示的三选处置——`ABANDON_SAVE` 仅关闭提示且不写盘（内存改动保留）；
      * `RELOAD_FROM_DISK` / `MERGE_AND_SAVE` 委托 [VaultFileDriftResolve]（失败如实上浮且保留内存改动）。
+     *
+     * `ISSUE-P1-631`：`MERGE_KEEP_*` 为合并冲突的裁决结果——与 `MERGE_AND_SAVE` 走同一实现，
+     * 仅冲突条目的取舍不同（命中同一合并实现重算后提交，见 `VaultFileDriftResolve`）。
      */
     override suspend fun applyExternalModificationChoice(
         choice: com.keepasskey.app.security.ExternalModificationChoice
     ): KdbxResult<Unit> {
-        return when (choice) {
-            com.keepasskey.app.security.ExternalModificationChoice.ABANDON_SAVE -> {
-                driftCoordinator?.dismiss()
-                KdbxResult.Success(Unit)
-            }
-
-            com.keepasskey.app.security.ExternalModificationChoice.RELOAD_FROM_DISK,
-            com.keepasskey.app.security.ExternalModificationChoice.MERGE_AND_SAVE -> {
-                // ISSUE-P3-447 AC②：SAF 通道的重载 / 合并需要 ContentResolver
-                VaultFileDriftResolve(databaseSession, strings, driftCoordinator, context).resolve(choice)
-            }
+        if (choice == com.keepasskey.app.security.ExternalModificationChoice.ABANDON_SAVE) {
+            driftCoordinator?.dismiss()
+            return KdbxResult.Success(Unit)
         }
+        // ISSUE-P3-447 AC②：SAF 通道的重载 / 合并需要 ContentResolver
+        return VaultFileDriftResolve(databaseSession, strings, driftCoordinator, context).resolve(choice)
     }
 
     companion object {

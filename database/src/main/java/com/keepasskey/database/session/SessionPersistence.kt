@@ -116,6 +116,9 @@ internal class SessionPersistence(
                 val serialized = serializeToBytes(dbToSave, pwd, credentials.currentKeyFile(), progress)
                 try {
                     writer(serialized)
+                    // ISSUE-P1-631：写盘确认成功 ⇒ 登记本版本为持久化基线（漂移合并的真实共同基线；
+                    // 克隆归会话，序列化缓冲由下方 finally 照常清零）。失败 / 取消路径不前移基线。
+                    core.retainPersistedBaselineBestEffort(serialized, core.activePathIdentifier)
                     // ISSUE-P3-368：落盘完成即终态 1.0（序列化侧进度已在 KdbxFile.save 内发到 0.9）
                     progress(KdbxProgress.DONE)
                     core.state.value = DatabaseSession.SessionState.OPENED

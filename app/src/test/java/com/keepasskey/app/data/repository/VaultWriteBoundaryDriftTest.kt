@@ -62,7 +62,8 @@ class VaultWriteBoundaryDriftTest {
             )
         }
         holder = VaultFileBaselineHolder(session)
-        coordinator = VaultFileDriftCoordinator(holder)
+        // ISSUE-P1-631：协调器追加会话引用（锁定时清空待决提示）
+        coordinator = VaultFileDriftCoordinator(holder, session)
         boundary = VaultWriteBoundary(
             databaseSession = session,
             driftGuard = VaultFileDriftGuard(coordinator, null),

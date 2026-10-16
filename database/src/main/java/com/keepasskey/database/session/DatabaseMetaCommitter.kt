@@ -115,6 +115,11 @@ internal class DatabaseMetaCommitter(
                 writer(serialized)
                 receipt.committed()
             }
+            // ISSUE-P1-631：写出已确认提交 ⇒ 登记本版本为持久化基线（候选即磁盘内容）；
+            // 未确认（下称 uncertain 分支）不登记——基线不得指向无法证实的磁盘状态。
+            if (receipt.status == SessionWriteReceipt.Status.COMMITTED) {
+                core.retainPersistedBaselineBestEffort(serialized, core.activePathIdentifier)
+            }
             progress(KdbxProgress.DONE)
         } finally {
             serialized.fill(0)

@@ -1,5 +1,7 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.core.session.SessionLockObserver
+import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,15 +17,36 @@ import javax.inject.Singleton
  * - 漂移即 fail-closed 中止覆盖，不得静默整树覆盖；
  * - 用户三选：放弃保存 / 重载磁盘 / 合并后保存（走既有 KdbxMerger）；
  * - 重载 / 合并失败不得丢改动：保持脏标记并把失败原因上浮，禁止「失败即丢内存树」。
+ *
+ * `ISSUE-P1-631`：合并以**真实共同基线**（最后确认持久化版本）执行；合并发现条目级冲突时
+ * 不静默取一侧——[mergeConflict] 承接待裁决提示（与三选提示[互斥]呈现），裁决结果
+ * （以本地 / 以磁盘 / 双方保留）驱动同一合并实现重算后提交。
  */
 @Singleton
 class VaultFileDriftCoordinator @Inject constructor(
-    private val baselineHolder: VaultFileBaselineHolder
+    private val baselineHolder: VaultFileBaselineHolder,
+    private val databaseSession: DatabaseSession
 ) {
 
     /** 待用户处置的漂移提示（null = 无待决） */
     private val _pending = MutableStateFlow<VaultFileDriftPrompt?>(null)
     val pending: StateFlow<VaultFileDriftPrompt?> = _pending.asStateFlow()
+
+    /** `ISSUE-P1-631`：待用户裁决的合并冲突提示（null = 无待决；与 [pending] 互斥） */
+    private val _mergeConflict = MutableStateFlow<VaultFileDriftMergeConflict?>(null)
+    val mergeConflict: StateFlow<VaultFileDriftMergeConflict?> = _mergeConflict.asStateFlow()
+
+    init {
+        // ISSUE-P1-631：会话终止（锁定 / 关闭 / 换库前置释放）时清空待决提示——
+        // 裁决已随会话作废，不得跨库残留。回调在会话互斥锁内同步触发，仅做置空（契约见
+        // SessionLockObserver：禁止网络 / 大量 IO，禁止再调会话 API）。
+        databaseSession.addLockObserver(
+            SessionLockObserver {
+                _pending.value = null
+                _mergeConflict.value = null
+            }
+        )
+    }
 
     /**
      * 检查当前文件是否相对基线漂移。
@@ -64,15 +87,45 @@ class VaultFileDriftCoordinator @Inject constructor(
         )
     }
 
-    /** 唤起三选提示（幂等：已有待决时覆盖为最新） */
+    /**
+     * 唤起三选提示（幂等：已有待决时覆盖为最新）。
+     *
+     * `ISSUE-P1-631`：三选与合并冲突裁决互斥——唤起三选即作废未完成的裁决提示
+     * （裁决可随时由合并重算重建，不丢失任何数据；反之两个对话框叠放才是错误状态）。
+     */
     fun requestPrompt(pathIdentifier: String?) {
         _pending.value = VaultFileDriftPrompt(
             pathIdentifier = pathIdentifier ?: baselineHolder.current()?.pathIdentifier ?: ""
         )
+        _mergeConflict.value = null
+    }
+
+    /**
+     * `ISSUE-P1-631`：唤起合并冲突裁决提示（幂等：覆盖为最新）。
+     * [titles] 为待裁决条目的展示用标题（已按上限截断），[conflictCount] 为真实冲突总数。
+     */
+    fun requestMergeConflictPrompt(
+        pathIdentifier: String,
+        conflictCount: Int,
+        titles: List<String>
+    ) {
+        _pending.value = null
+        _mergeConflict.value = VaultFileDriftMergeConflict(
+            pathIdentifier = pathIdentifier,
+            conflictCount = conflictCount,
+            entryTitles = titles
+        )
+    }
+
+    /** `ISSUE-P1-631`：关闭合并冲突裁决提示（用户已裁决、取消或转入其它处置） */
+    fun clearMergeConflictPrompt() {
+        _mergeConflict.value = null
     }
 
     /** 用户完成处置或放弃后关闭提示 */
     fun dismiss() {
+        // ISSUE-P1-631：只清三选提示——合并冲突裁决提示由 resolve 的终结路径显式清理，
+        // 避免「处置调用返回后由 UI 统一 dismiss」误杀刚由合并置起的待裁决提示
         _pending.value = null
     }
 
@@ -93,10 +146,22 @@ class VaultFileDriftCoordinator @Inject constructor(
     fun clear() {
         baselineHolder.clear()
         _pending.value = null
+        _mergeConflict.value = null
     }
 }
 
 /** 待决漂移提示载荷（UI 消费） */
 data class VaultFileDriftPrompt(
     val pathIdentifier: String
+)
+
+/**
+ * `ISSUE-P1-631`：待裁决的漂移合并冲突载荷（UI 消费）。
+ *
+ * [entryTitles] 仅承载**展示面**标题（同步冲突界面同口径）；不承载任何字段值 / 明文。
+ */
+data class VaultFileDriftMergeConflict(
+    val pathIdentifier: String,
+    val conflictCount: Int,
+    val entryTitles: List<String>
 )

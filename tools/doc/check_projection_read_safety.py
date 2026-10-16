@@ -151,6 +151,11 @@ ALLOWED_DISPLAY_READ_FILES = frozenset(
         # §522：确认页回传构造的交付复检（条目 URL 只进 `entryMatchesDeliveryOrigin` 布尔闸门，
         # 空串降级为拒绝；凭据值仍走 fail-fast 取数路径，本读口不承载任何下发值）
         "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthResolver.kt",
+        # `ISSUE-P1-631`：漂移合并冲突裁决提示的**条目提示串**——`displayTitle()` 唯一用途是
+        # 产出「待裁决条目」的展示列表（与 `ConflictResolutionViewModel` 同型展示面）。
+        # 读取时刻两棵树（活动会话树 / 本次磁盘解析树）均仍被合并流程持有；并发整树替换撞上时
+        # 降级为空串（提示文案少一条），不参与任何落盘值 / 下发值 / 裁决判据的构造。
+        "app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftMergeSupport.kt",
     }
 )
 

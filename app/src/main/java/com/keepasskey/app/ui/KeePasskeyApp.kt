@@ -117,10 +117,6 @@ fun KeePasskeyApp() {
 
             val autoLockManager = (context as? com.keepasskey.app.MainActivity)?.autoLockManager
 
-            // ISSUE-P2-378：外部修改三选全局对话框状态
-            val externalModificationPending by settingsViewModel.externalModificationPending
-                .collectAsStateWithLifecycle()
-
             // 三处全局导航守卫与副作用（组合位置仍在 Scaffold 之前，BackHandler 优先级语义不变）
             AppShellNavigationEffects(
                 navController = navController,
@@ -141,11 +137,8 @@ fun KeePasskeyApp() {
                 autoLockManager = autoLockManager
             )
 
-            // ISSUE-P2-378：库文件被外部修改后的三选对话框（挂点下沉 ExternalModificationDialogHost）
-            ExternalModificationDialogHost(
-                pending = externalModificationPending,
-                onChoice = { settingsViewModel.applyExternalModificationChoice(it) }
-            )
+            // ISSUE-P2-378 + ISSUE-P1-631：外部修改三选 / 合并冲突裁决对话框（挂点下沉 DriftDialogsHost）
+            DriftDialogsHost(settingsViewModel)
 
             // ISSUE-P1-592：恢复面外壳挂点（冷启动恢复副本处置 + 无法保全告警即时明示）
             RecoveryShellHost(autoLockManager = autoLockManager)

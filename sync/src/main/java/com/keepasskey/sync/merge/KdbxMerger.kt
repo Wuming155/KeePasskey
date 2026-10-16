@@ -331,10 +331,15 @@ object KdbxMerger {
 
     /**
      * 根据用户在冲突界面中的选择解决冲突
+     *
+     * @param duplicateTitleSuffix `ISSUE-P1-631`：`DUPLICATE_BOTH` 副本的标题后缀。同步侧默认
+     *   「云端冲突副本」；漂移（本地磁盘）合并由调用方传入「磁盘冲突副本」——两侧对称的
+     *   用户可见文案不得相互沿用（本项 remote = 磁盘版本，不是云端）。
      */
     fun resolveConflict(
         pair: ConflictedEntryPair,
-        choice: ConflictResolutionChoice
+        choice: ConflictResolutionChoice,
+        duplicateTitleSuffix: String = "云端冲突副本"
     ): List<KdbxEntry> {
         return when (choice) {
             ConflictResolutionChoice.KEEP_LOCAL -> listOf(pair.localEntry)
@@ -346,7 +351,7 @@ object KdbxMerger {
                     .copy(id = KdbxUuid.random())
                     .withField(
                         KdbxConstants.Fields.TITLE,
-                        ProtectedString("${pair.remoteEntry.title} (云端冲突副本)", isProtected = false)
+                        ProtectedString("${pair.remoteEntry.title} ($duplicateTitleSuffix)", isProtected = false)
                     )
                 listOf(pair.localEntry, remoteDuplicate)
             }

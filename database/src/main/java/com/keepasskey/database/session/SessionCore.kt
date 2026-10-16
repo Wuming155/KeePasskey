@@ -56,4 +56,48 @@ internal class SessionCore {
 
     /** 只读模式（对应拆分前的 `readOnlyMode`）。 */
     var readOnlyMode: Boolean = false
+
+    /**
+     * `ISSUE-P1-631`：最后确认持久化版本的整库密文快照（漂移合并的真实共同基线）。
+     *
+     * 写入点全部位于会话 Mutex 内的**确认写盘**收尾（打开 / 重载 / 新建 / 保存 /
+     * Meta 提交 / 凭据轮换）或会话终止路径；读取经 [DatabaseSession.persistedBaselineSnapshot]。
+     * 快照是整库密文的独立副本——与序列化缓冲同属会话派生敏态数据，会话终止（换库前置释放 /
+     * 锁定 / 关闭）时必须**先清零再置空**，不得留给 GC。
+     */
+    private var persistedBaseline: ByteArray? = null
+
+    private var persistedBaselineRevisionValue: Long = 0
+
+    private var persistedBaselinePathValue: String? = null
+
+    /**
+     * 登记 / 替换持久化基线（确认写盘成功时调用；[bytes] 为 null 表示本次写盘未留存，
+     * 旧基线一并作废）。内部克隆 [bytes]：调用方随后对原数组的清零不影响基线。
+     *
+     * 修订单调前移：登记、清除都会 +1——「读取基线（含修订）→ 计算合并 → 提交」窗口内的
+     * 任意持久化或会话变化都能被 `adoptDatabaseIfUnchanged(expectedPersistedBaselineRevision)`
+     * 检出（宁可误中止，不可静默以过期基线提交）。
+     */
+    fun retainPersistedBaseline(bytes: ByteArray?, pathIdentifier: String?) {
+        persistedBaseline?.fill(0)
+        persistedBaseline = bytes?.clone()
+        persistedBaselinePathValue = pathIdentifier
+        persistedBaselineRevisionValue += 1
+    }
+
+    /** 会话终止 / 换库前置释放：先清零快照再置空（修订同样前移，令在途校验失效） */
+    fun clearPersistedBaseline() {
+        persistedBaseline?.fill(0)
+        persistedBaseline = null
+        persistedBaselinePathValue = null
+        persistedBaselineRevisionValue += 1
+    }
+
+    /** 基线密文快照的**克隆**（无基线返回 null）；调用方拥有并负责用毕清零 */
+    fun persistedBaselineClone(): ByteArray? = persistedBaseline?.clone()
+
+    fun persistedBaselineRevision(): Long = persistedBaselineRevisionValue
+
+    fun persistedBaselinePathIdentifier(): String? = persistedBaselinePathValue
 }

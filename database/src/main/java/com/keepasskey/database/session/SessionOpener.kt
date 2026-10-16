@@ -84,11 +84,8 @@ internal class SessionOpener(
             }
         },
         writeNew = { db ->
-            val bytes = serializeCreated(db, passwordChars, keyFileData)
-            try {
-                withContext(Dispatchers.IO) { NewDatabaseFileWriter.write(file) { it.write(bytes) } }
-            } finally {
-                bytes.fill(0)
+            serializeCreatedAndWrite(db, passwordChars, keyFileData) { bytes ->
+                NewDatabaseFileWriter.write(file) { it.write(bytes) }
             }
         }
     )
@@ -108,11 +105,8 @@ internal class SessionOpener(
         name, passwordChars, useArgon2, keyFileData, cipherUuid,
         pathIdentifier, null, saveWriter, trackedSaveWriter
     ) { db ->
-        val bytes = serializeCreated(db, passwordChars, keyFileData)
-        try {
-            withContext(Dispatchers.IO) { writeNew(bytes) }
-        } finally {
-            bytes.fill(0)
+        serializeCreatedAndWrite(db, passwordChars, keyFileData) { bytes ->
+            writeNew(bytes)
         }
     }
 
@@ -128,6 +122,26 @@ internal class SessionOpener(
         }
     }
 
+    /**
+     * `ISSUE-P1-631`：新建链路的「序列化 → 写出」——**成功返回写出的字节**（所有权移交调用方：
+     * 登记持久化基线后清零）；写出抛异常时在本函数内清零并重抛（失败路径不让整库密文外泄）。
+     */
+    private suspend fun serializeCreatedAndWrite(
+        db: KdbxDatabase,
+        passwordChars: CharArray,
+        keyFileData: ByteArray?,
+        write: suspend (ByteArray) -> Unit
+    ): ByteArray {
+        val bytes = serializeCreated(db, passwordChars, keyFileData)
+        try {
+            withContext(Dispatchers.IO) { write(bytes) }
+        } catch (t: Throwable) {
+            bytes.fill(0)
+            throw t
+        }
+        return bytes
+    }
+
     /** 不发布半成品会话；新建空树不解析附件，旧会话释放可安全延后至提交成功。 */
     private suspend fun createNew(
         name: String,
@@ -139,7 +153,11 @@ internal class SessionOpener(
         associatedFile: File?,
         saveWriter: suspend (ByteArray) -> Unit,
         trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null,
-        writeNew: suspend (KdbxDatabase) -> Unit
+        /**
+         * `ISSUE-P1-631`：写出新库并**返回写出的字节**（待调用方登记持久化基线后清零；
+         * 写出失败由实现自行清零并重抛——见 [serializeCreatedAndWrite]）。
+         */
+        writeNew: suspend (KdbxDatabase) -> ByteArray
     ): KdbxResult<Unit> = mutex.withLock {
         // 落盘与会话切换是同一临界操作，提交后不能因调用方取消留下未登记的成功产物。
         withContext(NonCancellable) {
@@ -147,6 +165,8 @@ internal class SessionOpener(
                 var candidate: KdbxDatabase? = null
                 var ownedPassword: CharArray? = null
                 var ownedKeyFile: ByteArray? = null
+                // ISSUE-P1-631：新库写出字节——先登记持久化基线，finally 清零
+                var createdBytes: ByteArray? = null
                 try {
                     val candidateTicket = SessionCredentialTicket(pathIdentifier)
                     // 先分配候选副本；clone 失败时旧会话尚未释放，已分配副本由 finally 擦除。
@@ -159,7 +179,7 @@ internal class SessionOpener(
                         rootGroup = KdbxGroup(name = name.ifBlank { "Root" }, iconId = 48)
                     )
                     candidate = db
-                    writeNew(db)
+                    createdBytes = writeNew(db)
                     releaseCurrentSession()
                     core.activeFile = associatedFile
                     core.activePathIdentifier = pathIdentifier
@@ -174,6 +194,8 @@ internal class SessionOpener(
                     core.database.value = db
                     core.adoptCredentialTicket(candidateTicket)
                     core.state.value = DatabaseSession.SessionState.OPENED
+                    // ISSUE-P1-631：新建并写出成功的字节即本会话初始持久化基线（克隆归会话）
+                    core.retainPersistedBaselineBestEffort(createdBytes, pathIdentifier)
                     candidate = null // 明文树移交会话，失败分支不能擦除旧树。
                     KdbxResult.Success(Unit)
                 } catch (t: Throwable) {
@@ -188,6 +210,7 @@ internal class SessionOpener(
                     candidate?.clearSensitiveData()
                     ownedPassword?.fill('0')
                     ownedKeyFile?.fill(0)
+                    createdBytes?.fill(0)
                 }
             }
         }
@@ -250,13 +273,19 @@ internal class SessionOpener(
             progress(null)
             val spillTransaction = KdbxFile.beginAttachmentSpillTransaction(binaryStore)
             var candidate: KdbxDatabase? = null
+            // ISSUE-P1-631：解析旁路捕获的字节镜像（打开 / 重载成功即登记为持久化基线）
+            var baselineCapture: PersistedBaselineCapturingInputStream? = null
             try {
                 val candidateTicket = SessionCredentialTicket(pathIdentifier)
                 // 文件总长已知（本地 File）⇒ 载荷段确定进度；SAF 等未知长度流传 null 退分段不确定
                 val totalBytes = associatedFile?.length()?.takeIf { it > 0 }
                 val db = inputStreamProvider().use { fis ->
                     // ISSUE-P2-24：大附件在解析期流式落盘（binaryStore 为空则行为与既往一致）
-                    spillTransaction.load(fis, passwordChars, keyFileData, totalBytes, progress)
+                    // ISSUE-P1-631：捕获流套在解析链最外层——解析器消费什么就镜像什么，
+                    // 不重读文件、不重加密；超出留存上限只放弃捕获，不影响本次解析
+                    val capturing = PersistedBaselineCapturingInputStream(fis, MAX_PERSISTED_BASELINE_BYTES)
+                    baselineCapture = capturing
+                    spillTransaction.load(capturing, passwordChars, keyFileData, totalBytes, progress)
                         .also { candidate = it }
                 }
                 candidate = db
@@ -274,9 +303,19 @@ internal class SessionOpener(
                 core.adoptCredentialTicket(candidateTicket)
                 core.state.value = DatabaseSession.SessionState.OPENED
                 spillTransaction.commit()
+                // ISSUE-P1-631：登记本次版本的持久化基线（克隆归会话；捕获缓冲随即清零）
+                val captured = baselineCapture?.capturedBytes()
+                baselineCapture?.wipe()
+                try {
+                    core.retainPersistedBaselineBestEffort(captured, pathIdentifier)
+                } finally {
+                    captured?.fill(0)
+                }
                 candidate = null // 数据库与 spill key 已由活动会话接管
                 KdbxResult.Success(Unit)
             } catch (t: Throwable) {
+                // ISSUE-P1-631：失败 / 取消路径清零捕获缓冲（整库密文的第二份副本，不得留给 GC）
+                baselineCapture?.wipe()
                 if (candidate != null && core.database.value === candidate) {
                     core.database.value = null
                 }

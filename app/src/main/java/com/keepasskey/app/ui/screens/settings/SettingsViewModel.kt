@@ -305,6 +305,10 @@ class SettingsViewModel @Inject constructor(
             viewModelScope.launch {
                 coord.pending.collect { issueWiring::publishPending }
             }
+            // ISSUE-P1-631：观察漂移合并冲突待决裁决状态并下发到 UI（与三选互斥呈现）
+            viewModelScope.launch {
+                coord.mergeConflict.collect { issueWiring::publishMergeConflict }
+            }
         }
     }
 
@@ -340,6 +344,10 @@ class SettingsViewModel @Inject constructor(
     ) = issueWiring.applyExternalModificationChoice(choice)
     /** ISSUE-P2-378：待决外部修改提示（KeePasskeyApp 全局对话框消费） */
     val externalModificationPending: StateFlow<com.keepasskey.app.security.VaultFileDriftPrompt?> get() = issueWiring.pending
+    /** ISSUE-P1-631：待裁决的漂移合并冲突（KeePasskeyApp 全局对话框消费；与三选互斥） */
+    val driftMergeConflict: StateFlow<com.keepasskey.app.security.VaultFileDriftMergeConflict?> get() = issueWiring.mergeConflict
+    /** ISSUE-P1-631：取消合并冲突裁决（关闭提示并把三选重新交还用户） */
+    fun cancelDriftMergeConflict() = issueWiring.cancelMergeConflict()
     /** ISSUE-P2-602：库级设置写盘状态（正在保存 + 一次性反馈；经全局 Snackbar / 进度行呈现） */
     internal val databaseConfigWrite: StateFlow<DatabaseConfigWriteState> get() = preferences.databaseConfigWriteState
     fun clearDatabaseConfigWriteFeedback() = preferences.clearDatabaseConfigWriteFeedback()

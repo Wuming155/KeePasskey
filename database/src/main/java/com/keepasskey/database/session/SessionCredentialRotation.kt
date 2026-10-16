@@ -85,6 +85,10 @@ internal class SessionCredentialRotation(
                     core.adoptCredentialTicket(nextTicket)
                     request?.recordCommitted(nextTicket)
                     core.state.value = DatabaseSession.SessionState.OPENED
+                    // ISSUE-P1-631：换密写盘确认后，库以**新凭据**密文重写——持久化基线必须同步
+                    // 前移为新密文（旧基线仍以旧凭据加密，登记它只会让后续解析失败误入缺失分支）。
+                    // 采用新凭据之后登记，保证登记值与会话当前凭据一致；克隆为同步操作，无挂起点。
+                    core.retainPersistedBaselineBestEffort(serialized, core.activePathIdentifier)
                     // NonCancellable 仅包本地备份删除；不包计算、writer、网络或生物识别等待。
                     withContext(NonCancellable) {
                         withContext(Dispatchers.IO) { fileWriter.deleteBackupQuietly(core.activeFile) }

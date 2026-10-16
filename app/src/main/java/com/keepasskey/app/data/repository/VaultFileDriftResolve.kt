@@ -12,17 +12,16 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.util.StreamLimitExceededException
 import com.keepasskey.app.util.readBoundedBytes
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
-import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
+import com.keepasskey.sync.merge.MergeResult
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import kotlinx.coroutines.CancellationException
-
-/** ISSUE-P3-550：异常细节（含库文件本地路径）只进日志，UI 侧只留错误码映射。 */
-private const val TAG = "VaultFileDriftResolve"
 
 /**
  * ISSUE-P2-378：漂移后的重载 / 合并执行体（自 `RealVaultRepository.reloadOrMergeAfterDrift` 拆出）。
@@ -37,6 +36,14 @@ private const val TAG = "VaultFileDriftResolve"
  * 「磁盘库文件不可读」，即「检出漂移却无法重载 / 合并」的死路。现按通道取字节与重开流：
  * 本地直读文件，SAF 经 `ContentResolver`（与解锁 / 建库共用 [SafVaultCreation] 的写回实现），
  * 处置成功后的基线刷新同口径分流（本地直读属性 / SAF 取真实文档元数据）。
+ *
+ * `ISSUE-P1-631`：合并的共同基线取**最后确认持久化版本**（`DatabaseSession.persistedBaselineSnapshot`，
+ * 绑定库身份与持久化修订）——不得把当前可变树同时充作 base 与 local（那会把本地新增条目
+ * 同化为「远端已删除」、把本地编辑让位给磁盘旧值，静默丢失修改）。基线缺不可信 / 缺失时
+ * **不得静默做删除裁决**：按空底版双方并集语义合并（单侧新建保留、同 UUID 条目字段级合并、
+ * 同字段分叉进入冲突清单）。合并发现同一字段两侧都有修改时**不静默取一侧**：置待裁决提示
+ * （`VaultFileDriftCoordinator.mergeConflict`），由用户以「本地 / 磁盘 / 双方保留」三选裁决，
+ * 裁决结果驱动同一合并实现重算后，在会话修订校验（实例身份 + 基线修订，同一临界区）通过后提交。
  */
 internal class VaultFileDriftResolve(
     private val databaseSession: DatabaseSession,
@@ -54,6 +61,9 @@ internal class VaultFileDriftResolve(
     private val maxDriftReadBytes: Long = MAX_DRIFT_READ_BYTES
 ) {
 
+    /** `ISSUE-P1-631`：真实基线解析与冲突裁决支持（实现见 [VaultFileDriftMergeSupport]） */
+    private val mergeSupport = VaultFileDriftMergeSupport(databaseSession, strings, driftCoordinator)
+
     suspend fun resolve(
         choice: ExternalModificationChoice
     ): KdbxResult<Unit> {
@@ -61,20 +71,33 @@ internal class VaultFileDriftResolve(
         val localFile = databaseSession.currentFile
         return try {
             when (choice) {
-                ExternalModificationChoice.ABANDON_SAVE -> KdbxResult.Success(Unit)
+                ExternalModificationChoice.ABANDON_SAVE -> {
+                    driftCoordinator?.clearMergeConflictPrompt()
+                    KdbxResult.Success(Unit)
+                }
 
-                ExternalModificationChoice.RELOAD_FROM_DISK ->
+                ExternalModificationChoice.RELOAD_FROM_DISK -> {
+                    driftCoordinator?.clearMergeConflictPrompt()
                     reloadFromDisk(pathId, localFile)
+                }
 
                 ExternalModificationChoice.MERGE_AND_SAVE ->
-                    mergeAndSave(pathId, localFile)
+                    mergeAndSave(pathId, localFile, choice.mergePolicy)
+
+                ExternalModificationChoice.MERGE_KEEP_LOCAL,
+                ExternalModificationChoice.MERGE_KEEP_DISK,
+                ExternalModificationChoice.MERGE_KEEP_BOTH -> {
+                    // 裁决已受理：先关提示（重算期间不残留对话框）；失败路径由 requestPrompt 归还三选
+                    driftCoordinator?.clearMergeConflictPrompt()
+                    mergeAndSave(pathId, localFile, choice.mergePolicy)
+                }
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             driftCoordinator?.requestPrompt(pathId)
             // ISSUE-P3-550：`t.message` 携带**库文件本地路径**（漂移处置的异常常来自
             // 文件通道），只进日志；UI 侧统一走错误码映射（未归类 ⇒ `err_unknown`）
-            AppLog.w(TAG, "漂移处置失败: choice=$choice", t)
+            AppLog.w(DRIFT_LOG_TAG, "漂移处置失败: choice=$choice", t)
             val msg = if (choice == ExternalModificationChoice.RELOAD_FROM_DISK) {
                 strings.get(R.string.ext_mod_reload_failed, strings.get(R.string.err_unknown))
             } else {
@@ -104,10 +127,13 @@ internal class VaultFileDriftResolve(
                 databaseSession.open(localFile, pwdCopy, keyCopy, readOnly = false)
             } else {
                 // SAF：与解锁 / 建库同一条 openStream 通道（写回仍走同一 saveWriter 实现）
+                // 句柄非空由上方早退分支保证（localFile == null ⇒ saf != null），此处显式取非空值
+                val safHandle = saf
+                    ?: return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
                 databaseSession.openStream(
                     pathIdentifier = pathId,
-                    inputStreamProvider = { saf!!.openInput() },
-                    saveWriter = saf!!.saveWriter,
+                    inputStreamProvider = { safHandle.openInput() },
+                    saveWriter = safHandle.saveWriter,
                     passwordChars = pwdCopy,
                     keyFileData = keyCopy,
                     readOnly = false
@@ -127,70 +153,89 @@ internal class VaultFileDriftResolve(
 
     private suspend fun mergeAndSave(
         pathId: String,
-        localFile: File?
+        localFile: File?,
+        policy: DriftMergeConflictPolicy?
     ): KdbxResult<Unit> {
         val diskBytes = readCurrentBytes(localFile, pathId)
             ?: return unreadable(ExternalModificationChoice.MERGE_AND_SAVE)
         val diskDb = databaseSession.parseExternalDatabase(diskBytes).getOrThrow()
+        var baseDb: KdbxDatabase? = null
         try {
             val localDb = databaseSession.databaseFlow.value
                 ?: return KdbxResult.Failure(
                     IllegalStateException("无活动数据库"),
                     strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_drift_no_active_database))
                 )
-            val baseLite = KdbxDatabaseLite(
-                rootGroup = localDb.rootGroup,
-                deletedObjects = localDb.deletedObjects,
-                customIcons = localDb.customIcons
-            )
-            val localLite = KdbxDatabaseLite(
-                rootGroup = localDb.rootGroup,
-                deletedObjects = localDb.deletedObjects,
-                customIcons = localDb.customIcons
-            )
-            val remoteLite = KdbxDatabaseLite(
-                rootGroup = diskDb.rootGroup,
-                deletedObjects = diskDb.deletedObjects,
-                customIcons = diskDb.customIcons
-            )
+            // ISSUE-P1-631：真实共同基线（最后确认持久化版本）；不可信 / 缺失 ⇒ 空底版并集语义。
+            // 解析出的基线树由本方法独占（合并器不会把 base 节点复用进产物），随 diskDb 一并回收。
+            val baseline = mergeSupport.resolveTrustedBaseline(pathId)
+            baseDb = baseline?.database
             val merged = KdbxMerger.mergeDatabases(
-                base = baseLite,
-                local = localLite,
-                remote = remoteLite
+                base = mergeSupport.baselineLiteOf(baseDb),
+                local = localDb.toMergeLite(),
+                remote = diskDb.toMergeLite()
             )
-            val expected = localDb
-            val adopted = databaseSession.adoptDatabaseIfUnchanged(
-                expectedAtCycleStart = expected,
-                replacement = expected.copy(
-                    rootGroup = merged.mergedRoot,
-                    deletedObjects = merged.mergedDeletedObjects,
-                    customIcons = merged.mergedCustomIcons
+            val mergedRoot = mergeSupport.resolveConflictsBeforeAdopt(merged, policy, pathId)
+                ?: return KdbxResult.Failure(
+                    IllegalStateException("漂移合并存在待裁决冲突"),
+                    strings.get(R.string.ext_mod_merge_conflict_pending, merged.conflicts.size)
                 )
-            )
-            if (!adopted) {
-                return KdbxResult.Failure(
-                    IllegalStateException("合并窗口内会话树已变化"),
-                    strings.get(
-                        R.string.ext_mod_merge_failed,
-                        strings.get(R.string.err_drift_session_tree_changed)
-                    )
-                )
-            }
-            val saveResult = databaseSession.save()
-            if (saveResult is KdbxResult.Success) {
-                refreshBaseline(pathId, localFile)
-            } else {
-                driftCoordinator?.requestPrompt(pathId)
-            }
-            return saveResult
+            return adoptAndPersist(localDb, merged, mergedRoot, baseline?.revision, pathId, localFile)
         } finally {
             // ISSUE-P3-471：此处**必须**走身份集合判定，不得裸调 `diskDb.clearSensitiveData()`——
             // 合并器对「磁盘独有 / 磁盘胜出的条目」与「磁盘独有的图标」**复用原实例**，采用后这些
             // 实例同时可达于活动会话树（`SECURITY_RECHECK_2026-09.md` §9.6 #19 同型）；裸擦会把活动库
             // 仍在用的口令 / 图标字节清零。finally 同时覆盖解析后的早退、取消和异常；存活侧取**当前**
             // 会话树（`save()` 可能因历史修剪再换实例），其 root/history attachment sources 也参与 spill 判定。
-            eraseDiscardedDatabase(diskDb, live = databaseSession.databaseFlow.value)
+            //
+            // `ISSUE-P1-631`：基线解析树同口径——合并器**不会**把 base 节点复用进产物
+            // （存活节点只源自 local / remote 或二者的 copy），故基线树必然在存活侧之外；
+            // 仍走身份集合判定，使其附件 spill key 按同一契约释放。
+            val live = databaseSession.databaseFlow.value
+            baseDb?.let { eraseDiscardedDatabase(it, live) }
+            eraseDiscardedDatabase(diskDb, live)
         }
+    }
+
+    /**
+     * `ISSUE-P1-631`：提交侧——同一临界区校验（会话树实例身份 + 持久化基线修订）通过后
+     * 采用合并产物并落盘；成功刷新文件元数据基线，失败如实上浮并归还三选提示。
+     */
+    private suspend fun adoptAndPersist(
+        localDb: KdbxDatabase,
+        merged: MergeResult,
+        mergedRoot: KdbxGroup,
+        baselineRevision: Long?,
+        pathId: String,
+        localFile: File?
+    ): KdbxResult<Unit> {
+        val adopted = databaseSession.adoptDatabaseIfUnchanged(
+            expectedAtCycleStart = localDb,
+            replacement = localDb.copy(
+                rootGroup = mergedRoot,
+                deletedObjects = merged.mergedDeletedObjects,
+                customIcons = merged.mergedCustomIcons
+            ),
+            // 基线修订与实例身份在同一临界区校验：窗口内确认写盘 / 会话变化 ⇒ fail-closed
+            expectedPersistedBaselineRevision = baselineRevision
+        )
+        if (!adopted) {
+            return KdbxResult.Failure(
+                IllegalStateException("合并窗口内会话树已变化"),
+                strings.get(
+                    R.string.ext_mod_merge_failed,
+                    strings.get(R.string.err_drift_session_tree_changed)
+                )
+            )
+        }
+        val saveResult = databaseSession.save()
+        if (saveResult is KdbxResult.Success) {
+            driftCoordinator?.clearMergeConflictPrompt()
+            refreshBaseline(pathId, localFile)
+        } else {
+            driftCoordinator?.requestPrompt(pathId)
+        }
+        return saveResult
     }
 
     /** 处置成功后的基线刷新：本地直读文件属性；SAF 取真实文档元数据（不可读即置空） */
@@ -216,11 +261,11 @@ internal class VaultFileDriftResolve(
             if (!localFile.exists()) return null
             // 快拒：本地文件长度精确已知，超限根本不读进内存
             if (localFile.length() > maxDriftReadBytes) {
-                AppLog.w(TAG, "漂移源文件超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
+                AppLog.w(DRIFT_LOG_TAG, "漂移源文件超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
                 return null
             }
             return runCatching { localFile.inputStream().use { it.readBoundedBytes(maxDriftReadBytes) } }
-                .onFailure { AppLog.w(TAG, "漂移源文件读取失败: ${it.javaClass.simpleName}") }
+                .onFailure { AppLog.w(DRIFT_LOG_TAG, "漂移源文件读取失败: ${it.javaClass.simpleName}") }
                 .getOrNull()
         }
         val saf = safChannel(pathId) ?: return null
@@ -228,9 +273,9 @@ internal class VaultFileDriftResolve(
             .onFailure {
                 // 超限与 IO 失败同按不可读处置（日志只记类型与上限，不记路径——ISSUE-P3-550）
                 if (it is StreamLimitExceededException) {
-                    AppLog.w(TAG, "漂移源 SAF 流超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
+                    AppLog.w(DRIFT_LOG_TAG, "漂移源 SAF 流超出读取上限（>${maxDriftReadBytes} 字节），拒绝合并")
                 } else {
-                    AppLog.w(TAG, "漂移源 SAF 流读取失败: ${it.javaClass.simpleName}")
+                    AppLog.w(DRIFT_LOG_TAG, "漂移源 SAF 流读取失败: ${it.javaClass.simpleName}")
                 }
             }
             .getOrNull()

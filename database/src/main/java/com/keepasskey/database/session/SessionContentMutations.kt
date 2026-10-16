@@ -31,7 +31,9 @@ internal class SessionContentMutations(
     private val mutex: Mutex,
     private val databaseFlow: MutableStateFlow<KdbxDatabase?>,
     private val stateFlow: MutableStateFlow<DatabaseSession.SessionState>,
-    private val readOnly: () -> Boolean
+    private val readOnly: () -> Boolean,
+    /** `ISSUE-P1-631`：「校验-采用」的附加条件读取口（持久化基线修订；见 [adoptDatabaseIfUnchanged]） */
+    private val persistedBaselineRevision: () -> Long = { 0L }
 ) {
 
     /** 更新或保存条目。 */
@@ -185,13 +187,25 @@ internal class SessionContentMutations(
      * 已知保守面：`save()` 触发按龄修剪历史时也会替换实例（内容变化极小的误判），
      * 结果是本轮同步如实中止、下轮重试即收敛——宁可误中止，不可静默丢编辑。
      *
+     * `ISSUE-P1-631`：`expectedPersistedBaselineRevision` 非 null 时追加一条**同临界区内**的
+     * 等价性条件——调用方读取持久化基线（含修订）后经长窗口（解析 / 合并）再提交时，窗口内
+     * 任何确认写盘、会话更换或基线清除都会使修订前移 ⇒ 本方法返回 false 如实中止。
+     * 与「实例身份未变」条件互补：后者拦窗口内的**编辑**，本条拦窗口内的**持久化 / 会话变化**。
+     * 为 null（同步等既有调用方）时行为与改动前逐字一致。
+     *
      * 擦除口径与 [updateDatabaseMeta] 逐字一致（采用点同一收口，身份集合判定）。
      */
     suspend fun adoptDatabaseIfUnchanged(
         expectedAtCycleStart: KdbxDatabase,
-        replacement: KdbxDatabase
+        replacement: KdbxDatabase,
+        expectedPersistedBaselineRevision: Long? = null
     ): Boolean = mutex.withLock {
         if (readOnly()) return@withLock false
+        if (expectedPersistedBaselineRevision != null &&
+            persistedBaselineRevision() != expectedPersistedBaselineRevision
+        ) {
+            return@withLock false
+        }
         val currentDb = databaseFlow.value ?: return@withLock false
         if (currentDb !== expectedAtCycleStart) return@withLock false
         // ISSUE-P0-531：与 updateDatabaseMeta 同口径——**先发布、后擦除**（理由与两层兜底见该处注释）

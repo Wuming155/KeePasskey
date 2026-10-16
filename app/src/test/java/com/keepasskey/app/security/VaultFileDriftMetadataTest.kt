@@ -24,8 +24,11 @@ class VaultFileDriftMetadataTest {
     @get:Rule
     val tempFolder = TemporaryFolder()
 
-    private fun coordinator(): VaultFileDriftCoordinator =
-        VaultFileDriftCoordinator(VaultFileBaselineHolder(DatabaseSession()))
+    private fun coordinator(): VaultFileDriftCoordinator {
+        // ISSUE-P1-631：协调器追加会话引用（锁定时清空待决提示）
+        val session = DatabaseSession()
+        return VaultFileDriftCoordinator(VaultFileBaselineHolder(session), session)
+    }
 
     @Test
     fun `本地文件探针读取真实大小与路径标识`() {

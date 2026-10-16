@@ -82,7 +82,9 @@ class DatabaseSession(
         _ioProgress.value = value
     }
 
-    private val mutations = SessionContentMutations(mutex, core.database, core.state) { core.readOnlyMode }
+    private val mutations = SessionContentMutations(
+        mutex, core.database, core.state, { core.readOnlyMode }
+    ) { core.persistedBaselineRevision() }
     private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress, mutations::publishCommittedDatabaseMeta)
     /** Atomic target snapshot and Meta commit entry points. */
     val writeIntents = DatabaseSessionWriteIntents(mutex, core, persistence)
@@ -157,6 +159,8 @@ class DatabaseSession(
         core.invalidateSessionTicket()
         core.readOnlyMode = false
         credentials.clear()
+        // ISSUE-P1-631：旧库基线随会话更换作废（先清零密文快照再置空）
+        core.clearPersistedBaseline()
         core.database.value?.clearSensitiveData()
         core.database.value = null
         core.state.value = SessionState.LOCKED
@@ -286,11 +290,20 @@ class DatabaseSession(
      * [expectedAtCycleStart]（周期起点的 `databaseFlow.value` 实例）时才采用 [replacement]；
      * 会话在窗口内已被写路径替换（或只读 / 无活动库）时返回 false 且不做任何改动。
      * 详见 [SessionContentMutations.adoptDatabaseIfUnchanged]。
+     *
+     * `ISSUE-P1-631`：[expectedPersistedBaselineRevision] 非 null 时在同一临界区内追加
+     * 「持久化基线修订仍为登记值」的条件——漂移合并以长窗口（解析 / 合并）计算产物，
+     * 窗口内任何确认写盘 / 会话变化都必须让本次采用 fail-closed 中止。
      */
     suspend fun adoptDatabaseIfUnchanged(
         expectedAtCycleStart: KdbxDatabase,
-        replacement: KdbxDatabase
-    ): Boolean = mutations.adoptDatabaseIfUnchanged(expectedAtCycleStart, replacement)
+        replacement: KdbxDatabase,
+        expectedPersistedBaselineRevision: Long? = null
+    ): Boolean = mutations.adoptDatabaseIfUnchanged(
+        expectedAtCycleStart,
+        replacement,
+        expectedPersistedBaselineRevision
+    )
 
     /** 删除分组 */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutations.deleteGroup(groupId)
@@ -314,6 +327,32 @@ class DatabaseSession(
     }
 
     /**
+     * `ISSUE-P1-631`：最后确认持久化版本快照（**克隆副本**；调用方拥有，用毕必须
+     * [PersistedDatabaseBaseline.wipe] 清零）。
+     *
+     * 未持久化 / 超出留存上限 / 会话已终止时为 null——调用方（漂移合并）据此走
+     * 「无可信基线 ⇒ 保守并集语义」的既有失败安全分支，不得借用当前可变树充作基线。
+     * 取快照与修订在同一临界区完成，供 [adoptDatabaseIfUnchanged] 的修订校验配对使用。
+     */
+    suspend fun persistedBaselineSnapshot(): PersistedDatabaseBaseline? = mutex.withLock {
+        val bytes = core.persistedBaselineClone() ?: return@withLock null
+        PersistedDatabaseBaseline(
+            revision = core.persistedBaselineRevision(),
+            pathIdentifier = core.persistedBaselinePathIdentifier().orEmpty(),
+            bytes = bytes
+        )
+    }
+
+    /**
+     * 仅供测试使用：清除持久化基线（模拟「无可信基线」场景，覆盖 `ISSUE-P1-631`
+     * 缺失基线下的保守合并路径）。
+     */
+    @androidx.annotation.VisibleForTesting
+    fun clearPersistedBaselineForTesting() {
+        core.clearPersistedBaseline()
+    }
+
+    /**
      * TASK-13 整改：将当前内存数据库序列化为 KDBX 字节流（SAF 导出用）。
      * 与 [save] 相同的凭据要求与序列化管线（含密钥文件复合密钥），但不落盘到活动文件，
      * 字节交由调用方处置；锁定/关闭状态（内存树已销毁）下如实失败。
@@ -334,6 +373,9 @@ class DatabaseSession(
         core.invalidateSessionTicket()
         core.readOnlyMode = false
         credentials.clear()
+        // ISSUE-P1-631：锁定即销毁持久化基线密文快照（与「同步缓存密文快照」同一生命周期口径：
+        // 锁定后残留的整库密文可被离线无限期爆破，不得留给 GC）
+        core.clearPersistedBaseline()
         core.database.value?.clearSensitiveData()
         core.database.value = null
         core.state.value = SessionState.LOCKED
@@ -346,6 +388,8 @@ class DatabaseSession(
         core.invalidateSessionTicket()
         core.readOnlyMode = false
         credentials.clear()
+        // ISSUE-P1-631：关闭同锁定——持久化基线随会话终止销毁
+        core.clearPersistedBaseline()
         core.database.value?.clearSensitiveData()
         core.database.value = null
         core.activeFile = null

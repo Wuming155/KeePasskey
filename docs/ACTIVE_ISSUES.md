@@ -24,9 +24,10 @@
 - 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。
 - 问题：mergeAndSave 把当前 localDb 同时传作 base 与 local。合并器因此认为本地从未修改：本地新增条目在磁盘缺失时被推断为远端删除，同 ID 本地编辑则让磁盘版本成为唯一修改。随后采用并保存该结果。分组也受相同基线错误影响。
 - 影响与触发：用户选择“合并后保存”仍可能丢失未提交本地条目/分组或恢复磁盘旧值；影响本地文件和 SAF 外部漂移处置，不代表普通三方同步均有此缺陷。 触发序列及反证详见方案。
-- 位置：`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt:141`；`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt:49`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
-- [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
+- 位置：`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`；`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt`。
+- 已实现（2026-10-16）：会话持久化基线（`DatabaseSession.persistedBaselineSnapshot`——打开 / 重载 / 新建 / 保存 / Meta 提交 / 换密六类确认写盘点登记，绑定库身份与持久化修订，会话终止先清零再置空）；`VaultFileDriftResolve` 改按真实 base/local/disk 合并，基线缺失 / 不可信时按空底版双方并集语义（不推断删除）；同字段双侧修改不静默取一侧——以「本地 / 磁盘 / 双方保留」裁决提示（`VaultFileDriftCoordinator.mergeConflict`）驱动同一合并实现重算后提交；提交经实例身份 + 基线修订同一临界区校验（`adoptDatabaseIfUnchanged` 扩展）。本仓 JVM 验收：`VaultFileDriftMergeBaselineTest`（app，8 例，覆盖验收矩阵 1/2/3/4 与删除/修改组合，均重解析正式库核对）与 `PersistedBaselineCaptureTest`（database，8 例）全绿；全量 `test` 读数与门禁读数见方案「实施记录」。裁决口径登记 `PD-87`，边界登记限界 §45。
+- 尚未完成：原路径产品复现（真机外部改写 → 三选 → 裁决链）；SAF（`content://`）通道端到端与「并发换库 / 提交失败」barrier 设备验收（方案 §4 第 3 行）；本轮未触及 Rust/JNI/Native 加密分派与探活，四层 connected 测试义务未触发（未跑，如实声明）。
+- [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：目标、模块、步骤、失败处理、验收、回退与实施记录。
 
 ## P2 中危缺陷与协议/测试缺口
 
@@ -165,8 +166,16 @@
 - 已实现：无，本轮仅审查与方案。尚未完成：修复、原触发与失败对照、相应真实服务/运行验收。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-655/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
-## P3 低危问题、特性接线与体验优化
+### ISSUE-P2-658 同步编排用例时序脆弱：已验证直连分支在标准测试调度器下误报失败
 
+- 核实：2026-10-16（Asia/Shanghai），实跑（全量 `test --rerun-tasks --max-workers=1` 读数含该单例；并在**搁置本日 P1-631 改动**的同工作区基线树上单跑同一用例复现同红——非该改动引入）。置信度：高（本机可稳定复现）。
+- 问题：`SettingsThinOrchestrationTest.已验证连接直接同步且不再重复测试` 期望「已验证 ⇒ 直接同步并以上一轮 `sync_feedback_error` 收尾」，但在 `StandardTestDispatcher` + 单次 `runCurrent()` 推进下，同步协程尚未越过 `triggerSync` 的 `sync_feedback_connecting` 置位点，断言实际读到 `sync_feedback_connecting`（实测两文案 `resId` 差 2）。同文件「忙态」用例已按项目口径用 `Thread.sleep(50)` + 再次 `runCurrent` 缓冲真实时间，本用例未做同类缓冲。
+- 影响与触发：本机全量 `test` 读数恒为「3931 例 / 1 失败」，CI 若执行 `test` 会被该单例拖红、掩盖真实回归信号。不代表产品同步行为有缺陷（同用例的「跳过重复测试」断言与忙态用例均通过）。
+- 位置：`app/src/test/java/com/keepasskey/app/ui/screens/settings/SettingsThinOrchestrationTest.kt:112`。
+- 已实现：无（本轮仅登记，未改用例；按测试资产纪律不得放宽断言或改测产品行为）。尚未完成：按同文件既有口径补真实时间缓冲（`Thread.sleep` + 复推）或改 `pumpUntil` 轮询该反馈收敛，并在稳定复现后实跑确认；用例改动随修复一并实跑。
+- 独立整改方案：尚未编制（本轮仅登记；修复前按 AGENTS 补方案或并入相邻批次）。
+
+## P3 低危问题、特性接线与体验优化
 ### ISSUE-P3-642 原生Passkey候选在请求RP不匹配时仍走包名回退
 
 - 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认协议错配；不认定新增跨RP权限；置信度：高。
