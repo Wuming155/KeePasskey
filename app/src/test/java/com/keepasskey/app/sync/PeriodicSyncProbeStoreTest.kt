@@ -46,6 +46,24 @@ class PeriodicSyncProbeStoreTest {
     }
 
     @Test
+    fun `完整同步后的本地密文摘要和回滚命名空间跨实例持久化`() {
+        val preferences = InMemorySharedPreferences()
+        val firstProcessStore = PeriodicSyncProbeStore(preferences.context())
+        val secondProcessStore = PeriodicSyncProbeStore(preferences.context())
+        val vaultId = "/private/vault.kdbx"
+        val record = PeriodicSyncProbeRecord(
+            targetIdentity = "d".repeat(64),
+            observedEtag = "etag-b",
+            needsUnlock = false,
+            syncedContentDigest = "e".repeat(64),
+            rollbackVaultScope = "00112233445566778899AABBCCDDEEFF"
+        )
+
+        assertTrue(firstProcessStore.write(vaultId, record))
+        assertEquals(PeriodicSyncProbeRead.Stored(record), secondProcessStore.read(vaultId))
+    }
+
+    @Test
     fun `损坏或不完整探测状态关闭网络请求且库身份隔离`() {
         val preferences = InMemorySharedPreferences()
         val store = PeriodicSyncProbeStore(preferences.context())
@@ -78,5 +96,11 @@ class PeriodicSyncProbeStoreTest {
         assertEquals(PeriodicSyncWorker.STATUS_FULL_SYNC, fullSync.getString(PeriodicSyncWorker.OUTPUT_STATUS))
         assertEquals("Error", fullSync.getString(PeriodicSyncWorker.OUTPUT_SYNC_OUTCOME))
         assertEquals(null, fullSync.getString(PeriodicSyncWorker.OUTPUT_REASON))
+
+        val encryptedUpload = PeriodicSyncWorkResult.EncryptedUploadCompleted.toWorkData()
+        assertEquals(
+            PeriodicSyncWorker.STATUS_ENCRYPTED_UPLOAD_COMPLETED,
+            encryptedUpload.getString(PeriodicSyncWorker.OUTPUT_STATUS)
+        )
     }
 }

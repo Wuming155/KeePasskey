@@ -16,6 +16,7 @@ fun WebDavSyncScreen(
     onAutoSyncToggle: (Boolean) -> Unit,
     onWifiOnlyToggle: (Boolean) -> Unit,
     onTriggerSync: () -> Unit,
+    onRecoverSyncByKeepingLocal: () -> Unit = {},
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
     /** 「保存并同步」的后续动作（保存成功后触发；顺序编排在 ViewModel，见 `CloudSyncScreen`） */
@@ -59,6 +60,7 @@ fun WebDavSyncScreen(
         onAutoSyncToggle = onAutoSyncToggle,
         onWifiOnlyToggle = onWifiOnlyToggle,
         onTriggerSync = onTriggerSync,
+        onRecoverSyncByKeepingLocal = onRecoverSyncByKeepingLocal,
         onTestConnection = onTestConnection,
         onProviderChange = onProviderChange,
         onSyncAfterSave = onSyncAfterSave,

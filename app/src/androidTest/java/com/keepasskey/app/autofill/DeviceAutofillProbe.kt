@@ -214,6 +214,7 @@ internal class DeviceAutofillProbe {
     fun awaitActiveNode(
         label: String,
         timeoutMs: Long,
+        pollIntervalMs: Long = POLL_INTERVAL_MS,
         predicate: (AccessibilityNodeInfo) -> Boolean
     ): AccessibilityNodeInfo? {
         prepare()
@@ -222,7 +223,7 @@ internal class DeviceAutofillProbe {
             val root = runCatching { automation.rootInActiveWindow }.getOrNull()
             val matches = collectTree(root).filter(predicate)
             if (matches.size == 1) return matches.single()
-            SystemClock.sleep(POLL_INTERVAL_MS)
+            SystemClock.sleep(pollIntervalMs)
         }
         Log.w(TAG, "活动窗口内等待节点超时: $label；快照:\n${snapshot()}")
         return null

@@ -3,6 +3,7 @@ package com.keepasskey.sync.engine
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
 import com.keepasskey.sync.provider.SyncProvider
+import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.withContext
@@ -27,8 +28,76 @@ class SyncEngine(
      * 默认 null 表示未接线（行为与接线前逐字节一致，既有单测不受影响）。
      * `ISSUE-P2-308` 起由 `private` 放宽为 `internal`（同上，供结算句柄记录高水位）。
      */
-    internal val rollbackGuard: SyncRollbackGuard? = null
+    internal val rollbackGuard: SyncRollbackGuard? = null,
+    @VisibleForTesting
+    private val settlementStageObserver: ((SyncAdoptionSettlementStage) -> Unit)? = null
 ) {
+
+    internal fun reportSettlementStageForTest(stage: SyncAdoptionSettlementStage) {
+        settlementStageObserver?.invoke(stage)
+    }
+
+    /**
+     * Resolve a persisted adoption quarantine after the user explicitly chooses the current local vault.
+     * The remote ETag is read immediately before a conditional atomic upload; a concurrent remote write
+     * keeps the quarantine in place. Cache/base/high-water state is advanced only after the upload succeeds.
+     */
+    suspend fun resolvePendingAcceptanceByUploadingLocal(
+        remotePath: String,
+        localBytes: ByteArray
+    ): SyncRecoveryResolution = withContext(Dispatchers.IO) {
+        val guard = rollbackGuard ?: return@withContext SyncRecoveryResolution.NoPendingAcceptance
+        if (!guard.hasPendingAcceptance(remotePath)) {
+            return@withContext SyncRecoveryResolution.NoPendingAcceptance
+        }
+        if (isOffline) {
+            return@withContext SyncRecoveryResolution.Failed(
+                SyncException.NetworkError("Recovery upload is unavailable in offline mode")
+            )
+        }
+
+        val metadata = provider.getMetadata(remotePath)
+        val remoteExists: Boolean
+        val expectedEtag: String?
+        if (metadata.isSuccess) {
+            val current = metadata.getOrThrow()
+            if (current.etag.isBlank()) {
+                return@withContext SyncRecoveryResolution.Failed(
+                    SyncException.ProtocolError(412, "Recovery requires a remote ETag")
+                )
+            }
+            remoteExists = true
+            expectedEtag = current.etag
+        } else {
+            val failure = metadata.exceptionOrNull()
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            if (failure is SyncException.FileNotFound) {
+                remoteExists = false
+                expectedEtag = null
+            } else {
+                return@withContext SyncRecoveryResolution.Failed(failure)
+            }
+        }
+
+        val uploaded = provider.uploadAtomic(remotePath, localBytes, expectedEtag, remoteExists)
+        if (uploaded.isFailure) {
+            val failure = uploaded.exceptionOrNull()
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            return@withContext SyncRecoveryResolution.Failed(failure)
+        }
+
+        val newEtag = uploaded.getOrThrow()
+        try {
+            val digest = cache.writeCache(remotePath, localBytes)
+            advanceBaseAndPersist(cache, remotePath, newEtag, digest, localBytes)
+            guard.recordAccepted(remotePath, digest)
+            SyncRecoveryResolution.PublishedLocal(newEtag)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            SyncRecoveryResolution.Failed(failure)
+        }
+    }
     val events = MutableSharedFlow<SyncCacheEvent>(replay = 16, extraBufferCapacity = 64)
 
     /** 远端内容是否为设备侧曾接受过的历史版本（回退 / 重放） */

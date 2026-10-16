@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.WorkerParameters
+import com.keepasskey.app.security.AutoLockManager
+import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -14,8 +16,9 @@ import kotlinx.coroutines.CancellationException
  * 周期性后台同步执行体（TASK-08 整改）。
  *
  * 通过 Hilt EntryPoint 获取应用级 [SyncCoordinator] 单例执行周期工作：
- * - 开库时执行完整同步；锁库/冷启时只请求远端元数据，变化需要解锁后再合并；
- * - Worker 输出区分完整同步、待解锁、鉴权和网络结果；WorkManager success 仅表示本次调度已处理，
+ * - 开库时执行完整同步；锁库/冷启时先探测元数据，远端基线未变时可条件上传持久化的 KDBX 密文快照；
+ *   远端变化或提交结果不确定时保留快照并要求解锁处理；
+ * - Worker 输出区分完整同步、锁态密文上传、待解锁、鉴权和网络结果；WorkManager success 仅表示本次调度已处理，
  *   不代表同步完成；
  * - 失败不立即重试，下个周期自然重试，避免弱网环境出现退避重试风暴；
  * - 后台周期同步的凭据复用 [SyncCoordinator] 既有封印/借用擦除链路，无新增明文驻留。
@@ -53,6 +56,9 @@ class PeriodicSyncWorker(
     @InstallIn(SingletonComponent::class)
     interface PeriodicSyncEntryPoint {
         fun syncCoordinator(): SyncCoordinator
+        fun databaseSession(): DatabaseSession
+        fun syncCredentialsStore(): SyncCredentialsStore
+        fun autoLockManager(): AutoLockManager
     }
 
     companion object {
@@ -62,6 +68,7 @@ class PeriodicSyncWorker(
 
         const val STATUS_NOT_CONFIGURED = "not_configured"
         const val STATUS_METADATA_UNCHANGED = "metadata_unchanged"
+        const val STATUS_ENCRYPTED_UPLOAD_COMPLETED = "encrypted_upload_completed"
         const val STATUS_NEEDS_UNLOCK = "needs_unlock"
         const val STATUS_AUTHENTICATION_REQUIRED = "authentication_required"
         const val STATUS_TEMPORARY_NETWORK_FAILURE = "temporary_network_failure"
@@ -80,6 +87,10 @@ internal fun PeriodicSyncWorkResult.toWorkData(): Data {
         PeriodicSyncWorkResult.NotConfigured -> data.putString(
             PeriodicSyncWorker.OUTPUT_STATUS,
             PeriodicSyncWorker.STATUS_NOT_CONFIGURED
+        )
+        PeriodicSyncWorkResult.EncryptedUploadCompleted -> data.putString(
+            PeriodicSyncWorker.OUTPUT_STATUS,
+            PeriodicSyncWorker.STATUS_ENCRYPTED_UPLOAD_COMPLETED
         )
         PeriodicSyncWorkResult.MetadataUnchanged -> data.putString(
             PeriodicSyncWorker.OUTPUT_STATUS,

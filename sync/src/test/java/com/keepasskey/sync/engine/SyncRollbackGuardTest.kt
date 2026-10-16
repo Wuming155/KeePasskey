@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.IOException
 import java.io.File
 
 /**
@@ -22,6 +23,36 @@ import java.io.File
  * 随被测生产代码一同删除（登记于批次 §2.4）——原 MAC 失效本就是 fail-open，行为不回退。
  */
 class SyncRollbackGuardTest {
+
+    @Test
+    fun `pending vault marker itself keeps replay blocked if per-target quarantine write fails`() {
+        val stateDir = tempFolder.newFolder("pending-vault-marker")
+        val vaultIdentity = "vault-path-marker"
+        val remotePath = "/remote/marker.kdbx"
+        val guard = SyncRollbackGuard(
+            stateDir,
+            "scope-marker",
+            beforeStateReplace = { next ->
+                if (next.pendingDigest != null) throw java.io.IOException("injected quarantine write failure")
+            },
+            ownerVaultIdentity = vaultIdentity
+        )
+
+        val failure = runCatching {
+            guard.beginAcceptance(remotePath, SyncCache.sha256Hex("candidate".toByteArray()))
+        }.exceptionOrNull()
+        assertTrue("定点故障必须发生在 quarantine 写入", failure is IOException)
+
+        assertTrue(
+            "vault marker must be durable before per-target quarantine write",
+            SyncRollbackGuard.hasPendingAcceptanceForVault(stateDir, vaultIdentity))
+        assertEquals(
+            "marker alone must make every subsequent target fail closed",
+            RollbackVerdict.RecoveryRequired,
+            guard.inspect(remotePath, "replayed")
+        )
+        assertTrue("marker alone is reported as pending acceptance", guard.hasPendingAcceptance(remotePath))
+    }
 
     @get:Rule
     val tempFolder = TemporaryFolder()
@@ -63,6 +94,31 @@ class SyncRollbackGuardTest {
         afterProcessRestart.recordAccepted(remotePath, candidate)
         assertEquals(RollbackVerdict.Unchanged, afterProcessRestart.inspect(remotePath, candidate))
         assertEquals(RollbackVerdict.ReplayDetected, afterProcessRestart.inspect(remotePath, accepted))
+    }
+
+    @Test
+    fun `高水位原子替换失败保留已落盘隔离并可跨实例观察`() {
+        val guard = SyncRollbackGuard(stateDir())
+        val accepted = "content-a".toByteArray()
+        val candidate = "content-b".toByteArray()
+        guard.recordAccepted(remotePath, accepted)
+        guard.beginAcceptance(remotePath, SyncCache.sha256Hex(candidate))
+        guard.beforeStateReplaceForTest = { next ->
+            if (next.pendingDigest == null) throw IOException("injected high-water replace failure")
+        }
+
+        try {
+            guard.recordAccepted(remotePath, candidate)
+            org.junit.Assert.fail("故障注入应阻止高水位状态替换")
+        } catch (_: IOException) {
+            // tmp 已写入真实临时目录；失败发生在原子替换前，先前 pending 状态应保持完整。
+        }
+
+        val afterRestart = SyncRollbackGuard(stateDir())
+        assertTrue(afterRestart.hasPendingAcceptance(remotePath))
+        assertEquals(RollbackVerdict.RecoveryRequired, afterRestart.inspect(remotePath, accepted))
+        assertEquals(RollbackVerdict.RecoveryRequired, afterRestart.inspect(remotePath, candidate))
+        assertTrue("失败的临时文件需由 persist finally 清理", stateDir().listFiles().orEmpty().none { it.name.endsWith(".tmp") })
     }
 
     /**

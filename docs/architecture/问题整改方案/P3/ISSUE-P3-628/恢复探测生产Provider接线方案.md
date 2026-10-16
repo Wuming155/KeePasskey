@@ -1,7 +1,7 @@
 # ISSUE-P3-628：恢复探测生产 Provider 接线方案
 
 > 编制日期：2026-10-15（Asia/Shanghai）；源码基线：`4cfedc840d8cec67d7ba9db594de3b14c9355d0d`。
-> 状态：部分实施，仍开放。生产 Provider 生命周期与探测接线已改用统一作用域；持久化生产配置下的 HTTPS/ETag 前台恢复流程未端到端验收。
+> 状态：已完成。生产 Provider 生命周期与探测接线使用统一作用域；JVM 用例在持久化配置、`testSyncProvider == null` 时覆盖 ETag 提示、目标切换丢弃迟到结果、失败分类与凭据清理。Redmi 4X API 37 与隔离 API 36 AVD 首次联网真实 HTTPS/ETag 提示各 1/1；Redmi 4X 主应用进程真实前台返回触发探测 1/1，真实 Wi-Fi 断开/重连后由主应用进程的 `ConnectivityManager.onAvailable` 自动触发生产 HTTPS/ETag 提示 1/1，延迟生产 PROPFIND 在途切换正式 `DatabaseSession` 至另一库并丢弃迟到结果 1/1。debug-only trust anchor/生命周期接收器仅在 debug 变体，不修改设备系统 CA、不重启设备。
 
 ## 1. 问题与依据
 
@@ -37,7 +37,7 @@
 | 连续前后台/网络事件，探测中换库或换目标 | 同库单飞，迟到结果丢弃，无旧目标状态污染 |
 | 手动/解锁同步回归 | 生产 Provider 与凭据清理接线保持正确 |
 
-保留现有 probe policy 纯函数测试，新增不设置 `testSyncProvider` 的生产 resolver/HTTP 接线测试。隔离 AVD 使用受控 HTTPS 和虚构凭据，触发真实前后台及网络恢复，保留服务端请求、ETag 提示和非空 XML；mock Provider 单测不能作为生产接线验收。
+保留现有 probe policy 纯函数测试；`ResumeSyncProbeCoordinatorProductionTest` 不设置 `testSyncProvider`，以持久化配置和记录型生产工厂覆盖探测编排、ETag、目标切换及凭据清理。`ResumeSyncProbeProductionDeviceTest` 在 Redmi 4X API 37 与隔离 API 36 AVD 上，以本地受控 HTTPS WebDAV、持久化生产配置与虚构凭据验证首次默认网络回调及 ETag 提示，两设备 XML 各 1/1 通过。debug 包通过 raw trust anchor 信任本地测试证书，测试不写设备系统 CA。debug-only `P3_628ScenarioReceiver` 在主应用进程中准备合成库和生产 WebDAV 配置，只有测试用广播用于安排状态与回读结果；前台场景由真实 `MainActivity` HOME→再启动触发 MainApplication/AutoLockManager 生命周期探测，网络场景由主应用进程内已注册的默认网络回调在 Wi-Fi 真实断开/重新连接后自动触发探测。两条路径均观察真实 HTTPS PROPFIND、ETag 更新与远端变化提示，各 1/1 通过。第三场景让本地 HTTPS 服务延迟生产 PROPFIND，主机广播只负责在请求在途时把正式 `DatabaseSession` 切到第二合成库；请求返回后旧目标结果被丢弃，设备 XML 1/1 通过。证据位于 `.ci-artifacts/remediation-20261015/p2-627/probe-foreground-resume-main-process-d4fa72cdfc54.xml`、`probe-network-transition-main-process-b107b5ad4b70.xml`、`probe-target-switch-ResumeSyncProbeProductionDeviceTest.xml`。
 
 ## 5. 顺序、交付与回退
 

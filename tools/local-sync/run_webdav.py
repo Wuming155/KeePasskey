@@ -4,6 +4,8 @@
 # 证书：certs/cert.pem + certs/key.pem（localhost 自签名，SAN 含 localhost / 127.0.0.1）。
 import os
 import sys
+import time
+from pathlib import Path
 
 from cheroot import wsgi
 from cheroot.ssl.builtin import BuiltinSSLAdapter
@@ -48,6 +50,96 @@ config = {
 }
 
 app = WsgiDAVApp(config)
+
+
+class ConditionalWriteRace:
+    """Optional deterministic If-Match race for device acceptance tests."""
+
+    def __init__(self, wrapped_app):
+        self.wrapped_app = wrapped_app
+        self.marker = os.environ.get("WEBDAV_RACE_MARKER")
+        self.remote_path = os.environ.get("WEBDAV_RACE_PATH")
+        self.triggered = os.environ.get("WEBDAV_RACE_TRIGGERED")
+        self.race_move_number = int(os.environ.get("WEBDAV_RACE_MOVE_NUMBER", "0"))
+        self.delay_move_number = int(os.environ.get("WEBDAV_DELAY_MOVE_NUMBER", "0"))
+        self.delay_seconds = float(os.environ.get("WEBDAV_DELAY_SECONDS", "0"))
+        self.delay_marker = os.environ.get("WEBDAV_DELAY_MARKER")
+        self.delay_probe_after_race_seconds = float(
+            os.environ.get("WEBDAV_DELAY_PROBE_AFTER_RACE_SECONDS", "0")
+        )
+        self.delay_probe_seconds = float(os.environ.get("WEBDAV_DELAY_PROBE_SECONDS", "0"))
+        self.probe_delay_marker = os.environ.get("WEBDAV_PROBE_DELAY_MARKER")
+        self.probe_request_marker = os.environ.get("WEBDAV_PROBE_REQUEST_MARKER")
+        self.move_count = 0
+        self.race_happened = False
+
+    def __call__(self, environ, start_response):
+        if environ.get("REQUEST_METHOD") == "PROPFIND" and self.probe_request_marker:
+            marker = Path(self.probe_request_marker)
+            if not marker.exists():
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text("production HTTPS metadata request received\n", encoding="utf-8")
+        if (
+            environ.get("REQUEST_METHOD") == "PROPFIND"
+            and self.delay_probe_seconds > 0
+            and self.probe_delay_marker
+        ):
+            marker = Path(self.probe_delay_marker)
+            if not marker.exists():
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text("production probe request is in flight\n", encoding="utf-8")
+                print("[TEST-SLOW] delaying production probe request", flush=True)
+                time.sleep(self.delay_probe_seconds)
+        if (
+            environ.get("REQUEST_METHOD") == "PROPFIND"
+            and self.race_happened
+            and self.delay_probe_after_race_seconds > 0
+            and self.delay_marker
+        ):
+            marker = Path(self.delay_marker)
+            if not marker.exists():
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text("delaying the 412 metadata re-probe\n", encoding="utf-8")
+                print("[TEST-SLOW] delaying 412 metadata re-probe", flush=True)
+                time.sleep(self.delay_probe_after_race_seconds)
+        if environ.get("REQUEST_METHOD") == "MOVE":
+            self.move_count += 1
+            if self.delay_move_number and self.move_count == self.delay_move_number:
+                if self.delay_marker:
+                    marker = Path(self.delay_marker)
+                    marker.parent.mkdir(parents=True, exist_ok=True)
+                    marker.write_text(
+                        f"delaying MOVE {self.move_count} for {self.delay_seconds:g}s\n",
+                        encoding="utf-8",
+                    )
+                time.sleep(self.delay_seconds)
+        marker_is_active = bool(self.marker and Path(self.marker).is_file())
+        numbered_race_is_active = self.race_move_number > 0 and self.move_count == self.race_move_number
+        if marker_is_active or numbered_race_is_active:
+            print(
+                f"[TEST-RACE] method={environ.get('REQUEST_METHOD')} path={environ.get('PATH_INFO')}",
+                flush=True,
+            )
+        if (
+            self.remote_path
+            and environ.get("REQUEST_METHOD") == "MOVE"
+            and (marker_is_active or numbered_race_is_active)
+        ):
+            root = Path(DAV_ROOT).resolve()
+            target = (root / self.remote_path.lstrip("/")).resolve()
+            if target.is_relative_to(root):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"synthetic remote revision C inserted before conditional MOVE")
+                self.race_happened = True
+                if self.triggered:
+                    Path(self.triggered).write_text("conditional MOVE race returned HTTP 412\n", encoding="utf-8")
+                print("[TEST-RACE] returning explicit HTTP 412", flush=True)
+                start_response("412 Precondition Failed", [("Content-Length", "0")])
+                return [b""]
+        return self.wrapped_app(environ, start_response)
+
+
+app = ConditionalWriteRace(app)
 
 server = wsgi.Server(
     bind_addr=(HOST, PORT),

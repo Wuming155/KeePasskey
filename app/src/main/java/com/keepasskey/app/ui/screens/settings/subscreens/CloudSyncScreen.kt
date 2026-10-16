@@ -60,6 +60,7 @@ fun CloudSyncScreen(
     onAutoSyncToggle: (Boolean) -> Unit,
     onWifiOnlyToggle: (Boolean) -> Unit,
     onTriggerSync: () -> Unit,
+    onRecoverSyncByKeepingLocal: () -> Unit = {},
     onTestConnection: () -> Unit = onTriggerSync,
     onProviderChange: (CloudSyncProvider) -> Unit = {},
     /**
@@ -395,6 +396,7 @@ fun CloudSyncScreen(
                 SyncStatusCard(
                     uiState = uiState,
                     onTriggerSync = onTriggerSync,
+                    onRecoverByKeepingLocal = onRecoverSyncByKeepingLocal,
                     // 先保存表单（含刚输入的密码），再走顺序编排（测连通过则同步），
                     // 让 lastSyncTime 真正写入，避免「徽章已同步 / 下方尚未同步」矛盾
                     onTestConnection = {

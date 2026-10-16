@@ -44,9 +44,17 @@ internal class DeferredBaselineSettlement(
                     // file operation fails, a new engine instance must refuse automatic adoption.
                     engine.rollbackGuard?.beginAcceptance(remotePath, contentDigest)
                     intentWritten = true
+                    engine.reportSettlementStageForTest(SyncAdoptionSettlementStage.INTENT_PERSISTED)
                     receipt?.commit()
-                    advanceBaseAndPersist(engine.cache, remotePath, etag, contentDigest, bytes)
+                    if (receipt != null) {
+                        engine.reportSettlementStageForTest(SyncAdoptionSettlementStage.CACHE_RECEIPT_COMMITTED)
+                    }
+                    engine.cache.updateBase(remotePath, contentDigest, etag)
+                    engine.reportSettlementStageForTest(SyncAdoptionSettlementStage.BASE_METADATA_PERSISTED)
+                    engine.cache.writeBaseContent(remotePath, bytes)
+                    engine.reportSettlementStageForTest(SyncAdoptionSettlementStage.BASE_CONTENT_PERSISTED)
                     engine.recordAccepted(remotePath, contentDigest)
+                    engine.reportSettlementStageForTest(SyncAdoptionSettlementStage.HIGH_WATER_PERSISTED)
                     eventOnAccept?.let { engine.events.tryEmit(it) }
                 }
                 state = State.COMMITTED

@@ -84,5 +84,7 @@ data class UnlockUiState(
     // ISSUE-P3-438：上次进程死亡时会话仍处于打开态（未正常关闭）——解锁页一次性轻提示
     // （UnlockViewModel.init 消费 SessionCloseMarker 后置位；仅异常退出呈现，
     // 主动锁库 / 超时锁定不呈现；中性文案，不渲染为错误告警）
-    val lastSessionAbnormalCloseNotice: Boolean = false
+    val lastSessionAbnormalCloseNotice: Boolean = false,
+    /** 按库持久化的周期同步恢复状态；锁屏页仅提示，明文处理须由用户解锁后进行。 */
+    val syncRecoveryPending: Boolean = false
 )

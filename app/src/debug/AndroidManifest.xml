@@ -13,7 +13,21 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application>
+    <queries>
+        <package android:name="${applicationId}.test" />
+    </queries>
+
+    <application android:networkSecurityConfig="@xml/network_security_config">
+        <receiver
+            android:name="com.keepasskey.app.sync.P3_628ScenarioReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.keepasskey.debug.P3_628_SETUP_MAIN_PROCESS" />
+                <action android:name="com.keepasskey.debug.P3_628_ENABLE_PROBE" />
+                <action android:name="com.keepasskey.debug.P3_628_ASSERT_NOTICE" />
+                <action android:name="com.keepasskey.debug.P3_628_CLEANUP" />
+            </intent-filter>
+        </receiver>
         <activity
             android:name="com.keepasskey.app.security.DialogWindowHardeningHostActivity"
             android:excludeFromRecents="true"

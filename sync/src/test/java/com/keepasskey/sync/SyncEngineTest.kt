@@ -6,6 +6,7 @@ import com.keepasskey.sync.engine.SyncCommitResult
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.engine.SyncOpenResult
 import com.keepasskey.sync.engine.SyncResolveUploadResult
+import com.keepasskey.sync.engine.RollbackVerdict
 import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
@@ -25,6 +26,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
 import java.io.OutputStream
 
 /**
@@ -109,6 +111,121 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `缓存回执交付失败在真实文件系统重启后仍隔离远端重放`() = runTest {
+        val rollbackDir = File(tempFolder.root, "receipt-failure-rollback")
+        val guard = SyncRollbackGuard(rollbackDir)
+        val acceptedA = "accepted-a".toByteArray()
+        val candidateB = "accepted-b".toByteArray()
+        guard.recordAccepted(remotePath, acceptedA)
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(candidateB, "etag-b")
+        val guardedEngine = SyncEngine(fakeProvider, syncCache, guard)
+        val opened = guardedEngine.openRemote(remotePath) as SyncOpenResult.RemoteSynced
+
+        val cacheTarget = File(
+            cacheDir,
+            SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8)) + SyncCache.SUFFIX_CACHE
+        ).apply { mkdir() }
+        try {
+            opened.adoption!!.accept()
+            fail("缓存 receipt rename 到目录目标应失败")
+        } catch (_: Exception) {
+            // pending intent 已先行 fsync；缓存交付失败后继续隔离。
+        }
+
+        assertTrue(cacheTarget.isDirectory)
+        val restartedGuard = SyncRollbackGuard(rollbackDir)
+        assertEquals(RollbackVerdict.RecoveryRequired, restartedGuard.inspect(remotePath, acceptedA))
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(acceptedA, "etag-a-replay")
+        val callsBeforeReplay = fakeProvider.metadataCalls
+        assertEquals(SyncOpenResult.RecoveryRequired, SyncEngine(fakeProvider, syncCache, restartedGuard).openRemote(remotePath))
+        assertEquals(callsBeforeReplay, fakeProvider.metadataCalls)
+        assertFalse("失败的 cache receipt 不得留下 B 的正式缓存", cacheTarget.isFile)
+    }
+
+    @Test
+    fun `基准元数据提交失败后重启回放A保留已落盘B且结算不能重入`() = runTest {
+        val rollbackDir = File(tempFolder.root, "meta-failure-rollback")
+        val guard = SyncRollbackGuard(rollbackDir)
+        val acceptedA = "accepted-a".toByteArray()
+        val candidateB = "accepted-b".toByteArray()
+        guard.recordAccepted(remotePath, acceptedA)
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(candidateB, "etag-b")
+        val opened = SyncEngine(fakeProvider, syncCache, guard).openRemote(remotePath) as SyncOpenResult.RemoteSynced
+
+        val metaTarget = File(
+            cacheDir,
+            SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8)) + ".meta"
+        ).apply { mkdir() }
+        try {
+            opened.adoption!!.accept()
+            fail("基准元数据原子替换应因目标为目录而失败")
+        } catch (_: Exception) {
+            // cache receipt 和 baseversion 已交付；pending intent 仍是拒绝重放的权威状态。
+        }
+
+        assertTrue(metaTarget.isDirectory)
+        assertArrayEquals(candidateB, syncCache.readCache(remotePath))
+        val restartedGuard = SyncRollbackGuard(rollbackDir)
+        assertEquals(RollbackVerdict.RecoveryRequired, restartedGuard.inspect(remotePath, acceptedA))
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(acceptedA, "etag-a-replay")
+        assertEquals(
+            SyncOpenResult.RecoveryRequired,
+            SyncEngine(fakeProvider, syncCache, restartedGuard).openRemote(remotePath)
+        )
+        assertArrayEquals("重放 A 不得覆盖部分已提交的 B", candidateB, syncCache.readCache(remotePath))
+
+        // 失败后的 accept 不得重跑提交；reject 也不得清掉持久化隔离。
+        try {
+            opened.adoption!!.accept()
+            fail("失败后再次 accept 应要求恢复")
+        } catch (_: IllegalStateException) {
+            // expected
+        }
+        opened.adoption!!.reject()
+        assertTrue(SyncRollbackGuard(rollbackDir).hasPendingAcceptance(remotePath))
+        assertArrayEquals(candidateB, syncCache.readCache(remotePath))
+    }
+
+    @Test
+    fun `高水位最终替换失败后A持续隔离且B不被重放覆盖`() = runTest {
+        val rollbackDir = File(tempFolder.root, "high-water-failure-rollback")
+        val guard = SyncRollbackGuard(rollbackDir)
+        val acceptedA = "accepted-a".toByteArray()
+        val candidateB = "accepted-b".toByteArray()
+        guard.recordAccepted(remotePath, acceptedA)
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(candidateB, "etag-b")
+        val opened = SyncEngine(fakeProvider, syncCache, guard).openRemote(remotePath) as SyncOpenResult.RemoteSynced
+        guard.beforeStateReplaceForTest = { next ->
+            if (next.pendingDigest == null) throw IOException("injected high-water replace failure")
+        }
+
+        try {
+            opened.adoption!!.accept()
+            fail("最终高水位原子替换应失败")
+        } catch (_: IOException) {
+            // 失败发生在 tmp fsync 后，之前的 pending 状态文件应仍然可读。
+        }
+
+        assertArrayEquals(candidateB, syncCache.readCache(remotePath))
+        val restartedGuard = SyncRollbackGuard(rollbackDir)
+        assertEquals(RollbackVerdict.RecoveryRequired, restartedGuard.inspect(remotePath, acceptedA))
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(acceptedA, "etag-a-replay")
+        assertEquals(
+            SyncOpenResult.RecoveryRequired,
+            SyncEngine(fakeProvider, syncCache, restartedGuard).openRemote(remotePath)
+        )
+        assertArrayEquals("远端 A 重放不得覆盖正式缓存 B", candidateB, syncCache.readCache(remotePath))
+        try {
+            opened.adoption!!.accept()
+            fail("RECOVERY_REQUIRED 状态不得再次提交")
+        } catch (_: IllegalStateException) {
+            // expected
+        }
+        opened.adoption!!.reject()
+        assertTrue(SyncRollbackGuard(rollbackDir).hasPendingAcceptance(remotePath))
+    }
+
+    @Test
     fun `基准摘要已前移但基准内容写入失败后重放被隔离`() = runTest {
         val rollbackDir = File(tempFolder.root, "partial-settlement-rollback")
         val guard = SyncRollbackGuard(rollbackDir)
@@ -138,9 +255,32 @@ class SyncEngineTest {
         val restartedGuard = SyncRollbackGuard(rollbackDir)
         assertTrue(restartedGuard.hasPendingAcceptance(remotePath))
         val callsBeforeReplay = fakeProvider.metadataCalls
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile(previous, "etag-a-replay")
         val replay = SyncEngine(fakeProvider, syncCache, restartedGuard).openRemote(remotePath)
         assertEquals(SyncOpenResult.RecoveryRequired, replay)
         assertEquals("恢复隔离必须在再次读取远端前生效", callsBeforeReplay, fakeProvider.metadataCalls)
+        assertArrayEquals("重放 A 不得覆盖已交付的 B", candidate, syncCache.readCache(remotePath))
+    }
+
+    @Test
+    fun `settlement重复accept和reject按终态幂等`() = runTest {
+        val guard = SyncRollbackGuard(File(tempFolder.root, "idempotent-settlement-rollback"))
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("accepted-b".toByteArray(), "etag-b")
+        val accepted = SyncEngine(fakeProvider, syncCache, guard).openRemote(remotePath) as SyncOpenResult.RemoteSynced
+        accepted.adoption!!.accept()
+        accepted.adoption!!.accept()
+        accepted.adoption!!.reject()
+        assertTrue(syncCache.isCached(remotePath))
+        assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, "accepted-b".toByteArray()))
+
+        syncCache.clear(remotePath)
+        fakeProvider.remoteFiles[remotePath] = FakeRemoteFile("rejected-candidate".toByteArray(), "etag-c")
+        val rejected = SyncEngine(fakeProvider, syncCache, guard).openRemote(remotePath) as SyncOpenResult.RemoteSynced
+        rejected.adoption!!.reject()
+        rejected.adoption!!.reject()
+        rejected.adoption!!.accept()
+        assertFalse("拒绝终态重复调用不得交付缓存", syncCache.isCached(remotePath))
+        assertEquals("拒绝不更新高水位", RollbackVerdict.Accept, guard.inspect(remotePath, "rejected-candidate".toByteArray()))
     }
 
     @Test

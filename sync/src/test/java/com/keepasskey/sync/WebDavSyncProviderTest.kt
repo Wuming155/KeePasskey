@@ -4,6 +4,9 @@ import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.webdav.WebDavSyncProvider
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -14,6 +17,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 
 /**
  * WebDavSyncProvider 单元测试：
@@ -26,6 +31,25 @@ class WebDavSyncProviderTest {
 
     // Wave 12 TLS-only 工厂默认拒绝明文：MockWebServer 为 HTTP 回环，测试显式注入默认规格客户端
     private val plainLoopbackClient = OkHttpClient()
+
+    @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun `取消 WebDAV 请求会中止生产 Provider 的活动 HTTP Call`() = runTest {
+        server.enqueue(MockResponse().setHeadersDelay(10, TimeUnit.SECONDS))
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "test-user",
+            passwordChars = "test-password".toCharArray(),
+            client = plainLoopbackClient
+        )
+
+        val requestJob = launch { provider.testConnection() }
+        runCurrent()
+        assertNotNull("PROPFIND 应已到达服务端", server.takeRequest(2, TimeUnit.SECONDS))
+        requestJob.cancelAndJoin()
+
+        assertTrue("Provider 调用必须以协程取消结束", requestJob.isCancelled)
+    }
 
     @Before
     fun setUp() {
@@ -338,8 +362,10 @@ class WebDavSyncProviderTest {
             client = plainLoopbackClient
         )
 
-        val downloadResult = provider.downloadBytes("我的 密码库/工作 vault.kdbx")
+        val downloaded = ByteArrayOutputStream()
+        val downloadResult = provider.download("我的 密码库/工作 vault.kdbx", downloaded)
         assertTrue(downloadResult.isSuccess)
+        assertEquals("file content", downloaded.toString(Charsets.UTF_8.name()))
 
         val req = server.takeRequest()
         val path = req.path.orEmpty()

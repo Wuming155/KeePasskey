@@ -359,6 +359,7 @@ class SettingsViewModel @Inject constructor(
     fun setAutoSyncEnabled(enabled: Boolean) = syncController.setAutoSyncEnabled(enabled)
     fun setWifiOnlySync(enabled: Boolean) = extendedPreferences.setWifiOnlySync(enabled)
     fun triggerSync() = syncController.triggerSync()
+    fun recoverPendingSyncByKeepingLocal() = syncController.recoverPendingSyncByKeepingLocal()
     fun testSyncConnection() = syncController.testSyncConnection()
     /** ISSUE-P2-406：同步页水合（PD-23 单语句委托；体内后台派发器做 Keystore 解密） */
     fun hydrateSyncUi() = syncController.hydrate()

@@ -11,7 +11,11 @@ import javax.inject.Singleton
 internal data class PeriodicSyncProbeRecord(
     val targetIdentity: String,
     val observedEtag: String,
-    val needsUnlock: Boolean
+    val needsUnlock: Boolean,
+    /** 最近一次完整同步确认的本地 KDBX 密文摘要；null 表示旧版或尚无完整同步确认。 */
+    val syncedContentDigest: String? = null,
+    /** 防回滚守卫使用的根组 UUID 摘要。 */
+    val rollbackVaultScope: String? = null
 )
 
 internal sealed interface PeriodicSyncProbeRead {
@@ -37,6 +41,7 @@ internal enum class PeriodicSyncNeedsUnlockReason {
 internal sealed interface PeriodicSyncWorkResult {
     data object NotConfigured : PeriodicSyncWorkResult
     data object MetadataUnchanged : PeriodicSyncWorkResult
+    data object EncryptedUploadCompleted : PeriodicSyncWorkResult
     data class NeedsUnlock(val reason: PeriodicSyncNeedsUnlockReason) : PeriodicSyncWorkResult
     data object AuthenticationRequired : PeriodicSyncWorkResult
     data object TemporaryNetworkFailure : PeriodicSyncWorkResult
@@ -96,8 +101,9 @@ internal object PeriodicSyncProbePolicy {
 }
 
 /**
- * 按库持久化的元数据探测状态。库路径和目标配置仅用于派生偏好键与身份摘要；实际持久值只有目标
- * 身份、不透明 ETag 和待解锁状态。写入使用 commit，确保 Worker 成功返回后立即进程死亡也能保留结果。
+ * 按库持久化的元数据探测状态。库路径和目标配置仅用于派生偏好键与身份摘要；持久值包括目标
+ * 身份、不透明 ETag、待解锁状态、最近一次完整同步的本地 KDBX 密文摘要和非秘密回滚库命名空间。
+ * 写入使用 commit，确保 Worker 成功返回后立即进程死亡也能保留结果。
  */
 @Singleton
 class PeriodicSyncProbeStore @Inject constructor(
@@ -110,7 +116,7 @@ class PeriodicSyncProbeStore @Inject constructor(
         val keys = keysFor(vaultIdentity)
         return try {
             val values = preferences.all
-            val keySet = keys.toSet()
+            val keySet = keys.requiredSet()
             if (keySet.none(values::containsKey)) return PeriodicSyncProbeRead.Missing
             if (keySet.any { !values.containsKey(it) }) return PeriodicSyncProbeRead.Corrupt
 
@@ -120,11 +126,26 @@ class PeriodicSyncProbeStore @Inject constructor(
                 ?: return PeriodicSyncProbeRead.Corrupt
             val needsUnlock = values[keys.needsUnlock] as? Boolean
                 ?: return PeriodicSyncProbeRead.Corrupt
+            if ((values.containsKey(keys.syncedContentDigest) && values[keys.syncedContentDigest] !is String) ||
+                (values.containsKey(keys.rollbackVaultScope) && values[keys.rollbackVaultScope] !is String)
+            ) return PeriodicSyncProbeRead.Corrupt
+            val syncedDigest = values[keys.syncedContentDigest] as? String
+            val rollbackVaultScope = values[keys.rollbackVaultScope] as? String
             if (!isTargetIdentity(targetIdentity) || !isSafeEtag(etag) || (etag.isBlank() && !needsUnlock)) {
                 return PeriodicSyncProbeRead.Corrupt
             }
+            if ((syncedDigest != null && !isDigest(syncedDigest)) ||
+                (rollbackVaultScope != null && !isRollbackVaultScope(rollbackVaultScope))
+            ) return PeriodicSyncProbeRead.Corrupt
+            if ((syncedDigest == null) != (rollbackVaultScope == null)) return PeriodicSyncProbeRead.Corrupt
             PeriodicSyncProbeRead.Stored(
-                PeriodicSyncProbeRecord(targetIdentity, cleanEtag(etag), needsUnlock)
+                PeriodicSyncProbeRecord(
+                    targetIdentity,
+                    cleanEtag(etag),
+                    needsUnlock,
+                    syncedContentDigest = syncedDigest,
+                    rollbackVaultScope = rollbackVaultScope
+                )
             )
         } catch (_: Exception) {
             PeriodicSyncProbeRead.Corrupt
@@ -133,7 +154,10 @@ class PeriodicSyncProbeStore @Inject constructor(
 
     internal fun write(vaultIdentity: String, record: PeriodicSyncProbeRecord): Boolean {
         if (vaultIdentity.isBlank() || !isTargetIdentity(record.targetIdentity) ||
-            !isSafeEtag(record.observedEtag) || (record.observedEtag.isBlank() && !record.needsUnlock)
+            !isSafeEtag(record.observedEtag) || (record.observedEtag.isBlank() && !record.needsUnlock) ||
+            (record.syncedContentDigest != null && !isDigest(record.syncedContentDigest)) ||
+            (record.rollbackVaultScope != null && !isRollbackVaultScope(record.rollbackVaultScope)) ||
+            ((record.syncedContentDigest == null) != (record.rollbackVaultScope == null))
         ) {
             return false
         }
@@ -143,6 +167,18 @@ class PeriodicSyncProbeStore @Inject constructor(
                 .putString(keys.targetIdentity, record.targetIdentity)
                 .putString(keys.etag, cleanEtag(record.observedEtag))
                 .putBoolean(keys.needsUnlock, record.needsUnlock)
+                .apply {
+                    if (record.syncedContentDigest != null) {
+                        putString(keys.syncedContentDigest, record.syncedContentDigest)
+                    } else {
+                        remove(keys.syncedContentDigest)
+                    }
+                    if (record.rollbackVaultScope != null) {
+                        putString(keys.rollbackVaultScope, record.rollbackVaultScope)
+                    } else {
+                        remove(keys.rollbackVaultScope)
+                    }
+                }
                 .commit()
         } catch (_: Exception) {
             false
@@ -157,6 +193,8 @@ class PeriodicSyncProbeStore @Inject constructor(
                 .remove(keys.targetIdentity)
                 .remove(keys.etag)
                 .remove(keys.needsUnlock)
+                .remove(keys.syncedContentDigest)
+                .remove(keys.rollbackVaultScope)
                 .commit()
         } catch (_: Exception) {
             false
@@ -168,10 +206,20 @@ class PeriodicSyncProbeStore @Inject constructor(
             .digest(vaultIdentity.toByteArray(Charsets.UTF_8))
             .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
         val prefix = "$KEY_PREFIX$digest"
-        return ProbeKeys("${prefix}_target", "${prefix}_etag", "${prefix}_pending")
+        return ProbeKeys(
+            "${prefix}_target",
+            "${prefix}_etag",
+            "${prefix}_pending",
+            "${prefix}_synced_digest",
+            "${prefix}_rollback_scope"
+        )
     }
 
     private fun isTargetIdentity(value: String): Boolean = TARGET_IDENTITY_PATTERN.matches(value)
+
+    private fun isDigest(value: String): Boolean = DIGEST_PATTERN.matches(value)
+
+    private fun isRollbackVaultScope(value: String): Boolean = ROLLBACK_VAULT_SCOPE_PATTERN.matches(value)
 
     private fun isSafeEtag(value: String): Boolean = value.length <= MAX_ETAG_LENGTH &&
         value.none { it.code < ASCII_SPACE || it.code == ASCII_DELETE }
@@ -179,9 +227,11 @@ class PeriodicSyncProbeStore @Inject constructor(
     private data class ProbeKeys(
         val targetIdentity: String,
         val etag: String,
-        val needsUnlock: String
+        val needsUnlock: String,
+        val syncedContentDigest: String,
+        val rollbackVaultScope: String
     ) {
-        fun toSet(): Set<String> = setOf(targetIdentity, etag, needsUnlock)
+        fun requiredSet(): Set<String> = setOf(targetIdentity, etag, needsUnlock)
     }
 
     private companion object {
@@ -191,5 +241,7 @@ class PeriodicSyncProbeStore @Inject constructor(
         const val ASCII_SPACE = 0x20
         const val ASCII_DELETE = 0x7f
         val TARGET_IDENTITY_PATTERN = Regex("[0-9a-f]{64}")
+        val DIGEST_PATTERN = Regex("[0-9a-f]{64}")
+        val ROLLBACK_VAULT_SCOPE_PATTERN = Regex("[0-9A-Fa-f]{32}")
     }
 }

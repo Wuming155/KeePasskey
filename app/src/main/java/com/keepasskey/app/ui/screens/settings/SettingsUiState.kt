@@ -104,6 +104,10 @@ data class SettingsUiState(
     val wifiOnlySync: Boolean = true,
     val isSyncing: Boolean = false,
     val syncFeedbackMessage: UiMessage? = null,
+    /** 锁态周期同步或采纳事务留下的持久化恢复状态；仅由实际存储探测填充。 */
+    val syncRecoveryRequired: Boolean = false,
+    /** 有待采纳 rollback quarantine 且当前可执行带 ETag 条件的本地恢复上传。 */
+    val syncRecoveryCanKeepLocal: Boolean = false,
     // KP2A 进阶文件与同步机制
     // ISSUE-P2-497：离线缓存开关字段已整链移除（PD-75，假开关）
     val syncOnColdStart: Boolean = true, // 软件杀死后重新启动时自动与云端同步 (冷启动自动同步)

@@ -128,6 +128,21 @@ class SyncCycleRunner @Inject constructor(
      */
     internal var syncCacheFactory: ((File) -> SyncCache)? = null
 
+    /** Test-only factory seam for reproducing rollback-state failures around real cycle commits. */
+    internal var rollbackGuardFactoryForTest: ((File, String, String?) -> SyncRollbackGuard)? = null
+    internal var settlementStageObserverForTest:
+        ((com.keepasskey.sync.engine.SyncAdoptionSettlementStage) -> Unit)? = null
+
+    internal fun createRollbackGuard(
+        stateDir: File,
+        vaultScope: String,
+        vaultIdentity: String? = databaseSession.currentPathIdentifier
+    ): SyncRollbackGuard = rollbackGuardFactoryForTest?.invoke(stateDir, vaultScope, vaultIdentity)
+        ?: SyncRollbackGuard(stateDir, vaultScope, ownerVaultIdentity = vaultIdentity)
+
+    internal fun rollbackStateDirectory(): File =
+        rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME)
+
     /**
      * 执行全量同步周期的决策树（原 `SyncCoordinator.runSyncCycle` 主体，逐行搬运）。
      *
@@ -161,6 +176,81 @@ class SyncCycleRunner @Inject constructor(
             }
         }
         return outcome
+    }
+
+    /** Explicit user choice: keep this device's current database and conditionally publish it to resolve quarantine. */
+    internal suspend fun recoverPendingAcceptanceByPublishingLocal(): SyncOutcome = session.mutex.withLock {
+        val currentDb = databaseSession.databaseFlow.value
+            ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_vault_not_unlocked))
+        val vaultFileName = databaseSession.currentFile?.name ?: "${currentDb.databaseName}.kdbx"
+        autoLockGuard?.beginLongTask()
+        var holdoffActive = autoLockGuard != null
+        try {
+            val outcome = providerResolver.useProviderWithTarget(
+                defaultFileName = vaultFileName,
+                testOverride = session.testSyncProvider
+            ) { provider, providerTarget ->
+                val setup = withContext(Dispatchers.IO) {
+                    withTimeoutOrNull(localSnapshotHoldoffBudgetMillis) {
+                        setupCycleContext(vaultFileName, currentDb, provider, providerTarget)
+                    }
+                }
+                if (holdoffActive) {
+                    holdoffActive = false
+                    autoLockGuard?.endLongTask()
+                }
+                if (setup == null) {
+                    return@useProviderWithTarget SyncOutcome.Error(
+                        strings.get(R.string.sync_error_snapshot_prepare_timeout)
+                    )
+                }
+                setup.outcome?.let { return@useProviderWithTarget it }
+                val ctx = requireNotNull(setup.context)
+                try {
+                    when (
+                        val resolution = ctx.syncEngine.resolvePendingAcceptanceByUploadingLocal(
+                            ctx.remotePath,
+                            ctx.localBytes
+                        )
+                    ) {
+                        is com.keepasskey.sync.engine.SyncRecoveryResolution.PublishedLocal -> {
+                            session.lastRemoteEtag = resolution.newEtag
+                            session.lastSyncedDb = currentDb
+                            session.checkpointDatabase = currentDb
+                            val stableRevision = databaseSession.writeIntents.digestStableFileFor(currentDb)
+                            localFileCheckpoint?.record(
+                                lastCycleRemotePath.orEmpty(),
+                                lastCycleTargetIdentity,
+                                stableRevision
+                            )
+                            SyncOutcome.UploadedLocal
+                        }
+                        com.keepasskey.sync.engine.SyncRecoveryResolution.NoPendingAcceptance ->
+                            SyncOutcome.Error(strings.get(R.string.sync_error_recovery_required))
+                        is com.keepasskey.sync.engine.SyncRecoveryResolution.Failed -> {
+                            val failure = resolution.cause
+                            when (failure) {
+                                is com.keepasskey.sync.model.SyncException.NetworkError -> SyncOutcome.Offline
+                                is com.keepasskey.sync.model.SyncException.ConflictError -> SyncOutcome.Error(
+                                    strings.get(R.string.sync_error_remote_changed_during_resolve)
+                                )
+                                else -> strings.remoteFailureOutcome(failure)
+                            }
+                        }
+                    }
+                } finally {
+                    ctx.localBytes.fill(0)
+                    ctx.baseSnapshotBytes?.fill(0)
+                }
+            }
+            return@withLock outcome ?: SyncOutcome.Error(strings.get(R.string.sync_error_no_sync_credentials))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Throwable) {
+            SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
+        } finally {
+            if (holdoffActive) autoLockGuard?.endLongTask()
+        }
     }
 
     private suspend fun runCycleUnderLock(): SyncOutcome = session.mutex.withLock {
@@ -336,7 +426,7 @@ class SyncCycleRunner @Inject constructor(
 
                 val syncDir = File(context.cacheDir, SyncCache.CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
                 val syncCache = SyncCache(syncDir, cacheScope)
-                val rollbackGuard = SyncRollbackGuard(
+                val rollbackGuard = createRollbackGuard(
                     rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
                     cacheScope
                 )

@@ -93,7 +93,11 @@ class SyncRollbackGuard(
      * `SHA-256("vaultScope\nremotePath")`，两库共用同一 `remotePath` 时防回滚高水位
      * 各自独立，换库不沿用旧库状态；空串保持旧键（既有直构造调用方零影响）。
      */
-    private val vaultScope: String = ""
+    private val vaultScope: String = "",
+    /** Deterministic atomic-state failure injection for integration tests. Production passes null. */
+    private val beforeStateReplace: ((State) -> Unit)? = null,
+    /** Opaque active-vault path identity used only to make a pending transaction discoverable by UI. */
+    private val ownerVaultIdentity: String? = null
 ) {
 
     /**
@@ -115,6 +119,9 @@ class SyncRollbackGuard(
      * 但与「自声明口径」漂移——消口径而非堵可利用暴露，见 ISSUE-P3-202 第三轮真机取证）。
      */
     private val files = SyncCacheFiles(stateDir)
+
+    /** 高水位原子替换边界的故障注入，仅由同模块测试使用。 */
+    internal var beforeStateReplaceForTest: ((State) -> Unit)? = null
 
     init {
         if (!stateDir.exists()) {
@@ -138,7 +145,7 @@ class SyncRollbackGuard(
     fun inspect(remotePath: String, contentDigest: String): RollbackVerdict {
         val state = load(remotePath)
         return when {
-            state.pendingDigest != null -> RollbackVerdict.RecoveryRequired
+            state.pendingDigest != null || vaultPendingMarker()?.isFile == true -> RollbackVerdict.RecoveryRequired
             state.current == null -> RollbackVerdict.Accept
             state.current == contentDigest -> RollbackVerdict.Unchanged
             contentDigest in state.recent -> RollbackVerdict.ReplayDetected
@@ -158,12 +165,17 @@ class SyncRollbackGuard(
     /** 同上，摘要由调用方提供（`ISSUE-P3-167`；摘要须为内容的 SHA-256 十六进制小写摘要）。 */
     fun recordAccepted(remotePath: String, contentDigest: String) {
         val state = load(remotePath)
-        if (state.current == contentDigest && state.pendingDigest == null) return
+        if (state.current == contentDigest && state.pendingDigest == null) {
+            clearVaultPendingMarker()
+            return
+        }
         val recent = buildList {
             state.current?.let { add(it) }
+            state.pendingDigest?.let { add(it) }
             addAll(state.recent)
         }.distinct().take(MAX_RECENT_DIGESTS)
         persist(remotePath, State(state.sequence + 1, contentDigest, recent, pendingDigest = null))
+        clearVaultPendingMarker()
     }
 
     /**
@@ -174,14 +186,38 @@ class SyncRollbackGuard(
     fun beginAcceptance(remotePath: String, contentDigest: String) {
         val state = load(remotePath)
         when {
-            state.pendingDigest == contentDigest -> return
-            state.pendingDigest != null -> throw IllegalStateException("同步采纳事务需要恢复")
+            state.pendingDigest == contentDigest -> {
+                persistVaultPendingMarker()
+                return
+            }
+            state.pendingDigest != null || vaultPendingMarker()?.isFile == true ->
+                throw IllegalStateException("同步采纳事务需要恢复")
         }
+        persistVaultPendingMarker()
         persist(remotePath, state.copy(pendingDigest = contentDigest))
     }
 
     /** True when this path is quarantined by an incomplete settlement. */
-    fun hasPendingAcceptance(remotePath: String): Boolean = load(remotePath).pendingDigest != null
+    fun hasPendingAcceptance(remotePath: String): Boolean =
+        load(remotePath).pendingDigest != null || vaultPendingMarker()?.isFile == true
+
+    private fun vaultPendingMarker(): File? = ownerVaultIdentity
+        ?.takeIf(String::isNotBlank)
+        ?.let { identity -> File(stateDir, SyncCache.sha256Hex(identity.toByteArray(Charsets.UTF_8)) + SUFFIX_VAULT_PENDING) }
+
+    private fun persistVaultPendingMarker() {
+        val marker = vaultPendingMarker() ?: return
+        if (!stateDir.exists()) stateDir.mkdirs()
+        files.restrictToOwnerOnly(stateDir, isDirectory = true)
+        files.writeStringSafely(marker, "pending\n")
+        files.restrictToOwnerOnly(marker, isDirectory = false)
+    }
+
+    private fun clearVaultPendingMarker() {
+        vaultPendingMarker()?.let { marker ->
+            if (marker.exists()) marker.delete()
+        }
+    }
 
     private fun load(remotePath: String): State {
         val file = stateFile(remotePath)
@@ -230,6 +266,8 @@ class SyncRollbackGuard(
         val tmp = files.tmpFileFor(target)
         try {
             files.writeTmpSynced(tmp, content)
+            beforeStateReplace?.invoke(state)
+            beforeStateReplaceForTest?.invoke(state)
             files.moveAtomically(tmp, target)
         } finally {
             tmp.delete()
@@ -277,6 +315,8 @@ class SyncRollbackGuard(
          */
         const val SUFFIX_STATE = ".rollback"
 
+        const val SUFFIX_VAULT_PENDING = ".pending-acceptance"
+
         /**
          * 防回滚状态目录名（app 侧 `filesDir` 下的相对路径）。
          *
@@ -284,6 +324,16 @@ class SyncRollbackGuard(
          * 确保状态目录不与 `cacheDir` 下的可丢弃缓存混居——这是 F-23 的根因约束。
          */
         const val STATE_DIR_NAME = "rollback"
+
+        /** UI discovery path for a pending transaction even when periodic-probe metadata is absent. */
+        fun hasPendingAcceptanceForVault(stateDir: File, vaultIdentity: String): Boolean {
+            if (vaultIdentity.isBlank()) return false
+            val marker = File(
+                stateDir,
+                SyncCache.sha256Hex(vaultIdentity.toByteArray(Charsets.UTF_8)) + SUFFIX_VAULT_PENDING
+            )
+            return marker.isFile
+        }
 
         /** 历史已接受摘要的有界上限（防状态文件无限增长） */
         private const val MAX_RECENT_DIGESTS = 32

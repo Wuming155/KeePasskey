@@ -13,6 +13,7 @@ import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.SyncTransferOptions
 import com.keepasskey.sync.network.TransientHttpRetry
+import com.keepasskey.sync.network.executeCancellable
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.network.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
@@ -126,13 +127,13 @@ class WebDavSyncProvider private constructor(
         retryable: Boolean,
         requestFactory: () -> Request
     ): Response {
-        if (!retryable) return httpClient.newCall(requestFactory()).execute()
+        if (!retryable) return executeCancellable(httpClient.newCall(requestFactory()))
         return try {
             TransientHttpRetry.run(
                 maxAttempts = networkOptions.transientRetryAttempts,
                 baseDelayMs = networkOptions.transientRetryBaseDelayMs
             ) {
-                val response = httpClient.newCall(requestFactory()).execute()
+                val response = executeCancellable(httpClient.newCall(requestFactory()))
                 if (TransientHttpRetry.isRetryableStatus(response.code)) {
                     response.close()
                     throw TransientHttpRetry.RetryableStatus(response.code)

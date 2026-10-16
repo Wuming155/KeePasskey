@@ -453,6 +453,7 @@
     <string name="unlock_unsaved_edits_discarded">Unsaved changes from last time were discarded</string>
     <!-- ISSUE-P3-438: one-time neutral notice on the unlock screen when the process died with the vault still unlocked -->
     <string name="unlock_last_session_abnormal_close">The app did not close properly last time; the vault was locked automatically</string>
+    <string name="unlock_sync_recovery_pending">Periodic sync found a cloud change or recovery state that needs attention. Unlock, then review it on Settings → Cloud sync; the local vault will not be overwritten automatically before you resolve it.</string>
     <string name="unlock_biometric_title">Biometric Unlock</string>
     <string name="unlock_biometric_subtitle">Verify your fingerprint or face to unlock</string>
     <string name="unlock_biometric_enroll_title">Enable Biometric Unlock</string>
@@ -1000,13 +1001,20 @@
     <string name="sync_vault_takeover_copy_failed">Could not save the cloud copy; the overwrite was not performed: %1$s</string>
     <string name="sync_error_vault_copy_backup_failed">Could not save the cloud copy (download or write failed); the overwrite was not performed</string>
     <string name="sync_feedback_error">Sync failed: %1$s</string>
+    <string name="sync_recovery_pending">A cloud change or sync recovery state needs unlock. Review local and cloud versions before syncing manually.</string>
+    <string name="sync_recovery_keep_local_button">Keep local version and upload</string>
+    <string name="sync_recovery_keep_local_title">Resolve sync recovery with the local version</string>
+    <string name="sync_recovery_keep_local_message">This uploads the current vault on this device as the chosen version. It reads the cloud ETag first and replaces the remote file only if nobody changed it concurrently. If the cloud changed, both versions stay intact and recovery remains pending.</string>
+    <string name="sync_recovery_keep_local_confirm">Upload local version</string>
+    <string name="sync_recovery_uploading">Safely restoring %1$s sync from the local version…</string>
+    <string name="sync_recovery_upload_complete">Local version uploaded; %1$s sync recovery is complete</string>
     <string name="sync_section_offline">Offline &amp; background sync</string>
     <string name="sync_cold_start_title">Sync on cold start</string>
     <string name="sync_cold_start_sub">Check for cloud updates automatically on launch</string>
     <string name="sync_auto_sync_title">Auto sync</string>
     <string name="sync_auto_sync_sub">Sync with the cloud once after unlock; when off, manual sync only</string>
     <string name="sync_periodic_title">Periodic background sync</string>
-    <string name="sync_periodic_sub">Scheduled by Android at intervals; while locked, only metadata is checked and changes require unlock to sync</string>
+    <string name="sync_periodic_sub">Scheduled by Android at intervals; while locked, it checks metadata and may conditionally upload an encrypted local snapshot using a confirmed ETag; remote changes still require unlock to merge</string>
     <string name="sync_interval_title">Background sync interval</string>
     <string name="sync_interval_current">Every %1$d minutes</string>
     <string name="sync_interval_15">Every 15 minutes</string>

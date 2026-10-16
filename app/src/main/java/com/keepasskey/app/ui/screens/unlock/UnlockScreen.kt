@@ -251,6 +251,15 @@ fun UnlockContent(
                     }
                     UnlockStatusPill(subtitle = subtitleText)
 
+                    if (uiState.syncRecoveryPending) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = stringResource(R.string.unlock_sync_recovery_pending),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+
                     if (uiState.unlockMode == UnlockMode.QUICK_UNLOCK) {
                         Spacer(modifier = Modifier.height(16.dp))
                         UnlockQuickUnlockDatabaseCard(

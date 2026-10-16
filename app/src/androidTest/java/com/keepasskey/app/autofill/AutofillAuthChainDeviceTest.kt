@@ -79,7 +79,11 @@ class AutofillAuthChainDeviceTest {
     private var initialLogLines: Set<String> = emptySet()
     private var originalAppLanguage: AppLanguage? = null
     private var matrixSettings: RealSettingsRepository? = null
+    private var lockSettings: RealSettingsRepository? = null
+    private var originalLockPolicy: LockPolicySnapshot? = null
     private var originalAutofillService: String? = null
+    private var p2_620BRunId: String? = null
+    private var p2_620TaskLocked = false
 
     /** ISSUE-P3-610：活动库前提编排与原选择快照 / 干扰库（供路径核验与收尾清理）。 */
     private lateinit var selection: AutofillVaultSelection
@@ -123,6 +127,25 @@ class AutofillAuthChainDeviceTest {
         isolation = AutofillClientRunIsolation(probe, evidence::write)
         application.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         isolation.prepare()
+        val lockPolicyStore = RealSettingsRepository(targetContext)
+        lockSettings = lockPolicyStore
+        runBlocking {
+            val original = lockPolicyStore.getSettings().first()
+            originalLockPolicy = LockPolicySnapshot(
+                autoLockBackground = original.autoLockBackground,
+                autoLockTimeoutSeconds = original.autoLockTimeoutSeconds,
+                lockWhenScreenOff = original.lockWhenScreenOff,
+                autoLockForegroundEnabled = original.autoLockForegroundEnabled,
+                autoLockForegroundTimeoutSeconds = original.autoLockForegroundTimeoutSeconds
+            )
+            // 本测试跨多个系统认证 Activity，并故意等待框架不重发的观察窗口；保留产品默认的
+            // 60 秒后台锁定会让阶段 6 合法地再次返回锁定数据集，导致把安全锁定误判成填充回归。
+            // 仅在测试期间关闭这些自动锁触发条件，并在 @After 恢复原值。
+            lockPolicyStore.setAutoLockBackground(false)
+            lockPolicyStore.setLockWhenScreenOff(false)
+            lockPolicyStore.setAutoLockForegroundEnabled(false)
+        }
+        evidence.write("认证链路设备测试暂时关闭后台/熄屏/前台闲置自动锁定，收尾恢复原设置")
         InstrumentationRegistry.getArguments().getString("appLanguage")?.let { language ->
             val requested = AppLanguage.valueOf(language)
             val settings = RealSettingsRepository(targetContext)
@@ -137,6 +160,14 @@ class AutofillAuthChainDeviceTest {
 
     @After
     fun tearDown() {
+        if (p2_620TaskLocked) {
+            runCatching { probe.shell("am task lock stop") }
+            p2_620TaskLocked = false
+        }
+        p2_620BRunId?.let { runId ->
+            runCatching { finishP2_620BClient(runId) }
+            p2_620BRunId = null
+        }
         runCatching {
             if (::isolation.isInitialized) isolation.cleanup()
         }.onFailure { evidence.write("客户端清理异常: ${it.javaClass.simpleName}") }
@@ -156,6 +187,13 @@ class AutofillAuthChainDeviceTest {
         runActivities.clear()
         runBlocking {
             originalAppLanguage?.let { matrixSettings?.setAppLanguage(it) }
+            originalLockPolicy?.let { original ->
+                lockSettings?.setAutoLockBackground(original.autoLockBackground)
+                lockSettings?.setAutoLockTimeoutSeconds(original.autoLockTimeoutSeconds)
+                lockSettings?.setLockWhenScreenOff(original.lockWhenScreenOff)
+                lockSettings?.setAutoLockForegroundEnabled(original.autoLockForegroundEnabled)
+                lockSettings?.setAutoLockForegroundTimeoutSeconds(original.autoLockForegroundTimeoutSeconds)
+            }
         }
         application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
         resumedActivity = null
@@ -343,6 +381,33 @@ class AutofillAuthChainDeviceTest {
         val unlockLaunched = awaitActivity(UNLOCK_ACTIVITY, ACTIVITY_WAIT_MS)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue("框架未拉起 $UNLOCK_ACTIVITY（认证 PendingIntent 未被系统执行）", unlockLaunched)
+        val p2_620CrossTask = InstrumentationRegistry.getArguments().getString("p2_620CrossTask") == "true"
+        if (p2_620CrossTask) {
+            val bRunId = "p2-620-b-${java.util.UUID.randomUUID()}"
+            p2_620BRunId = bRunId
+            val beforeBRequest = logcatDump().lines().count {
+                it.contains(SERVICE_TAG) && it.contains("onFillRequest 下发解锁引导数据集")
+            }
+            probe.shell(
+                "am start -n $clientPackage/$CLIENT_B_CLASS_NAME " +
+                    "--es ${AutofillClientActivity.EXTRA_RUN_ID} $bRunId"
+            )
+            val requestDeadline = SystemClock.uptimeMillis() + CLIENT_WAIT_MS
+            var bRequestReachedProvider = false
+            while (SystemClock.uptimeMillis() < requestDeadline) {
+                val requestsNow = logcatDump().lines().count {
+                    it.contains(SERVICE_TAG) && it.contains("onFillRequest 下发解锁引导数据集")
+                }
+                if (requestsNow > beforeBRequest) {
+                    bRequestReachedProvider = true
+                    break
+                }
+                SystemClock.sleep(POLL_MS)
+            }
+            assertTrue("独立 B 任务必须发出新的生产 Autofill 请求", bRequestReachedProvider)
+            bringAuthTaskToFront()
+            evidence.write("独立 B Autofill 请求已到达生产服务；通过 ActivityManager.AppTask 恢复 A 解锁任务")
+        }
         SystemClock.sleep(UI_SETTLE_MS)
         screenshot("ac3-02-auth-activity")
 
@@ -420,6 +485,25 @@ class AutofillAuthChainDeviceTest {
             clientRequestsBeforeUnlock,
             clientRequestCount()
         )
+        if (p2_620CrossTask) {
+            val bRunId = requireNotNull(p2_620BRunId)
+            unlockP2_620AuthTask()
+            probe.shell("am start -n $clientPackage/$CLIENT_B_CLASS_NAME --activity-single-top")
+            val bStatus = probe.awaitNode("A 认证完成后的独立 B 表单状态", CLIENT_WAIT_MS) { node ->
+                node.packageName?.toString() == clientPackage &&
+                    textOf(node).contains("runId=$bRunId") &&
+                    textOf(node).contains("usernameFilled=")
+            }?.let(::textOf)
+            evidence.write("A 认证完成后的独立 B 表单状态=$bStatus")
+            assertNotNull("独立 B Autofill 会话必须仍可观察", bStatus)
+            val status = requireNotNull(bStatus)
+            assertTrue("旧 A 认证结果不得填入 B 用户名框", status.contains("usernameFilled=false"))
+            assertTrue("旧 A 认证结果不得填入 B 密码框", status.contains("passwordFilled=false"))
+            finishP2_620BClient(bRunId)
+            p2_620BRunId = null
+            evidence.write("旧 A 结果未跨独立 Autofill 任务会话填入 B")
+            return
+        }
         assertTrue(
             "解锁后未靠人工重请求，客户端输入框未被写入凭据（未捕获到新的「$CLIENT_FILLED_TRACE」）" +
                 "——ISSUE-P2-86 修复未生效",
@@ -667,6 +751,40 @@ class AutofillAuthChainDeviceTest {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
+    private fun bringAuthTaskToFront() {
+        val shellTasks = probe.shell("am stack list")
+        val authTaskId = Regex(
+            "taskId=(\\d+): [^\\n]*topActivity=ComponentInfo\\{[^}]*${Regex.escape(UNLOCK_ACTIVITY)}\\}"
+        ).find(shellTasks)?.groupValues?.get(1)
+        assertNotNull("ActivityTaskManager 必须仍保留 A 解锁任务：$shellTasks", authTaskId)
+        val taskId = requireNotNull(authTaskId)
+        val lockResult = probe.shell("am task lock $taskId")
+        if (!lockResult.contains("error", ignoreCase = true) && !lockResult.contains("exception", ignoreCase = true)) {
+            p2_620TaskLocked = true
+        }
+        evidence.write("锁定并前置 A Autofill 任务 taskId=$taskId，系统回执=$lockResult")
+        assertTrue("系统必须允许在 A 认证期间将其任务前置；回执=$lockResult", p2_620TaskLocked)
+        val deadline = SystemClock.uptimeMillis() + ACTIVITY_WAIT_MS
+        while (SystemClock.uptimeMillis() < deadline && resumedActivity?.javaClass?.name != UNLOCK_ACTIVITY) {
+            SystemClock.sleep(POLL_MS)
+        }
+        assertTrue("A 解锁任务必须恢复前台；${probe.snapshot()}", resumedActivity?.javaClass?.name == UNLOCK_ACTIVITY)
+    }
+
+    private fun unlockP2_620AuthTask() {
+        if (!p2_620TaskLocked) return
+        probe.shell("am task lock stop")
+        p2_620TaskLocked = false
+    }
+
+    private fun finishP2_620BClient(runId: String) {
+        probe.shell(
+            "am start -n $clientPackage/$CLIENT_B_CLASS_NAME --activity-single-top " +
+                "-a ${AutofillClientActivity.ACTION_FINISH_RUN} " +
+                "--es ${AutofillClientActivity.EXTRA_RUN_ID} $runId"
+        )
+    }
+
     /** 设备侧截图（shell 身份直写共享存储，供宿主侧与记录文档取证） */
     private fun screenshot(name: String): String {
         val path = "$SHOT_DIR/${isolation.runId}-$name.png"
@@ -871,6 +989,7 @@ class AutofillAuthChainDeviceTest {
         const val EVIDENCE_FILE = "autofill-auth-chain-evidence.txt"
         const val SERVICE_TAG = "KeePasskeyAutofill"
         const val CLIENT_CLASS_NAME = "com.keepasskey.app.autofill.AutofillClientActivity"
+        const val CLIENT_B_CLASS_NAME = "com.keepasskey.app.autofill.AutofillClientBActivity"
 
         const val UNLOCK_ACTIVITY = "com.keepasskey.app.autofill.AutofillUnlockActivity"
         const val PICKER_ACTIVITY = "com.keepasskey.app.autofill.AutofillPickerActivity"
@@ -920,4 +1039,12 @@ class AutofillAuthChainDeviceTest {
         /** 设备侧截图输出目录（shell 身份可写） */
         const val SHOT_DIR = "/sdcard/Download"
     }
+
+    private data class LockPolicySnapshot(
+        val autoLockBackground: Boolean,
+        val autoLockTimeoutSeconds: Int,
+        val lockWhenScreenOff: Boolean,
+        val autoLockForegroundEnabled: Boolean,
+        val autoLockForegroundTimeoutSeconds: Int
+    )
 }

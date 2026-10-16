@@ -58,6 +58,8 @@ internal class SettingsSyncController(
         val wifiOnlySync: Boolean = true,
         val isSyncing: Boolean = false,
         val syncFeedbackMessage: UiMessage? = null,
+        val syncRecoveryRequired: Boolean = false,
+        val syncRecoveryCanKeepLocal: Boolean = false,
         // H1 整改：真实同步完成时刻文案（空串=本会话尚未同步成功过）
         val lastSyncTimeText: String = "",
         // 连接是否已验证（测试连接或同步成功后置位；配置变更后复位）
@@ -102,6 +104,47 @@ internal class SettingsSyncController(
         scope.launch(Dispatchers.IO) {
             updateWifiOnlySync(extendedSettingsStore.loadWifiOnlySync())
             restoreSyncCredentials()
+            refreshSyncRecoveryRequired()
+        }
+    }
+
+    private suspend fun refreshSyncRecoveryRequired() {
+        val required = syncCoordinator.hasPendingUserRecoveryForActiveVault()
+        val canKeepLocal = syncCoordinator.hasPendingAdoptionRecoveryForActiveVault()
+        syncStateFlow.update {
+            it.copy(syncRecoveryRequired = required, syncRecoveryCanKeepLocal = canKeepLocal)
+        }
+    }
+
+    /** User-confirmed recovery: retain the current local database and conditionally publish it. */
+    fun recoverPendingSyncByKeepingLocal() {
+        if (syncStateFlow.value.isSyncing) return
+        val provider = syncStateFlow.value.provider
+        scope.launchGuarded(onFailure = ::onSyncFailure) {
+            syncStateFlow.update {
+                it.copy(
+                    isSyncing = true,
+                    syncFeedbackMessage = UiMessage(R.string.sync_recovery_uploading, listOf(provider.protocol))
+                )
+            }
+            val outcome = syncCoordinator.recoverPendingAcceptanceByPublishingLocal()
+            refreshSyncRecoveryRequired()
+            val succeeded = outcome is SyncOutcome.UploadedLocal
+            val feedback = if (succeeded) {
+                UiMessage(R.string.sync_recovery_upload_complete, listOf(provider.protocol))
+            } else if (outcome is SyncOutcome.Error) {
+                UiMessage(R.string.sync_feedback_error, listOf(outcome.userText))
+            } else {
+                UiMessage(R.string.sync_feedback_error, listOf(strings.get(R.string.sync_error_recovery_required)))
+            }
+            syncStateFlow.update {
+                it.copy(
+                    isSyncing = false,
+                    syncFeedbackMessage = feedback,
+                    lastSyncTimeText = if (succeeded) formatSyncTimestamp() else it.lastSyncTimeText,
+                    isConnectionVerified = if (succeeded) true else it.isConnectionVerified
+                )
+            }
         }
     }
 
@@ -327,6 +370,7 @@ internal class SettingsSyncController(
             }
 
             val outcome = syncCoordinator.syncNow()
+            refreshSyncRecoveryRequired()
             val feedback = when (outcome) {
                 is SyncOutcome.UpToDate -> UiMessage(
                     R.string.sync_feedback_done,

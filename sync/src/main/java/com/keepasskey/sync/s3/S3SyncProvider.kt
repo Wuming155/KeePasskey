@@ -12,6 +12,7 @@ import com.keepasskey.sync.network.SyncEndpointGuard
 import com.keepasskey.sync.network.SyncHttpClientFactory
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.TransientHttpRetry
+import com.keepasskey.sync.network.executeCancellable
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.network.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
@@ -174,7 +175,7 @@ class S3SyncProvider private constructor(
                     val headers = signV4("HEAD", url, EMPTY_SHA256, signDate)
                     val requestBuilder = Request.Builder().url(url).head()
                     headers.forEach { (k, v) -> requestBuilder.header(k, v) }
-                    httpClient.newCall(requestBuilder.build()).execute()
+                    executeCancellable(httpClient.newCall(requestBuilder.build()))
                 },
                 consume = { response ->
                     when {
@@ -196,7 +197,7 @@ class S3SyncProvider private constructor(
                     val headers = signV4("HEAD", url, EMPTY_SHA256, signDate)
                     val requestBuilder = Request.Builder().url(url).head()
                     headers.forEach { (k, v) -> requestBuilder.header(k, v) }
-                    httpClient.newCall(requestBuilder.build()).execute()
+                    executeCancellable(httpClient.newCall(requestBuilder.build()))
                 },
                 consume = { response ->
                     when {
@@ -239,7 +240,7 @@ class S3SyncProvider private constructor(
         sign = { method, url, payloadHash, queryString ->
             signV4(method, url, payloadHash, queryString = queryString)
         },
-        execute = { request -> httpClient.newCall(request).execute() }
+        execute = { request -> executeCancellable(httpClient.newCall(request)) }
     )
 
     override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
@@ -251,7 +252,7 @@ class S3SyncProvider private constructor(
                         val headers = signV4("GET", url, EMPTY_SHA256, signDate)
                         val requestBuilder = Request.Builder().url(url).get()
                         headers.forEach { (k, v) -> requestBuilder.header(k, v) }
-                        httpClient.newCall(requestBuilder.build()).execute()
+                        executeCancellable(httpClient.newCall(requestBuilder.build()))
                     },
                     consume = { response ->
                         when {
@@ -368,7 +369,7 @@ class S3SyncProvider private constructor(
                         // ISSUE-P2-244：非首传必有非空条件值（上方已 fail-closed）；不用 takeIf 放行（那是后门）
                         requestBuilder.header("If-Match", "\"${cleanEtag(precheckEtag.orEmpty())}\"")
                     }
-                    httpClient.newCall(requestBuilder.build()).execute()
+                    executeCancellable(httpClient.newCall(requestBuilder.build()))
                 },
                 consume = { response ->
                     when {
@@ -408,7 +409,7 @@ class S3SyncProvider private constructor(
                     val headers = signV4("DELETE", url, EMPTY_SHA256, signDate)
                     val requestBuilder = Request.Builder().url(url).delete()
                     headers.forEach { (k, v) -> requestBuilder.header(k, v) }
-                    httpClient.newCall(requestBuilder.build()).execute()
+                    executeCancellable(httpClient.newCall(requestBuilder.build()))
                 },
                 consume = { response ->
                     if (!response.isSuccessful && response.code != 404) {
@@ -430,7 +431,7 @@ class S3SyncProvider private constructor(
      *    落入 [consume] 原路径如实上浮（签名错误、鉴权失败等按原映射处理）。
      */
     private suspend fun <T> executeSignedRequest(
-        send: (signDate: Date) -> Response,
+        send: suspend (signDate: Date) -> Response,
         consume: suspend (response: Response) -> T
     ): T {
         var skewRetried = false

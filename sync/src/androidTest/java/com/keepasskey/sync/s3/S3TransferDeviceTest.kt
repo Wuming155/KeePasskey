@@ -2,7 +2,12 @@ package com.keepasskey.sync.s3
 
 import com.keepasskey.sync.model.SyncException
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -94,6 +99,17 @@ class S3TransferDeviceTest {
             payload.toList(),
             put.body.readByteArray().toList()
         )
+    }
+
+    @Test
+    fun `设备回环取消会中止仍等待响应头的 S3 请求`() = runBlocking {
+        server.enqueue(MockResponse().setHeadersDelay(30, TimeUnit.SECONDS))
+        val request = async(Dispatchers.IO) { newProvider().testConnection() }
+
+        assertTrue("S3 HEAD 请求应先到达设备回环服务端", server.takeRequest(5, TimeUnit.SECONDS) != null)
+        withTimeout(3_000) { request.cancelAndJoin() }
+
+        assertTrue("取消必须沿 Provider 传到设备上的 OkHttp Call", request.isCancelled)
     }
 
     @Test

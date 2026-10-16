@@ -5,6 +5,7 @@ import com.keepasskey.sync.model.RemoteListEntry
 import com.keepasskey.sync.model.RemoteListPage
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.network.SyncDownloadLimits
+import com.keepasskey.sync.network.runCatchingCancellable
 import okhttp3.Request
 import okhttp3.Response
 import kotlinx.coroutines.Dispatchers
@@ -38,12 +39,9 @@ internal object S3DirectoryList {
         pageSize: Int,
         buildBucketRootUrl: () -> String,
         sign: (method: String, url: String, payloadHash: String, queryString: String) -> Map<String, String>,
-        execute: (Request) -> Response
+        execute: suspend (Request) -> Response
     ): Result<RemoteListPage> = withContext(Dispatchers.IO) {
-        // 保护段 buildBucketRootUrl / sign / readBounded / parseListObjects 全为非挂起调用，
-        // execute 实参是非挂起的阻塞式 OkHttp newCall().execute()（ISSUE-P3-570 逐处判定）
-        // cancel-n/a: 保护段无挂起点
-        runCatching {
+        runCatchingCancellable {
             val dirPath = remotePath.trim().trim('/')
             val prefix = if (dirPath.isEmpty()) "" else "$dirPath/"
             val maxKeys = pageSize.coerceIn(1, 1000)

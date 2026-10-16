@@ -625,5 +625,11 @@
 | §525 | 解析附件缓存按次回收实体机验收 | `ISSUE-P3-622`（整条闭环） | [525-解析附件缓存按次回收实体机验收批次.md](resolved/batches/525-解析附件缓存按次回收实体机验收批次.md) |
 | §526 | 同步检查点 IO 与实体机性能测量 | `ISSUE-P2-626`（整条闭环） | [526-同步检查点IO与实体机性能测量批次.md](resolved/batches/526-同步检查点IO与实体机性能测量批次.md) |
 | §527 | 同步检查点修订绑定实体机验收 | `ISSUE-P2-624`（整条闭环） | [527-同步检查点修订绑定实体机验收批次.md](resolved/batches/527-同步检查点修订绑定实体机验收批次.md) |
+| §528 | 同步安全锁定网络取消与真机验收 | `ISSUE-P2-625`（整条闭环） | [528-同步安全锁定网络取消与真机验收批次.md](resolved/batches/528-同步安全锁定网络取消与真机验收批次.md) |
+| §529 | XLSX 文本单元格 Python 往返验收 | `ISSUE-P3-623`（按约定 Python 读写边界闭环） | [529-XLSX文本单元格Python往返验收批次.md](resolved/batches/529-XLSX文本单元格Python往返验收批次.md) |
+| §530 | 恢复探测生产 Provider 真机验收 | `ISSUE-P3-628`（整条闭环） | [530-恢复探测生产Provider真机验收批次.md](resolved/batches/530-恢复探测生产Provider真机验收批次.md) |
+| §531 | 锁态周期同步恢复提示 Redmi 真机验收 | `ISSUE-P2-627`（整条闭环） | [531-锁态周期同步恢复提示Redmi真机验收批次.md](resolved/batches/531-锁态周期同步恢复提示Redmi真机验收批次.md) |
+| §532 | 同步采纳进程终止恢复与本地保留 Redmi 真机验收 | `ISSUE-P2-621`（整条闭环） | [532-同步采纳进程终止恢复与本地保留Redmi真机验收批次.md](resolved/batches/532-同步采纳进程终止恢复与本地保留Redmi真机验收批次.md) |
+| §533 | 凭据入口隔离与浏览器 Autofill A/B 验收 | `ISSUE-P2-620`（整条闭环） | [533-凭据入口隔离与浏览器Autofill验收批次.md](resolved/batches/533-凭据入口隔离与浏览器Autofill验收批次.md) |
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58~§157，已封卷）· [`05`](resolved/BATCH_158_PLUS.md)（§158~§504，已封卷·超额册）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起，**当前滚动册**）。

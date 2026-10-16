@@ -142,6 +142,7 @@ internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController)
             onAutoSyncToggle = settingsViewModel::setAutoSyncEnabled,
             onWifiOnlyToggle = settingsViewModel::setWifiOnlySync,
             onTriggerSync = settingsViewModel::triggerSync,
+            onRecoverSyncByKeepingLocal = settingsViewModel::recoverPendingSyncByKeepingLocal,
             onTestConnection = settingsViewModel::testSyncConnection,
             // 本批整改：「保存并同步」——保存成功后由 ViewModel 顺序编排
             // （未验证连接则先测连接，通过才同步，失败即停并上浮）

@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Debug-only trust override for local HTTPS device tests.
-    Release builds keep app/src/main/res/xml/network_security_config.xml unchanged:
-    system CAs only, TLS required, and no user-installed test CA trust.
+    仅 debug 包信任仓库内的本地 HTTPS 测试证书，避免设备测试写入系统用户 CA 库。
+    debug-overrides 在非 debuggable 构建中不生效；release 继续使用 main 配置，仅信任系统 CA。
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
@@ -13,6 +12,7 @@
     <debug-overrides>
         <trust-anchors>
             <certificates src="user" />
+            <certificates src="@raw/local_sync_test_certificate" />
         </trust-anchors>
     </debug-overrides>
 </network-security-config>

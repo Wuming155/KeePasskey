@@ -13,6 +13,7 @@ import com.keepasskey.app.security.BiometricCredentialStorage
 import com.keepasskey.app.security.BiometricResult
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.security.UnlockThrottleManager
+import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -76,6 +77,7 @@ class UnlockViewModel @Inject constructor(
     // 生产 DI 注入 @Singleton 真实实例（Keystore 加密落盘 filesDir/keyfiles）
     private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
     private val databaseSession: com.keepasskey.database.session.DatabaseSession? = null, // ISSUE-P2-521：从备份恢复（nullable 仅单测）
+    private val syncCoordinator: SyncCoordinator? = null,
     // ISSUE-P1-429：封印 / 解封 keystore 密算的调度器（生产 DI 注入 @SealCryptoDispatcher = IO；
     // 默认值仅供未触 crypto 路径的既有 JVM 单测沿用，触路径的用例注入 TestDispatcher 保确定性）
     @com.keepasskey.app.di.SealCryptoDispatcher private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
@@ -194,6 +196,9 @@ class UnlockViewModel @Inject constructor(
                             refreshQuickUnlockDowngradeFlag(quickUnlockDbId)
                         }
                     }
+                    val syncRecoveryPending = syncCoordinator?.hasPendingUserRecovery(
+                        explicitActive?.path ?: activeDatabaseId
+                    ) == true
                     _uiState.update {
                         it.copy(
                             databaseName = displayActive.name,
@@ -203,7 +208,8 @@ class UnlockViewModel @Inject constructor(
                                 strings.get(R.string.unlock_db_status_local, displayActive.path)
                             },
                             isQuickUnlockAvailable = hasSealedCredential,
-                            hasDatabase = true
+                            hasDatabase = true,
+                            syncRecoveryPending = syncRecoveryPending
                         )
                     }
                 } else {
@@ -217,7 +223,8 @@ class UnlockViewModel @Inject constructor(
                             databaseName = "",
                             databaseStatus = "",
                             isQuickUnlockAvailable = false,
-                            hasDatabase = false
+                            hasDatabase = false,
+                            syncRecoveryPending = false
                         )
                     }
                 }

@@ -251,3 +251,20 @@ sealed class SyncCommitResult {
     /** Incomplete prior local adoption quarantines all automatic writes for this target. */
     data object RecoveryRequired : SyncCommitResult()
 }
+
+/** Explicit user-authorized resolution of a quarantined adoption by conditionally publishing local data. */
+sealed interface SyncRecoveryResolution {
+    data class PublishedLocal(val newEtag: String) : SyncRecoveryResolution
+    data object NoPendingAcceptance : SyncRecoveryResolution
+    data class Failed(val cause: Throwable?) : SyncRecoveryResolution
+}
+
+/** Durable boundaries in a remote-adoption settlement, exposed only for deterministic process-crash tests. */
+enum class SyncAdoptionSettlementStage {
+    INTENT_PERSISTED,
+    CACHE_RECEIPT_COMMITTED,
+    BASE_METADATA_PERSISTED,
+    BASE_CONTENT_PERSISTED,
+    HIGH_WATER_WRITE_STARTED,
+    HIGH_WATER_PERSISTED
+}

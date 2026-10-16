@@ -461,6 +461,7 @@
     <string name="unlock_unsaved_edits_discarded">上次未保存的改动已丢弃</string>
     <!-- ISSUE-P3-438：上次进程死亡时库仍处于解锁态，解锁页一次性轻提示（文案如实中性，非错误告警） -->
     <string name="unlock_last_session_abnormal_close">上次应用未正常关闭，密码库已自动锁定</string>
+    <string name="unlock_sync_recovery_pending">周期同步发现待处理的云端变更或恢复状态。请解锁后前往设置中的云端同步页面手动处理；在完成前不会自动覆盖本地库。</string>
     <!-- 既有构建债顺手整改：values-en 存在此条翻译但默认 locale 缺失，lintVitalRelease 因此 fail（阻塞 assembleRelease） -->
     <string name="unlock_biometric_title">生物识别解锁</string>
     <string name="unlock_biometric_subtitle">请验证指纹或面容以解锁密码库</string>
@@ -1011,6 +1012,13 @@
     <string name="sync_vault_takeover_copy_failed">云端副本另存失败，未执行覆盖：%1$s</string>
     <string name="sync_error_vault_copy_backup_failed">云端副本另存失败（下载或落盘失败），未执行覆盖</string>
     <string name="sync_feedback_error">同步失败：%1$s</string>
+    <string name="sync_recovery_pending">有待解锁的云端变更或同步恢复状态。请检查本地与云端版本后手动同步。</string>
+    <string name="sync_recovery_keep_local_button">保留本地版本并上传</string>
+    <string name="sync_recovery_keep_local_title">用本地版本解决同步恢复</string>
+    <string name="sync_recovery_keep_local_message">将把此设备当前密码库作为最终版本上传。上传前会读取云端 ETag，并仅在云端未发生并发变化时替换；若云端已变化，本地与云端都会保留，恢复状态不会清除。</string>
+    <string name="sync_recovery_keep_local_confirm">上传本地版本</string>
+    <string name="sync_recovery_uploading">正在使用本地版本安全恢复 %1$s 同步…</string>
+    <string name="sync_recovery_upload_complete">本地版本已上传，%1$s 同步恢复完成</string>
     <!-- ISSUE-P2-402：首传探测失败按异常类型如实归类（此前非 404 一律误报「离线」） -->
     <string name="sync_error_auth_failed">同步失败：远端鉴权被拒（401/403）。请到「设置 → 云端同步」核对用户名与 WebDAV 专用密码（或 S3 访问密钥）</string>
     <string name="sync_error_remote_rejected">同步失败：远端拒绝请求（%1$s）。可能是服务端限流（429/503）或临时故障，请稍后重试</string>
@@ -1021,7 +1029,7 @@
     <string name="sync_auto_sync_title">自动同步</string>
     <string name="sync_auto_sync_sub">解锁后自动与云端同步一次；关闭后仅手动同步</string>
     <string name="sync_periodic_title">周期性后台同步</string>
-    <string name="sync_periodic_sub">由系统按间隔调度；锁定时仅探测远端元数据，发现变化后需解锁同步（执行时间可能延迟）</string>
+    <string name="sync_periodic_sub">由系统按间隔调度；锁定时探测远端，并可按已确认 ETag 条件上传本地加密快照；检测到远端变化仍需解锁合并（执行时间可能延迟）</string>
     <string name="sync_interval_title">后台同步间隔</string>
     <string name="sync_interval_current">每 %1$d 分钟</string>
     <string name="sync_interval_15">每 15 分钟</string>

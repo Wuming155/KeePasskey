@@ -129,6 +129,22 @@ class AutofillAuthResultWiringTest {
         )
     }
 
+    @Test
+    fun `认证入口必须用随机Intent data隔离进程重建后的旧token`() {
+        val source = readSource(BUILDERS)
+
+        assertTrue(
+            "身份必须写入 Intent.data 参与 PendingIntent.filterEquals",
+            source.contains("data = Uri.Builder()")
+        )
+        assertTrue("身份必须由随机 UUID 生成", source.contains("UUID.randomUUID().toString()"))
+        assertEquals(
+            "解锁、每个确认候选和选择器入口都必须单独分配身份",
+            4,
+            Regex("attachAutofillRequestIdentity\\(").findAll(source).count() - 1
+        )
+    }
+
     // ── ISSUE-P2-86 / ISSUE-P2-88：三条认证 PendingIntent 一律 FLAG_MUTABLE ──
 
     @Test

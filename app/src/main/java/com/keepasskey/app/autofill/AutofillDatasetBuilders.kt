@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.Uri
 import android.service.autofill.Dataset
 import android.service.autofill.Field
 import android.service.autofill.FillResponse
@@ -13,6 +14,7 @@ import android.view.autofill.AutofillValue
 import android.view.inputmethod.InlineSuggestionsRequest
 import android.widget.RemoteViews
 import com.keepasskey.app.R
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.TAG
 import com.keepasskey.core.log.AppLog
@@ -22,7 +24,8 @@ import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 /**
  * 自动填充数据集构建（自 [KeePasskeyAutofillService] 原样抽出为同包扩展函数）。
  *
- * 仅做结构搬运，不改变任何判定逻辑、PendingIntent flags/requestCode 或 data 顺序；
+ * 认证入口使用进程级 requestCode，并将随机身份写入 Intent.data，避免进程重建后系统保留的旧 token
+ * 被同 requestCode 的新请求更新。其余判定逻辑与 PendingIntent flags 保持现有平台契约。
  * 依赖的注入字段保持 public，故同包扩展函数可直接访问。
  */
 
@@ -51,9 +54,8 @@ internal fun KeePasskeyAutofillService.buildInlinePresentation(
  *
  * ## 修复口径
  *
- * 每次分配取新值，从根上消除「不同响应共用 requestCode」这一前提；
- * `FLAG_UPDATE_CURRENT` 随之不再有覆盖对象。计数器为进程级单调，无需随响应重置
- * （重置反而会重新引入复用）。
+ * 每次分配取新值，避免同一进程内不同响应共用 requestCode；随机 Intent.data 身份进一步隔离
+ * 进程重建后复位的计数器。`FLAG_UPDATE_CURRENT` 保留系统认证参数注入契约。
  *
  * ## 与 CM 通道的关系（ISSUE-P2-199 更正）
  *
@@ -66,6 +68,20 @@ internal fun KeePasskeyAutofillService.buildInlinePresentation(
 private val authRequestCodeAllocator = AtomicInteger(AUTH_REQUEST_CODE_BASE)
 
 private fun nextAuthRequestCode(): Int = authRequestCodeAllocator.getAndIncrement()
+
+/**
+ * 将随机身份写入 PendingIntent 匹配键，避免进程重建后复位的 requestCode 更新系统仍持有的旧入口。
+ */
+internal fun attachAutofillRequestIdentity(intent: Intent): Intent = intent.apply {
+    data = Uri.Builder()
+        .scheme(AUTH_REQUEST_URI_SCHEME)
+        .authority(AUTH_REQUEST_URI_AUTHORITY)
+        .appendPath(UUID.randomUUID().toString())
+        .build()
+}
+
+private const val AUTH_REQUEST_URI_SCHEME = "keepasskey"
+private const val AUTH_REQUEST_URI_AUTHORITY = "autofill-auth"
 
 /** 分配基线（刻意避开既有常量区间，便于日志与抓包中辨认） */
 private const val AUTH_REQUEST_CODE_BASE = 100
@@ -102,14 +118,16 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
     // ISSUE-P2-86：与已验证可用的选择器基 Intent（[buildPickerDataset]）**严格同构**——
     // 不带任何 activity flag（旧构造的 NEW_TASK|CLEAR_TOP 与之相异），并携带选择器所需的
     // 全部上下文，使解锁页解锁后能直接链入选择器完成交付。
-    val unlockIntent = Intent(this, AutofillUnlockActivity::class.java).apply {
-        putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
-        putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
-        // ISSUE-P3-298 ⑤：OTP 框 id 随链路转发（解锁后选择器 / 确认页才能把 TOTP 值填入该框）
-        putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
-        putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
-        putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, webDomain.orEmpty())
-    }
+    val unlockIntent = attachAutofillRequestIdentity(
+        Intent(this, AutofillUnlockActivity::class.java).apply {
+            putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
+            putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+            // ISSUE-P3-298 ⑤：OTP 框 id 随链路转发（解锁后选择器 / 确认页才能把 TOTP 值填入该框）
+            putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
+            putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
+            putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, webDomain.orEmpty())
+        }
+    )
     val pendingIntent = PendingIntent.getActivity(
         this,
         nextAuthRequestCode(),
@@ -182,20 +200,22 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
         // 现与选择器入口（[buildPickerDataset]，真机实测可用）**同构造**：无 activity flag +
         // 随认证 Intent 下发目标字段 id，供确认页确认后按条目取回凭据并构造真实 Dataset 回传。
         // ISSUE-P3-375：结构化目标角色与框 id 同批下发（确认页据此把卡 / 地址字段写入回传数据集）
-        confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
-            putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
-            putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
-            // ISSUE-P3-298 ⑤：OTP 框 id 随认证 Intent 下发，确认页回传时把当前 TOTP 值填入
-            putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
-            putExtra(
-                EXTRA_TARGET_STRUCTURED_ROLES,
-                ArrayList(structuredTargetIds.keys.map { it.name })
-            )
-            putExtra(
-                EXTRA_TARGET_STRUCTURED_IDS,
-                ArrayList(structuredTargetIds.values)
-            )
-        },
+        confirmIntent = attachAutofillRequestIdentity(
+            Intent(this, AutofillConfirmActivity::class.java).apply {
+                putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
+                putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
+                // ISSUE-P3-298 ⑤：OTP 框 id 随认证 Intent 下发，确认页回传时把当前 TOTP 值填入
+                putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
+                putExtra(
+                    EXTRA_TARGET_STRUCTURED_ROLES,
+                    ArrayList(structuredTargetIds.keys.map { it.name })
+                )
+                putExtra(
+                    EXTRA_TARGET_STRUCTURED_IDS,
+                    ArrayList(structuredTargetIds.values)
+                )
+            }
+        ),
         // ISSUE-P3-577：敏感值判据须同时统计候选 TOTP 直填值，故 OTP 框 id 一并传入
         // （passwordId / otpId 同为 AutofillId?，用命名参数防位置对调静默错接）
         skipRepeatConfirmation = unlockedConfirmationPolicy(
@@ -324,14 +344,18 @@ internal fun KeePasskeyAutofillService.attachConfirmationAuth(
     // ISSUE-P3-03 (43b)：随确认入口下传条目标识，供 autofillCopyTotp
     // 在用户确认后按条目取回 TOTP（不物化明文，仅传标识）
     // ISSUE-P3-42：下传授权上下文（包名 + 域），供确认成功后写入会话授权
+    val confirmIntent = attachAutofillRequestIdentity(
+        Intent(ctx.confirmIntent).apply {
+            putExtra(AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE, displayName)
+            putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entryIdHex)
+            putExtra(AutofillConfirmActivity.EXTRA_GRANT_PACKAGE, ctx.callingPkg)
+            putExtra(AutofillConfirmActivity.EXTRA_GRANT_DOMAIN, ctx.webDomain.orEmpty())
+        }
+    )
     val confirmPendingIntent = PendingIntent.getActivity(
         this,
         nextAuthRequestCode(),
-        ctx.confirmIntent.putExtra(
-            AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE, displayName
-        ).putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entryIdHex)
-            .putExtra(AutofillConfirmActivity.EXTRA_GRANT_PACKAGE, ctx.callingPkg)
-            .putExtra(AutofillConfirmActivity.EXTRA_GRANT_DOMAIN, ctx.webDomain.orEmpty()),
+        confirmIntent,
         // ISSUE-P2-88：官方明文「Do not make the provided pending intent immutable ... as the
         // platform needs to fill in the authentication arguments」——认证 PendingIntent 必须可变，
         // 与该契约一致（接线守卫按此强制：本文件不得出现不可变标志）
@@ -357,16 +381,18 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
     // ISSUE-P3-40：手动搜索兜底入口（自动匹配零候选/候选不含目标条目时使用）。
     // 以「认证数据集」形式挂入：值在用户于选择器中选中并确认后才经
     // AutofillManager.EXTRA_AUTHENTICATION_RESULT 回传——未确认前不携带任何明文。
-    val pickerIntent = Intent(this, AutofillPickerActivity::class.java).apply {
-        putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
-        putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
-        // ISSUE-P3-298 ⑤：OTP 框 id 随链路转发，选择器交付时把当前 TOTP 值填入该框
-        putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
-        // ISSUE-P3-43 ②：下传「字段签名」所需上下文，使选择器成为字段级屏蔽的写入入口。
-        // 只传包名与表单自报域（均为非敏感标识），不传任何表单内容或凭据。
-        putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
-        putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, scanResult.webDomain.orEmpty())
-    }
+    val pickerIntent = attachAutofillRequestIdentity(
+        Intent(this, AutofillPickerActivity::class.java).apply {
+            putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
+            putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
+            // ISSUE-P3-298 ⑤：OTP 框 id 随链路转发，选择器交付时把当前 TOTP 值填入该框
+            putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
+            // ISSUE-P3-43 ②：下传「字段签名」所需上下文，使选择器成为字段级屏蔽的写入入口。
+            // 只传包名与表单自报域（均为非敏感标识），不传任何表单内容或凭据。
+            putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
+            putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, scanResult.webDomain.orEmpty())
+        }
+    )
     val pickerPendingIntent = PendingIntent.getActivity(
         this,
         nextAuthRequestCode(),

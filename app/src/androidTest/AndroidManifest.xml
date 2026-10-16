@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.CREDENTIAL_MANAGER_SET_ORIGIN" />
+    <uses-permission android:name="android.permission.CREDENTIAL_MANAGER_QUERY_CANDIDATE_CREDENTIALS" />
+
     <!--
       ISSUE-P2-73 AC③（设备侧实测自动填充认证链路）。
 
@@ -14,7 +17,7 @@
       - Activity 自身在 `onPostResume` 内主动调用 `AutofillManager.requestAutofill`，
         因此无需测试进程持有其 View 引用（跨进程亦可驱动）。
     -->
-    <application>
+    <application android:networkSecurityConfig="@xml/network_security_config">
         <provider
             android:name="com.keepasskey.app.data.repository.SafCreationProbeDocumentsProvider"
             android:authorities="${applicationId}.saf594"
@@ -34,9 +37,17 @@
 
         <activity
             android:name="com.keepasskey.app.autofill.AutofillClientActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+
+        <activity
+            android:name="com.keepasskey.app.autofill.AutofillClientBActivity"
             android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleTop"
+            android:taskAffinity="${applicationId}.p2_620_b"
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
 
@@ -52,6 +63,29 @@
             android:launchMode="singleTop"
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+
+        <!-- Independent browser-origin test caller for real system Credential Manager A/B requests. -->
+        <activity
+            android:name="com.keepasskey.app.passkey.CredentialBrowserGetClientActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:process=":p2_620_browser"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:windowSoftInputMode="stateAlwaysHidden|adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name="com.keepasskey.app.passkey.CredentialBrowserPrepareReceiver"
+            android:exported="true"
+            android:process=":p2_620_prepare" />
+
         <!-- 系统 PendingIntent A/B 身份验收专用；只接收应用生成的合成令牌与假数据。 -->
         <activity
             android:name="com.keepasskey.app.autofill.LockedSaveRequestProbeActivity"

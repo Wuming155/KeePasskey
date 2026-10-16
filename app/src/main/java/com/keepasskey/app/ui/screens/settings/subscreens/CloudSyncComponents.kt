@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -35,6 +36,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -191,8 +196,10 @@ internal fun ProviderSelectionSection(
 internal fun SyncStatusCard(
     uiState: SettingsUiState,
     onTriggerSync: () -> Unit,
-    onTestConnection: () -> Unit
+    onTestConnection: () -> Unit,
+    onRecoverByKeepingLocal: () -> Unit = {}
 ) {
+    var showKeepLocalRecoveryDialog by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -209,6 +216,20 @@ internal fun SyncStatusCard(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+
+        if (uiState.syncRecoveryRequired) {
+            Text(
+                text = stringResource(R.string.sync_recovery_pending),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        if (uiState.syncRecoveryCanKeepLocal && !uiState.isSyncing) {
+            OutlinedButton(onClick = { showKeepLocalRecoveryDialog = true }) {
+                Text(stringResource(R.string.sync_recovery_keep_local_button))
+            }
+        }
 
         // ISSUE-P3-437 AC②：同步进行中挂过程反馈段（跑马灯 + 阶段文案「正在通过 X 连接云端服务器...」），
         // 与解锁页/导出共用同一通道；终态仍走 SyncFeedbackMessage 反馈条
@@ -227,6 +248,27 @@ internal fun SyncStatusCard(
             onTestConnection = onTestConnection
         )
     }
+
+    if (showKeepLocalRecoveryDialog) {
+        AlertDialog(
+            onDismissRequest = { showKeepLocalRecoveryDialog = false },
+            title = { Text(stringResource(R.string.sync_recovery_keep_local_title)) },
+            text = { Text(stringResource(R.string.sync_recovery_keep_local_message)) },
+            confirmButton = {
+                Button(onClick = {
+                    showKeepLocalRecoveryDialog = false
+                    onRecoverByKeepingLocal()
+                }) {
+                    Text(stringResource(R.string.sync_recovery_keep_local_confirm))
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showKeepLocalRecoveryDialog = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
@@ -240,6 +282,8 @@ internal fun SyncStatusCardPreview() {
             uiState = com.keepasskey.app.ui.screens.settings.SettingsUiState().copy(
                 syncStatusText = stringResource(R.string.sync_status_synced),
                 syncLastTime = stringResource(R.string.vault_last_sync_time, "2026-01-02 12:00"),
+                syncRecoveryRequired = true,
+                syncRecoveryCanKeepLocal = true,
                 isConnectionVerified = true
             ),
             onTriggerSync = {},

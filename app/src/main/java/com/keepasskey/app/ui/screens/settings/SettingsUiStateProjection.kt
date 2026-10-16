@@ -144,6 +144,8 @@ internal fun buildSettingsUiState(
     wifiOnlySync = syncState.wifiOnlySync,
     isSyncing = syncState.isSyncing,
     syncFeedbackMessage = syncState.syncFeedbackMessage,
+    syncRecoveryRequired = syncState.syncRecoveryRequired,
+    syncRecoveryCanKeepLocal = syncState.syncRecoveryCanKeepLocal,
     syncLastTime = when {
         syncState.lastSyncTimeText.isNotEmpty() -> syncState.lastSyncTimeText
         // 测连成功但本会话尚未真正同步：与徽章「连接已验证」一致，不再写「尚未同步」造成矛盾

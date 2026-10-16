@@ -20,11 +20,15 @@ import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.FieldResolutionChoice
+import com.keepasskey.sync.engine.RollbackVerdict
+import com.keepasskey.sync.engine.SyncCache
+import com.keepasskey.sync.engine.SyncRollbackGuard
 import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -32,6 +36,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -44,6 +49,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
+import java.security.MessageDigest
 
 /** TASK-21：用户可见消息已资源化；单测无资源环境，注入返回占位文本的假 StringsProvider */
 private val TEST_STRINGS = com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" }
@@ -152,7 +158,7 @@ class SyncCoordinatorTest {
                 )
             }
             val newEtag = "etag_${System.currentTimeMillis()}_${data.size}"
-            remoteStorage[remotePath] = Pair(data, newEtag)
+            remoteStorage[remotePath] = Pair(data.clone(), newEtag)
             return Result.success(newEtag)
         }
 
@@ -168,10 +174,12 @@ class SyncCoordinatorTest {
 
         val cacheDir = File(tempFolder.root, "cache").apply { mkdirs() }
         val filesDir = File(tempFolder.root, "files").apply { mkdirs() }
+        val sharedPreferences = InMemorySharedPreferences()
 
         fakeContext = object : android.content.ContextWrapper(null) {
             override fun getCacheDir(): File = cacheDir
             override fun getFilesDir(): File = filesDir
+            override fun getSharedPreferences(name: String?, mode: Int) = sharedPreferences.prefs
             override fun getApplicationContext(): Context = this
         }
 
@@ -239,6 +247,410 @@ class SyncCoordinatorTest {
             databaseSession.close()
         }
     }
+
+    @Test
+    fun `锁定Worker条件上传持久密文并在解锁后安全收敛`() = runTest(testDispatcher) {
+        val provider = MemorySyncProvider()
+        val remotePath = "/remote/pending-ciphertext.kdbx"
+        val vaultFile = requireNotNull(databaseSession.currentFile)
+        val vaultIdentity = requireNotNull(databaseSession.currentPathIdentifier)
+        com.keepasskey.app.data.repository.ActiveDatabaseIdStore(fakeContext).save(vaultIdentity)
+        databaseSession.saveEntry(
+            KdbxEntry(
+                id = KdbxUuid.random(),
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString("locked queue entry", false),
+                    KdbxConstants.Fields.PASSWORD to ProtectedString("Synthetic-Queue-Password-A", true)
+                )
+            )
+        )
+        assertTrue(databaseSession.save().isSuccess)
+        val versionA = vaultFile.readBytes()
+        val contentDigestA = SyncCache.sha256Hex(versionA)
+        val rootScope = requireNotNull(databaseSession.databaseFlow.value).rootGroup.id.toHexString()
+        provider.remoteStorage[remotePath] = versionA.clone() to "etag-a"
+        SyncRollbackGuard(File(fakeContext.filesDir, SyncRollbackGuard.STATE_DIR_NAME), rootScope)
+            .recordAccepted(remotePath, contentDigestA)
+
+        databaseSession.saveEntry(
+            KdbxEntry(
+                id = KdbxUuid.random(),
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString("pending queue entry", false),
+                    KdbxConstants.Fields.PASSWORD to ProtectedString("Synthetic-Queue-Password-B", true)
+                )
+            )
+        )
+        assertTrue(databaseSession.save().isSuccess)
+        val versionB = vaultFile.readBytes()
+        val contentDigestB = SyncCache.sha256Hex(versionB)
+        assertFalse("合成库两个修订必须不同", contentDigestA == contentDigestB)
+        // 与生产锁态探测相同的两层身份派生：目标摘要由库身份与配置目标组成，再绑定库身份。
+        val probeTargetIdentity = digestIdentity(vaultIdentity, digestIdentity(vaultIdentity, remotePath))
+        val probeStore = PeriodicSyncProbeStore(InMemorySharedPreferences().context())
+        assertTrue(
+            probeStore.write(
+                vaultIdentity,
+                PeriodicSyncProbeRecord(
+                    targetIdentity = probeTargetIdentity,
+                    observedEtag = "etag-a",
+                    needsUnlock = false,
+                    syncedContentDigest = contentDigestA,
+                    rollbackVaultScope = rootScope
+                )
+            )
+        )
+        val session = SyncSessionState().apply {
+            testSyncProvider = provider
+            testRemotePath = remotePath
+        }
+        provider.forceConflictUploads = 1
+        val periodicCoordinator = SyncCoordinator(
+            fakeContext,
+            DatabaseSession(),
+            credentialsStore,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            TEST_STRINGS,
+            syncSession = session,
+            periodicSyncProbeStore = probeStore
+        )
+
+        try {
+            databaseSession.lock()
+            databaseSession.close()
+            val lockedResult = periodicCoordinator.runPeriodicSync()
+
+            assertEquals(
+                "412 冲突须保留密文快照并转为待解锁/可重试状态",
+                PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.REMOTE_CHANGED),
+                lockedResult
+            )
+            assertEquals("冲突的首次 PUT 不得改写远端", "etag-a", provider.remoteStorage[remotePath]?.second)
+            assertTrue(
+                "冲突后待传快照仍须持久化",
+                PeriodicSyncPendingUploadStore(
+                    File(fakeContext.filesDir, PeriodicSyncPendingUploadStore.DIRECTORY_NAME)
+                ).hasEntry(vaultIdentity)
+            )
+
+            val retryResult = periodicCoordinator.runPeriodicSync()
+
+            assertEquals(
+                "重试必须复用同一密文快照并完成受条件约束的上传",
+                PeriodicSyncWorkResult.EncryptedUploadCompleted,
+                retryResult
+            )
+            assertEquals("冲突后重试前必须重新探测 ETag", 2, provider.metadataCalls)
+            assertEquals(2, provider.uploadCalls)
+            assertEquals("上传必须绑定原远端 ETag", "etag-a", provider.lastExpectedEtag)
+            assertArrayEquals("远端应收到锁定前已落盘的密文修订 B", versionB, provider.remoteStorage[remotePath]?.first)
+            val settled = (probeStore.read(vaultIdentity) as PeriodicSyncProbeRead.Stored).record
+            assertEquals(provider.remoteStorage[remotePath]?.second, settled.observedEtag)
+            assertEquals(contentDigestB, settled.syncedContentDigest)
+            assertEquals(rootScope, settled.rollbackVaultScope)
+            assertFalse(settled.needsUnlock)
+
+            val guard = SyncRollbackGuard(File(fakeContext.filesDir, SyncRollbackGuard.STATE_DIR_NAME), rootScope)
+            assertEquals(RollbackVerdict.Unchanged, guard.inspect(remotePath, contentDigestB))
+            assertEquals(RollbackVerdict.ReplayDetected, guard.inspect(remotePath, contentDigestA))
+            assertFalse(
+                "完成上传后必须清除锁态密文队列",
+                PeriodicSyncPendingUploadStore(
+                    File(fakeContext.filesDir, PeriodicSyncPendingUploadStore.DIRECTORY_NAME)
+                ).hasEntry(vaultIdentity)
+            )
+
+            val restartedSession = DatabaseSession()
+            assertTrue(restartedSession.open(vaultFile, masterPassword.clone()) is com.keepasskey.core.result.KdbxResult.Success)
+            val unlockedCoordinator = SyncCoordinator(
+                fakeContext,
+                restartedSession,
+                credentialsStore,
+                com.keepasskey.app.data.logger.DebugLogBuffer(),
+                TEST_STRINGS,
+                syncSession = SyncSessionState().apply {
+                    testSyncProvider = provider
+                    testRemotePath = remotePath
+                },
+                periodicSyncProbeStore = probeStore
+            )
+            val unlockedResult = unlockedCoordinator.runPeriodicSync()
+            assertTrue("解锁后完整同步必须收敛且不能覆盖 B: $unlockedResult", unlockedResult is PeriodicSyncWorkResult.FullSync)
+            val unlockedDatabase = requireNotNull(restartedSession.databaseFlow.value)
+            assertTrue(
+                "解锁收敛后正式库仍应保留 B 的条目",
+                unlockedDatabase.rootGroup.entries.any { entry ->
+                    entry.fields[KdbxConstants.Fields.TITLE]?.readString() == "pending queue entry"
+                }
+            )
+        } finally {
+            versionA.fill(0)
+            versionB.fill(0)
+            provider.remoteStorage.values.forEach { it.first.fill(0) }
+            provider.remoteStorage.clear()
+            databaseSession.close()
+        }
+    }
+
+    @Test
+    fun `冷启动Worker用持久密文队列对账服务端已提交但本地未收尾的上传`() = runTest(testDispatcher) {
+        val provider = MemorySyncProvider()
+        val remotePath = "/remote/pending-ciphertext-reconcile.kdbx"
+        val vaultFile = requireNotNull(databaseSession.currentFile)
+        val vaultIdentity = requireNotNull(databaseSession.currentPathIdentifier)
+        com.keepasskey.app.data.repository.ActiveDatabaseIdStore(fakeContext).save(vaultIdentity)
+        databaseSession.saveEntry(
+            KdbxEntry(
+                id = KdbxUuid.random(),
+                fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("revision-a", false))
+            )
+        )
+        assertTrue(databaseSession.save().isSuccess)
+        val versionA = vaultFile.readBytes()
+        val digestA = SyncCache.sha256Hex(versionA)
+        val scope = requireNotNull(databaseSession.databaseFlow.value).rootGroup.id.toHexString()
+        val guardDir = File(fakeContext.filesDir, SyncRollbackGuard.STATE_DIR_NAME)
+        SyncRollbackGuard(guardDir, scope).recordAccepted(remotePath, digestA)
+
+        databaseSession.saveEntry(
+            KdbxEntry(
+                id = KdbxUuid.random(),
+                fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("revision-b", false))
+            )
+        )
+        assertTrue(databaseSession.save().isSuccess)
+        val versionB = vaultFile.readBytes()
+        val digestB = SyncCache.sha256Hex(versionB)
+        val targetIdentity = digestIdentity(vaultIdentity, digestIdentity(vaultIdentity, remotePath))
+        val probeStore = PeriodicSyncProbeStore(InMemorySharedPreferences().context())
+        assertTrue(
+            probeStore.write(
+                vaultIdentity,
+                PeriodicSyncProbeRecord(
+                    targetIdentity,
+                    "etag-a",
+                    needsUnlock = true,
+                    syncedContentDigest = digestA,
+                    rollbackVaultScope = scope
+                )
+            )
+        )
+        val pendingStore = PeriodicSyncPendingUploadStore(
+            File(fakeContext.filesDir, PeriodicSyncPendingUploadStore.DIRECTORY_NAME)
+        )
+        val queued = requireNotNull(
+            pendingStore.stage(
+                vaultIdentity,
+                targetIdentity,
+                remotePath,
+                "etag-a",
+                scope,
+                ByteArrayInputStream(versionB)
+            )
+        )
+        // 模拟远端已完成 PUT，但进程在本地高水位/ETag 收尾前死亡。
+        SyncRollbackGuard(guardDir, scope).beginAcceptance(remotePath, digestB)
+        provider.remoteStorage[remotePath] = versionB.clone() to "etag-b"
+        databaseSession.close()
+
+        val coldCoordinator = SyncCoordinator(
+            fakeContext,
+            DatabaseSession(),
+            credentialsStore,
+            com.keepasskey.app.data.logger.DebugLogBuffer(),
+            TEST_STRINGS,
+            syncSession = SyncSessionState().apply {
+                testSyncProvider = provider
+                testRemotePath = remotePath
+            },
+            periodicSyncProbeStore = probeStore
+        )
+        try {
+            val recovered = coldCoordinator.runPeriodicSync()
+
+            assertEquals(PeriodicSyncWorkResult.EncryptedUploadCompleted, recovered)
+            assertEquals("已提交的远端修订应通过密文摘要核验，不需重复 PUT", 0, provider.uploadCalls)
+            assertEquals("重启恢复仅通过远端下载对账", 1, provider.downloadCalls)
+            assertEquals(RollbackVerdict.Unchanged, SyncRollbackGuard(guardDir, scope).inspect(remotePath, digestB))
+            assertEquals(RollbackVerdict.ReplayDetected, SyncRollbackGuard(guardDir, scope).inspect(remotePath, digestA))
+            val stored = (probeStore.read(vaultIdentity) as PeriodicSyncProbeRead.Stored).record
+            assertEquals("etag-b", stored.observedEtag)
+            assertEquals(digestB, stored.syncedContentDigest)
+            assertFalse(stored.needsUnlock)
+            assertEquals(queued.contentDigest, stored.syncedContentDigest)
+            assertFalse(pendingStore.hasEntry(vaultIdentity))
+        } finally {
+            versionA.fill(0)
+            versionB.fill(0)
+            provider.remoteStorage.values.forEach { it.first.fill(0) }
+            provider.remoteStorage.clear()
+            databaseSession.close()
+        }
+    }
+
+    @Test
+    fun `正式库B已落盘而高水位提交失败后重建协调器不得接受远端A`() = runTest(testDispatcher) {
+        val provider = MemorySyncProvider()
+        val remotePath = "/remote/p2-621-formal-vault.kdbx"
+        val vaultFile = requireNotNull(databaseSession.currentFile)
+        coordinator.testSyncProvider = provider
+        coordinator.testRemotePath = remotePath
+        assertTrue("初始 A 必须上传并建立已接受基线", coordinator.syncNow() is SyncOutcome.UploadedLocal)
+        val remoteA = requireNotNull(provider.remoteStorage[remotePath]).first.clone()
+
+        val passwordForRead = masterPassword.clone()
+        val remoteDatabase = try {
+            KdbxFile.load(ByteArrayInputStream(remoteA), passwordForRead)
+        } finally {
+            passwordForRead.fill('\u0000')
+        }
+        val remoteBEntry = KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("formal revision B", false))
+        )
+        val passwordForWrite = masterPassword.clone()
+        val remoteB = try {
+            ByteArrayOutputStream().also { output ->
+                KdbxFile.save(
+                    output,
+                    remoteDatabase.copy(rootGroup = remoteDatabase.rootGroup.copy(
+                        entries = remoteDatabase.rootGroup.entries + remoteBEntry
+                    )),
+                    passwordForWrite
+                )
+            }.toByteArray()
+        } finally {
+            passwordForWrite.fill('\u0000')
+        }
+        remoteDatabase.clearSensitiveData()
+        val remoteBDigest = SyncCache.sha256Hex(remoteB)
+        provider.remoteStorage[remotePath] = remoteB.clone() to "etag-b"
+
+        var injectHighWaterFailure = true
+        val failureLog = com.keepasskey.app.data.logger.DebugLogBuffer()
+        val preferences = SyncPreferences(failureLog, null)
+        val sessionState = SyncSessionState().apply {
+            testSyncProvider = provider
+            testRemotePath = remotePath
+        }
+        val resolver = SyncProviderResolver(credentialsStore, preferences, failureLog)
+        val codec = SyncDatabaseCodec(databaseSession, failureLog)
+        val conflicts = SyncConflictController(databaseSession, codec, TEST_STRINGS, sessionState, failureLog)
+        val changes = SyncContentChangeDetector(codec, sessionState)
+        val rollbackDir = File(fakeContext.filesDir, SyncRollbackGuard.STATE_DIR_NAME)
+        val cycle = SyncCycleRunner(
+            fakeContext,
+            databaseSession,
+            sessionState,
+            resolver,
+            codec,
+            conflicts,
+            changes,
+            preferences,
+            TEST_STRINGS,
+            rollbackStateDir = rollbackDir
+        ).apply {
+            syncCacheFactory = { SyncCache(it) }
+            rollbackGuardFactoryForTest = { stateDir, scope, identity ->
+                SyncRollbackGuard(stateDir, scope, { next ->
+                    if (injectHighWaterFailure && next.current == remoteBDigest && next.pendingDigest == null) {
+                        injectHighWaterFailure = false
+                        throw IOException("injected high-water replacement failure")
+                    }
+                }, identity)
+            }
+        }
+        val failingCoordinator = SyncCoordinator(
+            fakeContext,
+            databaseSession,
+            credentialsStore,
+            failureLog,
+            TEST_STRINGS,
+            syncSession = sessionState,
+            syncPreferences = preferences,
+            syncProviderResolver = resolver,
+            syncDatabaseCodec = codec,
+            syncContentChanges = changes,
+            syncConflicts = conflicts,
+            syncCycle = cycle
+        )
+
+        try {
+            val failed = failingCoordinator.syncNow()
+            assertTrue("高水位提交故障必须报告失败", failed is SyncOutcome.Error)
+            assertTrue(
+                "没有周期探测记录时，待采纳意图也必须能通过库身份被恢复 UI 查询到",
+                failingCoordinator.hasPendingUserRecovery(vaultFile.absolutePath)
+            )
+            assertTrue(
+                "远端 B 已采用并保存到正式 KDBX 文件",
+                vaultFile.readBytes().let { bytes ->
+                    val verifyPassword = masterPassword.clone()
+                    try {
+                        KdbxFile.load(ByteArrayInputStream(bytes), verifyPassword)
+                            .useDatabase { db -> db.rootGroup.allEntries().any { it.title == "formal revision B" } }
+                    } finally {
+                        verifyPassword.fill('\u0000')
+                        bytes.fill(0)
+                    }
+                }
+            )
+
+            // 模拟进程结束：丢弃旧会话与协调器，从正式文件和持久目录创建全新对象。
+            databaseSession.close()
+            val restartedSession = DatabaseSession()
+            val restartPassword = masterPassword.clone()
+            val reopened = try {
+                restartedSession.open(vaultFile, restartPassword)
+            } finally {
+                restartPassword.fill('\u0000')
+            }
+            assertTrue("重建后必须能从正式 KDBX 解锁 B", reopened is com.keepasskey.core.result.KdbxResult.Success)
+            val restartedCoordinator = SyncCoordinator(
+                fakeContext,
+                restartedSession,
+                credentialsStore,
+                com.keepasskey.app.data.logger.DebugLogBuffer(),
+                TEST_STRINGS,
+                syncSession = SyncSessionState().apply {
+                    testSyncProvider = provider
+                    testRemotePath = remotePath
+                }
+            )
+            provider.remoteStorage[remotePath] = remoteA.clone() to "etag-a-replayed"
+            val resumed = restartedCoordinator.syncNow()
+            assertTrue("持久 quarantine 必须阻止重建后自动采用 A：$resumed", resumed is SyncOutcome.Error)
+            assertTrue(
+                "远端 A 重放后正式 KDBX 仍必须包含 B",
+                restartedSession.databaseFlow.value!!.rootGroup.allEntries()
+                    .any { it.title == "formal revision B" }
+            )
+            val restartedGuard = SyncRollbackGuard(rollbackDir)
+            assertEquals(
+                "B 的待完成采纳意图应跨协调器重建保留隔离",
+                RollbackVerdict.RecoveryRequired,
+                restartedGuard.inspect(remotePath, remoteBDigest)
+            )
+            restartedSession.close()
+        } finally {
+            remoteA.fill(0)
+            remoteB.fill(0)
+            provider.remoteStorage.values.forEach { it.first.fill(0) }
+            provider.remoteStorage.clear()
+            databaseSession.close()
+        }
+    }
+
+    private inline fun <T> KdbxDatabase.useDatabase(block: (KdbxDatabase) -> T): T = try {
+        block(this)
+    } finally {
+        clearSensitiveData()
+    }
+
+    private fun digestIdentity(vaultIdentity: String, targetIdentity: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest("$vaultIdentity\u0000$targetIdentity".toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     @Test
     fun `用户裁决上传网络等待不持有自动锁定挂锁`() = runTest(testDispatcher) {
@@ -312,13 +724,14 @@ class SyncCoordinatorTest {
         uploadStarted.await()
 
         assertFalse("云端上传等待阶段不得持有自动锁定挂锁", holdoff.isHolding)
+        val remoteEtagBeforeLock = provider.remoteStorage[remotePath]?.second
         assertTrue(
             "上传网络等待期间的锁定应立即完成",
             guard.triggerLock("冲突上传慢响应期间锁定") != com.keepasskey.app.security.LockOutcome.Deferred
         )
-        continueUpload.complete(Unit)
-        val resolved = resolution.await()
-        assertTrue("锁库后不得发布过期合并树: $resolved", resolved is SyncOutcome.Error)
+        val resolutionFailure = runCatching { resolution.await() }.exceptionOrNull()
+        assertTrue("锁库必须取消进行中的冲突上传", resolutionFailure is CancellationException)
+        assertEquals("取消后的冲突上传不得改写远端对象", remoteEtagBeforeLock, provider.remoteStorage[remotePath]?.second)
         assertEquals(DatabaseSession.SessionState.LOCKED, databaseSession.state.value)
         assertFalse("结束后挂锁计数必须归零", holdoff.isHolding)
         remoteBytes.fill(0)

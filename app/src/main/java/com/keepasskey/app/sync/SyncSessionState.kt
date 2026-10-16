@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import com.keepasskey.database.file.KdbxDatabase
+import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.sync.Mutex
@@ -30,6 +31,9 @@ class SyncSessionState @Inject constructor() {
 
     // 最近一次同步周期使用的引擎实例，用于事后抽取事件 replayCache（每次 syncNow 都会创建新引擎）
     var lastSyncEngine: SyncEngine? = null
+    /** 本轮周期的缓存视图；仅用于在周期结束时持久化已确认的 ETag，锁定时随会话释放。 */
+    @Volatile
+    var lastSyncCache: SyncCache? = null
 
     // ISSUE-P1-07：lastSyncedDb 持有整棵 KdbxDatabase 树（含全部 ProtectedString），
     // 必须随会话终止而释放，故在会话锁回调中置空（见 clear()）。
@@ -75,6 +79,7 @@ class SyncSessionState @Inject constructor() {
         lastSyncedDb = null
         checkpointDatabase = null
         lastSyncEngine = null
+        lastSyncCache = null
         lastRemoteEtag = ""
     }
 }

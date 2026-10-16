@@ -2,6 +2,9 @@ package com.keepasskey.sync
 
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.s3.S3SyncProvider
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.Dns
 import okhttp3.OkHttpClient
@@ -18,6 +21,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.TimeUnit
 
 /**
  * S3SyncProvider 单元测试：
@@ -27,6 +31,26 @@ import java.util.TimeZone
 class S3SyncProviderTest {
 
     private lateinit var server: MockWebServer
+
+    @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun `取消 S3 请求会中止生产 Provider 的活动 HTTP Call`() = runTest {
+        server.enqueue(MockResponse().setHeadersDelay(10, TimeUnit.SECONDS))
+        val provider = S3SyncProvider(
+            endpoint = "http://127.0.0.1:${server.port}",
+            bucketName = "test-bucket",
+            accessKeyId = "TESTKEY".toCharArray(),
+            secretAccessKey = "TESTSECRET".toCharArray(),
+            client = createLoopbackClient()
+        )
+
+        val requestJob = launch { provider.testConnection() }
+        runCurrent()
+        assertNotNull("HEAD 应已到达服务端", server.takeRequest(2, TimeUnit.SECONDS))
+        requestJob.cancelAndJoin()
+
+        assertTrue("Provider 调用必须以协程取消结束", requestJob.isCancelled)
+    }
 
     @Before
     fun setUp() {

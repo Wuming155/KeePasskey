@@ -101,11 +101,12 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
     } else {
         SyncCache(syncDir, cacheScope)
     }
+    session.lastSyncCache = syncCache
     // F-23 整改：防回滚状态**不得**与可丢弃缓存同目录——此前它落在 cacheDir/sync，
     // 而 SyncCache.clear() 把它列入删除清单且由锁库 / 凭据清空触发，导致「用户锁定一次
     // 即可被云端重放旧库」。现注入 filesDir 下的持久目录（跨锁定保留）。
     // 注入缺失（手动装配路径）时按同一落点惰性兜底，保证两种装配方式落点一致。
-    val rollbackGuard = SyncRollbackGuard(
+    val rollbackGuard = createRollbackGuard(
         rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
         cacheScope
     )
@@ -127,7 +128,7 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
             }
         }
     }
-    val syncEngine = SyncEngine(provider, syncCache, rollbackGuard)
+    val syncEngine = SyncEngine(provider, syncCache, rollbackGuard, settlementStageObserverForTest)
     // 离线开关联动：设置页开关传导至引擎决策树
     syncEngine.isOffline = session.isOfflineMode
     // ISSUE-P3-03 (43a)：关闭「同步前检查远程变更」= 上传前不比对方版本，本地修改直接覆盖远端
