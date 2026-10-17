@@ -19,21 +19,22 @@
 
 ## P1 高危与核心功能问题
 
-### ISSUE-P1-631 外部漂移合并伪造共同基线，可能丢失本地新增和编辑
-
-- 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。
-- 问题：mergeAndSave 把当前 localDb 同时传作 base 与 local。合并器因此认为本地从未修改：本地新增条目在磁盘缺失时被推断为远端删除，同 ID 本地编辑则让磁盘版本成为唯一修改。随后采用并保存该结果。分组也受相同基线错误影响。
-- 影响与触发：用户选择“合并后保存”仍可能丢失未提交本地条目/分组或恢复磁盘旧值；影响本地文件和 SAF 外部漂移处置，不代表普通三方同步均有此缺陷。 触发序列及反证详见方案。
-- 位置：`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`；`sync/src/main/java/com/keepasskey/sync/merge/KdbxEntryMerger.kt`。
-- 已实现（2026-10-16）：会话持久化基线（`DatabaseSession.persistedBaselineSnapshot`——打开 / 重载 / 新建 / 保存 / Meta 提交 / 换密六类确认写盘点登记，绑定库身份与持久化修订，会话终止先清零再置空）；`VaultFileDriftResolve` 改按真实 base/local/disk 合并，基线缺失 / 不可信时按空底版双方并集语义（不推断删除）；同字段双侧修改不静默取一侧——以「本地 / 磁盘 / 双方保留」裁决提示（`VaultFileDriftCoordinator.mergeConflict`）驱动同一合并实现重算后提交；提交经实例身份 + 基线修订同一临界区校验（`adoptDatabaseIfUnchanged` 扩展）。本仓 JVM 验收：`VaultFileDriftMergeBaselineTest`（app，8 例，覆盖验收矩阵 1/2/3/4 与删除/修改组合，均重解析正式库核对）与 `PersistedBaselineCaptureTest`（database，8 例）全绿；全量 `test` 读数与门禁读数见方案「实施记录」。裁决口径登记 `PD-87`，边界登记限界 §45。
-- 深化（2026-10-16 第二轮）：裁决由「整条目二选一」收口为**只重裁差异字段**（`KdbxMerger.resolveConflictFieldsOnly`，非差异字段保持合并产物）；新增**读取版本钉扎**（`VaultFileReadPin`）与**裁决归属绑定**（换库后的过期选择一律拒绝，`PD-88`）；采纳 + 落盘为 `NonCancellable` 提交段；UI 重复提交守卫。**真机（Redmi 4X / API 37）**：`VaultFileDriftSafDeviceTest` 3 例（真实 `content://` 全链路 + 三种裁决落盘 + 写故障/损坏边界）与 `VaultFileDriftBackupDeviceTest` 1 例（`.bak` 重解析 + 失败保全）全绿；JVM 新增分组 5 例 / 并发 barrier 4 例（latch 闸门）/ 裁决范围 4 例 / 生命周期 7 例 / 边界 6 例。审查发现并处置：旧会话结果写新会话（已修）、Meta 不参与合并（第三轮**定级** `ISSUE-P2-659`/P2）、分组双侧修改为 LWW 不提示（第三轮**已在漂移面修复**，同步面另立 `ISSUE-P2-660`）、SAF 部分写损坏文档后不可自修（既有 §24）。详见方案「实施记录」§8/§9。
-- 第三轮（2026-10-16，证据审计 + 收口）：① **分组静默 LWW 已修复**——合并器产出 `MergeResult.groupConflicts`，漂移面同字段双侧异值一律阻断待裁决并支持三种裁决落盘（「双方保留」复制整棵子树、UUID 全新）；② **读取版本钉扎升级为内容级**（整份密文 SHA-256，按同通道重读比对），消除「同尺寸改内容」与 ABA 复原的漏检面（SAF 无 mtime 时纯元数据判据不可靠）；③ **采纳 + 落盘合成同一临界区**（`adoptAndSaveIfUnchanged`，一次取锁），消除 adopt 与 save 之间换库导致「写入后来会话却回报成功」的窗口；④ **新增最小 UI 测试基建**（`src/debug` 宿主 Activity 挂生产对话框组合件）并以无障碍节点真实点击驱动关键路径；⑤ 160 MiB 三边界**真实尺寸实跑**（流式，含 `+1` 贯通与不等量克隆断言）。新发现并处置：Meta 不参与合并 → **定级 P2（`ISSUE-P2-659`）**；同步路径分组差异仍 LWW → **新登记 `ISSUE-P2-660`（P2）**。
-- 第四轮（2026-10-16，生命周期竞态审查与整改）：设备侧反向验收（Redmi 4X / API 37）实测复现**生产缺陷**——裁决（`MERGE_KEEP_*`）提交挂在组合作用域（`rememberCoroutineScope`）且受理即先清冲突提示，用户点击后退出页面即取消在途重算+落盘，形成「选择已被 UI 消费、提示全清、正式文件未变」的数据丢失第三态（复现用例 A/B 未改生产代码即稳定失败，读数 `实测=[Disk#1]；pending=null conflict=null`）。整改（生产代码）：① 处置提交移至协调器 `submitChoice` 的**应用级作用域**（`guardedScope`，按工程规则临界写操作不依赖 UI 生命周期；未用 `GlobalScope`、未扩大 `NonCancellable`）；② UI 状态不得领先持久化事实——受理不再先清提示，提交在途期间裁决对话框保持可见（按钮经 `choiceSubmissionInProgress` 禁用），成功清提示、失败保留裁决上下文可重试（三选路径行为不变）；③ 新增设备用例 6 例（受理后立即 recreate / 立即 destroy、三阶段 latch 门〔重读盘前 / 提交前 / 临界区内〕销毁宿主、保存失败注入），与既有 5 例**全类 11/11 真机通过**；阶段门 `DriftMergePhaseGates` 生产恒 null、仅 androidTest 注入。边界如实声明：提交仍随**进程终止**而终止（此时保留待决状态，由会话锁定路径自然清空）；「全量导航级 UI 路径」等尚未完成项见下条，状态保持「已实现 / 尚未完成」。
-- 第五轮（2026-10-17，生命周期收口 + 证据冻结）：① **`NonCancellable` 范围收口**——保存侧 KDF/Argon2 与序列化移入可取消的 `prepareSerializedSave` 预备段（不取会话锁、不发布、不触碰基线），提交临界区只剩「复检 → 实例身份/基线修订校验 → 发布 → 写预备密文 → 基线前移 → 终态」；AVD（sdk_gphone64_x86_64 / API 36）实测：解析+合并 1271ms、预备段 340ms（均在取消区内）、提交临界区 **112ms**。JVM 新增「预备与提交之间会话变更 ⇒ `SAVE_SESSION_CHANGED` fail-closed 且不写盘」「合并入口取消不写盘/不采用/基线不前移」两例（`VaultFileDriftCancellationTest` 共 5 例）。② **应用级 scope 隔离实测**：A 库提交卡在提交前门时换到 B 库（本仓库换库＝前置释放＋换开同一管线；`importExternalDatabase` 只登记不切换活动库、活动判定会话路径优先——均真机/AVD 实测确认）⇒ A 的提交以 `SAVE_SESSION_CHANGED` 失败，A/B 文件均未改、B 会话保持可用、A 的提示不污染 B UI。③ **进程死亡实测**：提交卡在临界区前门 → `am force-stop`（instrumentation 报 `Process crashed`）→ **新进程**重开：正式文件与提交前逐字节一致、重解析仅见 `Disk#1`（无 `LocalOnly#1`）、打开前无持久化基线残留、打开后基线即当前磁盘版本（`checkDrift=false`）、无待决提示。④ 断言复核：`awaitFileContains` 的判定走 `KdbxFile.load`（正式解析器 + 正确凭据 + 解密后读字段），轮询只用于等待写入完成，不含任何 raw-byte 搜索。⑤ Group：漂移面 `base.name=A / local.name=B / disk.name=C` 走 `groupConflicts` 进入同一裁决（LWW 仅给出裁决前的临时值；同步面仍 LWW 已另立 `ISSUE-P2-660`）。⑥ Meta：`ISSUE-P2-659` 的 P2 定级与四条边界依据不变（非同一因果链、损失单向、与导入/同步同源、需不可合并身份字段白黑名单）。⑦ 160 MiB 真实尺寸三边界 JVM 全绿（`PersistedBaselineRealSizeBoundaryTest`）。⑧ 设备侧全量：`VaultFileDriftUiPathDeviceTest` **13/13**、`VaultFileDriftSafDeviceTest` 3/3、`VaultFileDriftBackupDeviceTest` 1/1、进程死亡两段 PASS（AVD；此前 11/11 在 Redmi 4X / API 37 通过）。
-- 关闭条件与额外边界（2026-10-17 界定）：**原始关闭条件＝§4 验收矩阵四行**（1 基线无E/本地有E、2 真实修改来源保留或要求冲突、3 File+SAF+提交失败+并发换库 barrier 且重解析正式库与备份、反向/失败对照），均已有 JVM + 设备证据（含本轮第五轮读数）。**「全量导航级 UI 控件点击」与「GC 后物理内存绝对擦除」不是 §4/§5 关闭条件**：前者属产品入口级额外验收（现有覆盖为「漂移提示出现 → 点合并 → 裁决出现 → 点裁决 → 落盘 → 锁库重开」，解锁 / 保存 / 锁库经生产仓库入口，与 ViewModel 同一组 API），后者原理上不可由 JVM 证明——两者作为**额外工程边界**登记，不作为 P1 关闭的前置。未触及 Rust/JNI/Native 加密分派与探活，四层 connected 测试义务不触发（未跑，如实声明）。逐行矩阵与证据见方案「实施记录」§9/§10。
-- [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：目标、模块、步骤、失败处理、验收、回退与实施记录。
+暂无。
 
 ## P2 中危缺陷与协议/测试缺口
+
+### ISSUE-P2-661 进程死亡导致未提交会话脏树与待决漂移裁决不可恢复（无 durable draft）
+
+- 核实：2026-10-17（Asia/Shanghai），**真机实测**（隔离 AVD `sdk_gphone64_x86_64` / API 36）：提交卡在临界区前门 → `adb shell am force-stop com.keepasskey.debug`（instrumentation 报 `Process crashed`）→ 新进程重开同一库；读数：正式文件与提交前逐字节一致、重解析仅 `Disk#1`、无 `LocalOnly#1`、打开前无持久化基线、打开后 `checkDrift=false`、无 pending/conflict。置信度：高（可稳定复现）。
+- 问题：会话脏树（未落盘的内存编辑）与待决漂移裁决（`pending` / `mergeConflict` / 在途提交）**全部只存在于进程内存**，无任何持久化草稿 / 崩溃恢复日志。进程死亡（force-stop / OOM / 崩溃）后它们随进程消失；重开时持久化基线以**当前磁盘内容**重新登记，因此既不会把「已处理」写进任何持久状态，也**不会凭空恢复**此前的冲突与本地修改。
+- 真实状态机（实测口径，取代此前聊天中「下次保存会重新触发漂移」的错误推导）：本地脏树 → 外部改写磁盘 → 用户选 `KEEP_LOCAL`（UI 处理中、未报告成功）→ commit 前进程死亡 → 内存 session / 待决裁决 / 在途标记丢失 → 正式文件保持外部版本（无半写）→ 重启重开磁盘文件 → 基线以该文件建立 → 无 pending/conflict → 原未提交本地修改不再存在；**只有新的外部改写才会再次产生漂移**。
+- 用户可见风险：进程死亡前的未提交编辑丢失（与任何未保存编辑同型）；刚作出的裁决选择需在重新编辑并再次触发漂移后才能重做。
+- 恢复材料：**不存在** durable draft / draft journal；`.bak` 滚动备份只保存「上次成功写入前」的版本，不含未提交编辑；`recoveryStore` 只服务凭据轮换的旧凭据恢复，不承载树内容。
+- 定级：**P2**。理由：不损坏已持久化数据、不产生半写、不前移错误基线、不谎报成功（失败/中断路径不产生成功状态）；损失限于进程死亡瞬间未提交的内存编辑，属密码管理器通用的「未保存编辑无 durable draft」边界，而非本轮整改引入；但显式裁决后立即丢失的体验成本明显，值得单独修复（durable draft / 崩溃恢复）。
+- 与 `ISSUE-P1-631` 的因果边界：P1-631 管「外部漂移合并是否使用真实 base 并保住本地修改」（**有落盘机会时**，含 File / SAF / 失败 / 换库并发 / 正式库与备份重解析）；本项管「进程死亡后内存态是否可恢复」（**无落盘机会**），不是同一因果链，也不构成本轮回归（修复前后行为一致：提交协程无论挂组合作用域还是应用级作用域，进程死亡都会终止它；两种实现下会话树与待决状态都只在内存）。
+- 位置：`app/src/main/java/com/keepasskey/app/security/VaultFileDriftCoordinator.kt`（待决状态全内存）；`database/src/main/java/com/keepasskey/database/session/`（会话树无持久化草稿）；`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`（在途提交）。
+- 已实现：无（本轮仅实测与定级）。尚未完成：durable draft / 崩溃恢复能力的产品裁决与实现（含密文草稿的密钥生命周期与擦除策略）；限界登记见 [`已知工程限界.md`](architecture/已知工程限界.md) §49。
+- 关闭条件：明确产品裁决（支持或明确不支持崩溃恢复）；若支持，需有加密草稿的写入/恢复/擦除闭环与进程死亡实测；若不支持，需在用户可见处如实声明并保持限界条目。
 
 ### ISSUE-P2-632 历史版本以条目 UUID 定位，多个修订总命中首项
 
