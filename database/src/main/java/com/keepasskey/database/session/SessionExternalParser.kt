@@ -1,6 +1,7 @@
 package com.keepasskey.database.session
 
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.result.suppressCleanupFailure
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import kotlinx.coroutines.CancellationException
@@ -30,18 +31,10 @@ internal suspend fun parseExternalKdbxBytes(
             spillTransaction.commit()
             KdbxResult.Success(database)
         } catch (cancellation: CancellationException) {
-            try {
-                spillTransaction.purge()
-            } catch (cleanupFailure: Throwable) {
-                cancellation.addSuppressed(cleanupFailure)
-            }
+            suppressCleanupFailure(cancellation) { spillTransaction.purge() }
             throw cancellation
         } catch (t: Throwable) {
-            try {
-                spillTransaction.purge()
-            } catch (cleanupFailure: Throwable) {
-                t.addSuppressed(cleanupFailure)
-            }
+            suppressCleanupFailure(t) { spillTransaction.purge() }
             KdbxResult.Failure(t)
         } finally {
             pwdClone?.let { Arrays.fill(it, '0') }

@@ -88,9 +88,10 @@ class KdbxCustomIconBase64LenientTest {
 
     @Test
     fun `MetaReader 必须复用宽松解码器且生产代码不得再调严格 getDecoder 解码`() {
-        val source = readSource("KdbxXmlMetaReader.kt")
+        // ISSUE-P2-645：<CustomIcons> 子树拆至 KdbxXmlCustomIconNodes.kt（纯搬运），两处一并扫描
+        val source = readSource("KdbxXmlCustomIconNodes.kt") + "\n" + readSource("KdbxXmlMetaReader.kt")
         assertTrue(
-            "KdbxXmlMetaReader 必须调用 decodeBase64LenientWhitespace（ISSUE-P2-283 AC①）",
+            "Meta 解析（含拆出的图标节点）必须调用 decodeBase64LenientWhitespace（ISSUE-P2-283 AC①）",
             source.contains("KdbxXmlValueUtil.decodeBase64LenientWhitespace")
         )
         // 去掉行注释与块注释后，生产代码不得再出现严格解码调用（D19 同族误拒面）

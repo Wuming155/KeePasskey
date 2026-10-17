@@ -12,7 +12,8 @@ class WebDavNutstoreDefaultWiringTest {
     @Test
     fun `同步表单占位与已保存恢复走 WebDavDefaults`() {
         val fields = readSource(CLOUD_SYNC_CONFIG)
-        val controller = readSource(SETTINGS_SYNC_CONTROLLER)
+        // ISSUE-P2-645：恢复逻辑（WebDavDefaults 兜底）随凭据表单拆出，两处一并扫描
+        val controller = readSource(SETTINGS_SYNC_CONTROLLER) + "\n" + readSource(SYNC_CREDENTIAL_FORM)
         val uiState = readSource(SETTINGS_UI_STATE)
         assertTrue("CloudSyncConfigFields 必须引用 WebDavDefaults", fields.contains("WebDavDefaults"))
         assertTrue("不得残留 Nextcloud 示例 URL", !fields.contains("cloud.example.com"))
@@ -33,6 +34,9 @@ class WebDavNutstoreDefaultWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncConfigFields.kt"
         const val SETTINGS_SYNC_CONTROLLER =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt"
+        /** ISSUE-P2-645：凭据表单（restore / 保存）拆出后的落点 */
+        const val SYNC_CREDENTIAL_FORM =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncCredentialForm.kt"
         const val SETTINGS_UI_STATE =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiState.kt"
 

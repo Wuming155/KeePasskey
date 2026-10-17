@@ -19,7 +19,8 @@ class OfflineCacheNotEngineOfflineTest {
 
     @Test
     fun `设置 ViewModel 不得调用 setOfflineMode`() {
-        val viewModel = readSource(SETTINGS_VIEW_MODEL)
+        // ISSUE-P2-645：控制器装配与 init 接线拆至 SettingsControllerGraph（纯搬运），两处一并扫描
+        val viewModel = readSource(SETTINGS_VIEW_MODEL) + "\n" + readSource(SETTINGS_CONTROLLER_GRAPH)
         assertFalse(
             "禁止 setOfflineMode 误接：会令同步引擎永不联网",
             viewModel.contains("setOfflineMode")
@@ -92,6 +93,9 @@ class OfflineCacheNotEngineOfflineTest {
     private companion object {
         const val SETTINGS_VIEW_MODEL =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt"
+        /** ISSUE-P2-645：装配图（含 init 内的冷启动闸门接线） */
+        const val SETTINGS_CONTROLLER_GRAPH =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsControllerGraph.kt"
         const val SETTINGS_EXT_PREF =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsExtendedPreferencesController.kt"
         const val SYNC_COMMIT_PATHS =

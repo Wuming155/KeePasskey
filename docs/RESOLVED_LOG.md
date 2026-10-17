@@ -632,5 +632,6 @@
 | §532 | 同步采纳进程终止恢复与本地保留 Redmi 真机验收 | `ISSUE-P2-621`（整条闭环） | [532-同步采纳进程终止恢复与本地保留Redmi真机验收批次.md](resolved/batches/532-同步采纳进程终止恢复与本地保留Redmi真机验收批次.md) |
 | §533 | 凭据入口隔离与浏览器 Autofill A/B 验收 | `ISSUE-P2-620`（整条闭环） | [533-凭据入口隔离与浏览器Autofill验收批次.md](resolved/batches/533-凭据入口隔离与浏览器Autofill验收批次.md) |
 | §534 | 外部漂移合并真实基线与冲突裁决闭环 | `ISSUE-P1-631`（整条闭环） | [534-外部漂移合并真实基线与冲突裁决闭环批次.md](resolved/batches/534-外部漂移合并真实基线与冲突裁决闭环批次.md) |
+| §535 | CI 门禁三项失败与同步编排用例时序修复 | `ISSUE-P2-645` / `ISSUE-P2-658`（两条整条闭环） | [535-CI门禁三项失败与同步编排用例时序修复批次.md](resolved/batches/535-CI门禁三项失败与同步编排用例时序修复批次.md) |
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58~§157，已封卷）· [`05`](resolved/BATCH_158_PLUS.md)（§158~§504，已封卷·超额册）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起，**当前滚动册**）。

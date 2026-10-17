@@ -137,6 +137,33 @@ class CredentialResponseAssembler @Inject constructor(
         // ISSUE-P3-345 / PD-51：无匹配「就地新建」Action——只服务口令维度（公钥零候选不产出，
         // 本应用造不出对某 rpId 有效的凭据）；只读会话不产出（PD-51 裁决 4）。
         // 锁库 / 总开关 / 黑名单路径在上游已先行返回，不会走到这里。
+        assembleOptions(
+            request, callingOrigin, callingPackage, packageDimensionAllowed,
+            activeDatabaseId, sessionTicket, allEntries, responseBuilder
+        )
+
+        if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) {
+            AppLog.w(TAG, "候选组装结束前会话代次变化，拒绝发布凭据候选")
+            return BeginGetCredentialResponse.Builder().build()
+        }
+
+        return responseBuilder.build()
+    }
+
+    /**
+     * 候选装配段（`ISSUE-P2-645`：自 [buildUnlockedGetResponse] 抽出，行为零变更）。
+     * 逐选项产出公钥 / 口令候选；无匹配口令候选且门控允许时追加「就地新建」Action。
+     */
+    private fun assembleOptions(
+        request: BeginGetCredentialRequest,
+        callingOrigin: String,
+        callingPackage: String,
+        packageDimensionAllowed: Boolean,
+        activeDatabaseId: String,
+        sessionTicket: SessionCredentialTicket,
+        allEntries: List<KdbxEntry>,
+        responseBuilder: BeginGetCredentialResponse.Builder
+    ) {
         var sawPasswordOption = false
         var passwordCandidateCount = 0
         for (option in request.beginGetCredentialOptions) {
@@ -189,12 +216,6 @@ class CredentialResponseAssembler @Inject constructor(
             )
         }
 
-        if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) {
-            AppLog.w(TAG, "候选组装结束前会话代次变化，拒绝发布凭据候选")
-            return BeginGetCredentialResponse.Builder().build()
-        }
-
-        return responseBuilder.build()
     }
 
     private fun buildPasskeyEntries(

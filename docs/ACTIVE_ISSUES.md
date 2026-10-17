@@ -126,15 +126,6 @@
 - 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-641/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
-### ISSUE-P2-645 现行CI工程门禁有三项失败
-
-- 核实：2026-10-16（Asia/Shanghai），现行机检实际运行；已实跑确认；置信度：高。
-- 问题：本轮实跑gate_readings：13/16通过；count_line_tiers报6个>500行文件、400-500行38个超过预算35；long_functions报3个>=100行函数；check_cancellation_semantics报12处未按规则说明/传播取消。
-- 影响与触发：按当前CI定义hygiene-gate会失败，结构与取消处理审查成本回升；12个命中不全部等于真实吞取消，部分是非挂起清理块缺说明。 触发序列及反证详见方案。
-- 位置：`.github/workflows/build.yml:1`；`tools/doc/gate_readings.py:1`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
-- [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-645/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
-
 ### ISSUE-P2-649 合并库密钥文件在主线程无上限读取且失败静默降级
 
 - 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。
@@ -170,15 +161,6 @@
 - 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3DirectoryList.kt:48`；`sync/src/main/java/com/keepasskey/sync/s3/S3RequestSigner.kt:110`。
 - 已实现：无，本轮仅审查与方案。尚未完成：修复、原触发与失败对照、相应真实服务/运行验收。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-655/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
-
-### ISSUE-P2-658 同步编排用例时序脆弱：已验证直连分支在标准测试调度器下误报失败
-
-- 核实：2026-10-16（Asia/Shanghai），实跑（全量 `test --rerun-tasks --max-workers=1` 读数含该单例；并在**搁置本日 P1-631 改动**的同工作区基线树上单跑同一用例复现同红——非该改动引入）。置信度：高（本机可稳定复现）。
-- 问题：`SettingsThinOrchestrationTest.已验证连接直接同步且不再重复测试` 期望「已验证 ⇒ 直接同步并以上一轮 `sync_feedback_error` 收尾」，但在 `StandardTestDispatcher` + 单次 `runCurrent()` 推进下，同步协程尚未越过 `triggerSync` 的 `sync_feedback_connecting` 置位点，断言实际读到 `sync_feedback_connecting`（实测两文案 `resId` 差 2）。同文件「忙态」用例已按项目口径用 `Thread.sleep(50)` + 再次 `runCurrent` 缓冲真实时间，本用例未做同类缓冲。
-- 影响与触发：本机全量 `test` 读数恒为「3931 例 / 1 失败」，CI 若执行 `test` 会被该单例拖红、掩盖真实回归信号。不代表产品同步行为有缺陷（同用例的「跳过重复测试」断言与忙态用例均通过）。
-- 位置：`app/src/test/java/com/keepasskey/app/ui/screens/settings/SettingsThinOrchestrationTest.kt:112`。
-- 已实现：无（本轮仅登记，未改用例；按测试资产纪律不得放宽断言或改测产品行为）。尚未完成：按同文件既有口径补真实时间缓冲（`Thread.sleep` + 复推）或改 `pumpUntil` 轮询该反馈收敛，并在稳定复现后实跑确认；用例改动随修复一并实跑。
-- 独立整改方案：尚未编制（本轮仅登记；修复前按 AGENTS 补方案或并入相邻批次）。
 
 ### ISSUE-P2-659 漂移合并**不合并库级 Meta**：外部工具改动的库名 / 描述 / 默认用户名 / 自定义数据被静默覆盖
 

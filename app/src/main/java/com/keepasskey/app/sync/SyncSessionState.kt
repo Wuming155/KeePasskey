@@ -59,6 +59,13 @@ class SyncSessionState @Inject constructor() {
     @Volatile
     var lastRemoteEtag: String = ""
 
+    /**
+     * ISSUE-P3-381 / `ISSUE-P2-645`：与 [lastRemoteEtag] 配对的目标身份。
+     * ETag 只可与建立它时的同一非秘密目标身份比较；会话锁定时随 [clear] 清空。
+     */
+    @Volatile
+    var probeBaselineTargetIdentity: String? = null
+
     // 允许单元测试注入模拟 Provider 与测试路径（禁止生产代码赋值）
     var testSyncProvider: SyncProvider? = null
         internal set
@@ -81,5 +88,6 @@ class SyncSessionState @Inject constructor() {
         lastSyncEngine = null
         lastSyncCache = null
         lastRemoteEtag = ""
+        probeBaselineTargetIdentity = null
     }
 }

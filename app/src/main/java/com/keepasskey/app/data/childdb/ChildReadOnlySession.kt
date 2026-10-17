@@ -4,6 +4,7 @@ import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.result.suppressCleanupFailure
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException
@@ -166,11 +167,7 @@ internal class ChildReadOnlySession(
             spillTransaction.purge()
             Attempt.Loaded(projected)
         } catch (t: Throwable) {
-            try {
-                spillTransaction.purge()
-            } catch (cleanupFailure: Throwable) {
-                t.addSuppressed(cleanupFailure)
-            }
+            suppressCleanupFailure(t) { spillTransaction.purge() }
             if (t is CancellationException) throw t
             classify(t)
         }

@@ -127,8 +127,10 @@ class SecurityClaimWiringTest {
     private val syncCredentialsStoreSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/sync/SyncCredentialsStore.kt")
 
+    /** ISSUE-P2-645：封印实测（probe）随凭据表单拆出，判据覆盖「控制器 + 凭据表单」两处落点。 */
     private val settingsSyncControllerSource: String
-        get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt")
+        get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt") +
+            "\n" + readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncCredentialForm.kt")
 
     private val projectionSource: String
         get() = readSource("app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsUiStateProjection.kt")

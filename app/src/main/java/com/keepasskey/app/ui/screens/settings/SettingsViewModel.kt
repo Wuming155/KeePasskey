@@ -139,178 +139,82 @@ class SettingsViewModel @Inject constructor(
     ) = remoteBrowseHost.browseS3(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle, cursor)
     fun dismissRemoteBrowse() = remoteBrowseHost.dismiss()
 
-    // ===== 生物识别开关「开启前当场验证」 + 更换主密钥任务态（P2-354 / P2-398 重封印挂点） =====
-    private val biometricGate = SettingsBiometricGate(
+    // ===== 控制器装配（`ISSUE-P2-645`：整体下沉 [SettingsControllerGraph]） =====
+    private val graph: SettingsControllerGraph = SettingsControllerGraph(
         scope = viewModelScope,
-        settingsRepository = settingsRepository,
-        biometricAuthManager = biometricAuthManager,
-        biometricCredentialStorage = biometricCredentialStorage,
-        strings = strings,
-        debugLog = debugLogBuffer,
-        // 仅改绑密钥文件时的密码快照由协调器擦除；封印载荷只含主密码。
-        sessionPasswordChars = { databaseSession?.passwordSnapshot() }
-    )
-    private val biometricToggleState = biometricGate.toggleState
-    private val masterKeyChange = masterKeyChangeControllerOf(
-        vaultRepository, viewModelScope, biometricGate::resealAfterMasterKeyChange, keyFileAccess,
-        keyFileVaultCopyStore, strings,
-        residualBackupProbe = { databaseSession?.let { s -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { s.rollingBackupExists() } } ?: false },
-        onCredentialsRotated = { syncCoordinator.markLocalVaultRecrypted() },
-        runtime = credentialRotationRuntime, completion = credentialRotationCompletion
-    ) // §411（P3-452/P3-448）改密链路收口：提交（含密钥文件三态与留空密码）直用控制器
-    internal val masterKeyChangeController: SettingsMasterKeyChangeController get() = masterKeyChange
-    internal val keyFileReader get() = features.keyFileReader // ISSUE-P3-428：改密对话框 SAF 读取通道（全仓唯一）
-
-    /** ISSUE-P2-354 AC③：换密回执经 Snackbar 展示后清除（一次性消息语义）。 */
-    fun clearMasterKeyChangeFeedback() = masterKeyChange.clearFeedback()
-
-    // ===== 子库挂载（UI 接线，委托 [SettingsChildDatabaseController]） =====
-    private val childDatabaseController = features.childDatabaseController
-
-    /** 子库挂载面板状态；控制器缺失时如实 `available = false`。 */
-    val childDatabaseState: StateFlow<ChildDatabaseUiState> get() = childDatabaseController.state
-
-    fun mountChildDatabase(alias: String, sourceUri: String, passwordChars: CharArray, keyFileUri: String?) =
-        childDatabaseController.mount(alias, sourceUri, passwordChars, keyFileUri)
-    fun unlockChildDatabase(mountId: String, passwordChars: CharArray, keyFileUri: String?) =
-        childDatabaseController.unlock(mountId, passwordChars, keyFileUri)
-    fun unmountChildDatabase(mountId: String) = childDatabaseController.unmount(mountId)
-    fun dismissChildDatabaseFeedback() = childDatabaseController.dismissFeedback()
-
-    // ===== 同步 / 健康 / 导出控制器 =====
-    private val syncController = SettingsSyncController(
-        syncCredentialsStore, syncCoordinator, extendedSettingsStore, strings, viewModelScope
-    )
-
-    /**
-     * ISSUE-P2-65：会话锁定 / 关闭时擦除同步凭据的明文预填通道（WebDAV 口令 / S3 SecretKey / AccessKey 均为 CharArray 借用副本，锁定后不得继续驻留）。
-     */
-    private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
-        syncController.clearWebDavPasswordPrefill()
-        syncController.clearS3SecretKeyPrefill()
-        syncController.clearS3AccessKeyPrefill()
-    }
-
-    internal val extendedPreferences = SettingsExtendedPreferencesController( // ISSUE-P3-444：放宽为 internal 供设置页直取（同 masterKeyChangeController 口径）
-        extendedSettingsStore = extendedSettingsStore,
-        periodicSyncScheduler = periodicSyncScheduler,
-        databaseSession = databaseSession,
-        currentWifiOnlySync = { syncController.currentWifiOnlySync() },
-        updateWifiOnlySync = { syncController.updateWifiOnlySync(it) },
-        persistLockWhenScreenOff = { enabled ->
-            viewModelScope.launch { settingsRepository.setLockWhenScreenOff(enabled) }
-        }
-    )
-
-    private val preferences = SettingsPreferencesController(
+        features = features,
         settingsRepository = settingsRepository,
         vaultRepository = vaultRepository,
+        syncCredentialsStore = syncCredentialsStore,
+        syncCoordinator = syncCoordinator,
+        debugLogBuffer = debugLogBuffer,
+        extendedSettingsStore = extendedSettingsStore,
+        periodicSyncScheduler = periodicSyncScheduler,
         autofillBlocklistStore = autofillBlocklistStore,
         autofillSaveBlocklistStore = autofillSaveBlocklistStore,
         autofillFieldBlocklistStore = autofillFieldBlocklistStore,
-        debugLogBuffer = debugLogBuffer,
-        // ISSUE-P2-19 / P3-59：活动库会话（真实文件头/默认用户名下发）；单测可为 null
-        databaseSession = databaseSession,
-        scope = viewModelScope
-    )
-
-    // ISSUE-P2-379 / P2-378 / P3-381 / P3-382 / P3-385：新增门面与外部修改待决状态（声明在 preferences 之后，避免属性初始化顺序 NPE）
-    private val issueWiring = SettingsIssueWiring(
-        vaultRepository = vaultRepository,
-        vaultFileDriftCoordinator = vaultFileDriftCoordinator,
-        preferencesController = preferences
-    )
-
-    private val healthController = SettingsHealthController(
-        vaultRepository = vaultRepository,
         breachCheckCoordinator = breachCheckCoordinator,
+        databaseSession = databaseSession,
+        appContext = appContext,
         strings = strings,
-        breachCheckEnabled = { extendedPreferences.settings.value.breachCheckEnabled },
-        scope = viewModelScope,
-        // ISSUE-P3-257：开启泄露检测并就地扫描的偏好持久化回调（形态同 extendedPreferences 的 lambda 注入）
-        setBreachCheckEnabled = { extendedPreferences.setBreachCheckEnabled(it) },
-        // ISSUE-P3-382 / P3-409：库内重复条目——明细映射在 SettingsDatabaseMetaController，此处仅委托
-        scanDuplicates = {
-            preferences.databaseMetaController.scanDuplicateHealthIssues(strings)
-        }
+        vaultImportController = vaultImportController,
+        childDatabaseSessionManager = childDatabaseSessionManager,
+        keyFileAccess = keyFileAccess,
+        passkeyPrivilegedBrowserStore = passkeyPrivilegedBrowserStore,
+        biometricAuthManager = biometricAuthManager,
+        biometricCredentialStorage = biometricCredentialStorage,
+        vaultFileDriftCoordinator = vaultFileDriftCoordinator,
+        keyFileVaultCopyStore = keyFileVaultCopyStore,
+        resumeSyncProbeCoordinator = resumeSyncProbeCoordinator,
+        credentialRotationRuntime = credentialRotationRuntime,
+        credentialRotationCompletion = credentialRotationCompletion,
+        stateSubscribeTimeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS,
+        onTriggerSync = { triggerSync() }
     )
 
-    private val exportController = SettingsExportController(
-        vaultRepository, debugLogBuffer, appContext, strings, viewModelScope
-    )
+    // 逐项转发：装配顺序与生命周期仍由装配图保证，本类不再持有构造逻辑
+    private val biometricGate get() = graph.biometricGate
+    private val biometricToggleState get() = graph.biometricToggleState
+    private val masterKeyChange get() = graph.masterKeyChange
+    internal val masterKeyChangeController get() = graph.masterKeyChangeController
+    internal val keyFileReader get() = graph.keyFileReader
+    private val childDatabaseController get() = graph.childDatabaseController
+    private val syncController get() = graph.syncController
+    private val sessionLockGuard get() = graph.sessionLockGuard
+    internal val extendedPreferences get() = graph.extendedPreferences
+    private val preferences get() = graph.preferences
+    private val issueWiring get() = graph.issueWiring
+    private val healthController get() = graph.healthController
+    private val exportController get() = graph.exportController
+    private val kdfBenchmarkController get() = graph.kdfBenchmarkController
+    private val privilegedBrowserController get() = graph.privilegedBrowserController
+    val uiState: StateFlow<SettingsUiState> get() = graph.uiState
 
-    private val kdfBenchmarkController = SettingsKdfBenchmarkController(
-        appContext = appContext, strings = strings, scope = viewModelScope
-    )
+    /** ISSUE-P2-354 AC③：换密回执经 Snackbar 展示后清除（一次性消息语义）。 */
+    fun clearMasterKeyChangeFeedback() = graph.clearMasterKeyChangeFeedback()
 
-    // ===== 同步状态流与凭据明文预填通道由 [SettingsSyncController] 承载 =====
-    val webdavPasswordPrefill: StateFlow<CharArray?> get() = syncController.webdavPasswordPrefill
-    val s3SecretKeyPrefill: StateFlow<CharArray?> get() = syncController.s3SecretKeyPrefill
+    /** 子库挂载面板状态；控制器缺失时如实 `available = false`。 */
+    val childDatabaseState: StateFlow<ChildDatabaseUiState> get() = graph.childDatabaseState
+
+    fun mountChildDatabase(alias: String, sourceUri: String, passwordChars: CharArray, keyFileUri: String?) =
+        graph.mountChildDatabase(alias, sourceUri, passwordChars, keyFileUri)
+    fun unlockChildDatabase(mountId: String, passwordChars: CharArray, keyFileUri: String?) =
+        graph.unlockChildDatabase(mountId, passwordChars, keyFileUri)
+    fun unmountChildDatabase(mountId: String) = graph.unmountChildDatabase(mountId)
+    fun dismissChildDatabaseFeedback() = graph.dismissChildDatabaseFeedback()
+
+    // ===== 同步状态流与凭据明文预填通道（由 [SettingsSyncController] 承载） =====
+    val webdavPasswordPrefill: StateFlow<CharArray?> get() = graph.webdavPasswordPrefill
+    val s3SecretKeyPrefill: StateFlow<CharArray?> get() = graph.s3SecretKeyPrefill
     // ISSUE-P2-01：S3 AccessKey ID 一次性预填通道
-    val s3AccessKeyPrefill: StateFlow<CharArray?> get() = syncController.s3AccessKeyPrefill
+    val s3AccessKeyPrefill: StateFlow<CharArray?> get() = graph.s3AccessKeyPrefill
 
     /** Wave 15：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
-    fun clearWebDavPasswordPrefill() = syncController.clearWebDavPasswordPrefill()
-    fun clearS3SecretKeyPrefill() = syncController.clearS3SecretKeyPrefill()
+    fun clearWebDavPasswordPrefill() = graph.clearWebDavPasswordPrefill()
+    fun clearS3SecretKeyPrefill() = graph.clearS3SecretKeyPrefill()
     /** ISSUE-P2-01：用户开始编辑 AccessKey 后终结预填通道生命周期（语义同上） */
-    fun clearS3AccessKeyPrefill() = syncController.clearS3AccessKeyPrefill()
+    fun clearS3AccessKeyPrefill() = graph.clearS3AccessKeyPrefill()
 
-    // 状态流装配（纯投影 + combine 编排在 SettingsUiStateProjection.kt）
-    val uiState: StateFlow<SettingsUiState> = settingsUiStateFlow(
-        scope = viewModelScope,
-        timeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS,
-        flows = SettingsUiStateFlows(
-            userSettings = settingsRepository.getSettings(),
-            syncState = syncController.state,
-            healthState = healthController.state,
-            databaseConfigState = preferences.databaseConfigState,
-            // ISSUE-P2-212：生物识别开关的验证中/一次性反馈状态
-            biometricToggleState = biometricToggleState,
-            extendedSettings = extendedPreferences.settings,
-            debugLogLines = preferences.debugLogLines,
-            // ISSUE-P3-20：子库已挂载计数（替代原先硬编码的 0）
-            childDatabaseCount = childDatabaseController.countFlow,
-            // ISSUE-P2-354 AC③：更换主密钥任务态（busy + 结果反馈）
-            masterKeyChangeState = masterKeyChange.state,
-            syncProbeNotice = resumeSyncProbeCoordinator?.notice ?: kotlinx.coroutines.flow.MutableStateFlow(null)
-        ),
-        strings = strings
-    )
-
-    private val coldStartSyncGate = SettingsColdStartSyncGate(
-        settingsRepository = settingsRepository,
-        onTriggerSync = { triggerSync() },
-        scope = viewModelScope,
-        isSyncConfigured = { syncController.isSyncConfigured() }
-    )
-
-    init {
-        // ISSUE-P2-406：Keystore 解密/封印探测/wifi 回填不在 init 同步执行；见 hydrateSyncUi()
-        // ISSUE-P2-65：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
-        sessionLockGuard.register()
-        // ISSUE-P2-497：「离线缓存」假开关已整链移除（PD-75）——本页不得再把该缓存开关
-        // 误接到引擎「强制离线」（该误接曾使同步引擎永不联网、首传被误报为
-        // 「首次同步上传云端失败」，2026-10-30 已拆；现字段本身下架）。
-        coldStartSyncGate.checkAndTrigger()
-        // ISSUE-P2-212：跟踪活动库（开启生物识别开关时据此判定封印凭据是否就绪）
-        viewModelScope.launch {
-            vaultRepository.getDatabases().collect { databases ->
-                biometricGate.onActiveDatabaseChanged(
-                    (databases.firstOrNull { it.isActive } ?: databases.firstOrNull())?.id
-                )
-            }
-        }
-        // ISSUE-P2-378：观察漂移待决提示并下发到 UI（全局三选对话框）
-        vaultFileDriftCoordinator?.let { coord ->
-            viewModelScope.launch {
-                coord.pending.collect { issueWiring::publishPending }
-            }
-            // ISSUE-P1-631：观察漂移合并冲突待决裁决状态并下发到 UI（与三选互斥呈现）
-            viewModelScope.launch {
-                coord.mergeConflict.collect { issueWiring::publishMergeConflict }
-            }
-        }
-    }
 
     // ===== 外观与语言（仓库直写） =====
     fun setAppLanguage(language: AppLanguage) = preferences.setAppLanguage(language)
@@ -445,10 +349,6 @@ class SettingsViewModel @Inject constructor(
     fun unblockAutofillPackage(packageName: String): Boolean = preferences.unblockAutofillPackage(packageName)
 
     // ===== CM 通道：特权浏览器白名单 =====
-    private val privilegedBrowserController = SettingsPrivilegedBrowserController(
-        store = passkeyPrivilegedBrowserStore,
-        scope = viewModelScope
-    )
     val privilegedBrowsers: StateFlow<List<com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore.BrowserApp>> get() = privilegedBrowserController.privilegedBrowsers
     fun refreshPrivilegedBrowsers() = privilegedBrowserController.refresh()
     fun setPrivilegedBrowserEnabled(packageName: String, enabled: Boolean) = privilegedBrowserController.setEnabled(packageName, enabled)

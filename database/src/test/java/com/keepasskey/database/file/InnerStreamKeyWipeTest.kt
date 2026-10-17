@@ -126,7 +126,8 @@ class InnerStreamKeyWipeTest {
 
     @Test
     fun `读路径必须在解析之后且于 finally 内擦除密钥`() {
-        val body = functionBody(readSource(KDBX_FILE_SOURCE), "private fun decodeInnerPayload(")
+        // ISSUE-P2-645：读管线拆至 KdbxReadPipeline.kt（纯搬运），判据随实现落点迁移
+        val body = functionBody(readSource(READ_PIPELINE_SOURCE), "private fun decodeInnerPayload(")
 
         val parseIndex = body.indexOf("KdbxXmlParser(")
         val wipeIndex = body.indexOf("innerHeader.clearSensitive()")
@@ -259,6 +260,9 @@ class InnerStreamKeyWipeTest {
             "database/src/main/java/com/keepasskey/database/file/InnerHeader.kt"
         const val KDBX_FILE_SOURCE =
             "database/src/main/java/com/keepasskey/database/file/KdbxFile.kt"
+        /** ISSUE-P2-645：读管线（含 decodeInnerPayload）自 KdbxFile 拆出后的落点 */
+        const val READ_PIPELINE_SOURCE =
+            "database/src/main/java/com/keepasskey/database/file/KdbxReadPipeline.kt"
         const val ROOT_SEARCH_DEPTH = 6
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

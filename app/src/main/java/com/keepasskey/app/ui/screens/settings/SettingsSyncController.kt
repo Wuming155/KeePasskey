@@ -23,6 +23,9 @@ import kotlinx.coroutines.launch
  * 持有同步状态流与凭据明文一次性预填通道，承接凭据恢复、配置保存（Wave 14/15 语义）、
  * 手动同步 / 连接测试、「保存并同步」顺序编排与反馈文案生成；ViewModel 仅做委托转发
  * （顺序编排随 ISSUE-P3-257 自 ViewModel 下沉，KDoc 立规缘由随函数整体迁入本类）。
+ *
+ * `ISSUE-P2-645`：凭据表单面（预填通道 / WebDAV 与 S3 配置保存 / 封印密钥实测）拆到
+ * [SettingsSyncCredentialForm]，本类保留状态流与同步编排；公开 API 形状不变。
  */
 internal class SettingsSyncController(
     private val syncCredentialsStore: SyncCredentialsStore,
@@ -81,18 +84,7 @@ internal class SettingsSyncController(
         )
     )
 
-    /** ISSUE-P2-285：实测封印密钥落位（判据落点唯一，与解锁面 SOFTWARE / UNKNOWN 同判）。 */
-    private fun probeSealHardwareBacked(): Boolean =
-        when (syncCredentialsStore.syncSealSecurityLevel()) {
-            com.keepasskey.app.security.KeystoreManager.KeySecurityLevel.STRONGBOX,
-            com.keepasskey.app.security.KeystoreManager.KeySecurityLevel.TRUSTED_ENVIRONMENT -> true
-            else -> false
-        }
-
-    /** ISSUE-P2-285：封印密钥可能在保存后新生成 / 轮换，保存成功路径后重测。 */
-    private fun refreshSealHardwareBacked() {
-        syncStateFlow.update { it.copy(syncSealHardwareBacked = probeSealHardwareBacked()) }
-    }
+    private val credentialForm = SettingsSyncCredentialForm(syncCredentialsStore, syncStateFlow)
 
     /**
      * ISSUE-P2-406：同步 UI 水合（wifi 偏好回填 + 凭据预填恢复 + 封印等级探测）。
@@ -150,134 +142,32 @@ internal class SettingsSyncController(
 
     val state: StateFlow<SyncUiState> = syncStateFlow.asStateFlow()
 
-    // Wave 15 整改：同步凭据明文一次性预填通道（对齐 EntryEdit loadedPassword 模式）。
-    // 解密结果以 CharArray 承载、绝不进入 UiState/StateFlow；组件消费（或用户开始编辑、
-    // 保存成功、ViewModel 销毁）后即擦除置空。
-    private val _webdavPasswordPrefill = MutableStateFlow<CharArray?>(null)
-    val webdavPasswordPrefill: StateFlow<CharArray?> = _webdavPasswordPrefill.asStateFlow()
+    /** Wave 15 整改：明文一次性预填通道（见 [SettingsSyncCredentialForm]）。 */
+    val webdavPasswordPrefill: StateFlow<CharArray?> get() = credentialForm.webdavPasswordPrefill
+    val s3SecretKeyPrefill: StateFlow<CharArray?> get() = credentialForm.s3SecretKeyPrefill
+    val s3AccessKeyPrefill: StateFlow<CharArray?> get() = credentialForm.s3AccessKeyPrefill
 
-    private val _s3SecretKeyPrefill = MutableStateFlow<CharArray?>(null)
-    val s3SecretKeyPrefill: StateFlow<CharArray?> = _s3SecretKeyPrefill.asStateFlow()
+    fun clearWebDavPasswordPrefill() = credentialForm.clearWebDavPasswordPrefill()
 
-    // ISSUE-P2-01：S3 AccessKey ID 预填通道（语义同 SecretKey 通道）
-    private val _s3AccessKeyPrefill = MutableStateFlow<CharArray?>(null)
-    val s3AccessKeyPrefill: StateFlow<CharArray?> = _s3AccessKeyPrefill.asStateFlow()
-
-    /** Wave 15 整改：用户开始编辑密码后终结预填通道生命周期（防旋转后旧值回写覆盖用户输入） */
-    fun clearWebDavPasswordPrefill() {
-        _webdavPasswordPrefill.value?.fill('0')
-        _webdavPasswordPrefill.value = null
-    }
-
-    fun clearS3SecretKeyPrefill() {
-        _s3SecretKeyPrefill.value?.fill('0')
-        _s3SecretKeyPrefill.value = null
-    }
+    fun clearS3SecretKeyPrefill() = credentialForm.clearS3SecretKeyPrefill()
 
     /** ISSUE-P2-01：用户开始编辑 AccessKey 后终结预填通道生命周期（语义同上） */
-    fun clearS3AccessKeyPrefill() {
-        _s3AccessKeyPrefill.value?.fill('0')
-        _s3AccessKeyPrefill.value = null
-    }
+    fun clearS3AccessKeyPrefill() = credentialForm.clearS3AccessKeyPrefill()
 
-    /**
-     * Wave 15 整改：凭据恢复改走 CharArray 一次性预填通道——解密出的密码/SecretKey
-     * 不再以 String 驻留 syncStateFlow；WebDAV 密码与 S3 SecretKey 经预填通道下发至
-     * SecurePasswordField。ISSUE-P2-01：S3 AccessKey ID 亦经独立 CharArray 预填通道下发，
-     * 不再以 String 投影驻留状态流。
-     */
-    fun restoreSyncCredentials() {
-        val store = syncCredentialsStore
-        // ISSUE-P2-285：进入设置页即重测封印密钥落位（覆盖历史会话生成的密钥）
-        refreshSealHardwareBacked()
-        val savedProvider = store.loadProvider()
-        val savedWebDav = store.loadWebDavConfig()
-        val savedS3 = store.loadS3Config()
-        savedWebDav?.let { cfg ->
-            _webdavPasswordPrefill.value?.fill('0')
-            _webdavPasswordPrefill.value = cfg.password
-        }
-        savedS3?.let { cfg ->
-            _s3AccessKeyPrefill.value?.fill('0')
-            _s3AccessKeyPrefill.value = cfg.accessKey
-            _s3SecretKeyPrefill.value?.fill('0')
-            _s3SecretKeyPrefill.value = cfg.secretKey
-        }
-        syncStateFlow.update { cur ->
-            cur.copy(
-                provider = savedProvider,
-                // 已保存配置优先；无配置时预填坚果云端点，避免每次重敲示例 URL
-                webdavUrl = savedWebDav?.url?.takeIf { it.isNotBlank() }
-                    ?: com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL,
-                webdavUsername = savedWebDav?.username ?: cur.webdavUsername,
-                webdavRemotePath = savedWebDav?.remotePath?.takeIf { it.isNotBlank() }
-                    ?: com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH,
-                s3Endpoint = savedS3?.endpoint ?: cur.s3Endpoint,
-                s3Bucket = savedS3?.bucket ?: cur.s3Bucket,
-                s3Region = savedS3?.region ?: cur.s3Region,
-                s3ObjectKey = savedS3?.objectKey ?: cur.s3ObjectKey,
-                s3UsePathStyle = savedS3?.usePathStyle ?: cur.s3UsePathStyle
-            )
-        }
-    }
+    /** Wave 15 / ISSUE-P2-01：凭据恢复（语义见 [SettingsSyncCredentialForm.restoreSyncCredentials]）。 */
+    fun restoreSyncCredentials() = credentialForm.restoreSyncCredentials()
 
-    fun setSyncProvider(provider: CloudSyncProvider) {
-        syncCredentialsStore.saveProvider(provider)
-        // 切换提供商后旧连接验证结论不再适用
-        syncStateFlow.update { it.copy(provider = provider, isConnectionVerified = false) }
-    }
+    fun setSyncProvider(provider: CloudSyncProvider) = credentialForm.setSyncProvider(provider)
 
-    /**
-     * Wave 15 整改：密码以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
-     * 返回保存结果——Wave 14 https 校验拒绝或 Wave 15 凭据封印失败时如实回传 false 并上浮反馈，
-     * 不再无条件谎报「已保存」。
-     */
+    /** Wave 15 / Wave 14：WebDAV 配置保存（借用语义 + HTTPS 强制校验），返回是否成功。 */
     fun updateWebDavConfig(
         url: String,
         username: String,
         password: CharArray,
         remotePath: String
-    ): Boolean {
-        // Wave 14 全站强制 HTTPS：保存时即时校验端点（fail-fast），
-        // 显式 http:// 直接拒绝并反馈；无 scheme 输入自动归一化为 https://
-        val normalizedUrl = normalizeHttpsEndpoint(url)
-        if (normalizedUrl == null) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("WebDAV")))
-            }
-            password.fill('0')
-            return false
-        }
-        val saved = syncCredentialsStore.saveWebDavConfig(normalizedUrl, username, password, remotePath)
-        password.fill('0')
-        if (!saved) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
-            }
-            return false
-        }
-        syncStateFlow.update {
-            it.copy(
-                webdavUrl = normalizedUrl,
-                webdavUsername = username,
-                webdavRemotePath = remotePath,
-                // 配置变更后须重新验证连接
-                isConnectionVerified = false
-            )
-        }
-        // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
-        _webdavPasswordPrefill.value?.fill('0')
-        _webdavPasswordPrefill.value = null
-        // ISSUE-P2-285：封印密钥可能本次保存新生成，重测硬件落位
-        refreshSealHardwareBacked()
-        return true
-    }
+    ): Boolean = credentialForm.updateWebDavConfig(url, username, password, remotePath)
 
-    /**
-     * Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
-     * ISSUE-P2-01：AccessKey ID 亦改为 [CharArray] 借用语义（消费后即擦除，不再驻留状态流）。
-     * 返回保存结果（语义同 [updateWebDavConfig]）。
-     */
+    /** Wave 15 / ISSUE-P2-01：S3 配置保存（AccessKey 与 SecretKey 均借用语义），返回是否成功。 */
     fun updateS3Config(
         endpoint: String,
         bucket: String,
@@ -286,58 +176,9 @@ internal class SettingsSyncController(
         secretKey: CharArray,
         objectKey: String,
         usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
-    ): Boolean {
-        // Wave 14 全站强制 HTTPS：与 WebDAV 一致的保存期端点校验
-        val normalizedEndpoint = normalizeHttpsEndpoint(endpoint)
-        if (normalizedEndpoint == null) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_error_https_required, listOf("S3")))
-            }
-            accessKey.fill('0')
-            secretKey.fill('0')
-            return false
-        }
-        // AccessKey ID 与 SecretKey 均为借用语义：存储库封印后由库内统一擦除，此处兜底再擦一次
-        val saved = syncCredentialsStore.saveS3Config(
-            normalizedEndpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
-        )
-        accessKey.fill('0')
-        secretKey.fill('0')
-        if (!saved) {
-            syncStateFlow.update {
-                it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
-            }
-            return false
-        }
-        syncStateFlow.update {
-            it.copy(
-                s3Endpoint = normalizedEndpoint,
-                s3Bucket = bucket,
-                s3Region = region,
-                s3ObjectKey = objectKey,
-                s3UsePathStyle = usePathStyle,
-                // 配置变更后须重新验证连接
-                isConnectionVerified = false
-            )
-        }
-        // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
-        _s3AccessKeyPrefill.value?.fill('0')
-        _s3AccessKeyPrefill.value = null
-        _s3SecretKeyPrefill.value?.fill('0')
-        _s3SecretKeyPrefill.value = null
-        // ISSUE-P2-285：封印密钥可能本次保存新生成，重测硬件落位
-        refreshSealHardwareBacked()
-        return true
-    }
-
-    /**
-     * Wave 14 全站强制 HTTPS：端点归一化与校验。
-     * ISSUE-P2-399：实现抽出至 [HttpsEndpointPolicy] 单点（云端打开链路共用同一语义），此处委托。
-     * 空串原样返回（允许清空配置）；无 scheme 输入自动补 https://；
-     * 显式非 https scheme（http:// 等）返回 null 表示拒绝保存。
-     */
-    private fun normalizeHttpsEndpoint(raw: String): String? =
-        com.keepasskey.app.sync.HttpsEndpointPolicy.normalize(raw)
+    ): Boolean = credentialForm.updateS3Config(
+        endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
+    )
 
     /**
      * ISSUE-P3-272：自动同步总开关改走进阶偏好统一通道（内存快照 + 持久化原子完成）——

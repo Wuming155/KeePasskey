@@ -1,5 +1,6 @@
 package com.keepasskey.sync.network
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Response
@@ -17,6 +18,9 @@ internal suspend fun executeCancellable(call: Call): Response = suspendCancellab
     try {
         val response = call.execute()
         continuation.resume(response) { _, value, _ -> value.close() }
+    } catch (cancellation: CancellationException) {
+        // 取消以续体取消收口：已取消时不重复投递，保持结构化并发的收敛语义。
+        continuation.cancel(cancellation)
     } catch (error: Throwable) {
         if (continuation.isActive) continuation.resumeWithException(error)
     }

@@ -1,7 +1,6 @@
 package com.keepasskey.app.sync
 
 import android.content.Context
-import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ActiveDatabaseIdStore
 import com.keepasskey.app.data.logger.DebugLogBuffer
@@ -12,17 +11,15 @@ import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCacheEvent
-import com.keepasskey.sync.engine.SyncCache
-import com.keepasskey.sync.engine.SyncRollbackGuard
-import com.keepasskey.sync.network.SyncDownloadLimits
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.provider.SyncProvider
-import com.keepasskey.sync.model.SyncException
-import com.keepasskey.sync.model.cleanEtag
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.security.MessageDigest
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -37,18 +34,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.io.InputStream
-import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * 应用同步串行编排、StateFlow 与测试入口；同步周期由 [SyncCycleRunner]、冲突由 [SyncConflictController] 承担。
  * Provider / 编解码 / 变化判定 / 偏好 / 跨周期状态分别由 [SyncProviderResolver]、[SyncDatabaseCodec]、
  * [SyncContentChangeDetector]、[SyncPreferences]、[SyncSessionState] 协作完成。
+ * 锁态远端探测拆为 [SyncLockedProbeRunner]（编排）、[SyncLockedUploader]（上传与对账）与
+ * [SyncProbeSupport]（身份/摘要/分型）；恢复状态查询拆为 [SyncRecoveryQueries]（`ISSUE-P2-645`）。
  * 敏感凭据借用后显式擦除；加密合并走 Dispatchers.Default，网络与文件 IO 走 Dispatchers.IO。
  * 既有公共 API 保持兼容；完整依赖拓扑见 `docs/architecture/ARCHITECTURE.md`。
  */
@@ -120,8 +112,6 @@ open class SyncCoordinator @Inject constructor(
         ?: SyncConflictController(databaseSession, codec, effectiveStrings, session, debugLog)
     private val changes: SyncContentChangeDetector = syncContentChanges
         ?: SyncContentChangeDetector(codec, session)
-    /** `ISSUE-P3-528`：主凭据轮换标记表（null = 手工装配路径 / 既有单测，本机制整体旁路）。 */
-    private val credentialRotation: SyncCredentialRotationStore? = syncCredentialRotationStore
     private val cycle: SyncCycleRunner = syncCycle
         ?: SyncCycleRunner(
             context = context,
@@ -138,6 +128,49 @@ open class SyncCoordinator @Inject constructor(
             localFileCheckpoint = syncLocalFileCheckpoint,
             autoLockGuard = autoLockGuard
         )
+
+    private val probeUploader by lazy {
+        SyncLockedUploader(
+            context = context,
+            databaseSession = databaseSession,
+            providers = providers,
+            pendingUploads = { pendingEncryptedUploads },
+            currentVaultIdentity = { probeVaultNamespace.currentId() }
+        )
+    }
+    private val probeRunner by lazy {
+        SyncLockedProbeRunner(
+            context = context,
+            databaseSession = databaseSession,
+            providers = providers,
+            session = session,
+            probeStore = periodicSyncProbeStore,
+            pendingUploads = { pendingEncryptedUploads },
+            currentVaultIdentity = { probeVaultNamespace.currentId() },
+            uploader = probeUploader
+        )
+    }
+    private val recoveryQueries by lazy {
+        SyncRecoveryQueries(
+            context = context,
+            databaseSession = databaseSession,
+            syncCredentialsStore = syncCredentialsStore,
+            debugLog = debugLog,
+            pendingUploads = { pendingEncryptedUploads },
+            probeStore = periodicSyncProbeStore,
+            rollbackStateDirectory = { cycle.rollbackStateDirectory() },
+            currentVaultIdentity = { probeVaultNamespace.currentId() }
+        )
+    }
+    private val credentialRotationFacade by lazy {
+        SyncCredentialRotationFacade(
+            databaseSession = databaseSession,
+            syncCredentialsStore = syncCredentialsStore,
+            session = session,
+            store = syncCredentialRotationStore,
+            debugLog = debugLog
+        )
+    }
 
     init {
         // ISSUE-P1-07：本协调器是单例，lastSyncedDb / pendingLocalDb / pendingRemoteDb 持有
@@ -168,10 +201,6 @@ open class SyncCoordinator @Inject constructor(
 
     private val _recentSyncEvents = MutableStateFlow<List<SyncCacheEvent>>(emptyList())
     open val recentSyncEvents: StateFlow<List<SyncCacheEvent>> = _recentSyncEvents.asStateFlow()
-
-    /** ETag 只可与建立它时的同一非秘密目标身份比较。 */
-    @Volatile
-    private var probeBaselineTargetIdentity: String? = null
 
     /**
      * 离线模式开关：开启后同步引擎直接读本地缓存，不触碰网络。
@@ -218,7 +247,6 @@ open class SyncCoordinator @Inject constructor(
             job.cancel(CancellationException("数据库会话已锁定"))
         }
         session.clear()
-        probeBaselineTargetIdentity = null
         conflicts.clearPendingConflictSession()
         _recentSyncEvents.value = emptyList()
     }
@@ -241,66 +269,16 @@ open class SyncCoordinator @Inject constructor(
      * 查询指定库是否有持久化的周期同步恢复状态，供锁屏页与同步设置页呈现。
      * 只读 filesDir / SharedPreferences 元数据；不解锁凭据、不读取 KDBX 明文，也不发网络请求。
      */
-    suspend fun hasPendingUserRecovery(vaultIdentity: String?): Boolean = withContext(Dispatchers.IO) {
-        val identity = vaultIdentity?.takeIf(String::isNotBlank) ?: return@withContext false
-        try {
-            if (pendingEncryptedUploads.hasEntry(identity)) return@withContext true
-            if (SyncRollbackGuard.hasPendingAcceptanceForVault(
-                    cycle.rollbackStateDirectory(),
-                    identity
-                )
-            ) return@withContext true
-
-            val record = when (val stored = periodicSyncProbeStore?.read(identity)) {
-                null, PeriodicSyncProbeRead.Missing -> null
-                PeriodicSyncProbeRead.Corrupt -> return@withContext true
-                is PeriodicSyncProbeRead.Stored -> stored.record
-            } ?: return@withContext false
-            if (record.needsUnlock) return@withContext true
-
-            val rollbackScope = record.rollbackVaultScope ?: return@withContext false
-            val remotePath = syncCredentialsStore.captureRotationRemotePath(
-                identity,
-                probeDefaultFileName(identity)
-            ) ?: return@withContext false
-            SyncRollbackGuard(File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME), rollbackScope)
-                .hasPendingAcceptance(remotePath)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            debugLog.warn(SYNC_LOG_TAG, "读取同步恢复状态失败: ${failure.javaClass.simpleName}")
-            true
-        }
-    }
+    suspend fun hasPendingUserRecovery(vaultIdentity: String?): Boolean =
+        recoveryQueries.hasPendingUserRecovery(vaultIdentity)
 
     /** 当前活动库的锁态恢复提示；冷启动页面不能依赖 DatabaseSession 的解锁态路径。 */
     suspend fun hasPendingUserRecoveryForActiveVault(): Boolean =
-        hasPendingUserRecovery(currentProbeVaultIdentity())
+        recoveryQueries.hasPendingUserRecoveryForActiveVault()
 
     /** True only for an adoption quarantine with an explicit, conditional local-upload recovery path. */
     suspend fun hasPendingAdoptionRecoveryForActiveVault(): Boolean =
-        withContext(Dispatchers.IO) { hasPendingAdoptionRecovery(currentProbeVaultIdentity()) }
-
-    private suspend fun hasPendingAdoptionRecovery(vaultIdentity: String?): Boolean {
-        val identity = vaultIdentity?.takeIf(String::isNotBlank) ?: return false
-        return try {
-            val rollbackDir = cycle.rollbackStateDirectory()
-            if (SyncRollbackGuard.hasPendingAcceptanceForVault(rollbackDir, identity)) return true
-            val record = (periodicSyncProbeStore?.read(identity) as? PeriodicSyncProbeRead.Stored)?.record
-                ?: return false
-            val rollbackScope = record.rollbackVaultScope ?: return false
-            val remotePath = syncCredentialsStore.captureRotationRemotePath(
-                identity,
-                probeDefaultFileName(identity)
-            ) ?: return false
-            SyncRollbackGuard(rollbackDir, rollbackScope, ownerVaultIdentity = identity)
-                .hasPendingAcceptance(remotePath)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            false
-        }
-    }
+        recoveryQueries.hasPendingAdoptionRecoveryForActiveVault()
 
     /**
      * 设置离线模式（由设置页「使用离线缓存」开关驱动）
@@ -310,38 +288,18 @@ open class SyncCoordinator @Inject constructor(
     }
 
     /** 成功换密后登记本地重加密事实；未配置同步则空操作，不触发网络。 */
-    suspend fun markLocalVaultRecrypted(): Boolean = markCredentialRotationTarget(captureCredentialRotationTarget())
+    suspend fun markLocalVaultRecrypted(): Boolean = credentialRotationFacade.markLocalVaultRecrypted()
 
     /** 受理时同步捕获当前凭据票据对应的非秘密远端路径快照。 */
-    fun captureCredentialRotationTargetSnapshot(): String? {
-        if (credentialRotation == null) return null
-        val path = databaseSession.currentPathIdentifier ?: return null
-        val fileName = if (path.startsWith("content://")) null else java.io.File(path).name
-        val defaultName = fileName?.takeIf(String::isNotBlank)
-            ?: databaseSession.databaseFlow.value?.let { "${it.databaseName}.kdbx" }
-            ?: return null
-        return session.testRemotePath
-            ?: syncCredentialsStore.captureRotationRemotePath(path, defaultName)
-    }
+    fun captureCredentialRotationTargetSnapshot(): String? =
+        credentialRotationFacade.captureTargetSnapshot()
 
     /** 轮换前固定远端身份，提交后不能按已切换的活动库登记同步事实。 */
-    suspend fun captureCredentialRotationTarget(): String? = withContext(Dispatchers.IO) {
-        captureCredentialRotationTargetSnapshot()
-    }
+    suspend fun captureCredentialRotationTarget(): String? = credentialRotationFacade.captureTarget()
 
     /** 仅写入已捕获目标的本地标记，不触发网络或重读活动库。 */
-    suspend fun markCredentialRotationTarget(remotePath: String?): Boolean = withContext(Dispatchers.IO) {
-        val store = credentialRotation ?: return@withContext false
-        if (remotePath == null) return@withContext false
-        try {
-            store.markRecrypted(remotePath)
-            debugLog.info(SYNC_LOG_TAG, "主凭据已轮换：已登记云端副本待替换")
-            true
-        } catch (e: Exception) { // cancel-n/a: 非挂起偏好登记
-            debugLog.warn(SYNC_LOG_TAG, "登记云端副本待替换失败: ${e.javaClass.simpleName}")
-            false
-        }
-    }
+    suspend fun markCredentialRotationTarget(remotePath: String?): Boolean =
+        credentialRotationFacade.markTarget(remotePath)
 
     /**
      * 执行全量即时同步
@@ -360,7 +318,7 @@ open class SyncCoordinator @Inject constructor(
         publishSyncEvents()
         _lastOutcome.value = outcome
         if (probeTargetBefore != null) {
-            persistProbeStateAfterSync(probeTargetBefore, outcome)
+            probeRunner.persistAfterSync(probeTargetBefore, outcome)
         }
         // ISSUE-P3-381：远端 ETag 探测基线不在本周期直接读引擎 cache（internal）；
         // 锁态 Worker 与 ResumeSyncProbeCoordinator 共用 P2-627 的持久化元数据基线。
@@ -378,7 +336,7 @@ open class SyncCoordinator @Inject constructor(
         val outcome = cycle.recoverPendingAcceptanceByPublishingLocal()
         publishSyncEvents()
         _lastOutcome.value = outcome
-        if (probeTargetBefore != null) persistProbeStateAfterSync(probeTargetBefore, outcome)
+        if (probeTargetBefore != null) probeRunner.persistAfterSync(probeTargetBefore, outcome)
         outcome
     }
 
@@ -400,601 +358,10 @@ open class SyncCoordinator @Inject constructor(
             return PeriodicSyncWorkResult.FullSync(syncNow())
         }
         val probeResult = session.mutex.withLock {
-            if (databaseSession.databaseFlow.value != null) null else probeLockedRemoteMetadata()
+            if (databaseSession.databaseFlow.value != null) null else probeRunner.runProbe()
         }
         return probeResult ?: PeriodicSyncWorkResult.FullSync(syncNow())
     }
-
-    private suspend fun probeLockedRemoteMetadata(): PeriodicSyncWorkResult {
-        val store = periodicSyncProbeStore
-            ?: return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.PROBE_STATE_CORRUPT)
-        val vaultIdentity = currentProbeVaultIdentity()
-            ?: return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.ACTIVE_VAULT_UNKNOWN)
-        val defaultFileName = probeDefaultFileName(vaultIdentity)
-
-        val providerResult = try {
-            providers.useProviderWithTarget(
-                defaultFileName = defaultFileName,
-                testOverride = session.testSyncProvider
-            ) { provider, configuredTarget ->
-                val target = configuredTarget ?: session.testRemotePath?.let { testPath ->
-                    SyncProviderTarget(testPath, probeTargetIdentity(vaultIdentity, testPath))
-                }
-                if (target == null || isUnresolvedDefaultPath(target.remotePath, vaultIdentity)) {
-                    return@useProviderWithTarget PeriodicSyncWorkResult.NeedsUnlock(
-                        PeriodicSyncNeedsUnlockReason.TARGET_UNAVAILABLE
-                    )
-                }
-                if (currentProbeVaultIdentity() != vaultIdentity ||
-                    databaseSession.databaseFlow.value != null
-                ) {
-                    return@useProviderWithTarget PeriodicSyncWorkResult.NeedsUnlock(
-                        PeriodicSyncNeedsUnlockReason.TARGET_CHANGED
-                    )
-                }
-
-                val targetIdentity = probeTargetIdentity(vaultIdentity, target.identity)
-                val probeState = store.read(vaultIdentity)
-                val storedProbe = (probeState as? PeriodicSyncProbeRead.Stored)?.record
-                val pendingQueue = pendingEncryptedUploads.read(vaultIdentity)
-                if (pendingEncryptedUploads.hasEntry(vaultIdentity) && pendingQueue == null) {
-                    return@useProviderWithTarget PeriodicSyncWorkResult.NeedsUnlock(
-                        PeriodicSyncNeedsUnlockReason.PROBE_STATE_CORRUPT
-                    )
-                }
-                if (pendingQueue != null &&
-                    (pendingQueue.targetIdentity != targetIdentity || pendingQueue.remotePath != target.remotePath)
-                ) {
-                    return@useProviderWithTarget PeriodicSyncWorkResult.NeedsUnlock(
-                        PeriodicSyncNeedsUnlockReason.TARGET_CHANGED
-                    )
-                }
-                val preflight = if (pendingQueue != null) {
-                    PeriodicSyncProbePolicy.Preflight.RequestMetadata(pendingQueue.expectedEtag)
-                } else {
-                    PeriodicSyncProbePolicy.preflight(probeState, targetIdentity)
-                }
-                when (preflight) {
-                    is PeriodicSyncProbePolicy.Preflight.NeedsUnlock ->
-                        return@useProviderWithTarget PeriodicSyncWorkResult.NeedsUnlock(preflight.reason)
-
-                    is PeriodicSyncProbePolicy.Preflight.RequestMetadata -> {
-                        val metadata = try {
-                            provider.getMetadata(target.remotePath)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (failure: Exception) {
-                            Result.failure(failure)
-                        }
-
-                        if (currentProbeVaultIdentity() != vaultIdentity ||
-                            databaseSession.databaseFlow.value != null
-                        ) {
-                            return@useProviderWithTarget PeriodicSyncWorkResult.NeedsUnlock(
-                                PeriodicSyncNeedsUnlockReason.TARGET_CHANGED
-                            )
-                        }
-                        if (configuredTarget != null) {
-                            val currentConfiguredTarget = providers.configuredTarget(defaultFileName)
-                            if (currentConfiguredTarget?.identity != configuredTarget.identity ||
-                                currentConfiguredTarget.remotePath != configuredTarget.remotePath
-                            ) {
-                                return@useProviderWithTarget PeriodicSyncWorkResult.NeedsUnlock(
-                                    PeriodicSyncNeedsUnlockReason.TARGET_CHANGED
-                                )
-                            }
-                        }
-
-                        val failure = metadata.exceptionOrNull()
-                        if (failure != null) {
-                            when (classifyLockedProbeFailure(failure)) {
-                                LockedProbeFailure.AUTH -> PeriodicSyncWorkResult.AuthenticationRequired
-                                LockedProbeFailure.TEMPORARY -> PeriodicSyncWorkResult.TemporaryNetworkFailure
-                                LockedProbeFailure.MISSING -> writePendingProbeState(
-                                    store,
-                                    vaultIdentity,
-                                    targetIdentity,
-                                    observedEtag = "",
-                                    PeriodicSyncNeedsUnlockReason.REMOTE_MISSING
-                                )
-
-                                LockedProbeFailure.REJECTED ->
-                                    PeriodicSyncWorkResult.RemoteRejected(failure.javaClass.simpleName)
-                            }
-                        } else {
-                            val currentEtag = cleanEtag(metadata.getOrNull()?.etag)
-                            when (val observation = PeriodicSyncProbePolicy.observe(
-                                preflight.previousEtag,
-                                currentEtag
-                            )) {
-                                PeriodicSyncProbePolicy.Observation.Unchanged ->
-                                    uploadLockedCiphertextIfChanged(
-                                        provider = provider,
-                                        store = store,
-                                        vaultIdentity = vaultIdentity,
-                                        target = target,
-                                        targetIdentity = targetIdentity,
-                                        currentEtag = currentEtag,
-                                        previous = storedProbe,
-                                        pending = pendingQueue
-                                    )
-
-                                is PeriodicSyncProbePolicy.Observation.NeedsUnlock -> {
-                                    if (pendingQueue != null) {
-                                        reconcileLockedCiphertextUpload(
-                                            provider = provider,
-                                            store = store,
-                                            vaultIdentity = vaultIdentity,
-                                            target = target,
-                                            targetIdentity = targetIdentity,
-                                            currentEtag = currentEtag,
-                                            pending = pendingQueue
-                                        )
-                                    } else {
-                                        writePendingProbeState(
-                                            store,
-                                            vaultIdentity,
-                                            targetIdentity,
-                                            currentEtag,
-                                            observation.reason
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            return PeriodicSyncWorkResult.RemoteRejected(failure.javaClass.simpleName)
-        }
-
-        if (providerResult != null) return providerResult
-
-        // Provider 构造失败可能是凭据无法解封。这里只读取非秘密目标描述，以区分未配置和认证失败。
-        return try {
-            if (providers.configuredTarget(defaultFileName) == null) {
-                PeriodicSyncWorkResult.NotConfigured
-            } else {
-                PeriodicSyncWorkResult.AuthenticationRequired
-            }
-        } catch (_: Exception) {
-            PeriodicSyncWorkResult.ConfigurationInvalid
-        }
-    }
-
-    private fun writePendingProbeState(
-        store: PeriodicSyncProbeStore,
-        vaultIdentity: String,
-        targetIdentity: String,
-        observedEtag: String,
-        reason: PeriodicSyncNeedsUnlockReason
-    ): PeriodicSyncWorkResult {
-        val previous = (store.read(vaultIdentity) as? PeriodicSyncProbeRead.Stored)?.record
-            ?.takeIf { it.targetIdentity == targetIdentity }
-        val written = store.write(
-            vaultIdentity,
-            PeriodicSyncProbeRecord(
-                targetIdentity = targetIdentity,
-                observedEtag = observedEtag,
-                needsUnlock = true,
-                syncedContentDigest = previous?.syncedContentDigest,
-                rollbackVaultScope = previous?.rollbackVaultScope
-            )
-        )
-        return PeriodicSyncWorkResult.NeedsUnlock(
-            if (written) reason else PeriodicSyncNeedsUnlockReason.PROBE_STATE_WRITE_FAILED
-        )
-    }
-
-    private suspend fun persistProbeStateAfterSync(targetBefore: SyncProviderTarget, outcome: SyncOutcome) {
-        val store = periodicSyncProbeStore ?: return
-        val vaultIdentity = currentProbeVaultIdentity() ?: return
-        val targetAfter = resolveProbeTarget() ?: return
-        if (targetAfter.identity != targetBefore.identity || targetAfter.remotePath != targetBefore.remotePath) return
-        val targetIdentity = targetAfter.identity
-        val existing = (store.read(vaultIdentity) as? PeriodicSyncProbeRead.Stored)?.record
-            ?.takeIf { it.targetIdentity == targetIdentity }
-        val cachedEtag = withContext(Dispatchers.IO) {
-            session.lastSyncCache?.getState(targetAfter.remotePath)?.etag.orEmpty()
-        }
-        val etag = cleanEtag(lastRemoteEtagForProbe(targetIdentity))
-            .ifBlank { cleanEtag(cachedEtag) }
-            .ifBlank { existing?.observedEtag.orEmpty() }
-        val fullyConverged = when (outcome) {
-            SyncOutcome.UpToDate, SyncOutcome.UploadedLocal, SyncOutcome.MergedAndUploaded -> true
-            SyncOutcome.LocalPendingChanges,
-            is SyncOutcome.ConflictNeedsUser,
-            is SyncOutcome.VaultBindingMismatch -> false
-            else -> return
-        }
-        if (fullyConverged && etag.isBlank()) {
-            // No trustworthy post-sync ETag is available. Clear stale pending state; the next
-            // locked probe establishes a fresh observation and never treats it as content proof.
-            withContext(Dispatchers.IO) { store.clear(vaultIdentity) }
-            clearPendingUploadForConvergedTarget(vaultIdentity, targetIdentity, targetAfter.remotePath)
-            return
-        }
-        val rollbackScope = databaseSession.databaseFlow.value?.rootGroup?.id?.toHexString()
-            ?: existing?.rollbackVaultScope
-        val syncedDigest = when {
-            !fullyConverged -> existing?.syncedContentDigest
-            rollbackScope == null -> null
-            else -> currentVaultCipherDigest(vaultIdentity)
-        }
-        val persistedRollbackScope = rollbackScope.takeIf { syncedDigest != null }
-        val wroteState = withContext(Dispatchers.IO) {
-            store.write(
-                vaultIdentity,
-                PeriodicSyncProbeRecord(
-                    targetIdentity = targetIdentity,
-                    observedEtag = etag,
-                    needsUnlock = !fullyConverged,
-                    syncedContentDigest = syncedDigest,
-                    rollbackVaultScope = persistedRollbackScope
-                )
-            )
-        }
-        if (wroteState && fullyConverged) {
-            if (etag.isNotBlank()) rememberRemoteEtagForProbe(etag, targetIdentity)
-            // A manual full sync may be the user's recovery action for a locked-state queue.
-            // Clear only a queue for the same provider target after a fully converged outcome;
-            // local edits made during the sync are reported as LocalPendingChanges above.
-            clearPendingUploadForConvergedTarget(vaultIdentity, targetIdentity, targetAfter.remotePath)
-        }
-    }
-
-    private suspend fun clearPendingUploadForConvergedTarget(
-        vaultIdentity: String,
-        targetIdentity: String,
-        remotePath: String
-    ) {
-        val queued = withContext(Dispatchers.IO) { pendingEncryptedUploads.read(vaultIdentity) } ?: return
-        if (queued.targetIdentity == targetIdentity && queued.remotePath == remotePath) {
-            withContext(Dispatchers.IO) { pendingEncryptedUploads.clear(vaultIdentity) }
-        }
-    }
-
-    private suspend fun uploadLockedCiphertextIfChanged(
-        provider: SyncProvider,
-        store: PeriodicSyncProbeStore,
-        vaultIdentity: String,
-        target: SyncProviderTarget,
-        targetIdentity: String,
-        currentEtag: String,
-        previous: PeriodicSyncProbeRecord?,
-        pending: PendingEncryptedUpload?
-    ): PeriodicSyncWorkResult {
-        var queued = pending
-        if (queued == null) {
-            val currentDigest = currentVaultCipherDigest(vaultIdentity)
-                ?: return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.TARGET_UNAVAILABLE)
-            if (currentDigest == previous?.syncedContentDigest) return PeriodicSyncWorkResult.MetadataUnchanged
-            val rollbackScope = previous?.rollbackVaultScope
-                ?: return writePendingProbeState(
-                    store,
-                    vaultIdentity,
-                    targetIdentity,
-                    currentEtag,
-                    PeriodicSyncNeedsUnlockReason.PROBE_STATE_CORRUPT
-                )
-            val source = withContext(Dispatchers.IO) { openVaultSnapshotStream(vaultIdentity) }
-                ?: return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.TARGET_UNAVAILABLE)
-            queued = withContext(Dispatchers.IO) {
-                pendingEncryptedUploads.stage(
-                    vaultIdentity = vaultIdentity,
-                    targetIdentity = targetIdentity,
-                    remotePath = target.remotePath,
-                    expectedEtag = currentEtag,
-                    rollbackVaultScope = rollbackScope,
-                    input = source
-                )
-            } ?: return PeriodicSyncWorkResult.NeedsUnlock(
-                PeriodicSyncNeedsUnlockReason.PROBE_STATE_WRITE_FAILED
-            )
-        }
-
-        if (currentProbeVaultIdentity() != vaultIdentity || databaseSession.databaseFlow.value != null) {
-            return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.TARGET_CHANGED)
-        }
-        val onDiskDigest = currentVaultCipherDigest(vaultIdentity)
-            ?: return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.TARGET_UNAVAILABLE)
-        if (onDiskDigest != queued.contentDigest) {
-            val guard = SyncRollbackGuard(
-                File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-                queued.rollbackVaultScope
-            )
-            if (!guard.hasPendingAcceptance(target.remotePath)) {
-                withContext(Dispatchers.IO) { pendingEncryptedUploads.clear(vaultIdentity) }
-            }
-            return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.PENDING_UNLOCK)
-        }
-        val currentTarget = providers.configuredTarget(probeDefaultFileName(vaultIdentity))
-        if (currentTarget != null && currentTarget.identity != target.identity) {
-            return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.TARGET_CHANGED)
-        }
-
-        // Validate the queued encrypted bytes before creating a rollback acceptance intent.
-        // A corrupt payload needs user recovery, but it must not quarantine a target when no
-        // remote write or local adoption can possibly follow.
-        val payload = withContext(Dispatchers.IO) {
-            pendingEncryptedUploads.readPayload(vaultIdentity, queued)
-        } ?: return writePendingProbeState(
-            store,
-            vaultIdentity,
-            targetIdentity,
-            currentEtag,
-            PeriodicSyncNeedsUnlockReason.PROBE_STATE_CORRUPT
-        )
-
-        val intentWritten = withContext(Dispatchers.IO) {
-            store.write(
-                vaultIdentity,
-                PeriodicSyncProbeRecord(
-                    targetIdentity = targetIdentity,
-                    observedEtag = queued.expectedEtag,
-                    needsUnlock = true,
-                    syncedContentDigest = previous?.syncedContentDigest,
-                    rollbackVaultScope = queued.rollbackVaultScope
-                )
-            )
-        }
-        if (!intentWritten) {
-            payload.fill(0)
-            return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.PROBE_STATE_WRITE_FAILED)
-        }
-
-        val guard = SyncRollbackGuard(
-            File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-            queued.rollbackVaultScope
-        )
-        try {
-            withContext(Dispatchers.IO) { guard.beginAcceptance(target.remotePath, queued.contentDigest) }
-        } catch (_: Exception) {
-            payload.fill(0)
-            return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.PROBE_STATE_CORRUPT)
-        }
-        val upload = try {
-            provider.uploadAtomic(
-                remotePath = target.remotePath,
-                data = payload,
-                expectedEtag = queued.expectedEtag,
-                remoteExists = true
-            )
-        } catch (cancelled: CancellationException) {
-            payload.fill(0)
-            throw cancelled
-        } catch (failure: Exception) {
-            payload.fill(0)
-            return when (classifyLockedProbeFailure(failure)) {
-                LockedProbeFailure.AUTH -> PeriodicSyncWorkResult.AuthenticationRequired
-                LockedProbeFailure.TEMPORARY -> PeriodicSyncWorkResult.TemporaryNetworkFailure
-                LockedProbeFailure.MISSING -> writePendingProbeState(
-                    store, vaultIdentity, targetIdentity, currentEtag,
-                    PeriodicSyncNeedsUnlockReason.REMOTE_MISSING
-                )
-                LockedProbeFailure.REJECTED -> PeriodicSyncWorkResult.RemoteRejected(failure.javaClass.simpleName)
-            }
-        }
-        payload.fill(0)
-
-        val failure = upload.exceptionOrNull()
-        if (failure != null) {
-            return when (classifyLockedProbeFailure(failure)) {
-                LockedProbeFailure.AUTH -> PeriodicSyncWorkResult.AuthenticationRequired
-                LockedProbeFailure.TEMPORARY -> PeriodicSyncWorkResult.TemporaryNetworkFailure
-                LockedProbeFailure.MISSING -> writePendingProbeState(
-                    store, vaultIdentity, targetIdentity, currentEtag,
-                    PeriodicSyncNeedsUnlockReason.REMOTE_MISSING
-                )
-                LockedProbeFailure.REJECTED -> writePendingProbeState(
-                    store, vaultIdentity, targetIdentity, currentEtag,
-                    PeriodicSyncNeedsUnlockReason.REMOTE_CHANGED
-                )
-            }
-        }
-        return finishLockedCiphertextUpload(
-            provider = provider,
-            store = store,
-            vaultIdentity = vaultIdentity,
-            target = target,
-            targetIdentity = targetIdentity,
-            queued = queued,
-            etag = cleanEtag(upload.getOrNull())
-        )
-    }
-
-    private suspend fun reconcileLockedCiphertextUpload(
-        provider: SyncProvider,
-        store: PeriodicSyncProbeStore,
-        vaultIdentity: String,
-        target: SyncProviderTarget,
-        targetIdentity: String,
-        currentEtag: String,
-        pending: PendingEncryptedUpload
-    ): PeriodicSyncWorkResult {
-        val downloaded = ByteArrayOutputStream()
-        val result = try {
-            provider.download(target.remotePath, downloaded)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            return when (classifyLockedProbeFailure(failure)) {
-                LockedProbeFailure.AUTH -> PeriodicSyncWorkResult.AuthenticationRequired
-                LockedProbeFailure.TEMPORARY -> PeriodicSyncWorkResult.TemporaryNetworkFailure
-                LockedProbeFailure.MISSING -> writePendingProbeState(
-                    store, vaultIdentity, targetIdentity, currentEtag,
-                    PeriodicSyncNeedsUnlockReason.REMOTE_MISSING
-                )
-                LockedProbeFailure.REJECTED -> PeriodicSyncWorkResult.RemoteRejected(failure.javaClass.simpleName)
-            }
-        }
-        if (result.isFailure) {
-            val failure = result.exceptionOrNull() ?: return PeriodicSyncWorkResult.RemoteRejected("DownloadFailure")
-            return when (classifyLockedProbeFailure(failure)) {
-                LockedProbeFailure.AUTH -> PeriodicSyncWorkResult.AuthenticationRequired
-                LockedProbeFailure.TEMPORARY -> PeriodicSyncWorkResult.TemporaryNetworkFailure
-                LockedProbeFailure.MISSING -> writePendingProbeState(
-                    store, vaultIdentity, targetIdentity, currentEtag,
-                    PeriodicSyncNeedsUnlockReason.REMOTE_MISSING
-                )
-                LockedProbeFailure.REJECTED -> PeriodicSyncWorkResult.RemoteRejected(failure.javaClass.simpleName)
-            }
-        }
-        val remoteBytes = downloaded.toByteArray()
-        val matchesQueuedRevision = SyncCache.sha256Hex(remoteBytes) == pending.contentDigest
-        remoteBytes.fill(0)
-        if (!matchesQueuedRevision) {
-            return writePendingProbeState(
-                store,
-                vaultIdentity,
-                targetIdentity,
-                currentEtag,
-                PeriodicSyncNeedsUnlockReason.REMOTE_CHANGED
-            )
-        }
-        return finishLockedCiphertextUpload(
-            provider,
-            store,
-            vaultIdentity,
-            target,
-            targetIdentity,
-            pending,
-            currentEtag
-        )
-    }
-
-    private suspend fun finishLockedCiphertextUpload(
-        provider: SyncProvider,
-        store: PeriodicSyncProbeStore,
-        vaultIdentity: String,
-        target: SyncProviderTarget,
-        targetIdentity: String,
-        queued: PendingEncryptedUpload,
-        etag: String
-    ): PeriodicSyncWorkResult {
-        if (etag.isBlank()) {
-            val metadata = try {
-                provider.getMetadata(target.remotePath)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                return PeriodicSyncWorkResult.TemporaryNetworkFailure
-            }
-            val metadataFailure = metadata.exceptionOrNull()
-            if (metadataFailure != null) {
-                return PeriodicSyncWorkResult.RemoteRejected(metadataFailure.javaClass.simpleName)
-            }
-            val confirmedEtag = cleanEtag(metadata.getOrNull()?.etag)
-            if (confirmedEtag.isBlank()) {
-                return writePendingProbeState(
-                    store, vaultIdentity, targetIdentity, "",
-                    PeriodicSyncNeedsUnlockReason.ETAG_UNAVAILABLE
-                )
-            }
-            return finishLockedCiphertextUpload(
-                provider, store, vaultIdentity, target, targetIdentity, queued, confirmedEtag
-            )
-        }
-
-        val guard = SyncRollbackGuard(
-            File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
-            queued.rollbackVaultScope
-        )
-        try {
-            withContext(Dispatchers.IO) {
-                guard.beginAcceptance(target.remotePath, queued.contentDigest)
-                guard.recordAccepted(target.remotePath, queued.contentDigest)
-            }
-        } catch (_: Exception) {
-            return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.PROBE_STATE_WRITE_FAILED)
-        }
-
-        val written = withContext(Dispatchers.IO) {
-            store.write(
-                vaultIdentity,
-                PeriodicSyncProbeRecord(
-                    targetIdentity = targetIdentity,
-                    observedEtag = etag,
-                    needsUnlock = false,
-                    syncedContentDigest = queued.contentDigest,
-                    rollbackVaultScope = queued.rollbackVaultScope
-                )
-            )
-        }
-        if (!written) {
-            return PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.PROBE_STATE_WRITE_FAILED)
-        }
-        withContext(Dispatchers.IO) { pendingEncryptedUploads.clear(vaultIdentity) }
-        return PeriodicSyncWorkResult.EncryptedUploadCompleted
-    }
-
-    private suspend fun currentVaultCipherDigest(vaultIdentity: String): String? = withContext(Dispatchers.IO) {
-        val input = openVaultSnapshotStream(vaultIdentity) ?: return@withContext null
-        try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            val buffer = ByteArray(CIPHER_DIGEST_BUFFER_BYTES)
-            var total = 0L
-            input.use { stream ->
-                while (true) {
-                    val count = stream.read(buffer)
-                    if (count < 0) break
-                    total += count
-                    if (total > CIPHER_SNAPSHOT_MAX_BYTES) return@withContext null
-                    digest.update(buffer, 0, count)
-                }
-            }
-            digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun openVaultSnapshotStream(vaultIdentity: String): InputStream? = try {
-        if (vaultIdentity.startsWith(CONTENT_URI_PREFIX)) {
-            context.contentResolver.openInputStream(Uri.parse(vaultIdentity))
-        } else {
-            File(vaultIdentity).takeIf { it.isFile }?.inputStream()
-        }
-    } catch (_: Exception) {
-        null
-    }
-
-    private fun currentProbeVaultIdentity(): String? = probeVaultNamespace.currentId()
-
-    private fun probeDefaultFileName(vaultIdentity: String): String {
-        databaseSession.currentFile?.name?.takeIf(String::isNotBlank)?.let { return it }
-        databaseSession.databaseFlow.value?.databaseName?.takeIf(String::isNotBlank)?.let { return "$it.kdbx" }
-        if (!vaultIdentity.startsWith(CONTENT_URI_PREFIX)) {
-            File(vaultIdentity).name.takeIf(String::isNotBlank)?.let { return it }
-        }
-        // 锁定时无法从 SAF URI 还原 KDBX 名称。该哨兵路径不会发送请求；依赖此回退名时按安全失败处理。
-        return UNKNOWN_DEFAULT_REMOTE_FILE_NAME
-    }
-
-    private fun isUnresolvedDefaultPath(remotePath: String, vaultIdentity: String): Boolean {
-        val normalized = remotePath.trim().trimStart('/')
-        if (normalized == UNKNOWN_DEFAULT_REMOTE_FILE_NAME) return true
-        // SAF 冷启动 URI 无法还原 KDBX 文件名。Provider 默认路径即使语法有效也可能指向错误文件，
-        // 因此只有明确配置的非默认路径才允许探测。
-        return vaultIdentity.startsWith(CONTENT_URI_PREFIX) &&
-            normalized == WebDavDefaults.DEFAULT_REMOTE_PATH
-    }
-
-    private fun classifyLockedProbeFailure(failure: Throwable): LockedProbeFailure = when {
-        failure is SyncException.AuthenticationError -> LockedProbeFailure.AUTH
-        failure is SyncException.ProtocolError && failure.statusCode in AUTH_STATUS_CODES -> LockedProbeFailure.AUTH
-        failure is SyncException.ProtocolError &&
-            (failure.statusCode in TRANSIENT_STATUS_CODES || failure.statusCode >= HTTP_SERVER_ERROR) ->
-            LockedProbeFailure.TEMPORARY
-        failure is SyncException.NetworkError || failure is IOException -> LockedProbeFailure.TEMPORARY
-        failure is SyncException.FileNotFound -> LockedProbeFailure.MISSING
-        else -> LockedProbeFailure.REJECTED
-    }
-
-    private enum class LockedProbeFailure { AUTH, TEMPORARY, MISSING, REJECTED }
 
     /**
      * `ISSUE-P2-291` AC②：用户在绑定不符对话框中显式确认「整库覆盖并绑定当前库」后
@@ -1083,16 +450,9 @@ open class SyncCoordinator @Inject constructor(
             val vaultIdentity = databaseSession.currentPathIdentifier
                 ?: databaseSession.currentFile?.absolutePath
                 ?: databaseSession.databaseFlow.value?.databaseName.orEmpty()
-            target.copy(identity = probeTargetIdentity(vaultIdentity, target.identity))
+            target.copy(identity = SyncProbeSupport.targetIdentity(vaultIdentity, target.identity))
         } catch (_: Exception) {
             null
-        }
-    }
-
-    private fun probeTargetIdentity(vaultIdentity: String, targetIdentity: String): String {
-        val bytes = "$vaultIdentity\u0000$targetIdentity".toByteArray(Charsets.UTF_8)
-        return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { byte ->
-            (byte.toInt() and 0xff).toString(16).padStart(2, '0')
         }
     }
 
@@ -1101,15 +461,11 @@ open class SyncCoordinator @Inject constructor(
         providers.useProvider(session.testSyncProvider, block)
 
     /** ISSUE-P3-381：取回同一库、同一目标的进程内 ETag 基线；目标变化时视为首次探测。 */
-    fun lastRemoteEtagForProbe(targetIdentity: String): String {
-        return if (probeBaselineTargetIdentity == targetIdentity) session.lastRemoteEtag else ""
-    }
+    fun lastRemoteEtagForProbe(targetIdentity: String): String = probeRunner.lastEtag(targetIdentity)
 
     /** 当前目标首次探测完成后建立进程内基线；锁库后随会话清理。 */
-    fun rememberRemoteEtagForProbe(etag: String, targetIdentity: String) {
-        session.lastRemoteEtag = etag
-        probeBaselineTargetIdentity = targetIdentity
-    }
+    fun rememberRemoteEtagForProbe(etag: String, targetIdentity: String) =
+        probeRunner.rememberEtag(etag, targetIdentity)
 
     /**
      * 把最近一次同步周期内引擎发射的 ICacheSupervisor 六事件发布给上层订阅者。
@@ -1124,38 +480,11 @@ open class SyncCoordinator @Inject constructor(
         val settings = preferences.currentSettings()
         recent.forEach { event ->
             _syncEvents.tryEmit(event)
-            debugLog.info(SYNC_LOG_TAG, "缓存监督事件: ${describeCacheEvent(event)}")
-            preferences.verbose(settings, "缓存监督事件明细: ${describeCacheEventVerbose(event)}")
+            debugLog.info(SYNC_LOG_TAG, "缓存监督事件: ${SyncCacheEventDescriber.describe(event)}")
+            preferences.verbose(
+                settings,
+                "缓存监督事件明细: ${SyncCacheEventDescriber.describeVerbose(event)}"
+            )
         }
-    }
-
-    /** ISSUE-P3-03 (43f)：详细模式下追加事件类型与远端路径（普通模式只记摘要行）。 */
-    private fun describeCacheEventVerbose(event: SyncCacheEvent): String = when (event) {
-        is SyncCacheEvent.CouldntSaveToRemote -> "CouldntSaveToRemote path=${event.remotePath} cause=${event.cause?.javaClass?.simpleName}"
-        is SyncCacheEvent.CouldntOpenFromRemote -> "CouldntOpenFromRemote path=${event.remotePath} cause=${event.cause?.javaClass?.simpleName}"
-        else -> describeCacheEvent(event)
-    }
-
-    private fun describeCacheEvent(event: SyncCacheEvent): String = when (event) {
-        is SyncCacheEvent.UpdatedCachedFileOnLoad -> "UpdatedCachedFileOnLoad path=${event.remotePath}"
-        is SyncCacheEvent.UpdatedRemoteFileOnLoad -> "UpdatedRemoteFileOnLoad path=${event.remotePath}"
-        is SyncCacheEvent.OpenedFromLocalDueToConflict -> "OpenedFromLocalDueToConflict path=${event.remotePath}"
-        is SyncCacheEvent.LoadedFromRemoteInSync -> "LoadedFromRemoteInSync path=${event.remotePath}"
-        is SyncCacheEvent.CouldntSaveToRemote -> "CouldntSaveToRemote path=${event.remotePath}"
-        is SyncCacheEvent.CouldntOpenFromRemote -> "CouldntOpenFromRemote path=${event.remotePath}"
-    }
-
-    private companion object {
-        const val CONTENT_URI_PREFIX = "content://"
-        const val CIPHER_DIGEST_BUFFER_BYTES = 64 * 1024
-        const val CIPHER_SNAPSHOT_MAX_BYTES = SyncDownloadLimits.MAX_DOWNLOAD_BYTES
-        const val UNKNOWN_DEFAULT_REMOTE_FILE_NAME = "__keepasskey_unknown_remote_name__"
-        private const val HTTP_UNAUTHORIZED = 401
-        private const val HTTP_FORBIDDEN = 403
-        private const val HTTP_REQUEST_TIMEOUT = 408
-        private const val HTTP_TOO_MANY_REQUESTS = 429
-        private const val HTTP_SERVER_ERROR = 500
-        val AUTH_STATUS_CODES = setOf(HTTP_UNAUTHORIZED, HTTP_FORBIDDEN)
-        val TRANSIENT_STATUS_CODES = setOf(HTTP_REQUEST_TIMEOUT, HTTP_TOO_MANY_REQUESTS)
     }
 }

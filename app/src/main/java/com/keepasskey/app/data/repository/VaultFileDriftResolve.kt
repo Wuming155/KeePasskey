@@ -17,6 +17,7 @@ import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.PreparedSerializedSave
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
 import java.io.File
@@ -87,6 +88,15 @@ internal class VaultFileDriftResolve(
 
     /** `ISSUE-P1-631`：真实基线解析与冲突裁决支持（实现见 [VaultFileDriftMergeSupport]） */
     private val mergeSupport = VaultFileDriftMergeSupport(databaseSession, strings, driftCoordinator)
+
+    /** `ISSUE-P2-645`：磁盘重载通道（本地 File / SAF 双通道，见 [VaultFileDriftReloader]） */
+    private val reloader = VaultFileDriftReloader(
+        databaseSession = databaseSession,
+        strings = strings,
+        driftCoordinator = driftCoordinator,
+        sourceAccess = sourceAccess,
+        onBaselineRefreshed = ::refreshBaseline
+    )
 
     suspend fun resolve(
         choice: ExternalModificationChoice
@@ -159,49 +169,8 @@ internal class VaultFileDriftResolve(
         }
     }
 
-    private suspend fun reloadFromDisk(
-        pathId: String,
-        localFile: File?
-    ): KdbxResult<Unit> {
-        val saf = if (localFile == null) sourceAccess.safChannel(pathId) else null
-        if (localFile == null && saf == null) return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
-        if (localFile != null && !localFile.exists()) {
-            return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
-        }
-        var pwdCopy: CharArray? = null
-        var keyCopy: ByteArray? = null
-        databaseSession.useCredentials { pwd, key ->
-            pwdCopy = pwd?.copyOf()
-            keyCopy = key?.copyOf()
-        }
-        val reload = try {
-            if (localFile != null) {
-                databaseSession.open(localFile, pwdCopy, keyCopy, readOnly = false)
-            } else {
-                // SAF：与解锁 / 建库同一条 openStream 通道（写回仍走同一 saveWriter 实现）
-                // 句柄非空由上方早退分支保证（localFile == null ⇒ saf != null），此处显式取非空值
-                val safHandle = saf
-                    ?: return unreadable(ExternalModificationChoice.RELOAD_FROM_DISK)
-                databaseSession.openStream(
-                    pathIdentifier = pathId,
-                    inputStreamProvider = { safHandle.openInput() },
-                    saveWriter = safHandle.saveWriter,
-                    passwordChars = pwdCopy,
-                    keyFileData = keyCopy,
-                    readOnly = false
-                )
-            }
-        } finally {
-            pwdCopy?.fill('0')
-            keyCopy?.fill(0)
-        }
-        if (reload is KdbxResult.Success) {
-            refreshBaseline(pathId, localFile)
-        } else {
-            driftCoordinator?.requestPrompt(pathId)
-        }
-        return reload
-    }
+    private suspend fun reloadFromDisk(pathId: String, localFile: File?): KdbxResult<Unit> =
+        reloader.reload(pathId, localFile)
 
     private suspend fun mergeAndSave(
         pathId: String,
@@ -213,7 +182,7 @@ internal class VaultFileDriftResolve(
         // 若对首击三选合并同样生效，验收用例自己的「进入裁决」前置就会卡死在自己的门上。
         if (policy != null) mergeStartGate?.invoke()
         val diskBytes = sourceAccess.readCurrentBytes(localFile, pathId)
-            ?: return unreadable(ExternalModificationChoice.MERGE_AND_SAVE)
+            ?: return reloader.unreadable(ExternalModificationChoice.MERGE_AND_SAVE)
         // ISSUE-P1-631（读取版本钉扎）：记录**读取时点**的通道身份、内容摘要与元数据。
         // 解析 / 合并是长窗口，窗口内磁盘可能被再次外部改写、会话也可能被换库——提交前复核，
         // 把过期产物 fail-closed 拦下，绝不把用旧版本算出的结果写回覆盖新版本。
@@ -324,6 +293,32 @@ internal class VaultFileDriftResolve(
                 return KdbxResult.Failure(p.error, strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_unknown)), p.code)
             }
         }
+        return commitPreparedMerge(
+            localDb = localDb,
+            replacement = replacement,
+            prepared = prepared,
+            baselineRevision = baselineRevision,
+            pathId = pathId,
+            localFile = localFile,
+            readFingerprint = readFingerprint,
+            policy = policy
+        )
+    }
+
+    /**
+     * 提交临界区（`ISSUE-P1-631`）：`NonCancellable` 内的元数据复核 → 采用 → 落盘，失败按
+     * 「会话已变 / 落盘失败」分型如实上报。边界论证见 [adoptAndPersist] 的 KDoc。
+     */
+    private suspend fun commitPreparedMerge(
+        localDb: KdbxDatabase,
+        replacement: KdbxDatabase,
+        prepared: PreparedSerializedSave,
+        baselineRevision: Long?,
+        pathId: String,
+        localFile: File?,
+        readFingerprint: VaultFileReadPin,
+        policy: DriftMergeConflictPolicy?
+    ): KdbxResult<Unit> {
         try {
             return withContext(NonCancellable) {
                 // `ISSUE-P1-631`（生命周期验收）：提交临界区已进入的确定性暂停点（生产恒 null；
@@ -404,18 +399,6 @@ internal class VaultFileDriftResolve(
             else VaultFileMetadataProbe.baselineFor(context, pathId)
         driftCoordinator?.refreshBaselineAfterPersist(baseline)
     }
-
-
-    /** 磁盘库文件不可读的统一失败（重载 / 合并各自的文案入口） */
-    private fun unreadable(choice: ExternalModificationChoice): KdbxResult.Failure =
-        KdbxResult.Failure(
-            IllegalStateException("磁盘库文件不可读"),
-            strings.get(
-                if (choice == ExternalModificationChoice.RELOAD_FROM_DISK) R.string.ext_mod_reload_failed
-                else R.string.ext_mod_merge_failed,
-                strings.get(R.string.err_drift_file_unreadable)
-            )
-        )
 
     internal companion object {
         /**

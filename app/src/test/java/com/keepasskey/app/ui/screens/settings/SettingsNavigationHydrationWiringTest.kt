@@ -30,7 +30,8 @@ class SettingsNavigationHydrationWiringTest {
 
     @Test
     fun `SettingsViewModel init 不得同步 restoreSyncCredentials`() {
-        val initBody = functionBody(settingsViewModelSource, "    init {")
+        // ISSUE-P2-645：init 接线随装配拆至 SettingsControllerGraph（纯搬运），判据随落点迁移
+        val initBody = functionBody(settingsControllerGraphSource, "    init {")
         assertTrue(
             "init 必须显式说明不再同步 restore（禁回潮）",
             initBody.contains("ISSUE-P2-406")
@@ -80,7 +81,9 @@ class SettingsNavigationHydrationWiringTest {
         )
         assertTrue(
             "封印等级仍须由 probe 刷新（ISSUE-P2-285 实测链路不得断）",
-            settingsSyncControllerSource.contains("syncSealHardwareBacked = probeSealHardwareBacked()")
+            // ISSUE-P2-645：probe 实现随凭据表单拆出，判据覆盖两处落点
+            (settingsSyncControllerSource + "\n" + settingsCredentialFormSource)
+                .contains("syncSealHardwareBacked = probeSealHardwareBacked()")
         )
     }
 
@@ -95,6 +98,12 @@ class SettingsNavigationHydrationWiringTest {
         return if (next == null) rest else rest.substring(0, next.range.first)
     }
 
+    private val settingsCredentialFormSource: String
+        get() = readSource(SYNC_CREDENTIAL_FORM)
+
+    private val settingsControllerGraphSource: String
+        get() = readSource(CONTROLLER_GRAPH)
+
     private fun readSource(path: String): String {
         val file = File(repositoryRoot, path)
         assertTrue("源文件不存在：$path", file.isFile)
@@ -106,6 +115,12 @@ class SettingsNavigationHydrationWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt"
         const val SYNC_CONTROLLER =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt"
+        /** ISSUE-P2-645：凭据表单（probe / 预填 / 保存）拆出后的落点 */
+        const val SYNC_CREDENTIAL_FORM =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncCredentialForm.kt"
+        /** ISSUE-P2-645：控制器装配图（init 接线落点） */
+        const val CONTROLLER_GRAPH =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsControllerGraph.kt"
         const val NAV_ROUTES =
             "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraphRoutes.kt"
 

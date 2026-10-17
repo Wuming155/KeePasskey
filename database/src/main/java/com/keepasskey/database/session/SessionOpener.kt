@@ -5,6 +5,7 @@ import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.result.suppressCleanupFailure
 import com.keepasskey.core.security.BinaryStore
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
@@ -319,21 +320,9 @@ internal class SessionOpener(
                 if (candidate != null && core.database.value === candidate) {
                     core.database.value = null
                 }
-                try {
-                    candidate?.clearSensitiveData()
-                } catch (cleanupFailure: Throwable) {
-                    t.addSuppressed(cleanupFailure)
-                }
-                try {
-                    spillTransaction.purge()
-                } catch (cleanupFailure: Throwable) {
-                    t.addSuppressed(cleanupFailure)
-                }
-                try {
-                    credentials.clear()
-                } catch (cleanupFailure: Throwable) {
-                    t.addSuppressed(cleanupFailure)
-                }
+                suppressCleanupFailure(t) { candidate?.clearSensitiveData() }
+                suppressCleanupFailure(t) { spillTransaction.purge() }
+                suppressCleanupFailure(t) { credentials.clear() }
                 core.invalidateSessionTicket()
                 core.activeFile = null
                 core.activePathIdentifier = null

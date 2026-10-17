@@ -120,7 +120,10 @@ class SettingsThinOrchestrationTest {
         provider.testCalls = 0
 
         controller.verifyConnectionThenSync()
-        testScheduler.runCurrent()
+        // ISSUE-P2-658：单次 `runCurrent()` 只推得动 `sync_feedback_connecting` 置位点——
+        // 同步周期内部经 `Dispatchers.IO` / 真实耗时路径挂起，回到测试派发器需要真实时间。
+        // 因此按同文件既有口径轮询至反馈收敛（不固定 sleep 时长，避免机器快慢造成误报）。
+        pumpUntil { controller.state.value.syncFeedbackMessage?.resId == R.string.sync_feedback_error }
 
         assertEquals(
             "已验证时必须跳过重复测试（守卫 ②）",
@@ -183,7 +186,8 @@ class SettingsThinOrchestrationTest {
 
     @Test
     fun `特权浏览器扫描启停接线与ViewModel四处单语句委托（源码判据）`() {
-        val viewModel = readSource(SETTINGS_VIEW_MODEL)
+        // ISSUE-P2-645：控制器装配（含 healthController 的持久化回调接线）拆至 SettingsControllerGraph
+        val viewModel = readSource(SETTINGS_VIEW_MODEL) + "\n" + readSource(CONTROLLER_GRAPH)
         val privileged = readSource(PRIVILEGED_CONTROLLER)
         val health = readSource(HEALTH_CONTROLLER)
         val sync = readSource(SYNC_CONTROLLER)
@@ -464,6 +468,9 @@ class SettingsThinOrchestrationTest {
 
         const val SETTINGS_VIEW_MODEL =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt"
+        /** ISSUE-P2-645：控制器装配图（装配期接线落点） */
+        const val CONTROLLER_GRAPH =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsControllerGraph.kt"
         const val PRIVILEGED_CONTROLLER =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsPrivilegedBrowserController.kt"
         const val HEALTH_CONTROLLER =

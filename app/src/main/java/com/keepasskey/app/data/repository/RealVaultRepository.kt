@@ -80,14 +80,17 @@ class RealVaultRepository @Inject constructor(
         logPersistFailure = { debugLog.error(TAG, "数据库保存失败: ${it.error.javaClass.simpleName}") }
     )
 
+    /** `ISSUE-P2-645`：落盘 / 漂移检查 / 活动库身份的唯一出口（协调器一律经此回灌）。 */
+    private val persistence = VaultRepositoryPersistence(writeBoundary, databaseSession, debugLog, TAG)
+
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
 
     // TASK-21 拆分：投影映射器与领域协调器（回收站/Passkey/模板），仓库仅保留 CRUD 编排
     private val entryMapper = VaultEntryMapper(strings) { totpPreferencesSource.read() }
-    private val recycleBin = RecycleBinCoordinator(strings, databaseSession) { persistSession() }
-    private val entryDuplicator = EntryDuplicateCoordinator(strings, databaseSession) { persistSession() }
-    private val customIcons = CustomIconCoordinator(strings, databaseSession) { persistSession() }
-    private val passkeyEntries = PasskeyEntryCoordinator(databaseSession, debugLog) { persistSession() }
+    private val recycleBin = RecycleBinCoordinator(strings, databaseSession) { persistence.persist() }
+    private val entryDuplicator = EntryDuplicateCoordinator(strings, databaseSession) { persistence.persist() }
+    private val customIcons = CustomIconCoordinator(strings, databaseSession) { persistence.persist() }
+    private val passkeyEntries = PasskeyEntryCoordinator(databaseSession, debugLog) { persistence.persist() }
     // ISSUE-P3-31 批次 B：下列协调器自本类拆出，落盘统一回灌 [persistSession]
     private val catalog = VaultDatabaseCatalog(context, strings, databaseSession)
     private val lifecycle = VaultLifecycleCoordinator(
@@ -100,18 +103,18 @@ class RealVaultRepository @Inject constructor(
         // ISSUE-P2-378 AC①：打开成功后留存基线
         baselineHolder = baselineHolder,
         // ISSUE-P1-601：换密 / 改绑的写前漂移检查与全库保存同源（单点收口，见 VaultWriteBoundary）
-        driftRejection = ::driftAbortFailure
+        driftRejection = persistence::abortOnDrift
     )
-    private val entryWriter = VaultEntryWriteCoordinator(strings, databaseSession, entryMapper) { persistSession() }
+    private val entryWriter = VaultEntryWriteCoordinator(strings, databaseSession, entryMapper) { persistence.persist() }
     // ISSUE-P3-442：URL 字段级写入口（搜索词自愈回灌；独立成器，见 VaultEntryUrlWriter KDoc）
-    private val entryUrlWriter = VaultEntryUrlWriter(strings, databaseSession) { persistSession() }
+    private val entryUrlWriter = VaultEntryUrlWriter(strings, databaseSession) { persistence.persist() }
     private val secretReader = VaultEntrySecretReader(
         databaseSession,
         entryMapper,
         totpPreferences = { totpPreferencesSource.read() }
     )
-    private val groups = VaultGroupCoordinator(databaseSession, entryMapper) { persistSession() }
-    private val exporter = VaultExportCoordinator(strings, databaseSession) { persistSession() }
+    private val groups = VaultGroupCoordinator(databaseSession, entryMapper) { persistence.persist() }
+    private val exporter = VaultExportCoordinator(strings, databaseSession) { persistence.persist() }
     // ISSUE-P3-305：条目只读查询面与 HOTP 推进面（各自成器，见类 KDoc）
     private val queries = VaultEntryQueryCoordinator(databaseSession, entryMapper, projectionDispatcher)
     private val hotp = HotpAdvanceCoordinator(secretReader, entryWriter, strings)
@@ -168,20 +171,16 @@ class RealVaultRepository @Inject constructor(
         keyFileIntent: ChangeKeyFileIntent
     ): KdbxResult<Unit> {
         val result = lifecycle.changeMasterPassword(newPassword, keyFileIntent)
-        if (result.isSuccess) recoveryStore?.deleteByVaultId(activeVaultId())
+        if (result.isSuccess) recoveryStore?.deleteByVaultId(persistence.activeVaultId())
         return result
     }
 
     /** ISSUE-P3-430 / P1-592：仅改绑密钥文件下沉 [VaultLifecycleCoordinator]；成功后清理旧凭据恢复副本。 */
     override suspend fun changeKeyFileOnly(keyFileIntent: ChangeKeyFileIntent): KdbxResult<Unit> {
         val result = lifecycle.changeKeyFileOnly(keyFileIntent)
-        if (result.isSuccess) recoveryStore?.deleteByVaultId(activeVaultId())
+        if (result.isSuccess) recoveryStore?.deleteByVaultId(persistence.activeVaultId())
         return result
     }
-
-    /** ISSUE-P1-592 步骤 6：当前活动库身份（路径标识优先，回退活动文件绝对路径）；无会话返回 null。 */
-    private fun activeVaultId(): String? =
-        databaseSession.currentPathIdentifier ?: databaseSession.currentFile?.absolutePath
 
     /** ISSUE-P3-305：锁定与刷新下沉 [VaultLifecycleCoordinator]。 */
     override suspend fun lockDatabase() {
@@ -412,12 +411,7 @@ class RealVaultRepository @Inject constructor(
         webDomain: String?,
         username: String,
         passwordChars: CharArray
-    ): KdbxResult<Unit> = entryWriter.saveAutofillCredential(
-        packageName = packageName,
-        webDomain = webDomain,
-        username = username,
-        passwordChars = passwordChars
-    )
+    ): KdbxResult<Unit> = entryWriter.saveAutofillCredential(packageName, webDomain, username, passwordChars)
 
     // ================= TASK-13 整改：设置页导出/模板真实化 =================
 
@@ -431,22 +425,9 @@ class RealVaultRepository @Inject constructor(
 
     override suspend fun installEntryTemplates(): KdbxResult<Unit> = exporter.installEntryTemplates()
 
-    /** ISSUE-P2-378 / P1-601：写前外部修改漂移检查（单一收口；全库保存与换密 / 改绑同源）。 */
-    private fun driftAbortFailure(): KdbxResult.Failure? = writeBoundary.abortOnDrift()
-
-    /** H3：会话落盘的唯一出口（ISSUE-P1-601 起实现收敛到 [VaultWriteBoundary.persist]）。 */
-    private suspend fun persistSession(): KdbxResult<Unit> {
-        val result = writeBoundary.persist()
-        if (result is KdbxResult.Failure) debugLog.error(TAG, "保存中止或失败：${result.error.javaClass.simpleName}")
-        return result
-    }
-
     /** ISSUE-P1-601：库级写入统一提交边界（先漂移检查 → 再应用候选 → 再落盘，详见 [VaultWritePort]）。 */
-    override suspend fun commitDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase): KdbxResult<Unit> {
-        val result = writeBoundary.commitMeta(transform)
-        if (result is KdbxResult.Failure) debugLog.error(TAG, "库设置提交失败：${result.error.javaClass.simpleName}")
-        return result
-    }
+    override suspend fun commitDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase): KdbxResult<Unit> =
+        persistence.commitMeta(transform)
 
     /**
      * ISSUE-P2-378：用户对漂移提示的三选处置——`ABANDON_SAVE` 仅关闭提示且不写盘（内存改动保留）；
