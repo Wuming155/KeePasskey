@@ -338,6 +338,65 @@ class VaultFileDriftCancellationTest {
         session.close()
     }
 
+    /**
+     * 收口专项：**候选树已采用（adopt）后写回失败**的原子性。
+     *
+     * 排除的静默一致性风险：「内存显示新值、磁盘仍旧值、dirty 却被清除」。
+     * 期望：写回失败 ⇒ 会话状态仍为 `DIRTY`、基线修订不前移、正式文件逐字节未变、
+     * 内存树保留合并产物（不丢用户修改）、再次提交可成功（可重试）。
+     */
+    @Test
+    fun `写回失败不得清dirty不得前移基线且可重试`() = runBlocking {
+        val file = seedVault()
+        var attempts = 0
+        val written = arrayOfNulls<ByteArray>(1)
+        val session = openWithWriter(file) { bytes ->
+            attempts++
+            if (attempts == 1) throw java.io.IOException("注入写回失败（收口专项）")
+            written[0] = bytes.copyOf()
+        }
+        driftDisk(file, session)
+        localEdit(session)
+        val fileBytesBefore = file.readBytes()
+        val revisionBefore = revisionOf(session)
+        val coordinator = VaultFileDriftCoordinator(VaultFileBaselineHolder(session), session)
+        val resolver = VaultFileDriftResolve(session, CANCEL_STRINGS, coordinator)
+
+        val first = resolver.resolve(ExternalModificationChoice.MERGE_KEEP_LOCAL)
+        assertTrue("第一次写回失败必须如实失败: $first", first is KdbxResult.Failure)
+        assertEquals(
+            "写回失败后会话状态必须保持 DIRTY（不得出现「内存新值 + dirty 被清」）",
+            DatabaseSession.SessionState.DIRTY,
+            session.state.value
+        )
+        assertEquals("写回失败后基线修订不得前移", revisionBefore, revisionOf(session))
+        assertTrue("写回失败不得改动正式文件", fileBytesBefore.contentEquals(file.readBytes()))
+        val inMemory = session.databaseFlow.value!!.rootGroup.allEntries()
+            .map { it.fields.getValue(CANCEL_PWD_FIELD).readString() }
+            .toSet()
+        assertTrue(
+            "写回失败后内存树必须保留合并产物（不丢用户修改，实测=$inMemory）",
+            inMemory.containsAll(setOf("Disk#1", "LocalOnly#1"))
+        )
+        assertTrue("写回失败不得把整库密文缓冲留在堆上（writer 未收到即失败）", written[0] == null)
+
+        // 可重试：同一会话再次提交必须成功且状态回到 OPENED
+        val second = resolver.resolve(ExternalModificationChoice.MERGE_KEEP_LOCAL)
+        assertTrue("重试必须成功: $second", second is KdbxResult.Success)
+        assertNotNull("重试必须发生写回", written[0])
+        assertTrue(
+            "重试写回的必须是合并产物",
+            passwordsOf(written[0]!!).containsAll(setOf("Disk#1", "LocalOnly#1"))
+        )
+        assertTrue("重试成功后基线必须前移", revisionOf(session) > revisionBefore)
+        assertEquals(
+            "重试成功后状态必须回到 OPENED",
+            DatabaseSession.SessionState.OPENED,
+            session.state.value
+        )
+        session.close()
+    }
+
     @Test
     fun `正常路径成功且基线前移 证明前述断言非恒真`() = runBlocking {
         val file = seedVault()
