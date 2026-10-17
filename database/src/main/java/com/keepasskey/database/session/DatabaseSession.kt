@@ -272,6 +272,17 @@ class DatabaseSession(
     suspend fun deleteEntry(entryId: KdbxUuid) = mutations.deleteEntry(entryId)
 
     /**
+     * `ISSUE-P2-635`：条目**换址保存**——在会话 Mutex 内的单次变换中完成
+     * 「从原位置摘除 → 落到 [targetParentId]」，取代调用方自行 `deleteEntry + saveEntry`
+     * 的两步中间态（中间态下条目对并发读不可见）。
+     *
+     * @return 目标分组存在且写入已发布时为 true；只读态 / 无活动库 / 目标分组不存在为 false，
+     *   此时**不做任何写入**。详见 [SessionContentMutations.saveEntryInGroup]。
+     */
+    suspend fun saveEntryInGroup(entry: KdbxEntry, targetParentId: KdbxUuid): Boolean =
+        mutations.saveEntryInGroup(entry, targetParentId)
+
+    /**
      * 保存或更新分组。
      *
      * P0-1 防御性保护：更新既有分组（含根分组）时，若传入分组不携带任何子项而既有分组含有子项，

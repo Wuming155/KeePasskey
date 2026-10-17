@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.edit
 
 import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.EntryGroupIntent
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiMessage
@@ -59,6 +60,11 @@ internal class EntryEditSaveRunner(
         uiState.update { it.copy(isSaving = true) }
         scope.launch {
             val entry = buildEntrySaveSnapshot(state, entryId, strings.get(R.string.time_just_now))
+            // ISSUE-P2-635：分组 chip 的选中值就是**目标分组**——null 表示「移动到根组」，
+            // 不是「保留原分组」。整改前把 null 交给保存侧按「不变」处理，已有条目永远移不回根。
+            val groupIntent = state.groupId
+                ?.let { EntryGroupIntent.ToGroup(it) }
+                ?: EntryGroupIntent.Root
             // M1 整改：密码以独立参数显式提交，不再随条目投影携带；提交副本归仓库擦除
             // （契约：仓库任何结果路径用毕清零），ViewModel 自有副本保留以支持失败后继续编辑
             // 断点4 整改 + TASK-10：TOTP 种子与受保护自定义字段明文以 CharArray 副本随保存显式提交
@@ -71,7 +77,10 @@ internal class EntryEditSaveRunner(
                     entry,
                     passwordChars = passwordCopy,
                     totpSecretChars = totpCopy,
-                    protectedFieldChars = protectedCopy
+                    protectedFieldChars = protectedCopy,
+                    groupIntent = groupIntent,
+                    // ISSUE-P2-634：键基线用于识别删除 / 改名（被移除的旧键必须真的消失）
+                    loadedCustomFieldKeys = state.loadedCustomFieldKeys
                 )
             } finally {
                 // 兜底擦除：若仓库实现未按契约清零（如旧版本 Fake），此处保证副本不残留明文

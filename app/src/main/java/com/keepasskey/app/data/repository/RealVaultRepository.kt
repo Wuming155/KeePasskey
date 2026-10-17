@@ -260,14 +260,18 @@ class RealVaultRepository @Inject constructor(
     /** 单条条目投影流（ISSUE-P3-305：实现下沉 [VaultEntryQueryCoordinator]）。 */
     override fun getEntry(id: String): Flow<UiVaultEntry?> = queries.entryFlow(id)
 
-    /** ISSUE-P3-305：擦除契约与保存主体同处 [VaultEntryWriteCoordinator]。 */
+    /** ISSUE-P3-305：擦除契约与保存主体同处 [VaultEntryWriteCoordinator]（参数契约见接口 KDoc）。 */
     override suspend fun saveEntry(
-        entry: UiVaultEntry,
-        passwordChars: CharArray?,
-        totpSecretChars: CharArray?,
-        protectedFieldChars: Map<String, CharArray>
-    ): KdbxResult<Unit> =
-        entryWriter.saveEntryWithEraseContract(entry, passwordChars, totpSecretChars, protectedFieldChars)
+        entry: UiVaultEntry, passwordChars: CharArray?, totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>, groupIntent: EntryGroupIntent,
+        loadedCustomFieldKeys: Map<String, String>
+    ): KdbxResult<Unit> = entryWriter.saveEntryWithEraseContract(
+        entry, passwordChars, totpSecretChars, protectedFieldChars, groupIntent, loadedCustomFieldKeys
+    )
+
+    /** ISSUE-P2-633：历史回滚直接恢复历史条目（含附件所有权），不经 UI 投影重建。 */
+    override suspend fun rollbackEntryToRevision(entryId: String, revisionHandle: String): KdbxResult<Unit> =
+        entryWriter.rollbackToRevision(entryId, revisionHandle)
 
     override suspend fun setEntryFavorite(entryId: String, favorite: Boolean): KdbxResult<Unit> =
         entryWriter.setEntryFavorite(entryId, favorite)

@@ -896,14 +896,16 @@ class RealVaultRepositoryTest {
         session.setDatabaseForTesting(database)
         val repository = newRepository(session)
 
+        // ISSUE-P2-632：修订定位改走选择句柄（下标 + 修改时间），不再是条目 UUID
+        val revisionHandle = EntryRevisionHandle.encode(0, revision)
         val revisionPwdChars = repository.getEntryRevisionPasswordChars(
-            entryId.toHexString(), revisionId.toHexString()
+            entryId.toHexString(), revisionHandle
         )
         assertNotNull(revisionPwdChars)
         assertEquals("revision_pwd", String(revisionPwdChars!!))
         revisionPwdChars.fill('0')
 
-        val snapshot = repository.getEntryRevisionSnapshot(entryId.toHexString(), revisionId.toHexString())
+        val snapshot = repository.getEntryRevisionSnapshot(entryId.toHexString(), revisionHandle)
         assertNotNull(snapshot)
         val totpChars = snapshot!!.totpSecretChars
         try {

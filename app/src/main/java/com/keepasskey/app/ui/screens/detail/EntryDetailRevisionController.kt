@@ -6,6 +6,7 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.update
@@ -19,7 +20,8 @@ import com.keepasskey.app.ui.model.textArg
  * 明文仍由 [EntryDetailSecrets] 唯一持有（本类只写它、不另设副本）；
  * 三条语义逐字保留：
  * 1. 快照缺失（已被修剪/清理）时**不得谎报「已回滚」**，如实暴露失败（TASK-31）；
- * 2. 回滚路径全程 `CharArray`，不经 String 中转，副本按 `saveEntry` 擦除契约由仓库清零（M2）；
+ * 2. 回滚不再经 String / CharArray 中转任何明文——由仓库直接以历史条目落库（ISSUE-P2-633），
+ *    对比用的修订密码仍全程 CharArray（M2 契约不变）；
  * 3. 关闭对比弹窗必须连修订密码映射一并清空，避免跨弹窗累积驻留明文（M1）。
  */
 internal class EntryDetailRevisionController(
@@ -41,48 +43,42 @@ internal class EntryDetailRevisionController(
     }
 
     /** 事件入口：为对比弹窗预解密**当前条目**的密码与目标修订密码。 */
-    fun prepareDiffForCurrentEntry(revisionId: String) {
+    fun prepareDiffForCurrentEntry(revisionHandle: String) {
         val entryId = currentEntryId() ?: return
-        scope.launch { prepareDiff(entryId, revisionId) }
+        scope.launch { prepareDiff(entryId, revisionHandle) }
     }
 
     /**
-     * 回滚 [current] 到 [revision]：取整修订快照（含解密后的受保护字段与 TOTP 配置）全字段回滚，
-     * 保存时由 HistoryManager 把回滚前的当前版本归档为最新历史。
+     * 回滚 [current] 到 [revision]：由仓库直接恢复该历史版本的完整条目（含附件字节与
+     * 所有权），保存时由 HistoryManager 把回滚前的当前版本归档为最新历史。
      *
-     * @return 面向用户的结果消息（成功 / 快照缺失 / 保存失败），由调用方下发到 UI 状态。
+     * ISSUE-P2-633：整改前把历史**投影**交给通用 `saveEntry` 重建——投影没有历史附件
+     * 字节来源，附件会被当前版本顶替或清空。现行路径不再经投影，也不再另行解密密码 /
+     * TOTP（历史条目本身就是待落库内容）。
+     *
+     * @return 面向用户的结果消息（成功 / 快照不可用 / 保存失败），由调用方下发到 UI 状态。
      */
     suspend fun rollback(current: UiVaultEntry, revision: UiEntryRevision): UiMessage {
-        val entryId = current.id
-        val snapshot = vaultRepository.getEntryRevisionSnapshot(entryId, revision.id)
-            ?: return UiMessage(R.string.detail_history_rollback_failed)
-
-        val revisionPasswordChars = vaultRepository.getEntryRevisionPasswordChars(entryId, revision.id)
-        val updated = snapshot.entry.copy(
-            groupId = current.groupId,
-            updatedAt = strings.get(R.string.detail_rollback_updated_at)
-        )
-        val result = vaultRepository.saveEntry(
-            updated,
-            passwordChars = revisionPasswordChars,
-            totpSecretChars = snapshot.totpSecretChars
-        )
-        return if (result is KdbxResult.Success) {
-            UiMessage(R.string.detail_history_rolled_back)
-        } else {
-            UiMessage(R.string.edit_save_failed, listOf((result as KdbxResult.Failure).textArg(strings)))
+        return when (val result = vaultRepository.rollbackEntryToRevision(current.id, revision.id)) {
+            is KdbxResult.Success -> UiMessage(R.string.detail_history_rolled_back)
+            is KdbxResult.Failure -> if (result.code == KdbxError.HISTORY_REVISION_UNAVAILABLE) {
+                // 句柄指向的快照已被修剪 / 歧义：如实报「历史版本已不可用」，绝不谎报已回滚
+                UiMessage(R.string.detail_history_rollback_failed)
+            } else {
+                UiMessage(R.string.edit_save_failed, listOf(result.textArg(strings)))
+            }
         }
     }
 
     /** 打开历史修订对比弹窗前按需解密：当前密码 + 目标修订密码。 */
-    suspend fun prepareDiff(entryId: String, revisionId: String) {
+    suspend fun prepareDiff(entryId: String, revisionHandle: String) {
         // ISSUE-P2-15：对比路径同样改走 CharArray 借用通道，String 物化收敛在展示边界
         val currentPw = secrets.revealedPassword.value
             ?: vaultRepository.getEntryPasswordChars(entryId).toDisplayString()
-        val revisionPw = vaultRepository.getEntryRevisionPasswordChars(entryId, revisionId)
+        val revisionPw = vaultRepository.getEntryRevisionPasswordChars(entryId, revisionHandle)
             .toDisplayString()
         secrets.revealedPassword.value = currentPw
-        secrets.revealedRevisionPasswords.update { it + (revisionId to revisionPw.orEmpty()) }
+        secrets.revealedRevisionPasswords.update { it + (revisionHandle to revisionPw.orEmpty()) }
     }
 
     /** 关闭对比弹窗：清空当前密码与全部修订密码明文。 */

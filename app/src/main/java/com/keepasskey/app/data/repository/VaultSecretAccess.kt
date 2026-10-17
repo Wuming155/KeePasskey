@@ -47,16 +47,20 @@ interface VaultSecretAccess {
      */
     @Deprecated(
         message = "String 明文不可显式擦除；请改用 getEntryRevisionPasswordChars 并在 finally 中清零",
-        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionId)")
+        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionHandle)")
     )
-    suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String?
+    suspend fun getEntryRevisionPassword(entryId: String, revisionHandle: String): String?
 
     /**
      * 按需解密单条历史修订的密码为 CharArray（加解密审查 2026-09 M2 整改，回滚路径专用：
      * 全程 CharArray、不经 String 中转）。返回的数组是分配给调用方的独占副本，调用方
      * 使用完毕必须显式清零；修订不存在或无密码时返回 null。
+     *
+     * ISSUE-P2-632：[revisionHandle] 是 [EntryRevisionHandle] 生成的**选择句柄**
+     * （下标 + 修改时间），不是条目 / 快照 UUID——KDBX 历史快照的 UUID 与父条目相同，
+     * 按 UUID 定位会恒命中首项。陈旧 / 歧义句柄返回 null，调用方不得退回首项。
      */
-    suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray?
+    suspend fun getEntryRevisionPasswordChars(entryId: String, revisionHandle: String): CharArray?
 
     /**
      * 读取单条历史修订的完整回滚快照（断点8 整改，供详情页全字段回滚）。
@@ -64,8 +68,13 @@ interface VaultSecretAccess {
      * [EntryRevisionSnapshot.totpSecretChars] 为该修订 TOTP 配置原文独占 CharArray 副本
      * （无则空数组），调用方按借用语义用毕清零或交由 [VaultRepository.saveEntry] 擦除；
      * 修订不存在时返回 null。
+     *
+     * ISSUE-P2-632：[revisionHandle] 语义同 [getEntryRevisionPasswordChars]（选择句柄，
+     * 非 UUID）；陈旧 / 歧义句柄返回 null。
+     * ISSUE-P2-633：**回滚不经本通道**（投影不含历史附件字节来源），见
+     * [VaultRepository.rollbackEntryToRevision]。
      */
-    suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot?
+    suspend fun getEntryRevisionSnapshot(entryId: String, revisionHandle: String): EntryRevisionSnapshot?
 
     /**
      * 按需解密单条凭据的受保护自定义字段为 CharArray（TASK-10：编辑态 CharArray 化，

@@ -11,14 +11,39 @@ import com.keepasskey.app.ui.model.UiVaultEntry
  */
 
 /**
+ * 编辑保存时的**分组写入意图**（`ISSUE-P2-635`）。
+ *
+ * 背景：编辑页「根目录」chip 以 `null` 表示选中，而保存侧把 `null` 解读为「保留原分组」——
+ * 已有条目因此**永远移不回根组**（界面显示已选中根、保存也报成功，实际仍在旧分组）。
+ * `String?` 无法同时表达「保留」「移动到根」「移动到某分组」三态，故改为显式类型。
+ *
+ * 默认值 [Keep] 保证未改造的调用方（导入、草稿、列表页快捷保存等）行为不变。
+ */
+sealed interface EntryGroupIntent {
+
+    /** 保留条目既有父组（新建条目按根组落点）。 */
+    data object Keep : EntryGroupIntent
+
+    /** 移动到根组（即库根分组本身，不是「无父组」）。 */
+    data object Root : EntryGroupIntent
+
+    /** 移动到指定分组；目标必须存在且不在回收站子树内，否则写入被拒。 */
+    data class ToGroup(val groupId: String) : EntryGroupIntent
+}
+
+/**
  * 历史修订的完整回滚快照（断点8 整改）。
  * [entry] 的受保护自定义字段已按需解密回填，可直接作为 saveEntry 入参提交；
  * [totpSecretChars] 为该修订的 TOTP 配置原文（otpauth:// URI 或 Base32 种子），
  * 空数组表示该修订无 TOTP 配置。
  *
  * ISSUE-P2-15：TOTP 原文由不可擦除的 String 改为 **CharArray 独占副本**，归调用方所有；
- * 回滚路径应直接将其转交 [VaultRepository.saveEntry] 的 `totpSecretChars` 参数
- * （由仓库按擦除契约用毕清零），或在用毕自行 `fill('0')`，不得再遗留 String 中转。
+ * 调用方经 `saveEntry(totpSecretChars = …)` 提交或在用毕自行 `fill('0')`，不得遗留 String 中转。
+ *
+ * ISSUE-P2-633：**回滚不再走本结构**——历史投影只有附件名 / 下标，没有历史字节来源，
+ * 用它重建条目会按当前附件内容错配。回滚改由
+ * [VaultRepository.rollbackEntryToRevision] 直接恢复历史 `KdbxEntry`（含附件所有权）。
+ * 本结构保留给「读取某修订内容」的调用方（修订密码 / 配置原文的按需读取）。
  */
 data class EntryRevisionSnapshot(
     val entry: UiVaultEntry,

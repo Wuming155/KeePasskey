@@ -281,7 +281,9 @@ class FakeVaultRepository(
         entry: UiVaultEntry,
         passwordChars: CharArray?,
         totpSecretChars: CharArray?,
-        protectedFieldChars: Map<String, CharArray>
+        protectedFieldChars: Map<String, CharArray>,
+        groupIntent: EntryGroupIntent,
+        loadedCustomFieldKeys: Map<String, String>
     ): com.keepasskey.core.result.KdbxResult<Unit> {
         passwordChars?.let { pwd ->
             passwordStore.value = passwordStore.value + (entry.id to String(pwd))
@@ -316,7 +318,17 @@ class FakeVaultRepository(
                     else -> cf
                 }
             }
-            current[index] = entry.copy(customFields = mergedFields, revisions = updatedRevisions)
+            // ISSUE-P2-635：分组意图按生产口径生效（Root = 根组，投影里即 groupId == null）
+            val targetGroupId = when (groupIntent) {
+                EntryGroupIntent.Keep -> entry.groupId
+                EntryGroupIntent.Root -> null
+                is EntryGroupIntent.ToGroup -> groupIntent.groupId
+            }
+            current[index] = entry.copy(
+                customFields = mergedFields,
+                revisions = updatedRevisions,
+                groupId = targetGroupId
+            )
         } else {
             current.add(0, entry)
         }
@@ -327,6 +339,20 @@ class FakeVaultRepository(
         protectedFieldChars.values.forEach { it.fill('0') }
         return com.keepasskey.core.result.KdbxResult.Success(Unit)
     }
+
+    /**
+     * ISSUE-P2-633 Fake 语义：本替身只持有 `UiEntryRevision`（不含附件字节 / 字段快照），
+     * 无法真实恢复历史内容 ⇒ 如实返回「修订不可用」，不伪造成功。
+     * 回滚语义的验收走真实协调器（`VaultEntryRevisionRollbackTest`）。
+     */
+    override suspend fun rollbackEntryToRevision(
+        entryId: String,
+        revisionHandle: String
+    ): com.keepasskey.core.result.KdbxResult<Unit> =
+        com.keepasskey.core.result.KdbxResult.Failure(
+            IllegalStateException("fake repository cannot restore revision content"),
+            code = com.keepasskey.core.result.KdbxError.HISTORY_REVISION_UNAVAILABLE
+        )
 
     override suspend fun setEntryFavorite(
         entryId: String,
@@ -525,12 +551,12 @@ class FakeVaultRepository(
 
     @Deprecated(
         message = "String 明文不可显式擦除；请改用 getEntryRevisionPasswordChars 并在 finally 中清零",
-        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionId)")
+        replaceWith = ReplaceWith("getEntryRevisionPasswordChars(entryId, revisionHandle)")
     )
-    override suspend fun getEntryRevisionPassword(entryId: String, revisionId: String): String? =
+    override suspend fun getEntryRevisionPassword(entryId: String, revisionHandle: String): String? =
         passwordStore.value[entryId]
 
-    override suspend fun getEntryRevisionPasswordChars(entryId: String, revisionId: String): CharArray? =
+    override suspend fun getEntryRevisionPasswordChars(entryId: String, revisionHandle: String): CharArray? =
         passwordStore.value[entryId]?.toCharArray()
 
     override suspend fun getEntryProtectedFieldChars(entryId: String, fieldKey: String): CharArray? =
@@ -1078,7 +1104,7 @@ class FakeVaultRepository(
 
     override suspend fun getEntryTotpSecretChars(entryId: String): CharArray? = null
 
-    override suspend fun getEntryRevisionSnapshot(entryId: String, revisionId: String): EntryRevisionSnapshot? = null
+    override suspend fun getEntryRevisionSnapshot(entryId: String, revisionHandle: String): EntryRevisionSnapshot? = null
 
     override suspend fun getAttachmentData(entryId: String, refIndex: Int): ByteArray? = null
 

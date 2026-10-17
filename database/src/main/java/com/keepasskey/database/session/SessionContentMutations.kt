@@ -51,6 +51,35 @@ internal class SessionContentMutations(
         edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
     }
 
+    /**
+     * 条目**换址保存**：在会话 Mutex 内的**单次**变换中完成「从原位置摘除 → 落到目标分组」。
+     *
+     * 存在意义（`ISSUE-P2-635`）：编辑页把条目移入其它分组此前由调用方分两步完成
+     * （[deleteEntry] + [saveEntry]），两步之间条目在内存树中**不存在**——任何并发读
+     * （UI 投影 / 自动填充枚举 / 同步周期取快照）都可能看到「条目已消失」，随后又被写回。
+     * 本入口把摘除与落位收进同一临界区，中间态对外不可见。
+     *
+     * 语义与「先 [removeEntry] 再 [updateOrAddEntry]」逐字等价：
+     * - 目标分组不在树内 ⇒ **零写入**返回 false（调用方据此如实失败，不得静默落到别处）；
+     * - 条目原位置的旧实例**不做身份擦除**（`ISSUE-P2-06`：新实例与原实例按 `copy` 语义共享
+     *   受保护实例，按「新树未包含 = 下线」判定会清空即将复用的存活字段）；
+     * - 目标位置若有同 id 节点被替换，仍按既有口径做增量定点擦除。
+     *
+     * @return 目标分组存在且写入已发布时为 true；只读态 / 无活动库 / 目标分组不存在为 false。
+     */
+    suspend fun saveEntryInGroup(entry: KdbxEntry, targetParentId: KdbxUuid): Boolean = mutex.withLock {
+        if (readOnly()) return@withLock false
+        val currentDb = databaseFlow.value ?: return@withLock false
+        val targetGroup = currentDb.rootGroup.findGroup(targetParentId) ?: return@withLock false
+        val detachedRoot = SessionTreeEditor.removeEntry(currentDb.rootGroup, entry.id)
+        val edit = SessionTreeEditor.updateOrAddEntry(detachedRoot, entry.copy(parentGroupId = targetGroup.id))
+        // ISSUE-P2-534：**先发布新树、后擦除**（同 [saveEntry]；理由与约定见该处注释）
+        databaseFlow.value = currentDb.copy(rootGroup = edit.root)
+        stateFlow.value = DatabaseSession.SessionState.DIRTY
+        edit.replaced?.let { edit.root.eraseSupersededSensitiveData(it, edit.replacement) }
+        true
+    }
+
     /** 删除条目。 */
     suspend fun deleteEntry(entryId: KdbxUuid) = mutex.withLock {
         if (readOnly()) return@withLock

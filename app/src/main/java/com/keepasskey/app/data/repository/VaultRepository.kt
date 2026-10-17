@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.emptyFlow
  * 敏感值按需读取通道见 [VaultSecretAccess]，Passkey 凭据面见 [VaultPasskeyRepository]；
  * 本文件只保留库生命周期、分组与条目 CRUD、条目投影 / 查询、导出与模板。
  */
-interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWritePort {
+interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWritePort, VaultHistoryRestorePort {
     /** 按已受理会话路径读取库登记快照；默认实现仅供测试替身兼容。 */
     fun databaseInfoForPath(path: String): VaultDatabaseInfo? = null
     /**
@@ -231,17 +231,20 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWrit
      * 提交，未编辑的受保护字段在 UI 投影中值为空串，由实现方回填既有值（F2 语义）。
      * 返回 [com.keepasskey.core.result.KdbxResult]（H3 整改）：保存失败必须显式返回，
      * 禁止磁盘写失败被静默吞掉而 UI 谎报成功。
+     *
+     * [groupIntent]（ISSUE-P2-635）：分组写入意图，三态与无效目标的判定见 [EntryGroupIntent]；
+     * 缺省 `Keep` 供导入 / 草稿等不表达移动意图的调用方沿用，编辑页必须显式传入。
+     * [loadedCustomFieldKeys]（ISSUE-P2-634）：`UiCustomField.id → 载入时的键名`，
+     * 用于区分删除 / 改名与其它来源新增，语义见 `CustomFieldMergePolicy`。
      */
     suspend fun saveEntry(
-        entry: UiVaultEntry,
-        passwordChars: CharArray? = null,
-        totpSecretChars: CharArray? = null,
-        protectedFieldChars: Map<String, CharArray> = emptyMap()
+        entry: UiVaultEntry, passwordChars: CharArray? = null, totpSecretChars: CharArray? = null,
+        protectedFieldChars: Map<String, CharArray> = emptyMap(),
+        groupIntent: EntryGroupIntent = EntryGroupIntent.Keep,
+        loadedCustomFieldKeys: Map<String, String> = emptyMap()
     ): com.keepasskey.core.result.KdbxResult<Unit>
 
-    /**
-     * 删除凭据条目（移至回收站或彻底删除）
-     */
+    /** 删除凭据条目（移至回收站或彻底删除） */
     suspend fun deleteEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
@@ -299,14 +302,10 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWrit
      */
     suspend fun emptyRecycleBin(): com.keepasskey.core.result.KdbxResult<Unit>
 
-    /**
-     * 批量移动凭据条目至目标分组
-     */
+    /** 批量移动凭据条目至目标分组（`null` = 根组） */
     suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): com.keepasskey.core.result.KdbxResult<Unit>
 
-    /**
-     * 批量删除凭据条目（移至回收站）
-     */
+    /** 批量删除凭据条目（移至回收站） */
     suspend fun batchDeleteEntries(entryIds: Set<String>): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**

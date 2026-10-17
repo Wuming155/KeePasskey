@@ -52,6 +52,14 @@ data class EntryEditUiState(
     val notes: String = "",
     val isPasskey: Boolean = false,
     val customFields: List<UiCustomField> = emptyList(),
+    /**
+     * `ISSUE-P2-634`：本次编辑**载入时**的自定义字段键基线（`UiCustomField.id → 键名`）。
+     *
+     * 保存侧据此区分三种意图：id 已不在列表里 = 删除；同 id 的键变了 = 改名；
+     * 基线里没有的键 = 其它来源新增（并发同步 / 其它窗口），一律保留。
+     * 新建 / 模板预填没有既有条目，故为空表（保存侧退化为整改前的保留语义）。
+     */
+    val loadedCustomFieldKeys: Map<String, String> = emptyMap(),
     val attachments: List<UiAttachment> = emptyList(),
     // KP2A 能力补齐：标签（逗号/空格分隔输入）与 AutoType 默认序列、Override URL
     val tagsInput: String = "",

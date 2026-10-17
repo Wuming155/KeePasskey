@@ -42,7 +42,8 @@
 - 问题：历史快照保留条目 UUID，投影又把该 UUID 当修订 id；读取历史密码/快照时使用 firstOrNull(id==revisionUuid)，故多条历史记录具有同一定位值，选择较早记录仍读取列表首个版本。
 - 影响与触发：历史对比、历史密码和回滚可能选择错误版本；本仓自产历史和按同 UUID 保存的外部历史都受影响。 触发序列及反证详见方案。
 - 位置：`database/src/main/java/com/keepasskey/database/history/HistoryManager.kt:46`；`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryMapper.kt:56`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
+- 已实现（2026-10-17）：新增 `EntryRevisionHandle`（句柄 = 历史下标 + 修改时间；下标漂移按时间戳唯一命中自愈，已修剪 / 同时间戳歧义一律拒绝），`VaultEntryMapper` 的修订投影与 `VaultEntrySecretReader` 的修订密码 / 快照读取统一改走该句柄；磁盘 KDBX 的历史 UUID 语义未改。JVM 用例 `EntryRevisionHandleTest`（6 例）实跑通过，既有 `RealVaultRepositoryTest` 修订读取已改到句柄并同批通过。
+- 尚未完成：原路径的**设备端产品复现**（详情页分别选择第 2 / 3 行做对比与回滚）、历史列表刷新与修剪后的 UI 实测、与独立 KDBX 实现读取同一库的对拍（本轮未改磁盘格式，但仍需端到端确认）。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-632/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-633 历史回滚通过当前附件索引合并，不能恢复历史附件
@@ -51,7 +52,8 @@
 - 问题：回滚将历史投影传入通用saveEntry；历史附件投影只有refIndex/名称，没有历史字节来源。AttachmentMergePolicy按当前条目附件列表的同索引或同名项取数据，未命中时构造空附件。历史附件内容被当前内容替代或变空。
 - 影响与触发：历史回滚显示成功却未恢复附件；同名附件、替换/删除/重新排序后尤其明显。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailRevisionController.kt:55`；`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryMapper.kt:70`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
+- 已实现（2026-10-17）：新增 `VaultHistoryRestorePort.rollbackEntryToRevision` 与 `VaultEntryRevisionRollback`——按句柄定位真实历史 `KdbxEntry`，以 `HistoryManager.rollbackToSnapshot` 生成「内容取快照、UUID / 父组 / customData 取当前条目」的结果后原位落树；附件连同 `BinarySource` 引用与字节所有权一并恢复，回滚前版本归档为最新历史。回滚路径不再经 UI 投影与 `AttachmentMergePolicy`。JVM 用例 `VaultEntryRevisionRollbackTest`（5 例：同名异字节、历史独有附件、归档、句柄失效零写入、往返回滚）实跑通过。
+- 尚未完成：设备端回滚后导出附件并与历史版本比对（内联与落盘两种附件形态）、独立 KDBX 工具读取核对、锁定清理不误擦恢复后附件的实测。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-633/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-634 自定义字段删除和改名在保存时被补回旧键
@@ -60,7 +62,8 @@
 - 问题：UI删除字段会从customFields中移除，但mergeCustomFields无条件保留所有未出现在UI键集合中的旧字段。删除的旧键被补回；改名则保留旧键并新增新键。
 - 影响与触发：用户不能真正删除普通/受保护自定义字段，可能误以为旧敏感信息已移除；不等于明文对外泄露。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditCustomFields.kt:74`；`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryWriteCoordinator.kt:175`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
+- 已实现（2026-10-17）：新增 `CustomFieldMergePolicy`（纯策略）统一删除 / 改名 / 保留三态：载入基线 `UiCustomField.id → 键名` 经 `saveEntry(loadedCustomFieldKeys=…)` 提交，被移除或改名的旧键退役；Passkey schema 键与基线外新增键一律保留；无基线调用方（导入 / 草稿）维持整改前语义。重名键与标准字段键冲突在写入前拒绝（`KdbxError.ENTRY_CUSTOM_FIELD_INVALID`），不落库、草稿留在编辑页。JVM 用例 `CustomFieldMergePolicyTest`（10 例）与协调器级 `EntryWriteIntentCoordinatorTest`（2 例）实跑通过。
+- 尚未完成：设备端编辑页删除 / 改名后重开条目核对当前键集合、受保护字段与 Passkey 锁字段的 UI 实测、独立 KDBX 读取确认键确实缺失。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-634/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-635 编辑页选择根分组被当成保留原分组
@@ -69,7 +72,8 @@
 - 问题：根分组chip传onGroupChange(null)，保存时却用 entry.groupId?.parse ?: existing.parentGroupId；null被解释成“不变”，因此已有条目无法通过编辑页移回根。
 - 影响与触发：界面显示已选根且保存成功，但条目仍在旧分组；批量移动有独立实现，不直接受此问题影响。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditGroupAndAppSections.kt:74`；`app/src/main/java/com/keepasskey/app/data/repository/VaultEntryWriteCoordinator.kt:106`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
+- 已实现（2026-10-17）：新增 `EntryGroupIntent`（`Keep` / `Root` / `ToGroup`）三态意图并贯穿 `saveEntry`，落点解析抽为纯函数 `EntryGroupTargetResolver`；编辑页按分组 chip 的选中值显式提交（`null` = 移动到根）。换址改用会话单次原语 `DatabaseSession.saveEntryInGroup`（同临界区内「摘除 + 落位」，取代 `deleteEntry + saveEntry` 的中间态）。目标分组不可解析 / 不存在 / 落在回收站子树内一律拒绝写入（`KdbxError.ENTRY_GROUP_TARGET_INVALID`），不写历史、不改树。JVM 用例 `EntryWriteIntentCoordinatorTest`（5 例：移到根、Keep 不动、跨子组、目标不存在、回收站拒绝）实跑通过。
+- 尚未完成：设备端「子组 → 根目录」实测与重开核对父子关系、只读会话与保存失败路径实测、新建 / 模板 / 批量移动三条路径的根分组契约一致性复核（批量移动本就用 `null` = 根，本轮未改动）。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-635/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-636 同步缓存与版本标记分离提交可在重启后误判无修改

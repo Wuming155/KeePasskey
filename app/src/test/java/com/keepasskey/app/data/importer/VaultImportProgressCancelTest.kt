@@ -1,6 +1,7 @@
 package com.keepasskey.app.data.importer
 
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.repository.EntryGroupIntent
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
@@ -73,11 +74,16 @@ class VaultImportProgressCancelTest {
                 entry: UiVaultEntry,
                 passwordChars: CharArray?,
                 totpSecretChars: CharArray?,
-                protectedFieldChars: Map<String, CharArray>
+                protectedFieldChars: Map<String, CharArray>,
+                groupIntent: EntryGroupIntent,
+                loadedCustomFieldKeys: Map<String, String>
             ): KdbxResult<Unit> {
                 entered.complete(Unit)
                 gate.await()
-                return fake.saveEntry(entry, passwordChars, totpSecretChars, protectedFieldChars)
+                return fake.saveEntry(
+                    entry, passwordChars, totpSecretChars, protectedFieldChars,
+                    groupIntent, loadedCustomFieldKeys
+                )
             }
         }
         val importer = VaultImporter(repository, TEST_STRINGS, DebugLogBuffer())

@@ -37,6 +37,9 @@ internal fun applyLoadedEntry(
     notes = entry.notes,
     isPasskey = entry.isPasskey,
     customFields = entry.customFields,
+    // ISSUE-P2-634：记下载入时的键基线——保存侧靠它识别「删除」与「改名」，
+    // 否则被移除 / 改名的旧键会被既有字段保留规则补回
+    loadedCustomFieldKeys = entry.customFields.associate { it.id to it.key },
     attachments = entry.attachments,
     tagsInput = entry.tags.joinToString(", "),
     autoTypeSequence = entry.autoTypeSequence,
@@ -76,6 +79,8 @@ internal fun applyTemplateEntry(
     notes = template.notes,
     isPasskey = false,
     customFields = template.customFields,
+    // 模板预填不产生既有条目：无键基线（ISSUE-P2-634 的删除 / 改名意图只对既有条目有意义）
+    loadedCustomFieldKeys = emptyMap(),
     tagsInput = template.tags.joinToString(", "),
     autoTypeSequence = template.autoTypeSequence,
     overrideUrl = template.overrideUrl.orEmpty(),

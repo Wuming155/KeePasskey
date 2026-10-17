@@ -74,7 +74,13 @@ object KdbxErrorTexts {
         KdbxError.RECOVERY_UNLOCK_FAILED to R.string.err_recovery_unlock_failed,
         KdbxError.RECOVERY_LOCAL_ONLY to R.string.err_recovery_local_only,
         KdbxError.RECOVERY_OVERWRITE_BLOCKED to R.string.err_recovery_overwrite_blocked,
-        KdbxError.RECOVERY_WRITE_FAILED to R.string.err_recovery_write_failed
+        KdbxError.RECOVERY_WRITE_FAILED to R.string.err_recovery_write_failed,
+        // ISSUE-P2-632：修订句柄失效（已修剪 / 歧义）——与落盘失败分型，未做任何写入
+        KdbxError.HISTORY_REVISION_UNAVAILABLE to R.string.detail_history_rollback_failed,
+        // ISSUE-P2-635：编辑页目标分组失效（不存在 / 不可解析 / 落在回收站）
+        KdbxError.ENTRY_GROUP_TARGET_INVALID to R.string.err_entry_group_target_invalid,
+        // ISSUE-P2-634：自定义字段键重复或与标准字段冲突
+        KdbxError.ENTRY_CUSTOM_FIELD_INVALID to R.string.err_entry_custom_field_invalid
     )
 
     /** 错误码 → 资源 ID；未登记/陌生错误码一律回落 [R.string.err_unknown]（可观测降级，非崩溃）。 */

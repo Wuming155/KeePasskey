@@ -4,11 +4,9 @@ import com.keepasskey.app.R
 import com.keepasskey.app.autofill.AutofillPackageNames
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.StringsProvider
-import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
-import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxError
@@ -40,6 +38,9 @@ internal class VaultEntryWriteCoordinator(
     private val persistSession: suspend () -> KdbxResult<Unit>
 ) {
 
+    /** 历史回滚（ISSUE-P2-633）：与保存共用同一落盘出口，但**不经** UI 投影重建条目。 */
+    private val revisionRollback = VaultEntryRevisionRollback(databaseSession, persistSession)
+
     /**
      * 条目保存入口（含擦除契约）。
      *
@@ -51,15 +52,15 @@ internal class VaultEntryWriteCoordinator(
      * 调用方（仓库门面）只转发，不再重复清零。
      */
     suspend fun saveEntryWithEraseContract(
-        entry: UiVaultEntry,
-        passwordChars: CharArray?,
-        totpSecretChars: CharArray?,
-        protectedFieldChars: Map<String, CharArray>
+        entry: UiVaultEntry, passwordChars: CharArray?, totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>,
+        groupIntent: EntryGroupIntent = EntryGroupIntent.Keep,
+        loadedCustomFieldKeys: Map<String, String> = emptyMap()
     ): KdbxResult<Unit> {
         try {
             return withContext(Dispatchers.Default) {
                 try {
-                    saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars)
+                    saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars, groupIntent, loadedCustomFieldKeys)
                 } catch (error: IllegalArgumentException) {
                     KdbxResult.Failure(error, code = KdbxError.SAVE_FAILED)
                 }
@@ -73,41 +74,80 @@ internal class VaultEntryWriteCoordinator(
 
     /** 条目保存主体：既有条目合并更新（含历史修订），未命中则新建 */
     suspend fun saveEntryInternal(
-        entry: UiVaultEntry,
-        passwordChars: CharArray?,
-        totpSecretChars: CharArray?,
-        protectedFieldChars: Map<String, CharArray>
+        entry: UiVaultEntry, passwordChars: CharArray?, totpSecretChars: CharArray?,
+        protectedFieldChars: Map<String, CharArray>,
+        groupIntent: EntryGroupIntent = EntryGroupIntent.Keep,
+        loadedCustomFieldKeys: Map<String, String> = emptyMap()
     ): KdbxResult<Unit> {
+        // ISSUE-P2-634：重名键 / 与标准字段键冲突都会让 KDBX 写出两个同名 <String>，
+        // 官方实现按后者覆盖 ⇒ 静默丢值。写入前拒绝，草稿留在编辑页
+        val invalidKey = CustomFieldMergePolicy.findInvalidKey(entry.customFields)
+        if (invalidKey != null) {
+            return KdbxResult.Failure(
+                IllegalArgumentException("custom field key duplicated or reserved"),
+                userText = strings.get(R.string.err_entry_custom_field_invalid, invalidKey),
+                code = KdbxError.ENTRY_CUSTOM_FIELD_INVALID
+            )
+        }
+
         val db = databaseSession.databaseFlow.first()
         val targetUuid = parseKdbxUuidOrNull(entry.id)
         val existing = if (targetUuid != null && db != null) {
             db.rootGroup.allEntries().firstOrNull { it.id == targetUuid }
         } else null
 
-        if (existing != null) {
-            saveMergedEntry(entry, existing, db, passwordChars, totpSecretChars, protectedFieldChars)
+        // ISSUE-P2-635：保留 / 移动到根 / 移动到具体分组三态由意图显式表达；
+        // 目标不存在、不可解析或落在回收站子树内一律拒绝写入（不静默落到别处）
+        val targetParentId = when (
+            val resolved = EntryGroupTargetResolver.resolve(db, existing?.parentGroupId, groupIntent)
+        ) {
+            is EntryGroupTargetResolver.Resolution.Invalid -> return KdbxResult.Failure(
+                IllegalArgumentException("target group missing, unparsable or in recycle bin"),
+                userText = strings.get(R.string.err_entry_group_target_invalid),
+                code = KdbxError.ENTRY_GROUP_TARGET_INVALID
+            )
+            is EntryGroupTargetResolver.Resolution.Resolved -> resolved.parentId
+        }
+
+        val writeResult = if (existing != null) {
+            saveMergedEntry(
+                entry, existing, db, passwordChars, totpSecretChars, protectedFieldChars,
+                loadedCustomFieldKeys, targetParentId
+            )
         } else {
             // 新建条目
             val kdbxEntry = entryMapper.mapUiEntryToKdbx(entry, passwordChars, totpSecretChars, protectedFieldChars)
-            databaseSession.saveEntry(kdbxEntry)
+            databaseSession.saveEntry(
+                if (targetParentId != null) kdbxEntry.copy(parentGroupId = targetParentId) else kdbxEntry
+            )
+            KdbxResult.Success(Unit)
         }
+        if (writeResult is KdbxResult.Failure) return writeResult
         return persistSession()
     }
 
-    /** 既有条目：五段字段各自合并后走 HistoryManager 记录修订，父组变更时换址重挂 */
+    /**
+     * `ISSUE-P2-633`：历史回滚（直接恢复历史 `KdbxEntry` 内容与附件所有权）。
+     * 组件在本类内部组合，避免仓库门面为此再加一条转发链。
+     */
+    suspend fun rollbackToRevision(entryId: String, revisionHandle: String): KdbxResult<Unit> =
+        revisionRollback.rollback(entryId, revisionHandle)
+
+    /** 既有条目：五段字段各自合并后走 HistoryManager 记录修订，父组变更时**单次换址**落树 */
     private suspend fun saveMergedEntry(
         entry: UiVaultEntry,
         existing: KdbxEntry,
         db: KdbxDatabase?,
         passwordChars: CharArray?,
         totpSecretChars: CharArray?,
-        protectedFieldChars: Map<String, CharArray>
-    ) {
-        val targetParentId = entry.groupId?.let { parseKdbxUuidOrNull(it) } ?: existing.parentGroupId
+        protectedFieldChars: Map<String, CharArray>,
+        loadedCustomFieldKeys: Map<String, String>,
+        targetParentId: KdbxUuid?
+    ): KdbxResult<Unit> {
         val pendingNewEntry = existing.copy(
             parentGroupId = targetParentId,
             fields = mergeStandardFields(existing, entry, passwordChars, totpSecretChars),
-            customFields = mergeCustomFields(existing, entry, protectedFieldChars),
+            customFields = CustomFieldMergePolicy.merge(existing, entry, protectedFieldChars, loadedCustomFieldKeys),
             attachments = mergeAttachments(existing, entry),
             // 断点7 整改：图标落盘——把 UI 图标名映射回 KDBX 标准 iconId
             iconId = entryMapper.mapIconNameToId(entry.iconName, fallbackId = existing.iconId),
@@ -130,10 +170,22 @@ internal class VaultEntryWriteCoordinator(
             maxHistorySize = db?.historyMaxSize ?: HistoryManager.DEFAULT_MAX_HISTORY_SIZE
         )
 
-        if (targetParentId != existing.parentGroupId) {
-            databaseSession.deleteEntry(existing.id)
+        if (targetParentId != null && targetParentId != existing.parentGroupId) {
+            // ISSUE-P2-635：换址走会话单次变换（摘除 + 落位同一临界区），不再 delete + save——
+            // 两步之间条目在内存树里不存在，并发读会看到「条目已消失」。
+            // 目标分组在解析后可能已被并发删除/移入回收站 ⇒ 如实失败，正式文件保持原状
+            val moved = databaseSession.saveEntryInGroup(finalEntry, targetParentId)
+            if (!moved) {
+                return KdbxResult.Failure(
+                    IllegalStateException("target group vanished before commit"),
+                    userText = strings.get(R.string.err_entry_group_target_invalid),
+                    code = KdbxError.ENTRY_GROUP_TARGET_INVALID
+                )
+            }
+            return KdbxResult.Success(Unit)
         }
         databaseSession.saveEntry(finalEntry)
+        return KdbxResult.Success(Unit)
     }
 
     /** ISSUE-P3-310：过期两态合并——只改 `expires` / `expiryTime`，其余时间属性原样保留。 */
@@ -171,49 +223,8 @@ internal class VaultEntryWriteCoordinator(
         }
     }
 
-    /** 自定义字段：UI 覆盖者按原序落地，未在 UI 出现的既有字段（如 Passkey 属性）原样保留 */
-    private fun mergeCustomFields(
-        existing: KdbxEntry,
-        entry: UiVaultEntry,
-        protectedFieldChars: Map<String, CharArray>
-    ): List<KdbxCustomField> {
-        val uiCustomList = entry.customFields.map { cf ->
-            mergeCustomField(existing, cf, protectedFieldChars)
-        }
-        val uiKeys = uiCustomList.map { it.key }.toSet()
-        val preservedCustom = existing.customFields.filter { ef -> ef.key !in uiKeys }
-        return uiCustomList + preservedCustom
-    }
-
-    private fun mergeCustomField(
-        existing: KdbxEntry,
-        cf: UiCustomField,
-        protectedFieldChars: Map<String, CharArray>
-    ): KdbxCustomField {
-        // TASK-10：受保护自定义字段编辑态明文以 CharArray 显式提交（键为字段编辑 id），
-        // 仅用户显式编辑过的字段出现在 protectedFieldChars 中。
-        // 擦除语义：submittedChars 归 saveEntry 的 finally 契约擦除；回填路径的
-        // readChars 独占副本在密封后立即擦除
-        val submittedChars = if (cf.isProtected) protectedFieldChars[cf.id] else null
-        // F2 整改：UI 投影中受保护字段的明文恒为空（按需解密），未编辑的受保护字段
-        // 回写时「空值」视为未修改，回填既有条目的真实值——防止详情页回滚等携带掩码
-        // 投影的保存路径清空受保护字段
-        val existingField = existing.customFields.firstOrNull { it.key == cf.key }
-        return when {
-            submittedChars != null ->
-                KdbxCustomField(cf.key, ProtectedString(submittedChars, isProtected = true))
-            cf.isProtected && cf.value.isEmpty() -> {
-                val backfillChars = existingField?.value?.readChars()
-                try {
-                    KdbxCustomField(cf.key, ProtectedString(backfillChars ?: CharArray(0), isProtected = true))
-                } finally {
-                    backfillChars?.fill('0')
-                }
-            }
-            else ->
-                KdbxCustomField(cf.key, ProtectedString(cf.value, isProtected = cf.isProtected))
-        }
-    }
+    // 自定义字段合并（删除 / 改名 / 保留三态 + 键合法性）自 ISSUE-P2-634 起整体下沉
+    // [CustomFieldMergePolicy]：那是纯策略，可在纯 JVM 上逐条断言「删了就是删了」。
 
     /**
      * 断点1-2 整改：附件全链路——UI 侧新附件（data 非空）直接随条目提交，

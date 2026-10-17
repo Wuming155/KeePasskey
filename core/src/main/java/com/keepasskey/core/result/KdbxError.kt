@@ -99,4 +99,22 @@ object KdbxError {
     /** 恢复副本写回正式库 / 另存写盘失败。 */
     const val RECOVERY_WRITE_FAILED = "kdbx.recovery.write_failed"
 
+    // ---- 条目历史修订定位（app/data/repository/VaultEntryWriteCoordinator，ISSUE-P2-632）----
+    /**
+     * 历史修订句柄已失效：对应快照已被修剪、条目已变更，或同时间戳快照存在歧义。
+     * 与「落盘失败」分型——前者**未做任何写入**，调用方如实报「历史版本已不可用」，
+     * 不得谎报已回滚（TASK-31 既有口径）。
+     */
+    const val HISTORY_REVISION_UNAVAILABLE = "kdbx.history.revision_unavailable"
+
+    // ---- 条目写入意图校验（app/data/repository/VaultEntryWriteCoordinator）----
+    /** 编辑页提交的目标分组不存在、不可解析或落在回收站——拒绝写入，正式文件保持原状。 */
+    const val ENTRY_GROUP_TARGET_INVALID = "kdbx.entry.group_target_invalid"
+
+    /**
+     * 自定义字段投影不合法：同一键重名，或与标准字段键冲突（ISSUE-P2-634）。
+     * 拒绝写入并保留用户草稿，避免「序列化后同键互相覆盖」的静默数据丢失。
+     */
+    const val ENTRY_CUSTOM_FIELD_INVALID = "kdbx.entry.custom_field_invalid"
+
 }

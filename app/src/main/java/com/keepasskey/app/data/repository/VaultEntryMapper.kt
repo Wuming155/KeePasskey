@@ -53,9 +53,12 @@ internal class VaultEntryMapper(
             )
         }
 
-        val uiRevisions = entry.history.map { h ->
+        // ISSUE-P2-632：修订 id 不再是条目 UUID（KDBX 历史快照的 UUID 与父条目相同，全部历史行
+        // 会共享同一个定位值 ⇒ `firstOrNull` 恒命中首项）。改由 [EntryRevisionHandle] 提供
+        // 「下标 + 修改时间」句柄，选择哪一行就落到哪一行；磁盘 KDBX 的历史 UUID 语义不变。
+        val uiRevisions = entry.history.mapIndexed { index, h ->
             UiEntryRevision(
-                id = h.id.toHexString(),
+                id = EntryRevisionHandle.encode(index, h),
                 modifiedAt = formatInstant(h.times.lastModificationTime),
                 summary = strings.get(R.string.repo_revision_summary),
                 // ISSUE-P0-531 / P2-534：历史条目是 `SessionPersistence.save` 历史修剪的**首当其冲**

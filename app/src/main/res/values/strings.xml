@@ -1021,6 +1021,9 @@
     <string name="err_recovery_local_only">该库非本地文件，无法原地恢复，请改用另存</string>
     <string name="err_recovery_overwrite_blocked">正式库已存在，请先比较差异再确认覆盖</string>
     <string name="err_recovery_write_failed">恢复副本写入失败</string>
+    <!-- ISSUE-P2-635 / P2-634：条目写入意图校验失败（目标分组失效 / 自定义字段键不合法） -->
+    <string name="err_entry_group_target_invalid">目标分组已不存在或不可用，未保存</string>
+    <string name="err_entry_custom_field_invalid">自定义字段“%1$s”重名或与标准字段冲突，未保存</string>
     <!-- ISSUE-P1-592：自动锁定失败后的恢复副本处置对话框 -->
     <string name="recovery_dialog_title">发现未保存的恢复副本</string>
     <string name="recovery_dialog_body">上次锁定时有未获取落盘的改动已单独加密保存。请用该库的主密码解锁以比较差异，再选择恢复或另存；不会在无确认时覆盖正式库。</string>

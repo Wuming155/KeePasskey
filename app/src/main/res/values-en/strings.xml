@@ -1010,6 +1010,9 @@
     <string name="err_recovery_local_only">This vault is not a local file; in-place restore is unsupported — use Save as instead</string>
     <string name="err_recovery_overwrite_blocked">The official vault already exists; compare differences and confirm before overwriting</string>
     <string name="err_recovery_write_failed">Failed to write the recovery copy</string>
+    <!-- ISSUE-P2-635 / P2-634: entry write intent validation (invalid target group / invalid custom field key) -->
+    <string name="err_entry_group_target_invalid">The target group no longer exists or is unavailable; nothing was saved</string>
+    <string name="err_entry_custom_field_invalid">Custom field \"%1$s\" is duplicated or conflicts with a standard field; nothing was saved</string>
     <!-- ISSUE-P1-592: recovery copy handling dialog after a failed auto-lock save -->
     <string name="recovery_dialog_title">Unsaved recovery copy found</string>
     <string name="recovery_dialog_body">Changes that could not be written to the vault before the last lock were saved separately in encrypted form. Unlock with this vault\'s master password to compare differences, then restore or save as a new vault. The official vault is never overwritten without confirmation.</string>
