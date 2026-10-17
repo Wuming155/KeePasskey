@@ -180,6 +180,17 @@
 - 关闭条件：上述产品路径在设备上实跑通过（合并后重开，库名 / 描述 / 默认用户名 / 颜色 / 库级 customData 与外部改动一致，本地未改字段不变），并同步更新限界 §47 的验证层级。
 - [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：本项由该方案第三轮审计发现，详见其「实施记录」§9.3。
 
+### ISSUE-P2-660 同步（云端）路径的**分组**同字段双侧异值仍为字段级 LWW，不进冲突面
+
+- 核实：2026-10-16（Asia/Shanghai），`ISSUE-P1-631` 第三轮审计；静态确认；置信度：高。
+- 问题：合并器现已产出 `MergeResult.groupConflicts`，**漂移面**已据此阻断并裁决；但 `sync` 路径的消费方只读 `MergeResult.conflicts`（条目级），**不读** `groupConflicts` ⇒ 云端同步时分组同字段双侧异值仍由 `KdbxGroupFieldMerge` 按 LWW 静默定案，用户无任何提示。
+- 影响与触发：两端各自修改同一分组的组名 / 备注 / 图标 / 父组 / 组级自定义数据且取值不同时，一端修改被静默丢弃。触发序列：设备 A 改分组名 → 设备 B 改同一分组名为另一值 → 任一端同步。
+- 定级：P2（与漂移面同源同型；漂移面已证成可行，同步面照同一条路即可）。范围说明见限界 §46（第三轮已把「分组级差异不产生冲突清单」的旧边界改写为「漂移面已修 / 同步面仍 LWW」）。
+- 位置：`sync/src/main/java/com/keepasskey/sync/merge/KdbxGroupFieldMerge.kt`；`sync/.../KdbxMerger.kt`（`MergeResult.groupConflicts`）；`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt`（决策清单与 `groupConflictFlow`）；`app/.../sync/SyncGroupConflictResolution.kt`（与漂移面共用的落树原语）。
+- 已实现（2026-10-17）：`SyncConflictDecision` 携带 `entries` / `groups` / `meta`，`handleConflictMerge` 任一非空即进待决（不再只判条目）；新增 `groupConflictFlow` 独立通道，列表页冲突入口与冲突页同时消费。`resolveConflicts` 增加 `groupResolutions`，落树复用与漂移面**同一实现** `applyGroupConflictChoices`（只重裁差异字段；「双方保留」由 `KdbxGroupDuplicator` 复制整棵子树并重生成 UUID）；冲突页新增分组卡片（整组取本地 / 整组取云端 / 双方保留），副本后缀为「云端冲突副本」（与漂移面「磁盘冲突副本」区分）。JVM：`SyncGroupConflictResolutionTest` 7 例 0 失败（含多组同批裁决、目标缺失与根组 fail-closed）。
+- 尚未完成：① **设备端 UI 驱动验收**——两端各改同一分组 → 冲突页逐组裁决 → 上传 → 另一端同步回读；真机 Compose 点击级路径未驱动。② 分组「双方保留」在**多端循环**（A 上传副本、B 再同步）下的稳定性未实测。JVM 与代码层结论不代替这两项。
+- 关闭条件：同步消费方读 `groupConflicts` 并复用 `KdbxGroupConflictResolver` / `KdbxGroupDuplicator`，且限界 §46 收窄为「已对齐」，**并补设备端验收**（本项原条件未写设备端，按台账口径补齐）。
+
 ## P3 低危问题、特性接线与体验优化
 ### ISSUE-P3-642 原生Passkey候选在请求RP不匹配时仍走包名回退
 
@@ -261,3 +272,23 @@
 - 位置：`crypto/src/main/java/com/keepasskey/crypto/passkey/PasskeyPrf.kt:124`；`crypto/src/main/java/com/keepasskey/crypto/cipher/CbcDecryptingInputStream.kt:286`。
 - 已实现：无，本轮仅审查和编制方案。尚未完成：工作缓冲观测、修复及正常/失败/提前退出验证。
 - [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-654/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
+
+### ISSUE-P3-656 S3目录XML修改时间被按HTTP日期解析而丢失
+
+- 核实：2026-10-16（Asia/Shanghai），当前源码与协议消费链；静态确认；置信度：高。
+- 问题：ListObjects XML的LastModified使用ISO时间，但S3DirectoryList调用只认RFC1123的S3HttpDateCodec，解析失败回0。仓内fixture已含2026-10-06T00:00:00.000Z却未断言时间字段。
+- 影响与触发：S3目录列表元数据中的真实修改时间丢失，依赖该接口的展示或排序不能得到正确值；不外推为同步ETag失效。 复现与反证详见方案。
+- 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3DirectoryList.kt:135`；`sync/src/main/java/com/keepasskey/sync/s3/S3HttpDateCodec.kt:15`。
+- 已实现（2026-10-17）：新增 `S3XmlTimeCodec`（ISO-8601：`Instant` / `OffsetDateTime` / 无时区按 UTC），`S3DirectoryList` 的 `<LastModified>` 改走该解析器；HTTP 响应头仍走 `S3HttpDateCodec`（RFC 1123，协议归口不混用）。JVM：fixture 时间断言为 `1791244800000`、无小数秒与带 `+08:00` 偏移同值、非法值降级 0、HTTP 解析器不认 ISO，共 7 例 0 失败。
+- 尚未完成：① 真实 S3 服务端到端（目录列表回读 `<LastModified>`，含 `&` 前缀目录的分页回执）；② 设备端未跑（本项为纯解析改动，未新增/修改 `androidTest`）。模型层 `0 = 未知` 与合法 1970 同值属既有字段边界，本项不改变该契约。
+- [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-656/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
+
+### ISSUE-P3-657 S3签名密钥级联派生在中途异常时遗漏清理
+
+- 核实：2026-10-16（Asia/Shanghai），当前源码与协议消费链；静态确认异常出口缺口；置信度：高（控制流）；异常触发概率低。
+- 问题：kDate/kRegion/kService在第一个try内依次生成，该finally只清kSecret；清前三级的第二个try只有全部派生完成后才进入。中间HMAC抛异常时，已分配派生数组跳过清理。
+- 影响与触发：异常路径的可擦派生秘密等待GC；正常路径已有清理，真实HMAC异常/资源错误才触发。无外部未授权读取内存证据，不是签名密钥直接外传。 复现与反证详见方案。
+- 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3RequestSigner.kt:174`。
+- 已实现（2026-10-17）：三个中间派生量改为可空持有、逐级「先赋值再使用」，并登记在**同一最外层 finally** 的擦除面上；派生链抽为可注入 HMAC 的 `deriveSigningKeyChain`（正常与故障共用同一清理路径）。JVM：`S3SigningKeyDerivationTest` 5 例（第 2/3/4 步受控异常 + 成功路径不擦最终 key + 空 kSecret），0 失败。
+- 尚未完成：① 真实服务签名端到端（既有签名场景用例保持全绿，不代替该项）；② 时钟偏移重签路径（`S3ClockSkewGuard`）在异常清理改动后的实跑未覆盖；③ 设备端未跑。
+- [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-657/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。

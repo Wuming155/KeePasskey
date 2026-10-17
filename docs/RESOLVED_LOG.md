@@ -635,4 +635,4 @@
 | §535 | CI 门禁三项失败与同步编排用例时序修复 | `ISSUE-P2-645` / `ISSUE-P2-658`（两条整条闭环） | [535-CI门禁三项失败与同步编排用例时序修复批次.md](resolved/batches/535-CI门禁三项失败与同步编排用例时序修复批次.md) |
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58~§157，已封卷）· [`05`](resolved/BATCH_158_PLUS.md)（§158~§504，已封卷·超额册）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起，**当前滚动册**）。
-| §536 | S3 签名/时间/派生清理与同步分组冲突消费闭环 | `ISSUE-P3-656` / `ISSUE-P3-657` / `ISSUE-P2-660`（三条整条闭环） | [536-S3签名时间派生清理与同步分组冲突消费闭环批次.md](resolved/batches/536-S3签名时间派生清理与同步分组冲突消费闭环批次.md) |
+| §536 | S3 与同步分组整改实施记录（非闭环；更正误归档） | `ISSUE-P3-656` / `P3-657` / `P2-660`（仍在 ACTIVE_ISSUES） | [536-S3签名时间派生清理与同步分组冲突消费闭环批次.md](resolved/batches/536-S3签名时间派生清理与同步分组冲突消费闭环批次.md) |
