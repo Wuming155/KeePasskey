@@ -237,8 +237,8 @@ class S3SyncProvider private constructor(
         cursor = cursor,
         pageSize = pageSize,
         buildBucketRootUrl = { buildUrl("") },
-        sign = { method, url, payloadHash, queryString ->
-            signV4(method, url, payloadHash, queryString = queryString)
+        sign = { method, url, payloadHash, queryParams ->
+            signV4(method, url, payloadHash, queryParams = queryParams)
         },
         execute = { request -> executeCancellable(httpClient.newCall(request)) }
     )
@@ -477,14 +477,17 @@ class S3SyncProvider private constructor(
      *
      * TASK-45：生产调用方一律经 [S3ClockSkewGuard.signingDate] 传入补偿后时间戳；
      * [dateTime] 保留默认值仅供单元测试注入固定时间点（已知答案向量）使用。
+     *
+     * ISSUE-P2-655：[queryParams] 为结构化键值表；目录列举的 wire URL 与签名 query
+     * 由同一份 [S3RequestSigner.canonicalizeQueryPairs] 输出产生。
      */
     internal fun signV4(
         method: String,
         url: String,
         payloadHash: String,
         dateTime: Date = Date(),
-        queryString: String = ""
-    ): Map<String, String> = signer.signV4(method, url, payloadHash, dateTime, queryString)
+        queryParams: List<Pair<String, String>> = emptyList()
+    ): Map<String, String> = signer.signV4(method, url, payloadHash, dateTime, queryParams)
 
     companion object {
         const val EMPTY_SHA256 = S3RequestSigner.EMPTY_SHA256

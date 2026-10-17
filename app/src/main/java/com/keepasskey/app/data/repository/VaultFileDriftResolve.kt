@@ -7,6 +7,7 @@ import com.keepasskey.app.security.ExternalModificationChoice
 import com.keepasskey.app.security.VaultFileBaseline
 import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.app.security.VaultFileMetadataProbe
+import com.keepasskey.app.sync.withMergedMeta
 import com.keepasskey.app.sync.eraseDiscardedDatabase
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.util.StreamLimitExceededException
@@ -285,7 +286,7 @@ internal class VaultFileDriftResolve(
             rootGroup = mergedRoot,
             deletedObjects = merged.mergedDeletedObjects,
             customIcons = merged.mergedCustomIcons
-        )
+        ).withMergedMeta(mergeSupport.applyMetaConflictPolicy(merged, policy))
         val prepared = when (val p = databaseSession.prepareSerializedSave(replacement)) {
             is KdbxResult.Success -> p.data
             is KdbxResult.Failure -> {

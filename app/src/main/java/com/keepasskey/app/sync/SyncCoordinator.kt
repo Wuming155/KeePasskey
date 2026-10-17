@@ -13,7 +13,9 @@ import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.ConflictedGroupPair
 import com.keepasskey.sync.merge.FieldResolutionChoice
+import com.keepasskey.sync.merge.MetaFieldConflict
 import com.keepasskey.sync.provider.SyncProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -180,9 +182,10 @@ open class SyncCoordinator @Inject constructor(
         databaseSession.addLockObserver(this)
     }
 
-    /** 当前待决冲突清单（ISSUE-P3-25：状态下沉 [SyncConflictController]，对外实例语义不变）。 */
+    /** 当前待决冲突清单；`ISSUE-P2-660`/`P2-659`：条目、分组、库级 Meta 各一条通道，三者都必须被消费。 */
     open val conflictFlow: StateFlow<List<ConflictedEntryPair>> get() = conflicts.conflictFlow
-
+    open val groupConflictFlow: StateFlow<List<ConflictedGroupPair>> get() = conflicts.groupConflictFlow
+    open val metaConflictFlow: StateFlow<List<MetaFieldConflict>> get() = conflicts.metaConflictFlow
     // ICacheSupervisor 六事件接线：每次同步周期结束后把引擎事件发布给上层订阅者
     private val _syncEvents = MutableSharedFlow<SyncCacheEvent>(extraBufferCapacity = 64)
     open val syncEvents: SharedFlow<SyncCacheEvent> = _syncEvents.asSharedFlow()
@@ -391,10 +394,15 @@ open class SyncCoordinator @Inject constructor(
      * 串行化边界与拆分前一致：整个决策-提交过程在 [SyncSessionState.mutex] 内执行
      * （与同步周期互斥）。条目级/字段级决策的语义详见
      * [SyncConflictController.resolveConflicts]。
+     *
+     * `ISSUE-P2-660`/`P2-659`：[groupResolutions] 为分组级决策（`groupId` → 取舍）；
+     * [metaResolutions] 为库级 Meta 字段级决策（`KdbxMetaConflictKeys` 词汇）。
      */
     open suspend fun resolveConflicts(
         resolutions: Map<String, ConflictResolutionChoice>,
-        fieldResolutions: Map<String, Map<String, FieldResolutionChoice>> = emptyMap()
+        fieldResolutions: Map<String, Map<String, FieldResolutionChoice>> = emptyMap(),
+        groupResolutions: Map<String, ConflictResolutionChoice> = emptyMap(),
+        metaResolutions: Map<String, FieldResolutionChoice> = emptyMap()
     ): SyncOutcome = withSessionLockCancellation {
         // ISSUE-P2-625：等待同步互斥锁期间不挂起安全锁定；只在取得锁后保护本地裁决段。
         var holdoffActive = false
@@ -405,6 +413,8 @@ open class SyncCoordinator @Inject constructor(
                 conflicts.resolveConflicts(
                     resolutions,
                     fieldResolutions,
+                    groupResolutions,
+                    metaResolutions,
                     releaseLocalHoldoff = {
                         if (holdoffActive) {
                             holdoffActive = false

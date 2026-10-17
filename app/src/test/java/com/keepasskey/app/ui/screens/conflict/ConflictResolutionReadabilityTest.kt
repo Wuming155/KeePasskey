@@ -107,7 +107,9 @@ class ConflictResolutionReadabilityTest {
 
             override suspend fun resolveConflicts(
                 resolutions: Map<String, com.keepasskey.sync.merge.ConflictResolutionChoice>,
-                fieldResolutions: Map<String, Map<String, com.keepasskey.sync.merge.FieldResolutionChoice>>
+                fieldResolutions: Map<String, Map<String, com.keepasskey.sync.merge.FieldResolutionChoice>>,
+                groupResolutions: Map<String, com.keepasskey.sync.merge.ConflictResolutionChoice>,
+                metaResolutions: Map<String, com.keepasskey.sync.merge.FieldResolutionChoice>
             ): SyncOutcome {
                 conflictFlowInternal.value = emptyList()
                 return SyncOutcome.MergedAndUploaded

@@ -89,7 +89,9 @@ class ConflictResolutionCustomFieldTest {
 
             override suspend fun resolveConflicts(
                 resolutions: Map<String, ConflictResolutionChoice>,
-                fieldResolutions: Map<String, Map<String, FieldResolutionChoice>>
+                fieldResolutions: Map<String, Map<String, FieldResolutionChoice>>,
+                groupResolutions: Map<String, ConflictResolutionChoice>,
+                metaResolutions: Map<String, FieldResolutionChoice>
             ): SyncOutcome {
                 harness.resolvedMap = resolutions
                 harness.resolvedFieldMap = fieldResolutions

@@ -1,6 +1,8 @@
 package com.keepasskey.app.sync
 
 import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.ConflictedGroupPair
+import com.keepasskey.sync.merge.MetaFieldConflict
 
 /**
  * 云同步结果状态模型 (Wave 3-E P0-5)
@@ -27,8 +29,19 @@ sealed class SyncOutcome {
     /** 三方自动合并成功并已同步回写云端与本地 */
     data object MergedAndUploaded : SyncOutcome()
 
-    /** 发生条目同字段冲突，需用户在冲突界面决策 */
-    data class ConflictNeedsUser(val conflicts: List<ConflictedEntryPair>) : SyncOutcome()
+    /**
+     * 发生同字段冲突，需用户在冲突界面决策。
+     *
+     * `ISSUE-P2-660`：[conflicts] 为条目级，[groupConflicts] 为**分组级**（同字段双侧异值）。
+     * 两者必须一并带出——同步面此前只读条目冲突，分组分歧由 `KdbxGroupFieldMerge` 按 LWW
+     * 静默定案，用户无任何提示。默认空表保持既有构造点源码兼容。
+     */
+    data class ConflictNeedsUser(
+        val conflicts: List<ConflictedEntryPair>,
+        val groupConflicts: List<ConflictedGroupPair> = emptyList(),
+        /** `ISSUE-P2-659`：库级 Meta 的残余冲突（标量双侧异值且无时间戳可裁） */
+        val metaConflicts: List<MetaFieldConflict> = emptyList()
+    ) : SyncOutcome()
 
     /**
      * 云端副本（[remotePath]）登记的归属库与当前库不同（`ISSUE-P2-291`）：

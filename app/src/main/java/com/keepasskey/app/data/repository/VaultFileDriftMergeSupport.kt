@@ -8,7 +8,10 @@ import com.keepasskey.app.security.VaultFileBaseline
 import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.app.security.VaultFileDriftPolicy
 import com.keepasskey.app.security.VaultFileMetadataProbe
+import com.keepasskey.app.sync.applyGroupConflictChoices
+import com.keepasskey.app.sync.withMergedMeta
 import com.keepasskey.app.sync.applyResolvedEntriesToGroup
+import com.keepasskey.app.sync.toMetaLite
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.util.readBoundedBytes
 import com.keepasskey.core.log.AppLog
@@ -20,12 +23,13 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.merge.ConflictResolutionChoice
+import com.keepasskey.sync.merge.FieldResolutionChoice
+import com.keepasskey.sync.merge.KdbxMetaLite
+import com.keepasskey.sync.merge.KdbxMetaMerge
 import com.keepasskey.sync.merge.ConflictedEntryPair
 import com.keepasskey.sync.merge.ConflictedGroupPair
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxEntryDuplicator
-import com.keepasskey.sync.merge.KdbxGroupConflictResolver
-import com.keepasskey.sync.merge.KdbxGroupDuplicator
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
 import java.io.File
@@ -66,9 +70,14 @@ internal class TrustedBaseline(
     val database: KdbxDatabase
 )
 
-/** `ISSUE-P1-631`：`KdbxDatabase` → 合并镜像（三项同形，禁逐处手抄字段清单） */
+/**
+ * `ISSUE-P1-631`：`KdbxDatabase` → 合并镜像（三项同形，禁逐处手抄字段清单）。
+ *
+ * `ISSUE-P2-659`：镜像同时携带库级 Meta——漂移合并必须把它一并纳入，否则外部工具对
+ * 库名 / 描述 / 默认用户名 / 自定义数据的改动会在「合并后保存」时被本地值覆盖。
+ */
 internal fun KdbxDatabase.toMergeLite(): KdbxDatabaseLite =
-    KdbxDatabaseLite(rootGroup, deletedObjects, customIcons)
+    KdbxDatabaseLite(rootGroup, deletedObjects, customIcons, toMetaLite())
 
 /**
  * `ISSUE-P1-631`：漂移合并的**真实基线解析与冲突裁决**支持（自 `VaultFileDriftResolve` 拆出，
@@ -136,7 +145,7 @@ internal class VaultFileDriftMergeSupport(
         policy: DriftMergeConflictPolicy?,
         pathId: String
     ): KdbxGroup? {
-        val total = merged.conflicts.size + merged.groupConflicts.size
+        val total = merged.conflicts.size + merged.groupConflicts.size + merged.metaConflicts.size
         if (total == 0) return merged.mergedRoot
         if (policy == null) {
             // 同字段双侧修改不静默取一侧——置待裁决提示并**不落盘**；
@@ -148,7 +157,8 @@ internal class VaultFileDriftMergeSupport(
             )
             AppLog.w(
                 DRIFT_LOG_TAG,
-                "漂移合并存在待裁决冲突: 条目=${merged.conflicts.size} 分组=${merged.groupConflicts.size}"
+                "漂移合并存在待裁决冲突: 条目=${merged.conflicts.size} " +
+                    "分组=${merged.groupConflicts.size} 库Meta=${merged.metaConflicts.size}"
             )
             return null
         }
@@ -163,6 +173,27 @@ internal class VaultFileDriftMergeSupport(
     }
 
     /**
+     * `ISSUE-P2-659`：按漂移裁决策略落定**库级 Meta** 的残余冲突（双侧异值且无时间戳可裁）。
+     *
+     * - 取本地 / 取磁盘：该侧值整体生效（`KdbxMetaMerge.resolveFieldsOnly` 只重裁差异字段）；
+     * - 双方保留：标量没有「并集」语义，Meta 不产生副本——保持合并产物（本地为底版）。
+     *   这是**明确定义的边界**而非静默：用户选「双方保留」时，条目与分组各留两份，
+     *   库名 / 描述这类单值设置只能留一份。
+     */
+    fun applyMetaConflictPolicy(merged: MergeResult, policy: DriftMergeConflictPolicy?): KdbxMetaLite? {
+        val meta = merged.mergedMeta ?: return null
+        if (merged.metaConflicts.isEmpty()) return meta
+        val choices = when (policy) {
+            DriftMergeConflictPolicy.KEEP_DISK ->
+                merged.metaConflicts.associate { it.fieldKey to FieldResolutionChoice.KEEP_REMOTE }
+            DriftMergeConflictPolicy.KEEP_LOCAL,
+            DriftMergeConflictPolicy.KEEP_BOTH,
+            null -> emptyMap()
+        }
+        return KdbxMetaMerge.resolveFieldsOnly(meta, merged.metaConflicts, choices)
+    }
+
+    /**
      * 待裁决对象的展示用标题（仅展示面，不承载任何字段值 / 明文）；
      * 条目在前、分组在后，共取前 [MAX_CONFLICT_TITLES] 条（总数仍按真实值展示）。
      */
@@ -173,7 +204,11 @@ internal class VaultFileDriftMergeSupport(
         val groupTitles = merged.groupConflicts.map { pair ->
             strings.get(R.string.ext_mod_merge_conflict_group_prefix) + pair.groupName
         }
-        return (entryTitles + groupTitles).take(MAX_CONFLICT_TITLES)
+        // ISSUE-P2-659：库级 Meta 冲突按字段键展示（库名 / 描述等，均为公开元数据）
+        val metaTitles = merged.metaConflicts.map { conflict ->
+            strings.get(R.string.ext_mod_merge_conflict_meta_prefix) + conflict.fieldKey
+        }
+        return (entryTitles + groupTitles + metaTitles).take(MAX_CONFLICT_TITLES)
     }
 
     /**
@@ -250,70 +285,26 @@ internal class VaultFileDriftMergeSupport(
     /**
      * `ISSUE-P1-631`（分组裁决）：按用户裁决把冲突分组落回合并树。
      *
-     * - 本地 / 磁盘：只重裁差异字段（`KdbxGroupConflictResolver.resolveFieldsOnly`），
-     *   非差异字段保持三方合并产物；
-     * - 双方保留：原分组保留**本地**字段值，另在**同一父组下**插入一棵复制子树，其根取
-     *   **磁盘**字段值、名字带「磁盘冲突副本」后缀；复制体上分组与条目 UUID 全部重生成
-     *   （`KdbxGroupDuplicator`），history 指向新条目 UUID、子树内部引用重映射。
-     *
-     * 任一环节找不到目标节点（树结构与冲突清单不一致，理论不可达）返回 null，
-     * 调用方 fail-closed —— 绝不静默丢掉一条冲突。
+     * `ISSUE-P2-660`：实现收敛到 `app.sync` 的 [applyGroupConflictChoices]——同步面接入分组差异
+     * 后必须有**同一份**裁决语义（只重裁差异字段、双方保留复制整棵子树），否则两条路径会各长一套。
+     * 本函数只保留「漂移三档策略 → 裁决词汇」的映射与磁盘侧措辞的副本后缀。
      */
     private fun applyGroupConflictPolicy(
         mergedRoot: KdbxGroup,
         conflicts: List<ConflictedGroupPair>,
         policy: DriftMergeConflictPolicy
-    ): KdbxGroup? {
-        val byHex = mergedRoot.allGroups().associateBy { it.id.toHexString() }
-        val replacements = mutableMapOf<KdbxUuid, KdbxGroup>()
-        val duplicates = mutableListOf<ConflictedGroupPair>()
-        for (pair in conflicts) {
-            val mergedGroup = byHex[pair.groupId] ?: return null
-            when (policy) {
-                DriftMergeConflictPolicy.KEEP_LOCAL -> {
-                    replacements[mergedGroup.id] = KdbxGroupConflictResolver.resolveFieldsOnly(
-                        merged = mergedGroup,
-                        pair = pair,
-                        choice = ConflictResolutionChoice.KEEP_LOCAL
-                    )
-                }
-                DriftMergeConflictPolicy.KEEP_DISK -> {
-                    replacements[mergedGroup.id] = KdbxGroupConflictResolver.resolveFieldsOnly(
-                        merged = mergedGroup,
-                        pair = pair,
-                        choice = ConflictResolutionChoice.KEEP_REMOTE
-                    )
-                }
-                DriftMergeConflictPolicy.KEEP_BOTH -> {
-                    replacements[mergedGroup.id] = KdbxGroupConflictResolver.resolveFieldsOnly(
-                        merged = mergedGroup,
-                        pair = pair,
-                        choice = ConflictResolutionChoice.KEEP_LOCAL
-                    )
-                    duplicates += pair
-                }
-            }
-        }
-        var root = KdbxGroupConflictResolver.applyResolvedGroupsToTree(mergedRoot, replacements)
-            ?: return null
-        for (pair in duplicates) {
-            val targetId = root.allGroups().firstOrNull { it.id.toHexString() == pair.groupId }?.id
-                ?: return null
-            root = KdbxGroupDuplicator.duplicateSubtreeAsSibling(
-                root = root,
-                targetId = targetId,
-                newName = duplicateGroupName(pair),
-                // 复制体根节点取磁盘侧字段值；parentGroupId 由复制器重挂为原分组的父组
-                resolveTargetFields = { duplicate ->
-                    KdbxGroupConflictResolver.resolveFieldsOnly(
-                        merged = duplicate,
-                        pair = pair,
-                        choice = ConflictResolutionChoice.KEEP_REMOTE
-                    )
-                }
-            ) ?: return null
-        }
-        return root
+    ): KdbxGroup? = applyGroupConflictChoices(
+        root = mergedRoot,
+        conflicts = conflicts,
+        choiceOf = { policy.toResolutionChoice() },
+        duplicateNameOf = ::duplicateGroupName
+    )
+
+    /** 漂移三档策略 → 与同步面共用的裁决词汇（远端 = 磁盘版本） */
+    private fun DriftMergeConflictPolicy.toResolutionChoice(): ConflictResolutionChoice = when (this) {
+        DriftMergeConflictPolicy.KEEP_LOCAL -> ConflictResolutionChoice.KEEP_LOCAL
+        DriftMergeConflictPolicy.KEEP_DISK -> ConflictResolutionChoice.KEEP_REMOTE
+        DriftMergeConflictPolicy.KEEP_BOTH -> ConflictResolutionChoice.DUPLICATE_BOTH
     }
 
     /** 分组冲突副本的显示名：磁盘侧组名 + 后缀（空名与条目侧同口径，退化为仅后缀） */

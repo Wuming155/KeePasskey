@@ -26,6 +26,11 @@ internal object KdbxMergeOutcomeFactory {
     /**
      * base=空根（UUID 同 local 根）+ local + remote 三棵轻量镜像。
      * 空底版：对端独有对象视为新增；同 UUID 冲突由 [KdbxMerger] 产出清单，调用方 KEEP_LOCAL。
+     *
+     * `ISSUE-P2-659`（Meta 口径）：导入的镜像**刻意不携带库级 Meta**（`meta` 保持 null）。
+     * 语义是「把另一个库的内容并进来」，不是「两个副本互相同步」——库名 / 描述 / 默认用户名 /
+     * 历史上限这些**当前库身份与设置**必须保持本地，不能被被导入的文件覆盖。引擎对 null 的处理
+     * 即「Meta 不参与合并」，与同步 / 漂移两条路径（必须提供 Meta）形成显式分工。
      */
     fun buildMergeLites(
         localDb: KdbxDatabase,

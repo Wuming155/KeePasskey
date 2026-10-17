@@ -205,10 +205,16 @@ class VaultListViewModel @Inject constructor(
         // ISSUE-P2-89：不再需要显式 start()——节拍随 [totpRemainingSeconds] 的订阅自动起停
         // （列表页不可见即停表），此前 init 期常驻启动会在离屏后继续每秒烧 CPU。
         // H2 整改：订阅冲突会话流，冲突待解决时点亮列表页冲突入口
+        // ISSUE-P2-660：分组冲突是独立通道，必须一并计入——否则「只有分组分叉」时入口不亮，
+        // 用户进不去冲突页，分组差异只能等下轮同步再撞一次。
         viewModelScope.launch {
-            syncCoordinator.conflictFlow.collect { conflicts ->
-                hasPendingConflictFlow.value = conflicts.isNotEmpty()
-            }
+            combine(
+                syncCoordinator.conflictFlow,
+                syncCoordinator.groupConflictFlow,
+                syncCoordinator.metaConflictFlow
+            ) { entries, groups, meta ->
+                entries.isNotEmpty() || groups.isNotEmpty() || meta.isNotEmpty()
+            }.collect { pending -> hasPendingConflictFlow.value = pending }
         }
         // PD-47：随设置流刷新防截屏开关快照（顶栏扫码对话框在组合时消费当前值）
         viewModelScope.launch {

@@ -139,6 +139,10 @@ ALLOWED_DISPLAY_READ_FILES = frozenset(
         "app/src/main/java/com/keepasskey/app/data/repository/VaultEntryMapper.kt",
         "app/src/main/java/com/keepasskey/app/data/repository/VaultEntryTotpMapping.kt",
         "app/src/main/java/com/keepasskey/app/ui/screens/conflict/ConflictResolutionViewModel.kt",
+        # `ISSUE-P2-660`/`P2-659`：差异键 → 界面行的映射自 ViewModel 下沉（控行数门禁），
+        # 仍是同一展示面、调用同一安全读口（`readCharsForDisplayOrNull` / `readStringForDisplayOrEmpty`）；
+        # 读取结果只进 UiState 展示串，不参与落盘值 / 下发值 / 裁决判据的构造。
+        "app/src/main/java/com/keepasskey/app/ui/screens/conflict/ConflictResolutionDiffMapper.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillEntrySearch.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillCandidateRanker.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillDatasetBuilders.kt",

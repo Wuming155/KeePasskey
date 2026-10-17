@@ -95,9 +95,15 @@ internal fun ConflictResolutionBottomBar(
     }
 }
 
-/** 顶部警示说明卡片：冲突条数如实取真实列表长度，不以 0 冒充「无冲突」。 */
+/**
+ * 顶部警示说明卡片：冲突条数如实取真实列表长度，不以 0 冒充「无冲突」。
+ *
+ * `ISSUE-P2-660` / `ISSUE-P2-659`：有分组或库设置冲突时改用分类计数文案——只报条目数会让
+ * 用户以为这类差异不存在（而这正是整改前被 LWW 静默吞掉的冲突）。
+ */
 @Composable
-internal fun ConflictWarningCard(conflictCount: Int) {
+internal fun ConflictWarningCard(conflictCount: Int, groupCount: Int = 0, metaCount: Int = 0) {
+    val total = conflictCount + groupCount + metaCount
     Surface(
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
         shape = RoundedCornerShape(14.dp),
@@ -116,7 +122,17 @@ internal fun ConflictWarningCard(conflictCount: Int) {
             Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text(
-                    text = stringResource(R.string.conflict_detected_count, conflictCount),
+                    text = if (groupCount > 0 || metaCount > 0) {
+                        stringResource(
+                            R.string.conflict_detected_count_breakdown,
+                            total,
+                            conflictCount,
+                            groupCount,
+                            metaCount
+                        )
+                    } else {
+                        stringResource(R.string.conflict_detected_count, conflictCount)
+                    },
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )

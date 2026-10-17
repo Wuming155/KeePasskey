@@ -31,14 +31,20 @@ internal object S3DirectoryList {
 
     /**
      * @param buildBucketRootUrl bucket 根对象 URL（ListObjectsV2 规范目标）
-     * @param sign 传入 method/url/payloadHash/queryString 返回签名头
+     * @param sign 传入 method/url/payloadHash/queryParams 返回签名头；queryParams 为结构化键值表
+     *   （ISSUE-P2-655：不得传回拼好的查询串再让签名侧重解析），wire URL 与签名共用同一份规范串
      */
     suspend fun list(
         remotePath: String,
         cursor: String?,
         pageSize: Int,
         buildBucketRootUrl: () -> String,
-        sign: (method: String, url: String, payloadHash: String, queryString: String) -> Map<String, String>,
+        sign: (
+            method: String,
+            url: String,
+            payloadHash: String,
+            queryParams: List<Pair<String, String>>
+        ) -> Map<String, String>,
         execute: suspend (Request) -> Response
     ): Result<RemoteListPage> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
@@ -52,13 +58,13 @@ internal object S3DirectoryList {
             )
             if (prefix.isNotEmpty()) queryPairs.add("prefix" to prefix)
             if (!cursor.isNullOrBlank()) queryPairs.add("continuation-token" to cursor)
-            val signQuery = queryPairs.joinToString("&") { (k, v) -> "$k=$v" }
-            val urlQuery = queryPairs.joinToString("&") { (k, v) ->
-                "${S3KeyCodec.encodeQueryValue(k)}=${S3KeyCodec.encodeQueryValue(v)}"
-            }
+            // ISSUE-P2-655：单一规范输出——wire URL 与 SigV4 CanonicalQueryString 逐字相同。
+            // 旧实现把原始值拼成 signQuery 再让签名侧按 `&` 拆，值内的 `&` 会被拆成额外参数，
+            // 与线上编码后的单个参数不一致 ⇒ 含 `&` 的合法前缀必然签名不匹配。
+            val canonicalQuery = S3RequestSigner.canonicalQueryString(queryPairs)
             val baseUrl = buildBucketRootUrl()
-            val url = "$baseUrl?$urlQuery"
-            val headers = sign("GET", baseUrl, S3RequestSigner.EMPTY_SHA256, signQuery)
+            val url = "$baseUrl?$canonicalQuery"
+            val headers = sign("GET", baseUrl, S3RequestSigner.EMPTY_SHA256, queryPairs)
             val requestBuilder = Request.Builder().url(url).get()
             headers.forEach { (k, v) -> requestBuilder.header(k, v) }
             execute(requestBuilder.build()).use { response ->
@@ -143,7 +149,10 @@ internal object S3DirectoryList {
                     name = path.substringAfterLast('/'),
                     isDirectory = false,
                     contentLength = textOf(node, "Size")?.toLongOrNull() ?: 0L,
-                    lastModifiedMillis = S3HttpDateCodec.parse(textOf(node, "LastModified").orEmpty())
+                    // ISSUE-P3-656：ListObjectsV2 的 `<LastModified>` 是 ISO-8601，不是 HTTP 日期。
+                    // 旧实现复用只认 RFC 1123 的 codec ⇒ 解析必失败回 0，真实修改时间全丢。
+                    // 无法解析时保留模型的「0 = 未知」语义，不伪造时间。
+                    lastModifiedMillis = S3XmlTimeCodec.parseLastModified(textOf(node, "LastModified")) ?: 0L
                 )
             }
             val isTruncated = textOf(root, "IsTruncated")?.equals("true", ignoreCase = true) == true

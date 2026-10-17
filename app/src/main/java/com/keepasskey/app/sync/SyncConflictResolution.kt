@@ -14,6 +14,8 @@ import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.FieldResolutionChoice
 import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.ConflictedGroupPair
+import com.keepasskey.sync.merge.KdbxMetaMerge
 import com.keepasskey.sync.merge.KdbxMerger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -41,11 +43,18 @@ import com.keepasskey.app.ui.model.textArg
  * 决策——键为条目 ID，值为「字段键 → 选择」映射，非空时该条目按字段粒度合并
  * （本地为底版、远端仅覆写用户钦点字段），取代整条目二选一的塌缩行为。
  *
+ * `ISSUE-P2-660`：[groupResolutions] 为**分组**级决策（键 = `ConflictedGroupPair.groupId`）。
+ * 分组差异与条目差异同属「同字段双侧异值」，不得只裁决条目而让分组落回 LWW：未给出决策的
+ * 分组按「取本地」处理（与条目侧默认同口径），选择「双方保留」时由
+ * [applyGroupConflictChoices] 复制整棵子树并重生成 UUID。
+ *
  * ISSUE-P3-25：调用方（`SyncCoordinator.resolveConflicts`）已持有会话互斥锁，本方法内不再取锁。
  */
 internal suspend fun SyncConflictController.resolveConflicts(
     resolutions: Map<String, ConflictResolutionChoice>,
     fieldResolutions: Map<String, Map<String, FieldResolutionChoice>> = emptyMap(),
+    groupResolutions: Map<String, ConflictResolutionChoice> = emptyMap(),
+    metaResolutions: Map<String, FieldResolutionChoice> = emptyMap(),
     releaseLocalHoldoff: suspend () -> Unit = {},
     autoLockGuard: AutoLockSessionGuard? = null
 ): SyncOutcome {
@@ -78,15 +87,36 @@ internal suspend fun SyncConflictController.resolveConflicts(
             updatedRoot = applyResolvedEntriesToGroup(updatedRoot, resolvedByParent)
         }
 
+        // ISSUE-P2-660：分组冲突按同一批裁决落树（漂移面与同步面共用 applyGroupConflictChoices）。
+        // 结构不一致时 fail-closed——绝不静默丢掉一条分组冲突后继续上传。
+        val decisionGroups = _groupConflictFlow.value
+        if (decisionGroups.isNotEmpty()) {
+            updatedRoot = applyGroupConflictChoices(
+                root = updatedRoot,
+                conflicts = decisionGroups,
+                choiceOf = { pair ->
+                    groupResolutions[pair.groupId] ?: ConflictResolutionChoice.KEEP_LOCAL
+                },
+                duplicateNameOf = ::duplicateGroupName
+            ) ?: return@withContext SyncOutcome.Error(
+                strings.get(R.string.sync_error_conflict_group_apply_failed)
+            )
+        }
+
         // ISSUE-P3-292：合并历史在序列化 / 上传 / 落库之前按库级 Meta 上限截断
         // （上传字节与落库树取自同一产物，不存在「本地截了、远端没截」）
+        // ISSUE-P2-659：库级 Meta 随裁决一并落库。未提供决策的冲突字段保持合并产物
+        // （本地为底版）——与条目侧「未显式选择即保留本地」同口径。
+        val mergedMeta = pendingMergedMeta?.let { meta ->
+            KdbxMetaMerge.resolveFieldsOnly(meta, _metaConflictFlow.value, metaResolutions)
+        }
         val mergedDb = truncateMergedHistory(
             localDb.copy(
                 rootGroup = updatedRoot,
                 deletedObjects = pendingMergedTombstones,
                 // ISSUE-P2-280：合并图标池随决策一并采用（同 autoMergeAndUpload 口径）
                 customIcons = pendingMergedCustomIcons
-            )
+            ).withMergedMeta(mergedMeta)
         )
         val mergedBytes = codec.serializeLocalDatabase(mergedDb)
             ?: return@withContext SyncOutcome.Error(strings.get(R.string.sync_error_conflict_serialize_failed))
@@ -132,8 +162,20 @@ internal suspend fun SyncConflictController.resolveConflicts(
     }
 }
 
-/** 将用户裁决结果按目标父组 id 归集（ISSUE-P3-161：单趟落树的前置收集）。 */
-private fun SyncConflictController.collectResolvedByParent(
+/**
+ * `ISSUE-P2-660`：「双方保留」的分组副本显示名——云端侧组名 + 后缀。
+ *
+ * 与漂移面的「磁盘冲突副本」措辞**必须区分**：同步面的 remote 是云端版本，
+ * 漂移面的 remote 是本地磁盘版本，两者不得相互沿用（同 `KdbxMerger.resolveConflict` 的后缀口径）。
+ * 空组名退化为仅后缀（与条目侧同口径）。
+ */
+private fun SyncConflictController.duplicateGroupName(pair: ConflictedGroupPair): String {
+    val suffix = strings.get(R.string.conflict_duplicate_group_suffix)
+    val remoteName = pair.remoteGroup.name
+    return if (remoteName.isBlank()) suffix else "$remoteName ($suffix)"
+}
+
+/** 将用户裁决结果按目标父组 id 归集（ISSUE-P3-161：单趟落树的前置收集）。 */private fun SyncConflictController.collectResolvedByParent(
     decisionConflicts: List<ConflictedEntryPair>,
     resolutions: Map<String, ConflictResolutionChoice>,
     fieldResolutions: Map<String, Map<String, FieldResolutionChoice>>,

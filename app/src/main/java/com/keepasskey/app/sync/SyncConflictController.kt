@@ -14,6 +14,9 @@ import com.keepasskey.sync.engine.SyncEngine
 import com.keepasskey.sync.merge.ConflictDisposition
 import com.keepasskey.sync.merge.ConflictStrategyPolicy
 import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.ConflictedGroupPair
+import com.keepasskey.sync.merge.KdbxMetaLite
+import com.keepasskey.sync.merge.MetaFieldConflict
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
@@ -77,6 +80,10 @@ class SyncConflictController @Inject constructor(
     // 图标为公开素材（非敏感数据），无擦除义务
     internal var pendingMergedCustomIcons: List<com.keepasskey.core.model.CustomIcon> = emptyList()
 
+    // ISSUE-P2-659：待决合并的库级 Meta（决策落库时须与树 / 墓碑 / 图标池一并采用，
+    // 否则用户裁决后写回的仍是「本地 Meta」，外部改动在最后一步丢失）
+    internal var pendingMergedMeta: KdbxMetaLite? = null
+
     // E2 整改：冲突发生时刻的远端 ETag。resolveConflicts 的 If-Match 期望值必须用
     // 该值而非重新探测的当前值，否则用户决策期间远端的再次更新会被静默覆盖
     internal var pendingRemoteEtag: String = ""
@@ -94,8 +101,31 @@ class SyncConflictController @Inject constructor(
 
     internal val _conflictFlow = MutableStateFlow<List<ConflictedEntryPair>>(emptyList())
 
+    /**
+     * `ISSUE-P2-660`：待决**分组**冲突清单（与 [conflictFlow] 并列的独立通道）。
+     *
+     * 为什么单独一条流而不是把两者塞进同一个 `List`：条目冲突项与分组冲突项的裁决词汇、
+     * 落树原语、界面卡片都不同（条目可按字段粒度，分组是整节点 + 可复制子树）。分开后
+     * 既有条目通道的消费方（`VaultListViewModel` 的冲突入口开关、条目卡片渲染）零改动。
+     */
+    internal val _groupConflictFlow = MutableStateFlow<List<ConflictedGroupPair>>(emptyList())
+
+    /**
+     * `ISSUE-P2-659`：待决**库级 Meta** 冲突清单（标量双侧异值且无时间戳可裁）。
+     *
+     * 与条目 / 分组同样必须进待决面：Meta 是标量，没有「双方保留」的并集语义，但「取哪一侧」
+     * 仍然必须由用户决定，不能由合并器替用户选。
+     */
+    internal val _metaConflictFlow = MutableStateFlow<List<MetaFieldConflict>>(emptyList())
+
     /** 当前待决冲突清单（由 `SyncCoordinator.conflictFlow` 对外暴露，实例与拆分前同为单一 StateFlow）。 */
     val conflictFlow: StateFlow<List<ConflictedEntryPair>> = _conflictFlow.asStateFlow()
+
+    /** `ISSUE-P2-660`：当前待决**分组**冲突清单（同步面必须消费，不得只读条目冲突）。 */
+    val groupConflictFlow: StateFlow<List<ConflictedGroupPair>> = _groupConflictFlow.asStateFlow()
+
+    /** `ISSUE-P2-659`：当前待决**库级 Meta** 冲突清单。 */
+    val metaConflictFlow: StateFlow<List<MetaFieldConflict>> = _metaConflictFlow.asStateFlow()
 
     /**
      * ISSUE-P1-275 AC①：冲突上传 If 预条件期望值的**唯一判据**（实现在同包
@@ -222,6 +252,8 @@ class SyncConflictController @Inject constructor(
         pendingRemoteDb?.let { eraseDiscardedDatabase(it, live) }
         pendingMergedRoot?.let { eraseDiscardedGroup(it, live?.rootGroup) }
         _conflictFlow.value = emptyList()
+        _groupConflictFlow.value = emptyList()
+        _metaConflictFlow.value = emptyList()
         pendingRemoteEngine = null
         pendingRemotePath = null
         pendingLocalDb = null
@@ -229,6 +261,7 @@ class SyncConflictController @Inject constructor(
         pendingMergedRoot = null
         pendingMergedTombstones = emptyList()
         pendingMergedCustomIcons = emptyList()
+        pendingMergedMeta = null
         pendingRemoteEtag = ""
         pendingRemoteCache = null
         // ISSUE-P2-278：仅丢引用——该快照是活动会话树的身份别名，绝不列入擦除面
@@ -301,8 +334,14 @@ class SyncConflictController @Inject constructor(
 
         val base = resolveTrustedBase(codec, baseSnapshotBytes, localBytes)
         // ISSUE-P2-280：镜像带图标池——合并产物含对端新增图标，落库时一并采用
-        val localLite = KdbxDatabaseLite(localDb.rootGroup, localDb.deletedObjects, localDb.customIcons)
-        val remoteLite = KdbxDatabaseLite(remoteDb.rootGroup, remoteDb.deletedObjects, remoteDb.customIcons)
+        // ISSUE-P2-659：镜像带库级 Meta——不带给合并器就等于「Meta 不参与合并」，外部工具对
+        // 库名 / 描述 / 默认用户名 / 自定义数据的改动会在同步合并时被本地值覆盖。
+        val localLite = KdbxDatabaseLite(
+            localDb.rootGroup, localDb.deletedObjects, localDb.customIcons, localDb.toMetaLite()
+        )
+        val remoteLite = KdbxDatabaseLite(
+            remoteDb.rootGroup, remoteDb.deletedObjects, remoteDb.customIcons, remoteDb.toMetaLite()
+        )
         val mergeResult = KdbxMerger.mergeDatabases(base.trustedLite, localLite, remoteLite)
         val decisionConflicts = decisionConflictsOf(
             strategy = strategy,
@@ -312,7 +351,7 @@ class SyncConflictController @Inject constructor(
             mergeResult = mergeResult
         )
 
-        if (decisionConflicts.isNotEmpty()) {
+        if (!decisionConflicts.isEmpty) {
             beginPendingConflict(
                 syncEngine, syncCache, remotePath, localDb, remoteDb, mergeResult, decisionConflicts, remoteEtag
             )
@@ -366,7 +405,12 @@ class SyncConflictController @Inject constructor(
         }
     }
 
-    /** 有条目级分叉：留存本次合并底版与双方树，交用户决策（决策阶段由 pending 通道复用） */
+    /**
+     * 有条目级 / 分组级分叉：留存本次合并底版与双方树，交用户决策
+     * （决策阶段由 pending 通道复用）。
+     *
+     * `ISSUE-P2-660`：分组冲突与条目冲突**同等触发待决**——任何一类非空都不得自动落盘。
+     */
     private fun beginPendingConflict(
         syncEngine: SyncEngine,
         syncCache: SyncCache,
@@ -374,7 +418,7 @@ class SyncConflictController @Inject constructor(
         localDb: KdbxDatabase,
         remoteDb: KdbxDatabase,
         mergeResult: MergeResult,
-        decisionConflicts: List<ConflictedEntryPair>,
+        decisionConflicts: SyncConflictDecision,
         remoteEtag: String
     ): SyncOutcome {
         // ISSUE-P3-258：新一轮待决**覆盖**旧 pending 字段前先按身份集合判定擦除旧会话
@@ -383,7 +427,9 @@ class SyncConflictController @Inject constructor(
         // 树密文与池内附件明文只能等 GC——三事件永远追不上已不可达的对象。
         // live = 当前活动会话树：旧 `pendingLocalDb` 恒为其实例（或 copy 共享）⇒ 判定护栏不误擦。
         clearPendingConflictSession()
-        _conflictFlow.value = decisionConflicts
+        _conflictFlow.value = decisionConflicts.entries
+        _groupConflictFlow.value = decisionConflicts.groups
+        _metaConflictFlow.value = decisionConflicts.meta
         pendingRemoteEngine = syncEngine
         pendingRemotePath = remotePath
         pendingLocalDb = localDb
@@ -391,10 +437,15 @@ class SyncConflictController @Inject constructor(
         pendingMergedRoot = mergeResult.mergedRoot
         pendingMergedTombstones = mergeResult.mergedDeletedObjects
         pendingMergedCustomIcons = mergeResult.mergedCustomIcons
+        pendingMergedMeta = mergeResult.mergedMeta
         pendingRemoteEtag = cleanEtag(remoteEtag)
         pendingRemoteCache = syncCache
         // ISSUE-P2-278：待决窗口的起点快照（活动会话树身份，非擦除对象）
         pendingSessionSnapshot = databaseSession.databaseFlow.value
-        return SyncOutcome.ConflictNeedsUser(decisionConflicts)
+        return SyncOutcome.ConflictNeedsUser(
+            conflicts = decisionConflicts.entries,
+            groupConflicts = decisionConflicts.groups,
+            metaConflicts = decisionConflicts.meta
+        )
     }
 }

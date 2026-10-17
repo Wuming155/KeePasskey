@@ -124,7 +124,7 @@ fun ConflictResolutionScreen(
     pendingConfirm?.let { action ->
         ConflictActionConfirmDialog(
             action = action,
-            conflictCount = uiState.entries.size,
+            conflictCount = uiState.entries.size + uiState.groups.size + (uiState.meta?.fields?.size ?: 0),
             onConfirm = {
                 pendingConfirm = null
                 when (action) {
@@ -160,7 +160,11 @@ private fun ConflictResolutionBody(
 
         // 警示说明卡片
         item {
-            ConflictWarningCard(conflictCount = uiState.entries.size)
+            ConflictWarningCard(
+                conflictCount = uiState.entries.size,
+                groupCount = uiState.groups.size,
+                metaCount = uiState.meta?.fields?.size ?: 0
+            )
         }
 
         // ISSUE-P3-360 AC①：两侧修改时间 + 「较新」标注（此前 UI 无消费点）
@@ -180,6 +184,26 @@ private fun ConflictResolutionBody(
             )
         }
 
+        // ISSUE-P2-659：库级 Meta 冲突（库名 / 描述 / 默认用户名 / 颜色 / 历史上限 / 库级自定义数据）。
+        // 标量没有「双方保留」语义，只提供逐字段的本地 / 云端选择。
+        uiState.meta?.let { meta ->
+            item {
+                Text(
+                    text = stringResource(R.string.conflict_meta_section_title),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            item {
+                ConflictedMetaCard(
+                    meta = meta,
+                    onFieldChoiceChange = { fieldKey, choice ->
+                        viewModel.selectMetaFieldChoice(fieldKey, choice)
+                    }
+                )
+            }
+        }
+
         // 冲突条目列表
         items(uiState.entries, key = { it.id }) { entry ->
             ConflictedEntryCard(
@@ -191,182 +215,24 @@ private fun ConflictResolutionBody(
             )
         }
 
-        item { Spacer(modifier = Modifier.height(20.dp)) }
-    }
-}
-
-@Composable
-private fun ConflictedEntryCard(
-    entry: ConflictedEntryItem,
-    onFieldChoiceChange: (String, FieldChoice) -> Unit,
-    onModeChange: (EntryResolutionMode) -> Unit
-) {
-    BentoCard(
-        modifier = Modifier.fillMaxWidth(),
-        backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = entry.title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = entry.groupPath,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // ISSUE-P2-281 AC②／AC③：条目级裁决方式（整条取本地 / 云端兜底与双方保留入口）
-            EntryResolutionModeSelector(
-                mode = entry.mode,
-                onModeChange = onModeChange
-            )
-
-            if (entry.mode == EntryResolutionMode.FIELD_BY_FIELD) {
-                entry.fields.forEach { field ->
-                    FieldDiffRow(
-                        field = field,
-                        onChoiceSelected = { choice -> onFieldChoiceChange(field.fieldKey, choice) }
-                    )
-                }
-            } else {
+        // ISSUE-P2-660：分组冲突（同字段双侧异值）。同步面此前不读 groupConflicts，
+        // 这类差异被 KdbxGroupFieldMerge 按 LWW 静默定案 —— 页面必须显式呈现并允许逐组裁决。
+        if (uiState.groups.isNotEmpty()) {
+            item {
                 Text(
-                    text = stringResource(R.string.conflict_entry_mode_whole_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = stringResource(R.string.conflict_group_section_title, uiState.groups.size),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            items(uiState.groups, key = { "group:${it.id}" }) { group ->
+                ConflictedGroupCard(
+                    group = group,
+                    onModeChange = { mode -> viewModel.selectGroupMode(group.id, mode) }
                 )
             }
         }
-    }
-}
 
-/** ISSUE-P2-281：条目级裁决方式选择行（逐字段 / 整条本地 / 整条云端 / 双方保留）。 */
-@Composable
-private fun EntryResolutionModeSelector(
-    mode: EntryResolutionMode,
-    onModeChange: (EntryResolutionMode) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        EntryResolutionMode.entries.forEach { option ->
-            FilterChip(
-                selected = mode == option,
-                onClick = { onModeChange(option) },
-                label = {
-                    Text(
-                        text = stringResource(entryModeLabelRes(option)),
-                        fontSize = 11.sp
-                    )
-                }
-            )
-        }
-    }
-}
-
-private fun entryModeLabelRes(mode: EntryResolutionMode): Int = when (mode) {
-    EntryResolutionMode.FIELD_BY_FIELD -> R.string.conflict_entry_mode_field
-    EntryResolutionMode.KEEP_LOCAL -> R.string.conflict_entry_keep_local
-    EntryResolutionMode.KEEP_REMOTE -> R.string.conflict_entry_keep_remote
-    EntryResolutionMode.DUPLICATE_BOTH -> R.string.conflict_entry_duplicate_both
-}
-
-@Composable
-private fun FieldDiffRow(
-    field: ConflictedField,
-    onChoiceSelected: (FieldChoice) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = field.fieldName,
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.primary
-        )
-
-        // 本地选项
-        ConflictFieldChoiceRow(
-            choice = FieldChoice.LOCAL,
-            labelRes = if (field.localMissing) R.string.conflict_local_field_missing else R.string.conflict_local_version,
-            labelColor = MaterialTheme.colorScheme.primary,
-            value = field.localValue,
-            selectedChoice = field.selectedChoice,
-            isSensitive = field.isSensitive && !field.localMissing,
-            onChoiceSelected = onChoiceSelected
-        )
-
-        if (field.remoteMissing) {
-            ConflictFieldChoiceRow(
-                choice = FieldChoice.DELETE_REMOTE,
-                labelRes = R.string.conflict_remote_delete_action,
-                labelColor = MaterialTheme.colorScheme.secondary,
-                value = field.remoteValue,
-                selectedChoice = field.selectedChoice,
-                isSensitive = false,
-                onChoiceSelected = onChoiceSelected
-            )
-        } else {
-            ConflictFieldChoiceRow(
-                choice = FieldChoice.REMOTE,
-                labelRes = R.string.conflict_remote_version,
-                labelColor = MaterialTheme.colorScheme.secondary,
-                value = field.remoteValue,
-                selectedChoice = field.selectedChoice,
-                isSensitive = field.isSensitive,
-                onChoiceSelected = onChoiceSelected
-            )
-        }
-    }
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@androidx.compose.ui.tooling.preview.Preview(name = "冲突条目对比卡片 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "冲突条目对比卡片 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun ConflictedEntryCardPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        ConflictedEntryCard(
-            entry = com.keepasskey.app.ui.screens.conflict.ConflictedEntryItem(
-                id = "preview-conflict-1",
-                title = "预览冲突条目",
-                groupPath = "预览根目录 / 网站登录",
-                fields = listOf(
-                    com.keepasskey.app.ui.screens.conflict.ConflictedField(
-                        fieldKey = "Title",
-                        fieldName = "标题",
-                        localValue = "预览标题（本地）",
-                        remoteValue = "预览标题（云端）"
-                    ),
-                    com.keepasskey.app.ui.screens.conflict.ConflictedField(
-                        fieldKey = "Password",
-                        fieldName = "密码",
-                        localValue = "预览掩码值（本地）",
-                        remoteValue = "预览掩码值（云端）",
-                        selectedChoice = com.keepasskey.app.ui.screens.conflict.FieldChoice.REMOTE,
-                        isSensitive = true
-                    )
-                )
-            ),
-            onFieldChoiceChange = { _, _ -> },
-            onModeChange = {}
-        )
+        item { Spacer(modifier = Modifier.height(20.dp)) }
     }
 }

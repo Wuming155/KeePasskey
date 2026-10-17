@@ -9,6 +9,8 @@ import com.keepasskey.sync.merge.BothModifiedEntryCollector
 import com.keepasskey.sync.merge.ConflictDisposition
 import com.keepasskey.sync.merge.ConflictStrategyPolicy
 import com.keepasskey.sync.merge.ConflictedEntryPair
+import com.keepasskey.sync.merge.ConflictedGroupPair
+import com.keepasskey.sync.merge.MetaFieldConflict
 import com.keepasskey.sync.merge.KdbxDatabaseLite
 import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
@@ -61,14 +63,40 @@ internal suspend fun resolveTrustedBase(
         trusted = trustedBase,
         // ISSUE-P2-280：base 镜像同样带图标池（合并为双向并集，base 图标池不直接参与，
         // 但保持镜像三面同形，避免后续按镜像取池时拿到空表）
-        trustedLite = trustedBase?.let { KdbxDatabaseLite(it.rootGroup, it.deletedObjects, it.customIcons) }
-            ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
+        // ISSUE-P2-659：base 镜像同样带库级 Meta（无可信基线时 meta=null，表示「无 Meta 底版」，
+        // 引擎按双方并集语义处理——不推断任何一侧的 Meta 为「未修改」）
+        trustedLite = trustedBase?.let {
+            KdbxDatabaseLite(it.rootGroup, it.deletedObjects, it.customIcons, it.toMetaLite())
+        } ?: KdbxDatabaseLite(KdbxGroup(name = ""), emptyList())
     )
 }
 
 /**
- * ISSUE-P3-03 (43a)：PROMPT_USER（每次询问）把「双方各自修改过的条目」一并纳入决策清单，
- * 而不是只问同字段分歧的条目；其余策略沿用合并引擎给出的冲突清单。
+ * `ISSUE-P2-660`：一次待决冲突会话的**决策清单**——条目与分组各一份。
+ *
+ * 为什么要成对：合并器自 `ISSUE-P1-631` 起同时产出 `MergeResult.conflicts` 与
+ * `MergeResult.groupConflicts`，而同步路径此前只消费前者 ⇒ 云端同步时分组同字段双侧异值
+ * 仍由 `KdbxGroupFieldMerge` 按 LWW 静默定案。只给条目清单时，调用方连「有分组冲突」
+ * 都无法判断（`List` 类型本身不携带该信息），因此必须成一个显式对象。
+ */
+internal data class SyncConflictDecision(
+    val entries: List<ConflictedEntryPair>,
+    val groups: List<ConflictedGroupPair>,
+    /** `ISSUE-P2-659`：库级 Meta 残余冲突（标量双侧异值且无时间戳可裁） */
+    val meta: List<MetaFieldConflict> = emptyList()
+) {
+    val isEmpty: Boolean get() = entries.isEmpty() && groups.isEmpty() && meta.isEmpty()
+
+    /** 用户可见总数（警示卡与裁决计数用同一口径） */
+    val totalCount: Int get() = entries.size + groups.size + meta.size
+}
+
+/**
+ * ISSUE-P3-03 (43a) / ISSUE-P2-660：待决决策清单。
+ *
+ * PROMPT_USER（每次询问）把「双方各自修改过的条目」一并纳入，而不是只问同字段分歧的条目；
+ * 分组侧不分策略档次：`ConflictedGroupPair` 本身只收录**同字段双侧异值**（双侧改了不同字段
+ * 已在字段级合并里无冲突地合入），因此任何策略下都必须带出，不得按策略过滤掉。
  */
 internal fun decisionConflictsOf(
     strategy: SyncConflictStrategy,
@@ -76,17 +104,24 @@ internal fun decisionConflictsOf(
     local: KdbxDatabaseLite,
     remote: KdbxDatabaseLite,
     mergeResult: MergeResult
-): List<ConflictedEntryPair> =
-    if (ConflictStrategyPolicy.dispositionOf(strategy) == ConflictDisposition.PromptUser) {
-        BothModifiedEntryCollector.collect(
-            trustedBase = base.trustedLite.takeIf { base.trusted != null },
-            local = local,
-            remote = remote,
-            alreadyConflicted = mergeResult.conflicts
-        )
-    } else {
-        mergeResult.conflicts
-    }
+): SyncConflictDecision {
+    val entries =
+        if (ConflictStrategyPolicy.dispositionOf(strategy) == ConflictDisposition.PromptUser) {
+            BothModifiedEntryCollector.collect(
+                trustedBase = base.trustedLite.takeIf { base.trusted != null },
+                local = local,
+                remote = remote,
+                alreadyConflicted = mergeResult.conflicts
+            )
+        } else {
+            mergeResult.conflicts
+        }
+    return SyncConflictDecision(
+        entries = entries,
+        groups = mergeResult.groupConflicts,
+        meta = mergeResult.metaConflicts
+    )
+}
 
 /**
  * ISSUE-P3-119：丢弃「仅服务本次判定 / 合并、且不被任何存活对象引用」的解析产物前**显式擦除**

@@ -84,7 +84,9 @@ internal suspend fun autoMergeAndUpload(
             // ISSUE-P2-280 AC①：合并图标池一并采用——只换树与墓碑会让远端新增图标丢失，
             // 条目 / 分组的 customIconId 沦为悬空引用（写出侧 AC② 起对此 fail-closed）
             customIcons = mergeResult.mergedCustomIcons
-        )
+            // ISSUE-P2-659：库级 Meta 的合并产物一并采用。无 Meta 冲突时走自动合并，
+            // 外部工具对库名 / 描述 / 默认用户名 / 自定义数据的改动由此真正落库。
+        ).withMergedMeta(mergeResult.mergedMeta)
     )
 
     // ISSUE-P2-278：采纳前「校验-采用」单点（本函数内两处落库共用）。会话树在合并 / 上传

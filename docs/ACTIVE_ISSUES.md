@@ -159,7 +159,8 @@
 - 问题：目录列举将原始queryPairs拼成signQuery，值内&被signer当成参数分隔；wire URL则先编码值。prefix=foo&bar/因此在线上是一个参数，签名里却被拆为两项，canonical request不一致。
 - 影响与触发：含&的合法S3目录前缀无法浏览；若服务返回此类续页token，翻页亦失败。普通参数不受影响，不是凭据泄漏。 复现与反证详见方案。
 - 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3DirectoryList.kt:48`；`sync/src/main/java/com/keepasskey/sync/s3/S3RequestSigner.kt:110`。
-- 已实现：无，本轮仅审查与方案。尚未完成：修复、原触发与失败对照、相应真实服务/运行验收。
+- 已实现（2026-10-17）：`S3DirectoryList` 与 `S3RequestSigner` 改为**结构化键值表**——`S3RequestSigner.canonicalQueryString` 对键与值分别按 SigV4 编码、按键（同键按值）排序，wire URL 与签名 canonical query 消费**同一份输出**；不再存在「先拼串再拆」这一步。JVM：`S3QueryCanonicalizeTest` 6 例 + `S3DirectoryListMetadataTest` 7 例（`&` / `=` / `%` / `+` / 空格 / Unicode / 重复键；含「含 `&` 前缀不得改变参数个数」与「wire query 与 canonical 逐字一致」断言），0 失败。
+- 尚未完成：真实 S3 服务端到端（含服务端返回含 `&` 的续页 token）与独立 AWS 签名向量对拍——本环境无 S3 凭据；静态与 JVM 结论不代替该项。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-655/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-659 漂移合并**不合并库级 Meta**：外部工具改动的库名 / 描述 / 默认用户名 / 自定义数据被静默覆盖
@@ -168,8 +169,9 @@
 - 问题：漂移合并产物为 `localDb.copy(rootGroup=…, deletedObjects=…, customIcons=…)`——库级 Meta（库名 / 描述 / 默认用户名 / 颜色 / 自定义数据 / 回收站配置 / 历史维护参数 / 库级 `customData`）**一律取本地**，`KdbxMerger` 无 Meta 合并面。外部工具（KeePassXC / 官方桌面端）对 Meta 的改动，在用户选择「合并后保存」并写盘后被**永久覆盖且无任何提示**。
 - 影响与触发：多工具协同同一库文件时，外部端的库名 / 描述 / 默认用户名 / 自定义数据改动会丢失；本地一侧的 Meta **不会**丢失（写盘的就是本地库）。触发序列：外部工具改 Meta → 本机继续编辑条目 → 保存触发漂移 → 选「合并后保存」。
 - 定级与处置（第三轮结论）：**P2**（非 P1）。理由：①与本 P1 非同一因果链（即便基线完全真实也照旧发生）；②损失方向与 P1 相反且单向（丢的是外部那一次改动，本地 Meta 永不丢）；③与导入合并 / 同步路径**同源**（`KdbxMergeController` 同形），只改漂移会造出第三套 Meta 口径；④修复需先定义 `recycleBinUuid` / `entryTemplatesGroup` / `masterKeyChanged` 等**不可合并身份字段**的白 / 黑名单，且 Meta 为标量、「双方保留」无对应语义，需要第三类裁决面。登记限界 §47（已由「单纯登记」升级为「定级 + 拆分」）。
-- 位置：`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`（合并产物构造）；`sync/src/main/java/com/keepasskey/sync/merge/KdbxMerger.kt`（`MergeResult` 字段表）；`app/src/main/java/com/keepasskey/app/data/importer/KdbxMergeController.kt`（同形先例）。
-- 已实现：无（本轮定级与登记）。尚未完成：Meta 字段级三方合并实现与标量冲突裁决语义；导入 / 同步两路径同批对齐；产品复现与验收。
+- 位置：`sync/src/main/java/com/keepasskey/sync/merge/KdbxMetaMerge.kt`（合并与重裁）；`sync/.../KdbxMerger.kt`（`MergeResult.mergedMeta` / `metaConflicts`）；`app/src/main/java/com/keepasskey/app/sync/KdbxMetaApplication.kt`（镜像与落库映射）；`app/.../data/repository/VaultFileDriftResolve.kt`、`app/.../sync/SyncConflictAutoMerge.kt`、`app/.../sync/SyncConflictResolution.kt`（三处落库）；`app/.../data/importer/KdbxMergeOutcomeFactory.kt`（导入不提供 Meta 的语义）。
+- 已实现（2026-10-17）：新增 `KdbxMetaMerge` / `KdbxMetaLite` / `MetaFieldConflict`（`sync` 合并面）；`KdbxDatabaseLite` 与 `MergeResult` 携带 Meta 面。逐字段三方合并：两侧同值 / 单侧等于 base 取变更侧 / 双侧异值按该字段**元数据时间戳**（较新者，一方缺失视为更旧）/ 时间戳不可区分则登记冲突并临时取本地。身份字段**不合并**、恒取本地（加密头、`recycleBin*`、`entryTemplatesGroup*`、`masterKey*`、`lastSelectedGroup`、`lastTopVisibleGroup`、`generator`、`memoryProtection`、图标池与二进制池；清单见 `KdbxMetaMerge.IDENTITY_FIELDS_NOTE`）。落库：漂移（`withMergedMeta`）、同步自动合并、同步用户裁决（`pendingMergedMeta`）三条路径同批采用；同步冲突页新增「库设置」卡片（字段级本地 / 云端）。`.kdbx` 导入**显式不提供 Meta**（产品语义：导入不改当前库身份），已写入 `KdbxMergeOutcomeFactory` 注释。JVM：`KdbxMetaMergeTest` 13 例 0 失败（含「外部单侧改库名必须合入」与「无时间戳双侧异值登记冲突」）。
+- 尚未完成：设备端产品路径实跑（外部工具改 Meta → 漂移 / 同步合并 → 落盘后重开逐字段核对）；限界 §47 已按代码事实改写为「已合并（JVM 级验证）」，设备端结论待补。
 - [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：本项由该方案第三轮审计发现，详见其「实施记录」§9.3。
 
 ### ISSUE-P2-660 同步（云端）路径的**分组**同字段双侧异值仍为字段级 LWW，不进冲突面
@@ -178,8 +180,8 @@
 - 问题：合并器现已产出 `MergeResult.groupConflicts`，**漂移面**已据此阻断并裁决；但 `sync` 路径的消费方只读 `MergeResult.conflicts`（条目级），**不读** `groupConflicts` ⇒ 云端同步时分组同字段双侧异值仍由 `KdbxGroupFieldMerge` 按 LWW 静默定案，用户无任何提示。
 - 影响与触发：两端各自修改同一分组的组名 / 备注 / 图标 / 父组 / 组级自定义数据且取值不同时，一端修改被静默丢弃。触发序列：设备 A 改分组名 → 设备 B 改同一分组名为另一值 → 任一端同步。
 - 定级：P2（与漂移面同源同型；漂移面已证成可行，同步面照同一条路即可）。范围说明见限界 §46（第三轮已把「分组级差异不产生冲突清单」的旧边界改写为「漂移面已修 / 同步面仍 LWW」）。
-- 位置：`sync/src/main/java/com/keepasskey/sync/merge/KdbxGroupFieldMerge.kt`；`sync/.../KdbxMerger.kt`（`MergeResult.groupConflicts`）；`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt`（消费方）。
-- 已实现：无（本轮登记）。尚未完成：同步冲突页接入分组差异（数据模型 + 逐条裁决落树 + 分组「双方保留」语义）与验收。
+- 位置：`sync/src/main/java/com/keepasskey/sync/merge/KdbxGroupFieldMerge.kt`；`sync/.../KdbxMerger.kt`（`MergeResult.groupConflicts`）；`app/src/main/java/com/keepasskey/app/sync/SyncConflictController.kt`（决策清单与 `groupConflictFlow`）；`app/.../sync/SyncGroupConflictResolution.kt`（与漂移面共用的落树原语）。
+- 已实现（2026-10-17）：`SyncConflictDecision` 携带 `entries` / `groups` / `meta`，`handleConflictMerge` 任一非空即进待决（不再只判条目）；新增 `groupConflictFlow` 独立通道，列表页冲突入口与冲突页同时消费。`resolveConflicts` 增加 `groupResolutions`，落树复用与漂移面**同一实现** `applyGroupConflictChoices`（只重裁差异字段；「双方保留」由 `KdbxGroupDuplicator` 复制整棵子树并重生成 UUID）；冲突页新增分组卡片（整组取本地 / 整组取云端 / 双方保留），副本后缀为「云端冲突副本」（与漂移面「磁盘冲突副本」区分）。JVM：`SyncGroupConflictResolutionTest` 7 例 0 失败（含多组同批裁决、目标缺失与根组 fail-closed）。
 - 关闭条件：同步消费方读 `groupConflicts` 并复用 `KdbxGroupConflictResolver` / `KdbxGroupDuplicator`，且限界 §46 收窄为「已对齐」。
 
 ## P3 低危问题、特性接线与体验优化
@@ -270,7 +272,8 @@
 - 问题：ListObjects XML的LastModified使用ISO时间，但S3DirectoryList调用只认RFC1123的S3HttpDateCodec，解析失败回0。仓内fixture已含2026-10-06T00:00:00.000Z却未断言时间字段。
 - 影响与触发：S3目录列表元数据中的真实修改时间丢失，依赖该接口的展示或排序不能得到正确值；不外推为同步ETag失效。 复现与反证详见方案。
 - 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3DirectoryList.kt:135`；`sync/src/main/java/com/keepasskey/sync/s3/S3HttpDateCodec.kt:15`。
-- 已实现：无，本轮仅审查与方案。尚未完成：修复、原触发与失败对照、相应真实服务/运行验收。
+- 已实现（2026-10-17）：新增 `S3XmlTimeCodec`（ISO-8601：`Instant` / `OffsetDateTime` / 无时区按 UTC），`S3DirectoryList` 的 `<LastModified>` 改走该解析器；HTTP 响应头仍走 `S3HttpDateCodec`（RFC 1123，协议归口不混用）。JVM：fixture 时间断言为 `1791244800000`、无小数秒与带 `+08:00` 偏移同值、非法值降级 0、HTTP 解析器不认 ISO，共 7 例 0 失败。
+- 尚未完成：真实 S3 服务端到端（目录列表回读时间）。模型层 `0 = 未知` 与合法 1970 同值属既有字段边界，本项不改变该契约。
 - [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-656/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P3-657 S3签名密钥级联派生在中途异常时遗漏清理
@@ -279,5 +282,6 @@
 - 问题：kDate/kRegion/kService在第一个try内依次生成，该finally只清kSecret；清前三级的第二个try只有全部派生完成后才进入。中间HMAC抛异常时，已分配派生数组跳过清理。
 - 影响与触发：异常路径的可擦派生秘密等待GC；正常路径已有清理，真实HMAC异常/资源错误才触发。无外部未授权读取内存证据，不是签名密钥直接外传。 复现与反证详见方案。
 - 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3RequestSigner.kt:174`。
-- 已实现：无，本轮仅审查与方案。尚未完成：修复、原触发与失败对照、相应真实服务/运行验收。
+- 已实现（2026-10-17）：三个中间派生量改为可空持有、逐级「先赋值再使用」，并登记在**同一最外层 finally** 的擦除面上；派生链抽为可注入 HMAC 的 `deriveSigningKeyChain`（正常与故障共用同一清理路径）。JVM：`S3SigningKeyDerivationTest` 5 例（第 2/3/4 步受控异常 + 成功路径不擦最终 key + 空 kSecret），0 失败。
+- 尚未完成：真实服务签名端到端（既有签名场景用例保持全绿，不代替该项）。
 - [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-657/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。

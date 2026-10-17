@@ -42,16 +42,21 @@ data class ConflictedEntryPair(
 )
 
 /**
- * 数据库轻量级镜像（分组树 + 墓碑列表 + 自定义图标池）。
+ * 数据库轻量级镜像（分组树 + 墓碑列表 + 自定义图标池 + 库级 Meta）。
  * 由 sync 模块定义与消费，解耦对 database 模块的直接依赖。
  *
  * ISSUE-P2-280：[customIcons] 自本批起参与合并（此前镜像不含图标池，落库恒取本地 ⇒
  * 对端新增图标变悬空 `CustomIconRef`）。默认空表保持既有构造点源码兼容。
+ *
+ * `ISSUE-P2-659`：[meta] 为库级 Meta 的三方合并面。**null 表示调用方不参与 Meta 合并**
+ * （合并产物 Meta 保持本地）——这是 `.kdbx` 导入路径的既定产品语义：导入是「把另一个库的
+ * 内容并进来」，不改变当前库的身份与设置。同步 / 漂移两条路径必须提供非空 Meta。
  */
 data class KdbxDatabaseLite(
     val rootGroup: KdbxGroup,
     val deletedObjects: List<DeletedObject> = emptyList(),
-    val customIcons: List<CustomIcon> = emptyList()
+    val customIcons: List<CustomIcon> = emptyList(),
+    val meta: KdbxMetaLite? = null
 )
 
 /**
@@ -74,7 +79,17 @@ data class MergeResult(
      * 消费方（漂移合并）据本清单决定「阻断待裁决」；同步等既有调用方可暂只读 [conflicts]
      * ——其分组口径为存量行为，不在本项范围（见已知工程限界）。
      */
-    val groupConflicts: List<ConflictedGroupPair> = emptyList()
+    val groupConflicts: List<ConflictedGroupPair> = emptyList(),
+    /**
+     * `ISSUE-P2-659`：合并后的**库级 Meta**；null 表示调用方未提供 Meta 镜像（如 `.kdbx` 导入，
+     * 语义为「Meta 保持本地」）。
+     *
+     * 消费方落库时必须一并采用：只换树 / 墓碑 / 图标池会让外部工具对库名 / 描述 / 默认用户名 /
+     * 自定义数据的修改在「合并后保存」时被永久覆盖（整改前的缺陷形态）。
+     */
+    val mergedMeta: KdbxMetaLite? = null,
+    /** `ISSUE-P2-659`：无法按三方合并 / 元数据时间戳自动定案的 Meta 字段（双侧异值） */
+    val metaConflicts: List<MetaFieldConflict> = emptyList()
 )
 
 /**
@@ -194,6 +209,14 @@ object KdbxMerger {
             survivingUuids = allSurvivingUuids
         )
 
+        // `ISSUE-P2-659`：库级 Meta 字段级三方合并。任一侧未提供 Meta 镜像（导入路径）时
+        // 整个面不启用——调用方据此保持本地 Meta，不做「无底版的静默替换」。
+        val metaMerge = local.meta?.let { localMeta ->
+            remote.meta?.let { remoteMeta ->
+                KdbxMetaMerge.merge(base = base.meta, local = localMeta, remote = remoteMeta)
+            }
+        }
+
         return MergeResult(
             mergedRoot = mergedRootGroup,
             mergedDeletedObjects = mergedDeletedObjects,
@@ -201,7 +224,10 @@ object KdbxMerger {
             // ISSUE-P2-280 AC①：自定义图标池参与合并（对齐官方 MergeInCustomIcons 口径）
             mergedCustomIcons = mergeCustomIcons(local.customIcons, remote.customIcons),
             // ISSUE-P1-631：分组同字段双侧异值一并带出（不得只给存活集合而吞掉冲突信号）
-            groupConflicts = groupMerge.conflicts
+            groupConflicts = groupMerge.conflicts,
+            // ISSUE-P2-659：Meta 合并产物与残余冲突
+            mergedMeta = metaMerge?.meta,
+            metaConflicts = metaMerge?.conflicts.orEmpty()
         )
     }
 

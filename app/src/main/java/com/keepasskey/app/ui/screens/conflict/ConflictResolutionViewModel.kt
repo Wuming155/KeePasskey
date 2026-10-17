@@ -18,6 +18,9 @@ import com.keepasskey.core.security.readCharsForDisplayOrNull
 import com.keepasskey.core.security.readStringForDisplayOrEmpty
 import com.keepasskey.sync.merge.ConflictResolutionChoice
 import com.keepasskey.sync.merge.FieldResolutionChoice
+import com.keepasskey.sync.merge.KdbxGroupConflictKeys
+import com.keepasskey.sync.merge.KdbxMetaConflictKeys
+import com.keepasskey.sync.merge.MetaFieldConflict
 import com.keepasskey.sync.merge.KdbxMerger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -45,6 +48,8 @@ class ConflictResolutionViewModel @Inject constructor(
     // P3-23：null 时回退空串实现（生产 Hilt 恒注入 StringsProviderModule 真实现）
     private val strings: StringsProvider = stringsProvider ?: StringsProvider { _, _ -> "" }
 
+    private val diffMapper = ConflictResolutionDiffMapper(strings)
+
     private val _uiState = MutableStateFlow(ConflictResolutionUiState(entries = emptyList()))
     val uiState: StateFlow<ConflictResolutionUiState> = _uiState.asStateFlow()
 
@@ -64,7 +69,7 @@ class ConflictResolutionViewModel @Inject constructor(
                             // 与会话整树替换的就地擦除并发 ⇒ 走展示面读口
                             title = pair.localEntry.displayTitle().ifBlank { pair.remoteEntry.displayTitle() },
                             groupPath = strings.get(R.string.conflict_group_path),
-                            fields = pair.modifiedFields.map { key -> buildConflictedField(pair, key) }
+                            fields = pair.modifiedFields.map { key -> diffMapper.entryField(pair, key) }
                         )
                     }
                     // H1 整改：两侧修改时间取冲突条目中最新的真实 lastModificationTime，
@@ -91,6 +96,29 @@ class ConflictResolutionViewModel @Inject constructor(
                 }
             }
         }
+        // ISSUE-P2-660：分组冲突与条目冲突分通道到达，独立收集后并进同一份 UI 状态——
+        // 两边各自 update 只改自己的字段，互不清空对方。
+        // ISSUE-P2-659：库级 Meta 冲突独立通道；与条目 / 分组各自 update 自己的字段。
+        viewModelScope.launch {
+            syncCoordinator.metaConflictFlow.collect { conflicts ->
+                val fields = conflicts.map { conflict -> diffMapper.metaField(conflict) }
+                _uiState.update {
+                    it.copy(meta = if (fields.isEmpty()) null else ConflictedMetaItem(fields = fields))
+                }
+            }
+        }
+        viewModelScope.launch {
+            syncCoordinator.groupConflictFlow.collect { groups ->
+                val items = groups.map { pair ->
+                    ConflictedGroupItem(
+                        id = pair.groupId,
+                        name = pair.localGroup.name.ifBlank { pair.remoteGroup.name },
+                        fields = pair.modifiedFields.map { key -> diffMapper.groupField(pair, key) }
+                    )
+                }
+                _uiState.update { it.copy(groups = items) }
+            }
+        }
     }
 
     /**
@@ -99,203 +127,6 @@ class ConflictResolutionViewModel @Inject constructor(
      */
     private fun formatConflictTime(instant: Instant): String =
         RelativeTimeFormatter.formatInstant(strings, instant)
-
-    /**
-     * ISSUE-P3-360 AC①：敏感字段的安全差异线索——静态掩码两侧完全相同、无法区分差异，
-     * 改为「掩码 + 长度 + 字符形态（大写/小写/数字/符号）」。
-     *
-     * 安全裁决：**不做「揭示」开关**——冲突裁决无需明文即可完成，明文进 UiState 违反
-     * 敏感数据铁律（能用 Char 的地方绝不落到 String）。长度与形态统计经
-     * [readCharsForDisplayOrNull] 在 CharArray 通道完成，不物化明文、不入日志。
-     *
-     * `ISSUE-P2-534`：本页在**同步刚结束**时渲染，与会话整树替换的就地擦除极易并发。
-     * 整改前是「先查 `cleared` 再 `useChars`」的两步式——两步之间不是原子的，撞上即抛
-     * `IllegalStateException` 且逃逸到 `viewModelScope` ⇒ 闪退；现统一走展示面读口，
-     * 已清零 / null 一律降级为既有回退掩码。
-     *
-     * @param fallbackMask [value] 缺失 / 已清零时的回退掩码（保持既有降级形态）
-     */
-    private fun sensitiveValueHint(value: ProtectedString?, fallbackMaskRes: Int): String {
-        // 返回值是**独占副本**，用毕在 finally 清零（与 `ProtectedString.readChars` 同契约）
-        val chars = value.readCharsForDisplayOrNull() ?: return strings.get(fallbackMaskRes)
-        return try {
-            if (chars.isEmpty()) {
-                strings.get(R.string.conflict_sensitive_hint_length_only, 0)
-            } else {
-                val categories = buildList {
-                    if (chars.any { it in 'A'..'Z' }) add(strings.get(R.string.conflict_sensitive_cat_upper))
-                    if (chars.any { it in 'a'..'z' }) add(strings.get(R.string.conflict_sensitive_cat_lower))
-                    if (chars.any { it in '0'..'9' }) add(strings.get(R.string.conflict_sensitive_cat_digit))
-                    if (chars.any { !it.isLetterOrDigit() }) add(strings.get(R.string.conflict_sensitive_cat_symbol))
-                }
-                val separator = strings.get(R.string.conflict_sensitive_cat_separator)
-                if (categories.isEmpty()) {
-                    strings.get(R.string.conflict_sensitive_hint_length_only, chars.size)
-                } else {
-                    strings.get(R.string.conflict_sensitive_hint, chars.size, categories.joinToString(separator))
-                }
-            }
-        } finally {
-            chars.fill('0')
-        }
-    }
-
-    /**
-     * ISSUE-P2-281：把 `modifiedFields` 的一个差异键映射为可裁决的界面行
-     * （键的词汇与合并器同表——标准字段键 / `custom:` 前缀自定义字段键 / 标量 / 联合到期 / AutoType / 颜色键）。
-     * 敏感值（密码 / `isProtected` 的自定义字段）一律掩码，不物化明文。
-     */
-    private fun buildConflictedField(
-        pair: com.keepasskey.sync.merge.ConflictedEntryPair,
-        key: String
-    ): ConflictedField {
-        val local = pair.localEntry
-        val remote = pair.remoteEntry
-        return when {
-            key == KdbxConstants.Fields.PASSWORD || key == KdbxConstants.Fields.OTP -> {
-                val labelRes = if (key == KdbxConstants.Fields.PASSWORD) {
-                    R.string.conflict_field_password
-                } else {
-                    R.string.conflict_field_otp
-                }
-                ConflictedField(
-                    fieldKey = key,
-                    fieldName = strings.get(labelRes),
-                    localValue = local.fields[key]?.let {
-                        sensitiveValueHint(it, R.string.conflict_mask_local)
-                    } ?: strings.get(R.string.conflict_value_field_missing),
-                    remoteValue = remote.fields[key]?.let {
-                        sensitiveValueHint(it, R.string.conflict_mask_remote)
-                    } ?: strings.get(R.string.conflict_value_field_missing),
-                    isSensitive = true,
-                    localMissing = key !in local.fields,
-                    remoteMissing = key !in remote.fields
-                )
-            }
-            key == KdbxConstants.Fields.TITLE || key == KdbxConstants.Fields.USER_NAME ||
-                key == KdbxConstants.Fields.URL || key == KdbxConstants.Fields.NOTES -> {
-                val labelRes = when (key) {
-                    KdbxConstants.Fields.TITLE -> R.string.conflict_field_title
-                    KdbxConstants.Fields.USER_NAME -> R.string.conflict_field_username
-                    KdbxConstants.Fields.URL -> R.string.conflict_field_url
-                    else -> R.string.conflict_field_notes
-                }
-                ConflictedField(
-                    fieldKey = key,
-                    fieldName = strings.get(labelRes),
-                    // ISSUE-P2-534：冲突差异展示面——本页在同步刚结束时渲染，与会话整树替换的
-                    // 就地擦除极易并发；裸 readString 撞上已擦实例会崩进程（§473 同型面）
-                    localValue = local.fields[key]?.readStringForDisplayOrEmpty()
-                        ?.ifEmpty { strings.get(R.string.conflict_value_empty) }
-                        ?: strings.get(R.string.conflict_value_field_missing),
-                    remoteValue = remote.fields[key]?.readStringForDisplayOrEmpty()
-                        ?.ifEmpty { strings.get(R.string.conflict_value_empty) }
-                        ?: strings.get(R.string.conflict_value_field_missing),
-                    localMissing = key !in local.fields,
-                    remoteMissing = key !in remote.fields
-                )
-            }
-            key.startsWith(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX) -> {
-                val customKey = key.removePrefix(KdbxMerger.CUSTOM_FIELD_CONFLICT_PREFIX)
-                val lv = local.customFields.firstOrNull { it.key == customKey }?.value
-                val rv = remote.customFields.firstOrNull { it.key == customKey }?.value
-                val sensitive = lv?.isProtected == true || rv?.isProtected == true
-                ConflictedField(
-                    fieldKey = key,
-                    fieldName = customKey,
-                    localValue = when {
-                        lv == null -> strings.get(R.string.conflict_value_field_missing)
-                        sensitive -> sensitiveValueHint(lv, R.string.conflict_mask_local)
-                        else -> lv.readStringForDisplayOrEmpty().ifEmpty {
-                            strings.get(R.string.conflict_value_empty)
-                        }
-                    },
-                    remoteValue = when {
-                        rv == null -> strings.get(R.string.conflict_value_field_missing)
-                        sensitive -> sensitiveValueHint(rv, R.string.conflict_mask_remote)
-                        else -> rv.readStringForDisplayOrEmpty().ifEmpty {
-                            strings.get(R.string.conflict_value_empty)
-                        }
-                    },
-                    isSensitive = sensitive,
-                    localMissing = lv == null,
-                    remoteMissing = rv == null
-                )
-            }
-            // 标量 / 联合到期 / AutoType / 颜色键经专用映射；词汇外的键可见呈现（禁静默丢弃差异），
-            // resolveConflictByFields 对未知键为安全 no-op
-            else -> buildEntryScalarField(key, local, remote) ?: ConflictedField(
-                fieldKey = key,
-                fieldName = key,
-                localValue = strings.get(R.string.conflict_value_changed),
-                remoteValue = strings.get(R.string.conflict_value_changed)
-            )
-        }
-    }
-
-    /**
-     * 标量 / 联合到期 / AutoType / 颜色差异键的界面行映射（ISSUE-P2-279 / P2-597）。
-     * 未知键返回 null，由调用方回落到「可见呈现」兜底。
-     */
-    private fun buildEntryScalarField(key: String, local: KdbxEntry, remote: KdbxEntry): ConflictedField? = when (key) {
-        KdbxMerger.CONFLICT_KEY_ICON_ID -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_icon),
-            localValue = local.iconId.toString(),
-            remoteValue = remote.iconId.toString()
-        )
-        KdbxMerger.CONFLICT_KEY_CUSTOM_ICON_ID -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_custom_icon),
-            localValue = local.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none),
-            remoteValue = remote.customIconId?.toHexString() ?: strings.get(R.string.conflict_value_none)
-        )
-        KdbxMerger.CONFLICT_KEY_OVERRIDE_URL -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_override_url),
-            localValue = local.overrideUrl ?: strings.get(R.string.conflict_value_none),
-            remoteValue = remote.overrideUrl ?: strings.get(R.string.conflict_value_none)
-        )
-        KdbxMerger.CONFLICT_KEY_QUALITY_CHECK -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_quality_check),
-            localValue = strings.get(if (local.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false),
-            remoteValue = strings.get(if (remote.qualityCheck) R.string.conflict_value_true else R.string.conflict_value_false)
-        )
-        KdbxMerger.CONFLICT_KEY_AUTO_TYPE -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_auto_type),
-            localValue = autoTypeHint(local.autoType),
-            remoteValue = autoTypeHint(remote.autoType)
-        )
-        KdbxMerger.CONFLICT_KEY_EXPIRES -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_expires),
-            localValue = expiryHint(local),
-            remoteValue = expiryHint(remote)
-        )
-        KdbxMerger.CONFLICT_KEY_BACKGROUND_COLOR -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_background_color),
-            localValue = local.backgroundColor ?: strings.get(R.string.conflict_value_none),
-            remoteValue = remote.backgroundColor ?: strings.get(R.string.conflict_value_none)
-        )
-        KdbxMerger.CONFLICT_KEY_FOREGROUND_COLOR -> ConflictedField(
-            fieldKey = key,
-            fieldName = strings.get(R.string.conflict_field_foreground_color),
-            localValue = local.foregroundColor ?: strings.get(R.string.conflict_value_none),
-            remoteValue = remote.foregroundColor ?: strings.get(R.string.conflict_value_none)
-        )
-        else -> null
-    }
-
-    /** AutoType 配置提示（ISSUE-P2-597）：仅呈现配置启用状态，不新增自动输入执行功能。 */
-    private fun autoTypeHint(autoType: KdbxAutoType?): String =
-        strings.get(if (autoType?.enabled == true) R.string.conflict_value_true else R.string.conflict_value_false)
-
-    /** 到期提示（ISSUE-P2-597）：未启用到期显示「（无）」，启用则显示到期时刻。 */
-    private fun expiryHint(entry: KdbxEntry): String =
-        if (entry.times.expires) entry.times.expiryTime.toString() else strings.get(R.string.conflict_value_none)
 
     /** [fieldKey] 为差异键（[ConflictedField.fieldKey]，与 `modifiedFields` 同词汇表） */
     fun selectFieldChoice(entryId: String, fieldKey: String, choice: FieldChoice) {
@@ -339,6 +170,34 @@ class ConflictResolutionViewModel @Inject constructor(
                 if (entry.id == entryId) entry.copy(mode = mode) else entry
             }
             state.copy(entries = updated)
+        }
+    }
+
+    /** `ISSUE-P2-660`：分组级裁决方式（整组取本地 / 整组取云端 / 双方保留）。 */
+    fun selectGroupMode(groupId: String, mode: GroupResolutionMode) {
+        _uiState.update { state ->
+            val updated = state.groups.map { group ->
+                if (group.id == groupId) group.copy(mode = mode) else group
+            }
+            state.copy(groups = updated)
+        }
+    }
+
+    /** `ISSUE-P2-659`：库级 Meta 的逐字段选择（只有本地 / 云端两档）。 */
+    fun selectMetaFieldChoice(fieldKey: String, choice: FieldChoice) {
+        _uiState.update { state ->
+            val meta = state.meta ?: return@update state
+            val updated = meta.fields.map { field ->
+                if (field.fieldKey == fieldKey) {
+                    // 标量无「云端删除该字段」语义：DELETE_REMOTE 归一为保留本地
+                    field.copy(
+                        selectedChoice = if (choice == FieldChoice.REMOTE) FieldChoice.REMOTE else FieldChoice.LOCAL
+                    )
+                } else {
+                    field
+                }
+            }
+            state.copy(meta = meta.copy(fields = updated))
         }
     }
 
@@ -387,7 +246,30 @@ class ConflictResolutionViewModel @Inject constructor(
                     EntryResolutionMode.DUPLICATE_BOTH -> resolutions[entry.id] = ConflictResolutionChoice.DUPLICATE_BOTH
                 }
             }
-            val outcome = syncCoordinator.resolveConflicts(resolutions, fieldResolutions)
+            // ISSUE-P2-660：分组裁决与条目裁决同批提交。默认「整组取本地」，与条目侧
+            // 「未显式选择即保留本地」同口径；「双方保留」由落树侧复制整棵子树。
+            val groupResolutions = mutableMapOf<String, ConflictResolutionChoice>()
+            _uiState.value.groups.forEach { group ->
+                groupResolutions[group.id] = when (group.mode) {
+                    GroupResolutionMode.KEEP_LOCAL -> ConflictResolutionChoice.KEEP_LOCAL
+                    GroupResolutionMode.KEEP_REMOTE -> ConflictResolutionChoice.KEEP_REMOTE
+                    GroupResolutionMode.DUPLICATE_BOTH -> ConflictResolutionChoice.DUPLICATE_BOTH
+                }
+            }
+            // ISSUE-P2-659：Meta 字段决策与条目同批提交；未选择的字段保持合并产物（本地为底版）
+            val metaResolutions = mutableMapOf<String, FieldResolutionChoice>()
+            _uiState.value.meta?.fields?.forEach { field ->
+                metaResolutions[field.fieldKey] = when (field.selectedChoice) {
+                    FieldChoice.REMOTE -> FieldResolutionChoice.KEEP_REMOTE
+                    FieldChoice.LOCAL, FieldChoice.DELETE_REMOTE -> FieldResolutionChoice.KEEP_LOCAL
+                }
+            }
+            val outcome = syncCoordinator.resolveConflicts(
+                resolutions,
+                fieldResolutions,
+                groupResolutions,
+                metaResolutions
+            )
             val isSuccess = outcome is SyncOutcome.MergedAndUploaded
             _uiState.update {
                 it.copy(

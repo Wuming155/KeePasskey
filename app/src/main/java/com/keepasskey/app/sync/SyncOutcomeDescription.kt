@@ -19,7 +19,8 @@ internal fun syncOutcomeDescription(outcome: SyncOutcome): String = when (outcom
     // ISSUE-P1-591：远端已接受本轮上传版本，但窗口内又产生了未同步的本地版本
     is SyncOutcome.LocalPendingChanges -> "LocalPendingChanges(远端已更新，本地仍有未同步修改)"
     is SyncOutcome.MergedAndUploaded -> "MergedAndUploaded(合并后已上传)"
-    is SyncOutcome.ConflictNeedsUser -> "ConflictNeedsUser(条目冲突数=${outcome.conflicts.size})"
+    is SyncOutcome.ConflictNeedsUser ->
+        "ConflictNeedsUser(条目冲突数=${outcome.conflicts.size} 分组冲突数=${outcome.groupConflicts.size} 库Meta冲突数=${outcome.metaConflicts.size})"
     is SyncOutcome.Offline -> "Offline(离线/网络不可达)"
     // ISSUE-P2-69：Error.message 可能内嵌端点 URL / 主机 / 桶名（如 InvalidEndpointError
     // 直接拼接原始 endpoint），属敏感插值，不得进入调试日志缓冲；
