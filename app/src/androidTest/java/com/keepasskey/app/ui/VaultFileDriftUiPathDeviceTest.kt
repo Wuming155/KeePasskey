@@ -137,6 +137,21 @@ class VaultFileDriftUiPathDeviceTest {
             repository.importExternalDatabase("P1631-UI-${file.parentFile?.name}", file.absolutePath)
                 is KdbxResult.Success
         )
+        // 活动库判定「会话路径优先 + 默认库占位」：仅 import 不足以把活动切到目标库
+        // （新装环境会解锁到默认库 ⇒ 主密码不匹配；真机与 AVD 均实测），走产品入口显式选中。
+        // 有界重试：目录里可能残留其它库（如进程死亡用例的 pd 库）且活动判定受会话路径影响，
+        // 单次选中可能被并发 refresh 覆盖——直到目标库确实 active 再解锁。
+        var selected = false
+        val selectDeadline = android.os.SystemClock.uptimeMillis() + 5_000L
+        while (android.os.SystemClock.uptimeMillis() < selectDeadline) {
+            repository.selectDatabase(file.absolutePath)
+            if (repository.databaseInfoForPath(file.absolutePath)?.isActive == true) {
+                selected = true
+                break
+            }
+            android.os.SystemClock.sleep(50)
+        }
+        assertTrue("目标库必须成为活动库（残留活动库干扰）", selected)
         val unlocked = repository.unlockActiveDatabase(password.clone(), null, readOnly = false)
         assertTrue("打开活动库必须成功: $unlocked", unlocked is KdbxResult.Success)
         assertEquals("会话通道必须是本地文件", file.absolutePath, session.currentPathIdentifier)
@@ -1006,10 +1021,18 @@ class VaultFileDriftUiPathDeviceTest {
                 )
                 val prepareMs = critGate.enteredAt - commitGate.releasedAt
                 critGate.release.complete(Unit)
-                // 轮询等写入完成（5ms 步进；含轮询粒度误差，记录用）
+                // 临界区耗时：5ms 粒度轮询文件变更（mtime/长度）——**不用重解析轮询**，
+                // 否则每次轮询的 KDBX 解析（~1s）会污染读数
                 val writeStart = android.os.SystemClock.uptimeMillis()
-                val persisted = awaitFileContains(file, "Local#1")
+                val lenBefore = file.length()
+                val mtimeBefore = file.lastModified()
+                while (android.os.SystemClock.uptimeMillis() - writeStart < 30_000L) {
+                    if (file.length() != lenBefore || file.lastModified() != mtimeBefore) break
+                    android.os.SystemClock.sleep(5)
+                }
                 val writePollMs = android.os.SystemClock.uptimeMillis() - writeStart
+                // 正确性判定仍走正式重解析（轮询只用于计时）
+                val persisted = awaitFileContains(file, "Local#1")
                 assertTrue("提交必须落盘（实测=$persisted）", "Local#1" in persisted)
                 android.util.Log.i(
                     "P1631Timing",
@@ -1157,9 +1180,11 @@ class VaultFileDriftUiPathDeviceTest {
                 // 定格现场：提交前磁盘快照 + 到门标记
                 snapshot.writeBytes(file.readBytes())
                 marker.writeBytes(byteArrayOf(1))
-                // 等外部放行（最多 5 分钟；正常路径由 force-stop 终止本进程，走不到放行）
+                // 外部编排可见的到门信号（logcat 无需 run-as；卸载后缓存目录不可读）
+                android.util.Log.i("P1631PD", "GATE_REACHED")
+                // 等外部放行（最多 3 分钟；正常路径由 force-stop 终止本进程，走不到放行）
                 val released = File(dir, "RELEASE")
-                val deadline = android.os.SystemClock.uptimeMillis() + 300_000L
+                val deadline = android.os.SystemClock.uptimeMillis() + 180_000L
                 while (android.os.SystemClock.uptimeMillis() < deadline && !released.exists()) {
                     android.os.SystemClock.sleep(500)
                 }
@@ -1172,40 +1197,8 @@ class VaultFileDriftUiPathDeviceTest {
         }
     }
 
-    /**
-     * ③收口（第二段，**新 instrumentation 进程**）：进程死亡后重开同一库——
-     * 正式文件必须与提交前逐字节一致（无半步 / 无已提交产物）；进程内未落盘的裁决与
-     * 内存编辑随进程消失（与任何未保存编辑同一语义）；不得有任何「已处理」残留
-     * （会话级持久化基线为空、无待决提示），重开必须成功且会话可用。
-     */
-    @Test
-    fun `UI驱动_进程死亡后重开_无已处理残留且文件未变`() {
-        val file = File(context.cacheDir, "p1631-ui-pd/vault.kdbx")
-        val snapshot = File(context.cacheDir, "p1631-ui-pd/before.bin")
-        try {
-            assertTrue("进程死亡前置现场必须存在", file.exists() && snapshot.exists())
-            val before = snapshot.readBytes()
-            assertTrue(
-                "进程死亡后正式文件必须与提交前逐字节一致（不得出现半步/已提交产物）",
-                before.contentEquals(file.readBytes())
-            )
-            // 正式文件必须仍是合法 KDBX 且内容为提交前的磁盘版本
-            val passwords = KdbxFile.load(ByteArrayInputStream(file.readBytes()), password.clone())
-                .rootGroup.allEntries()
-                .mapNotNull { it.fields[KdbxConstants.Fields.PASSWORD]?.readString() }
-                .toSet()
-            assertTrue("重开前磁盘内容必须仍是提交前版本（实测=$passwords）", "Disk#1" in passwords)
-            // 重开同一库（新进程：无任何会话态残留）
-            registerAndUnlock(file, "Base#1")
-            val persistedBaseline = runBlocking { session.persistedBaselineSnapshot() }
-            assertNull("新进程不得有「已处理」残留基线", persistedBaseline)
-            assertNull("重开后不得有残留待决提示", coordinator.mergeConflict.value)
-            assertNull("重开后不得有残留三选提示", coordinator.pending.value)
-        } finally {
-            lockQuietly()
-            unregister(file)
-        }
-    }
+    // ③收口（第二段）已拆至 `VaultFileDriftProcessDeathDeviceTest`：进程死亡需外部
+    // `am force-stop` 编排，混入常规套件会让常规验收依赖外部时序。
 
     private companion object {
         const val UI_TIMEOUT_MS = 30_000L

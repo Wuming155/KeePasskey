@@ -227,7 +227,10 @@ class VaultFileDriftSafDeviceTest {
                     newUiEntry(editedHex, "Edited"),
                     passwordChars = "B".toCharArray()
                 )
-                assertTrue("漂移下本地保存必须被中止: $localEdit", localEdit is KdbxResult.Failure)
+                assertTrue(
+                    "漂移下本地保存必须被中止（policy=$policy）: $localEdit",
+                    localEdit is KdbxResult.Failure
+                )
 
                 val mergeAttempt = repository.applyExternalModificationChoice(ExternalModificationChoice.MERGE_AND_SAVE)
                 assertTrue("同字段双改不得静默提交: $mergeAttempt", mergeAttempt is KdbxResult.Failure)
