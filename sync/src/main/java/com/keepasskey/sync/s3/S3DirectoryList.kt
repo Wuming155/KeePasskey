@@ -103,9 +103,12 @@ internal object S3DirectoryList {
             val factory = DocumentBuilderFactory.newInstance().apply {
                 isNamespaceAware = true
             }
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            // Android 的 DocumentBuilderFactory 不实现这三项 JAXP/Apache 特有开关
+            // （API 36 实测均抛 ParserConfigurationException）。能设置的环境必须开启
+            // DOCTYPE 拒绝；平台不支持时仍保留下方的空实体解析器作为第二层防线。
+            factory.setFeatureIfSupported(FEATURE_DISALLOW_DOCTYPE, true)
+            factory.setFeatureIfSupported(FEATURE_EXTERNAL_GENERAL_ENTITIES, false)
+            factory.setFeatureIfSupported(FEATURE_EXTERNAL_PARAMETER_ENTITIES, false)
             val builder = factory.newDocumentBuilder().apply {
                 setEntityResolver(EntityResolver { _, _ ->
                     InputSource(ByteArrayInputStream(ByteArray(0)))
@@ -196,4 +199,13 @@ internal object S3DirectoryList {
         }
         return out
     }
+
+    /** JAXP 特性按平台能力启用；不支持不是解析失败，实体访问仍由 EntityResolver 阻断。 */
+    private fun DocumentBuilderFactory.setFeatureIfSupported(name: String, enabled: Boolean) {
+        runCatching { setFeature(name, enabled) }
+    }
+
+    private const val FEATURE_DISALLOW_DOCTYPE = "http://apache.org/xml/features/disallow-doctype-decl"
+    private const val FEATURE_EXTERNAL_GENERAL_ENTITIES = "http://xml.org/sax/features/external-general-entities"
+    private const val FEATURE_EXTERNAL_PARAMETER_ENTITIES = "http://xml.org/sax/features/external-parameter-entities"
 }

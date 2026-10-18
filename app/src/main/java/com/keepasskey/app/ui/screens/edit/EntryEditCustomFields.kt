@@ -70,8 +70,9 @@ internal class EntryEditCustomFieldEditor(
         update { it.copy(isDirty = true) }
     }
 
-    /** 移除字段（被锁字段由 [withoutCustomField] 挡下；连带擦除该 id 的明文副本）。 */
+    /** 移除字段；被锁字段为无副作用 no-op，普通字段删除时同步清理该 id 的明文副本。 */
     fun remove(id: String) {
+        if (isLockedCustomField(state().customFields, id)) return
         protectedChars.remove(id)?.fill('0')
         update { current ->
             current.copy(customFields = withoutCustomField(current.customFields, id), isDirty = true)

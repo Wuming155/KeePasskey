@@ -5,8 +5,11 @@ import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertSame
 import org.junit.Test
 import java.time.Instant
+import java.util.UUID
 
 /**
  * `ISSUE-P2-632`：历史修订选择句柄的定位规则。
@@ -14,8 +17,7 @@ import java.time.Instant
  * 缺陷背景：KDBX 历史快照的 `<UUID>` 与父条目相同，整改前把该 UUID 当修订 id，
  * `history.firstOrNull { it.id == revisionId }` 恒命中首项 ⇒ 选任何一行都读到第一版。
  *
- * 本用例逐条锁定 [EntryRevisionHandle.resolve] 的四种确定行为：精确命中 / 下标漂移自愈 /
- * 已修剪拒绝 / 同时间戳歧义拒绝。全部为纯函数断言，不触碰会话与磁盘。
+ * 本用例锁定身份句柄语义：同秒快照区分、头插稳定、修剪后拒绝以及非法句柄失败关闭。
  */
 class EntryRevisionHandleTest {
 
@@ -56,12 +58,15 @@ class EntryRevisionHandleTest {
     }
 
     @Test
-    fun `同时间戳的两条历史按下标仍可分别选中`() {
+    fun `同时间戳的两条历史按对象身份分别选中`() {
         val shared = Instant.ofEpochMilli(1_700_000_500_000)
         val history = listOf(snapshot(shared), snapshot(shared))
+        val first = EntryRevisionHandle.encode(0, history[0])
+        val second = EntryRevisionHandle.encode(1, history[1])
 
-        assertEquals(0, EntryRevisionHandle.resolve(history, EntryRevisionHandle.encode(0, shared))?.index)
-        assertEquals(1, EntryRevisionHandle.resolve(history, EntryRevisionHandle.encode(1, shared))?.index)
+        assertNotEquals("同一秒但不同快照对象必须有不同句柄", first, second)
+        assertSame(history[0], EntryRevisionHandle.resolve(history, first)?.snapshot)
+        assertSame(history[1], EntryRevisionHandle.resolve(history, second)?.snapshot)
     }
 
     @Test
@@ -75,28 +80,30 @@ class EntryRevisionHandleTest {
 
         val located = EntryRevisionHandle.resolve(shifted, handle)
         assertEquals("必须落到同一份快照（新下标 2）", 2, located?.index)
+        assertSame(history[1], located?.snapshot)
         assertEquals(times[1], located?.snapshot?.times?.lastModificationTime)
     }
 
     @Test
-    fun `快照已被修剪时拒绝而不是退回首项`() {
-        val (history, _) = threeRevisions()
-        val handle = EntryRevisionHandle.encode(2, history[2])
+    fun `旧快照被修剪且剩余快照同秒时仍拒绝`() {
+        val shared = Instant.ofEpochMilli(1_700_000_600_000)
+        val newest = snapshot(shared)
+        val trimmedSnapshot = snapshot(shared)
+        val handle = EntryRevisionHandle.encode(1, trimmedSnapshot)
 
-        // 只剩最新的两份：目标（最旧）已被修剪
-        val trimmed = history.take(2)
-        assertNull("已修剪的快照必须解析失败，不得静默落到首项", EntryRevisionHandle.resolve(trimmed, handle))
+        assertNull("时间相同不能让已修剪句柄误命中剩余快照", EntryRevisionHandle.resolve(listOf(newest), handle))
     }
 
     @Test
-    fun `同时间戳且下标已漂移时按歧义拒绝`() {
+    fun `头插同秒快照后仍精确定位原对象`() {
         val shared = Instant.ofEpochMilli(1_700_000_600_000)
         val history = listOf(snapshot(shared), snapshot(shared))
-        val handle = EntryRevisionHandle.encode(0, shared)
+        val handle = EntryRevisionHandle.encode(1, history[1])
+        val shifted = listOf(snapshot(shared)) + history
 
-        // 头插一份不同时间戳的快照 ⇒ 原下标不再命中，且同时间戳快照有两份 ⇒ 无法判断是哪一份
-        val shifted = listOf(snapshot(Instant.ofEpochMilli(1_700_000_700_000))) + history
-        assertNull(EntryRevisionHandle.resolve(shifted, handle))
+        val located = EntryRevisionHandle.resolve(shifted, handle)
+        assertEquals(2, located?.index)
+        assertSame(history[1], located?.snapshot)
     }
 
     @Test
@@ -105,6 +112,6 @@ class EntryRevisionHandleTest {
         listOf("", "abc", "0", ":123", "0:", "x:1", "-1:1", "0:abc", "1:1:1").forEach { raw ->
             assertNull("非法句柄 [$raw] 必须解析失败", EntryRevisionHandle.resolve(history, raw))
         }
-        assertNull("越界下标且时间戳不命中必须解析失败", EntryRevisionHandle.resolve(history, "9:123"))
+        assertNull("未登记的合法 UUID 也必须解析失败", EntryRevisionHandle.resolve(history, UUID.randomUUID().toString()))
     }
 }

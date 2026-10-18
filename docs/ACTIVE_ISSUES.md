@@ -1,4 +1,4 @@
-# KeePasskey 当前未解决问题
+﻿# KeePasskey 当前未解决问题
 
 本文件是当前缺陷、功能缺口和待办的唯一状态源，只保留尚未闭环事项。新条目须记录核实时间与方式；开始处理前重新核对涉及的路径、行为和前提。关闭事项后从本表移除，不在此追加进度或历史流水；完成任务不自动新建永久文档。
 
@@ -35,81 +35,6 @@
 - 位置：`app/src/main/java/com/keepasskey/app/security/VaultFileDriftCoordinator.kt`（待决状态全内存）；`database/src/main/java/com/keepasskey/database/session/`（会话树无持久化草稿）；`app/src/main/java/com/keepasskey/app/data/repository/VaultFileDriftResolve.kt`（在途提交）。
 - 已实现：无（本轮仅实测与定级）。尚未完成：durable draft / 崩溃恢复能力的产品裁决与实现（含密文草稿的密钥生命周期与擦除策略）；限界登记见 [`已知工程限界.md`](architecture/已知工程限界.md) §49。
 - 关闭条件：明确产品裁决（支持或明确不支持崩溃恢复）；若支持，需有加密草稿的写入/恢复/擦除闭环与进程死亡实测；若不支持，需在用户可见处如实声明并保持限界条目。
-
-### ISSUE-P2-632 历史版本以条目 UUID 定位，多个修订总命中首项
-
-- 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。实施：2026-10-17，提交 `450633bb`。
-- 问题：历史快照保留条目 UUID，投影又把该 UUID 当修订 id；读取历史密码/快照时使用 firstOrNull(id==revisionUuid)，故多条历史记录具有同一定位值，选择较早记录仍读取列表首个版本。
-- 影响与触发：历史对比、历史密码和回滚可能选择错误版本；本仓自产历史和按同 UUID 保存的外部历史都受影响。 触发序列及反证详见方案。
-- 位置：原缺陷点 `app/src/main/java/com/keepasskey/app/data/repository/VaultEntryMapper.kt:56`、`app/src/main/java/com/keepasskey/app/data/repository/VaultEntrySecretReader.kt:142`；现行实现 `app/src/main/java/com/keepasskey/app/data/repository/EntryRevisionHandle.kt`（句柄）＋上述两处调用点。
-- 已实现（2026-10-17）：
-  - 句柄 = `"<history 下标>:<lastModificationTime 毫秒>"`（`EntryRevisionHandle`）。解析三条确定行为：下标命中且时间戳一致＝精确命中（同时间戳的多条也能分别选中）；下标漂移（新修订头插 / 尾部修剪）按时间戳**唯一**命中自愈；命中 0 份（已修剪）或多份（歧义）⇒ 返回 null，调用方如实报错。
-  - `VaultEntryMapper` 的 `UiEntryRevision.id`、`VaultEntrySecretReader` 的 `getEntryRevisionPassword(Chars)` / `getEntryRevisionSnapshot` 统一改走句柄；`Revision.id` 在 UI 侧仅作不透明 key（对比弹窗与回滚都直接回传）。
-  - 用例（已实跑通过）：`app/src/test/java/com/keepasskey/app/data/repository/EntryRevisionHandleTest.kt` 6 例 + `RealVaultRepositoryTest` 的修订读取改到句柄后同批通过。复跑：`./gradlew :app:testDebugUnitTest --tests "com.keepasskey.app.data.repository.EntryRevisionHandleTest"`。
-  - 本轮**刻意未改**：KDBX 磁盘格式（历史 UUID 仍等于父条目）、`HistoryManager` 按 index 的回滚原语；也**未**给旧 UUID 句柄留兼容回退——保留它等于把缺陷带回。
-- 尚未完成（下次按此顺序做，不得用「构建通过 / 用例绿」替代）：
-  1. 设备端对比：同一条目连续保存 3 个不同密码 → 详情页历史列表分别点第 2、3 行「对比」，历史密码必须分别是第 2、3 次保存前的值（不是首项）。
-  2. 设备端回滚：点第 2 行「回滚」→ 重开条目，密码 / 备注等于该行版本；再点第 1 行回滚能回到回滚前内容（归档正确）。
-  3. 列表漂移：详情页停留期间触发一次保存（历史头插）后再点原历史行，仍须命中同一版本；把库 `historyMaxItems` 调小使目标快照被修剪后再点旧行，必须提示「历史版本已不可用」且库内容不变（无部分写入）。
-  4. 互操作：导出该库，用独立 KDBX 实现（KeePass / KeePassXC）核对历史条目数量与内容，再由本仓重开复核。
-- [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-632/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
-
-### ISSUE-P2-633 历史回滚通过当前附件索引合并，不能恢复历史附件
-
-- 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。实施：2026-10-17，提交 `450633bb`。
-- 问题：回滚将历史投影传入通用saveEntry；历史附件投影只有refIndex/名称，没有历史字节来源。AttachmentMergePolicy按当前条目附件列表的同索引或同名项取数据，未命中时构造空附件。历史附件内容被当前内容替代或变空。
-- 影响与触发：历史回滚显示成功却未恢复附件；同名附件、替换/删除/重新排序后尤其明显。 触发序列及反证详见方案。
-- 位置：原缺陷点 `app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailRevisionController.kt:55`、`app/src/main/java/com/keepasskey/app/data/repository/AttachmentMergePolicy.kt:33`；现行实现 `app/src/main/java/com/keepasskey/app/data/repository/VaultEntryRevisionRollback.kt` ＋ 端口 `app/src/main/java/com/keepasskey/app/data/repository/VaultHistoryRestorePort.kt`。
-- 已实现（2026-10-17）：
-  - 新增 `VaultHistoryRestorePort.rollbackEntryToRevision(entryId, revisionHandle)`（由 `VaultEntryWriteCoordinator.rollbackToRevision` 转发）。回滚**不再**经 UI 投影重建：按句柄取真实历史 `KdbxEntry`，经 `HistoryManager.rollbackToSnapshot` 生成「内容取快照、UUID / 父组 / `customData`（收藏）取当前条目」的结果后原位落树（`DatabaseSession.saveEntry`，无 delete）。
-  - 附件连 inline 字节与 `BinarySource` 引用一起恢复（历史快照本就持有二者，二进制池去重递归覆盖 history，引用不失效）；回滚前版本归档为最新历史；句柄失效 ⇒ `KdbxError.HISTORY_REVISION_UNAVAILABLE` 且**零写入**。
-  - 详情页回滚不再另行解密密码 / TOTP（历史条目就是待落库内容）；对比弹窗的修订密码读取仍走 CharArray 通道。
-  - 用例（已实跑通过）：`app/src/test/java/com/keepasskey/app/data/repository/VaultEntryRevisionRollbackTest.kt` 5 例——同名异字节、历史独有附件、归档、句柄失效零写入、往返回滚。复跑：`./gradlew :app:testDebugUnitTest --tests "com.keepasskey.app.data.repository.VaultEntryRevisionRollbackTest"`。
-  - 本轮**保留但已无生产调用方**：`VaultSecretAccess.getEntryRevisionSnapshot`（仍被测试使用）。若确认不再需要，可按「删除死代码」口径移除，另起一条改动。
-- 尚未完成（下次按此顺序做）：
-  1. 设备端同位置替换：附件 `A(old)` 保存 → 同位置换 `B(new)` 保存 → 回滚到含 A 的版本 → 导出附件，摘要必须等于 A（既不是 B 也不是空）。
-  2. 设备端历史独有附件：A 保存后在后续版本里删除 → 回滚该版本，A 必须重新出现且字节一致。
-  3. 落盘形态（spill）：用 > 1 MiB 的附件（`BinaryStorePolicy.DEFAULT_THRESHOLD_BYTES`）重复 1、2，核对导出摘要；再锁定库 → 解锁 → 重开后再导出，确认锁定清理没有擦掉恢复后的附件字节。
-  4. 互操作：导出库用独立 KDBX 工具读取该条目的 history 与附件内容，核对与回滚目标版本一致。
-- [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-633/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
-
-### ISSUE-P2-634 自定义字段删除和改名在保存时被补回旧键
-
-- 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。实施：2026-10-17，提交 `450633bb`。
-- 问题：UI删除字段会从customFields中移除，但mergeCustomFields无条件保留所有未出现在UI键集合中的旧字段。删除的旧键被补回；改名则保留旧键并新增新键。
-- 影响与触发：用户不能真正删除普通/受保护自定义字段，可能误以为旧敏感信息已移除；不等于明文对外泄露。 触发序列及反证详见方案。
-- 位置：原缺陷点 `app/src/main/java/com/keepasskey/app/data/repository/VaultEntryWriteCoordinator.kt:175`（已下沉）；现行实现 `app/src/main/java/com/keepasskey/app/data/repository/CustomFieldMergePolicy.kt`，基线来源 `app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditFormProjection.kt`（`applyLoadedEntry`）与 `EntryEditUiState.loadedCustomFieldKeys`，提交点 `EntryEditSaveRunner`。
-- 已实现（2026-10-17）：
-  - 分类口径：载入基线 `UiCustomField.id → 键名`。id 已不在 UI 列表＝**删除**；同 id 键名变了＝**改名**（旧键退役、新键按 UI 落地）；基线里没有的既有键＝其它来源新增（并发同步 / 其它窗口）⇒ **一律保留**；无基线调用方（导入、草稿、列表页快捷保存）退化为整改前语义，行为零变化。
-  - 保留集：`PasskeyData.isPasskeyFieldKey` 拒绝退役（私钥 / credentialId / userHandle / PRF 种子等凭据材料缺失会让条目不可断言）。
-  - 写入前校验：重名键、与标准五字段键冲突（忽略大小写，官方字段表不区分大小写）⇒ `KdbxError.ENTRY_CUSTOM_FIELD_INVALID`，**不落库、不写历史**，草稿留在编辑页。`otp` 刻意不判冲突：解析侧把标准 `otp` 落在 `customFields`，判冲突会让所有带 TOTP 的条目无法保存。
-  - 用例（已实跑通过）：`CustomFieldMergePolicyTest` 10 例（删除 / 改名 / 受保护删除 / 无基线 / Passkey 保留 / 基线外新增保留 / 同名新增不重复 / 重名 / 标准键冲突 / 空键放行）+ `EntryWriteIntentCoordinatorTest` 2 例（协调器端到端删除、重名拒绝且库内不变）。
-- 尚未完成（下次按此顺序做）：
-  1. 设备端删除：建字段 X + 受保护字段 SECRET → 保存 → 重进编辑页删 X → 保存 → 重开条目，X 必须不在；再用独立 KDBX 工具读取同一文件，确认 X 在库内确实缺失（不是只在 UI 隐藏）。
-  2. 设备端改名：X → Y 保存 → 重开只有 Y 且值保留、无 X 残留。
-  3. 受保护字段：删除 SECRET 后重开必须消失；**未编辑**受保护字段保存后仍保留原值（F2 回填路径）。
-  4. Passkey 条目：编辑保存后 `credentialId` / 私钥 PEM / `userHandle` 仍在，锁字段在 UI 上仍不可改、不可删。
-  5. 校验反馈：两行改成同名键保存 → 提示「重名或与标准字段冲突」且不落库、草稿保留；把键改成 `Title` / `password` 同样被拒（含大小写变体）。
-- [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-634/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
-
-### ISSUE-P2-635 编辑页选择根分组被当成保留原分组
-
-- 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。实施：2026-10-17，提交 `450633bb`。
-- 问题：根分组chip传onGroupChange(null)，保存时却用 entry.groupId?.parse ?: existing.parentGroupId；null被解释成“不变”，因此已有条目无法通过编辑页移回根。
-- 影响与触发：界面显示已选根且保存成功，但条目仍在旧分组；批量移动有独立实现，不直接受此问题影响。 触发序列及反证详见方案。
-- 位置：原缺陷点 `app/src/main/java/com/keepasskey/app/data/repository/VaultEntryWriteCoordinator.kt:106`（已改）；现行实现 `app/src/main/java/com/keepasskey/app/data/repository/EntryGroupTargetResolver.kt`（纯解析）+ `VaultRepositoryTypes.kt` 的 `EntryGroupIntent`，提交点 `EntryEditSaveRunner`，换址原语 `database/src/main/java/com/keepasskey/database/session/SessionContentMutations.kt` 的 `saveEntryInGroup`。
-- 已实现（2026-10-17）：
-  - 三态意图 `EntryGroupIntent`：`Keep`（保留既有父组，缺省值，供导入 / 草稿 / 快捷保存沿用）、`Root`（库根分组 id，**不是** null 占位）、`ToGroup(id)`。编辑页按分组 chip 选中值显式提交：`state.groupId == null` ⇒ `Root`，否则 `ToGroup`。
-  - 校验：目标不可解析 / 不在本树 / 落在**回收站子树**（按 `parentGroupId` 上溯判定，含回收站根）⇒ `KdbxError.ENTRY_GROUP_TARGET_INVALID`，不写库、不写历史、不改树。
-  - 换址：`DatabaseSession.saveEntryInGroup` 在同一会话 Mutex 内完成「摘除 + 落位」，取代 `deleteEntry + saveEntry`（旧实现两步之间条目对并发读不可见）；目标分组在解析后被并发删除 ⇒ 如实失败并保持正式文件原状。
-  - 用例（已实跑通过）：`EntryWriteIntentCoordinatorTest` 5 例——移到根（父组＝根、无副本、历史 +1）、`Keep` 不动、跨子组、目标不存在、回收站拒绝。复跑：`./gradlew :app:testDebugUnitTest --tests "com.keepasskey.app.data.repository.EntryWriteIntentCoordinatorTest"`。
-  - 本轮**未改动**：批量移动（本来就用 `null` = 根）、新建 / 模板落点、导入路径的分组解析——共用 `saveEntry` 但走 `Keep` / 默认分支，行为与整改前一致；`previousParentGroup`（KDBX 4.1）在换址时仍未写入，属既有边界。
-- 尚未完成（下次按此顺序做）：
-  1. 设备端「子组 → 根」：子组 G 中条目 → 编辑页点「根目录」→ 保存 → 返回列表条目出现在根层级；重开编辑页「根目录」高亮；根与 G 的条目计数不变（不得出现副本）。再反向做「根 → G」与「G → 另一子组」。
-  2. 只读会话：只读模式下保存被拒，条目仍在原分组（不得出现「界面已选根」的假成功）。
-  3. 失效目标：保存前在另一窗口删除目标分组（或把它移入回收站）后再保存，必须提示目标分组失效且条目不落到别处。
-  4. 批量移动回归：多选移动行为不变（`null` = 根），与编辑页路径结论一致。
-- [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-635/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-636 同步缓存与版本标记分离提交可在重启后误判无修改
 
@@ -203,18 +128,6 @@
 - 关闭条件（方案 §4 / §5）：原触发（含 `&` 前缀）与正常 / 失败对照在**隔离 S3 服务**上复现通过，且独立签名向量一致；仅 JVM 层对照不足以结案。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-655/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
-### ISSUE-P2-659 漂移合并**不合并库级 Meta**：外部工具改动的库名 / 描述 / 默认用户名 / 自定义数据被静默覆盖
-
-- 核实：2026-10-16（Asia/Shanghai），`ISSUE-P1-631` 第三轮审计；静态确认 + 落盘产物逐字段核对；置信度：高。
-- 问题：漂移合并产物为 `localDb.copy(rootGroup=…, deletedObjects=…, customIcons=…)`——库级 Meta（库名 / 描述 / 默认用户名 / 颜色 / 自定义数据 / 回收站配置 / 历史维护参数 / 库级 `customData`）**一律取本地**，`KdbxMerger` 无 Meta 合并面。外部工具（KeePassXC / 官方桌面端）对 Meta 的改动，在用户选择「合并后保存」并写盘后被**永久覆盖且无任何提示**。
-- 影响与触发：多工具协同同一库文件时，外部端的库名 / 描述 / 默认用户名 / 自定义数据改动会丢失；本地一侧的 Meta **不会**丢失（写盘的就是本地库）。触发序列：外部工具改 Meta → 本机继续编辑条目 → 保存触发漂移 → 选「合并后保存」。
-- 定级与处置（第三轮结论）：**P2**（非 P1）。理由：①与本 P1 非同一因果链（即便基线完全真实也照旧发生）；②损失方向与 P1 相反且单向（丢的是外部那一次改动，本地 Meta 永不丢）；③与导入合并 / 同步路径**同源**（`KdbxMergeController` 同形），只改漂移会造出第三套 Meta 口径；④修复需先定义 `recycleBinUuid` / `entryTemplatesGroup` / `masterKeyChanged` 等**不可合并身份字段**的白 / 黑名单，且 Meta 为标量、「双方保留」无对应语义，需要第三类裁决面——**已按此落地**：身份字段清单收敛到 `KdbxMetaMerge.IDENTITY_FIELDS_NOTE`，标量冲突进同步冲突页「库设置」卡片逐字段裁决。限界 §47 已由「不合并」改写为「已合并（JVM 级验证）」。
-- 位置：`sync/src/main/java/com/keepasskey/sync/merge/KdbxMetaMerge.kt`（合并与重裁）；`sync/.../KdbxMerger.kt`（`MergeResult.mergedMeta` / `metaConflicts`）；`app/src/main/java/com/keepasskey/app/sync/KdbxMetaApplication.kt`（镜像与落库映射）；`app/.../data/repository/VaultFileDriftResolve.kt`、`app/.../sync/SyncConflictAutoMerge.kt`、`app/.../sync/SyncConflictResolution.kt`（三处落库）；`app/.../data/importer/KdbxMergeOutcomeFactory.kt`（导入不提供 Meta 的语义）。
-- 已实现（2026-10-17）：新增 `KdbxMetaMerge` / `KdbxMetaLite` / `MetaFieldConflict`（`sync` 合并面）；`KdbxDatabaseLite` 与 `MergeResult` 携带 Meta 面。逐字段三方合并：两侧同值 / 单侧等于 base 取变更侧 / 双侧异值按该字段**元数据时间戳**（较新者，一方缺失视为更旧）/ 时间戳不可区分则登记冲突并临时取本地。身份字段**不合并**、恒取本地（加密头、`recycleBin*`、`entryTemplatesGroup*`、`masterKey*`、`lastSelectedGroup`、`lastTopVisibleGroup`、`generator`、`memoryProtection`、图标池与二进制池；清单见 `KdbxMetaMerge.IDENTITY_FIELDS_NOTE`）。落库：漂移（`withMergedMeta`）、同步自动合并、同步用户裁决（`pendingMergedMeta`）三条路径同批采用；同步冲突页新增「库设置」卡片（字段级本地 / 云端）。`.kdbx` 导入**显式不提供 Meta**（产品语义：导入不改当前库身份），已写入 `KdbxMergeOutcomeFactory` 注释。JVM：`KdbxMetaMergeTest` 14 例 0 失败（含「外部单侧改库名必须合入」「无时间戳双侧异值登记冲突」「无底版时 customData 键并集」）。
-- 尚未完成：设备端产品路径实跑（外部工具改 Meta → 漂移 / 同步合并 → 落盘后重开逐字段核对）。限界 §47 已按代码事实改写为「已合并（JVM 级验证）」，设备端结论是该条目的剩余项。
-- 关闭条件：上述产品路径在设备上实跑通过（合并后重开，库名 / 描述 / 默认用户名 / 颜色 / 库级 customData 与外部改动一致，本地未改字段不变），并同步更新限界 §47 的验证层级。
-- [独立整改方案](architecture/问题整改方案/P1/ISSUE-P1-631/整改方案.md)：本项由该方案第三轮审计发现，详见其「实施记录」§9.3。
-
 ### ISSUE-P2-660 同步（云端）路径的**分组**同字段双侧异值仍为字段级 LWW，不进冲突面
 
 - 核实：2026-10-16（Asia/Shanghai），`ISSUE-P1-631` 第三轮审计；静态确认；置信度：高。
@@ -307,23 +220,3 @@
 - 位置：`crypto/src/main/java/com/keepasskey/crypto/passkey/PasskeyPrf.kt:124`；`crypto/src/main/java/com/keepasskey/crypto/cipher/CbcDecryptingInputStream.kt:286`。
 - 已实现：无，本轮仅审查和编制方案。尚未完成：工作缓冲观测、修复及正常/失败/提前退出验证。
 - [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-654/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
-
-### ISSUE-P3-656 S3目录XML修改时间被按HTTP日期解析而丢失
-
-- 核实：2026-10-16（Asia/Shanghai），当前源码与协议消费链；静态确认；置信度：高。
-- 问题：ListObjects XML的LastModified使用ISO时间，但S3DirectoryList调用只认RFC1123的S3HttpDateCodec，解析失败回0。仓内fixture已含2026-10-06T00:00:00.000Z却未断言时间字段。
-- 影响与触发：S3目录列表元数据中的真实修改时间丢失，依赖该接口的展示或排序不能得到正确值；不外推为同步ETag失效。 复现与反证详见方案。
-- 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3DirectoryList.kt:135`；`sync/src/main/java/com/keepasskey/sync/s3/S3HttpDateCodec.kt:15`。
-- 已实现（2026-10-17）：新增 `S3XmlTimeCodec`（ISO-8601：`Instant` / `OffsetDateTime` / 无时区按 UTC），`S3DirectoryList` 的 `<LastModified>` 改走该解析器；HTTP 响应头仍走 `S3HttpDateCodec`（RFC 1123，协议归口不混用）。JVM：fixture 时间断言为 `1791244800000`、无小数秒与带 `+08:00` 偏移同值、非法值降级 0、HTTP 解析器不认 ISO，共 7 例 0 失败。
-- 尚未完成：① 真实 S3 服务端到端（目录列表回读 `<LastModified>`，含 `&` 前缀目录的分页回执）；② 设备端未跑（本项为纯解析改动，未新增/修改 `androidTest`）。模型层 `0 = 未知` 与合法 1970 同值属既有字段边界，本项不改变该契约。
-- [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-656/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
-
-### ISSUE-P3-657 S3签名密钥级联派生在中途异常时遗漏清理
-
-- 核实：2026-10-16（Asia/Shanghai），当前源码与协议消费链；静态确认异常出口缺口；置信度：高（控制流）；异常触发概率低。
-- 问题：kDate/kRegion/kService在第一个try内依次生成，该finally只清kSecret；清前三级的第二个try只有全部派生完成后才进入。中间HMAC抛异常时，已分配派生数组跳过清理。
-- 影响与触发：异常路径的可擦派生秘密等待GC；正常路径已有清理，真实HMAC异常/资源错误才触发。无外部未授权读取内存证据，不是签名密钥直接外传。 复现与反证详见方案。
-- 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3RequestSigner.kt:174`。
-- 已实现（2026-10-17）：三个中间派生量改为可空持有、逐级「先赋值再使用」，并登记在**同一最外层 finally** 的擦除面上；派生链抽为可注入 HMAC 的 `deriveSigningKeyChain`（正常与故障共用同一清理路径）。JVM：`S3SigningKeyDerivationTest` 5 例（第 2/3/4 步受控异常 + 成功路径不擦最终 key + 空 kSecret），0 失败。
-- 尚未完成：① 真实服务签名端到端（既有签名场景用例保持全绿，不代替该项）；② 时钟偏移重签路径（`S3ClockSkewGuard`）在异常清理改动后的实跑未覆盖；③ 设备端未跑。
-- [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-657/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。

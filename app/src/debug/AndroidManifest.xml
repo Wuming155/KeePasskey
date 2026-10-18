@@ -43,6 +43,26 @@
             android:excludeFromRecents="true"
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
+        <activity
+            android:name="com.keepasskey.app.ui.EntryDetailDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+        <activity
+            android:name="com.keepasskey.app.ui.HistoryDetailDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+        <activity
+            android:name="com.keepasskey.app.ui.EntryEditDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+        <activity
+            android:name="com.keepasskey.app.ui.SyncConflictDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
     </application>
 
 </manifest>

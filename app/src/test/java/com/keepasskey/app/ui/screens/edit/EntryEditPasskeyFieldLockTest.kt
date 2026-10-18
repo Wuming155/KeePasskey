@@ -155,6 +155,7 @@ class EntryEditPasskeyFieldLockTest {
 
         viewModel.removeCustomField(rpIdId)
         assertTrue("被锁字段删不掉", viewModel.uiState.value.customFields.any { it.id == rpIdId })
+        assertFalse("拒绝删除被锁字段不得把表单标记为已修改", viewModel.uiState.value.isDirty)
 
         // 正向对照：普通字段的三条通路仍然管用（否则上面两句是「谁都改不动」的假绿）
         viewModel.updateCustomField("${ENTRY_ID}_plain_note", "renamed", "changed", false)

@@ -636,3 +636,7 @@
 
 > **分册体系**：见 [`resolved/README.md`](resolved/README.md)；分册级索引 6 份：[`01`](resolved/BATCH_01_30.md) · [`02`](resolved/BATCH_31_45.md) · [`03`](resolved/BATCH_46_57.md) · [`04`](resolved/BATCH_58_PLUS.md)（§58~§157，已封卷）· [`05`](resolved/BATCH_158_PLUS.md)（§158~§504，已封卷·超额册）· [`06`](resolved/BATCH_505_PLUS.md)（§505 起，**当前滚动册**）。
 | §536 | S3 与同步分组整改实施记录（非闭环；更正误归档） | `ISSUE-P3-656` / `P3-657` / `P2-660`（仍在 ACTIVE_ISSUES） | [536-S3签名时间派生清理与同步分组冲突消费闭环批次.md](resolved/batches/536-S3签名时间派生清理与同步分组冲突消费闭环批次.md) |
+| §537 | P2-635 编辑页根分组与批量移动 AVD 验收闭环 | `ISSUE-P2-635`（整条闭环；P2 17 → 16） | [537-P2-635根分组编辑与批量移动AVD验收闭环批次.md](resolved/batches/537-P2-635根分组编辑与批量移动AVD验收闭环批次.md) |
+| §538 | P2-633 / 634 / 659 独立 KDBX 互操作验收闭环 | `ISSUE-P2-633` / `P2-634` / `P2-659`（整条闭环；P2 16 → 13） | [538-P2-633-634-659独立KDBX互操作验收闭环.md](resolved/batches/538-P2-633-634-659独立KDBX互操作验收闭环.md) |
+| §539 | P2-632 历史修订句柄同秒碰撞修正与 AVD 闭环 | `ISSUE-P2-632`（整条闭环；P2 13 → 12） | [539-P2-632历史修订句柄同秒碰撞修正与AVD闭环.md](resolved/batches/539-P2-632历史修订句柄同秒碰撞修正与AVD闭环.md) |
+| §540 | P3-656 / P3-657 官方 MinIO 服务端验收闭环 | `ISSUE-P3-656` / `P3-657`（整条闭环；P3 11 → 9） | [540-P3-656-657官方MinIO服务端验收闭环.md](resolved/batches/540-P3-656-657官方MinIO服务端验收闭环.md) |

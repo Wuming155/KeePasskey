@@ -23,6 +23,11 @@
     </base-config>
 
     <domain-config cleartextTrafficPermitted="true">
+        <!-- 独立 S3 HTTPS 用例仅在回环主机信任仓库 tracked 测试证书；其它主机仍只信任系统 CA。 -->
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/live_sync_cert" />
+        </trust-anchors>
         <!--
           `localhost`：WebDavTransferDeviceTest 经 `MockWebServer.url("/")` 取 provider 的 serverUrl，
           其 host 即 `localhost`（SsrfRedirectBypassDeviceTest 第 1 例把该事实钉为断言）；
