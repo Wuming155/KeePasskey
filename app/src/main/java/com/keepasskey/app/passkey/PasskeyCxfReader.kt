@@ -47,9 +47,13 @@ object PasskeyCxfReader {
         }
         val root = ByteJsonScanner.scan(payload)
             ?: return PasskeyCxfOutcome.Rejected(PasskeyCxfReject.MalformedJson)
-        return when (val located = locate(root)) {
-            is Located.Bad -> PasskeyCxfOutcome.Rejected(located.reason)
-            is Located.Good -> extract(located)
+        return try {
+            when (val located = locate(root)) {
+                is Located.Bad -> PasskeyCxfOutcome.Rejected(located.reason)
+                is Located.Good -> extract(located)
+            }
+        } finally {
+            root.wipe()
         }
     }
 

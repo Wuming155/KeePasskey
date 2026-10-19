@@ -115,9 +115,9 @@ class AutoLockManager @Inject constructor(
     private fun scheduleForegroundIdleLock() {
         foregroundLockJob?.cancel()
         foregroundLockJob = null
-        scope.launch {
+        foregroundLockJob = scope.launch {
             val settings = settingsRepository.getSettings().first()
-            if (!settings.autoLockForegroundEnabled || sessionLocked) {
+            if (isInBackground || !settings.autoLockForegroundEnabled || sessionLocked) {
                 return@launch
             }
             val decision = ForegroundIdleLockPolicy.decide(
@@ -138,8 +138,12 @@ class AutoLockManager @Inject constructor(
                     ) ?: return@launch
                     val delayMs = (lockAt - System.currentTimeMillis()).coerceAtLeast(0L)
                     delay(delayMs)
+                    val currentSettings = settingsRepository.getSettings().first()
+                    if (isInBackground || !currentSettings.autoLockForegroundEnabled || sessionLocked) {
+                        return@launch
+                    }
                     val recheck = ForegroundIdleLockPolicy.decide(
-                        idleTimeoutSeconds = settings.autoLockForegroundTimeoutSeconds,
+                        idleTimeoutSeconds = currentSettings.autoLockForegroundTimeoutSeconds,
                         lastInteractionMillis = lastInteractionAtMillis,
                         nowMillis = System.currentTimeMillis()
                     )

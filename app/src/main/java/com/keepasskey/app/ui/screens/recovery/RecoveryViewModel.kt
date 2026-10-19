@@ -39,6 +39,7 @@ class RecoveryViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+    private var previewRequestGeneration: Long = 0L
 
     /** 上次「未能保全」告警待展示（冷启动消费）。 */
     private val _preservationAlert = MutableStateFlow(false)
@@ -65,18 +66,30 @@ class RecoveryViewModel @Inject constructor(
     fun dismissMessage() { _uiState.update { it.copy(message = null) } }
 
     fun select(key: String?) {
-        _uiState.update { it.copy(selectedKey = key, preview = null, previewText = null, awaitingOverwriteConfirm = false) }
+        previewRequestGeneration += 1
+        _uiState.update {
+            it.copy(
+                selectedKey = key,
+                preview = null,
+                previewText = null,
+                busy = false,
+                awaitingOverwriteConfirm = false
+            )
+        }
     }
 
     /** 解锁并比较差异（密码副本由调用方所有，本方法用毕清零）。 */
     fun preview(target: VaultRecoveryCoordinator.Pending, password: CharArray) {
+        val targetKey = keyOf(target)
+        val requestGeneration = ++previewRequestGeneration
         viewModelScope.launch {
-            _uiState.update { it.copy(busy = true, selectedKey = keyOf(target), preview = null, previewText = null, message = null) }
+            _uiState.update { it.copy(busy = true, selectedKey = targetKey, preview = null, previewText = null, message = null) }
             val result = try {
                 coordinator.preview(target, password)
             } finally {
                 password.fill('0')
             }
+            if (requestGeneration != previewRequestGeneration || _uiState.value.selectedKey != targetKey) return@launch
             _uiState.update { state ->
                 when (result) {
                     is KdbxResult.Success -> state.copy(

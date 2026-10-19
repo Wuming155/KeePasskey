@@ -123,10 +123,12 @@ object PasskeyPrf {
 
     private fun secretToProtected(secret: ByteArray): ProtectedString {
         val encoded = Base64.getEncoder().encode(secret)
+        val chars = CharArray(encoded.size) { encoded[it].toInt().toChar() }
         try {
-            return ProtectedString(CharArray(encoded.size) { encoded[it].toInt().toChar() }, isProtected = true)
+            return ProtectedString(chars, isProtected = true)
         } finally {
             encoded.fill(0)
+            chars.fill('0')
         }
     }
 
@@ -138,7 +140,10 @@ object PasskeyPrf {
             if (v == ASCII_LF || v == ASCII_CR || v == ASCII_SPACE || v == ASCII_TAB) continue
             out[n++] = b
         }
-        return if (n == out.size) out else out.copyOf(n)
+        if (n == out.size) return out
+        val trimmed = out.copyOf(n)
+        out.fill(0)
+        return trimmed
     }
 
     private fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {

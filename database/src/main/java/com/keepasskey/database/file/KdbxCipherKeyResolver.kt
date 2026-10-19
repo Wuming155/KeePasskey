@@ -5,7 +5,7 @@ import com.keepasskey.crypto.cipher.CipherEngine
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
+import com.keepasskey.database.io.WipableByteArrayOutputStream
 import java.util.Arrays
 
 /**
@@ -121,28 +121,42 @@ internal object KdbxCipherKeyResolver {
     ): Boolean {
         val prefix = try {
             val probe = cipherEngine.createDecryptingStream(ByteArrayInputStream(firstBlock), cipherKey, encryptionIv)
-            probe.use { stream ->
-                val buffer = ByteArray(PROBE_READ_BUFFER_SIZE)
-                val collected = ByteArrayOutputStream()
-                try {
-                    while (true) {
-                        val count = stream.read(buffer)
-                        if (count < 0) break
-                        collected.write(buffer, 0, count)
+            val collected = WipableByteArrayOutputStream()
+            try {
+                probe.use { stream ->
+                    val buffer = ByteArray(PROBE_READ_BUFFER_SIZE)
+                    try {
+                        while (true) {
+                            val count = stream.read(buffer)
+                            if (count < 0) break
+                            collected.write(buffer, 0, count)
+                        }
+                    } catch (_: java.io.IOException) {
+                        // 解密流收尾异常：截取已解出的前缀继续校验
+                    } finally {
+                        buffer.fill(0)
                     }
-                } catch (_: java.io.IOException) {
-                    // 解密流收尾异常：截取已解出的前缀继续校验
                 }
                 collected.toByteArray()
+            } finally {
+                collected.wipe()
             }
         } catch (_: Exception) {
             return false
         }
-        return if (isGzipCompressed) {
-            prefix.size >= GZIP_MAGIC.size &&
-                    prefix.copyOfRange(0, GZIP_MAGIC.size).contentEquals(GZIP_MAGIC)
-        } else {
-            isPlausibleFieldSequence(prefix)
+        return try {
+            if (isGzipCompressed) {
+                if (prefix.size < GZIP_MAGIC.size) {
+                    false
+                } else {
+                    val magic = prefix.copyOfRange(0, GZIP_MAGIC.size)
+                    try { magic.contentEquals(GZIP_MAGIC) } finally { magic.fill(0) }
+                }
+            } else {
+                isPlausibleFieldSequence(prefix)
+            }
+        } finally {
+            prefix.fill(0)
         }
     }
 

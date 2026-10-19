@@ -28,12 +28,14 @@ internal class SyncCacheMaintenance(
      */
     fun hasLocalChanges(remotePath: String): Boolean {
         val versionFile = getFile(remotePath, SyncCache.SUFFIX_VERSION)
-        if (!versionFile.exists()) return false
-
         val baseVersionFile = getFile(remotePath, SUFFIX_BASE_VERSION)
+        val cacheFile = getFile(remotePath, SyncCache.SUFFIX_CACHE)
+        if (!cacheFile.isFile) return versionFile.exists()
         if (!baseVersionFile.exists()) return true
 
-        val localVer = versionFile.readText().trim()
+        // The cache and marker are separate files. Treat the bytes as authoritative so a crash
+        // after replacing .cache but before replacing .version cannot turn a dirty cache clean.
+        val localVer = SyncCache.sha256Hex(cacheFile.readBytes())
         val baseVer = baseVersionFile.readText().trim()
         return localVer != baseVer
     }

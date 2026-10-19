@@ -409,6 +409,10 @@ internal class SettingsPreferencesController(
         }
     }
 
+    fun useBrandPalette() {
+        scope.launch { settingsRepository.useBrandPalette() }
+    }
+
     /** ISSUE-P3-441 AC①：自定义种子色设置/清除（null = 清除；互斥写由仓库层原子事务兜底） */
     fun setCustomSeedColor(seed: Long?) {
         scope.launch {

@@ -222,6 +222,7 @@ class SettingsViewModel @Inject constructor(
     fun setThemePalette(themePalette: AppThemePalette) = preferences.setThemePalette(themePalette)
     fun setOledBlackOptimization(enabled: Boolean) = preferences.setOledBlackOptimization(enabled)
     fun setDynamicColorEnabled(enabled: Boolean) = preferences.setDynamicColorEnabled(enabled)
+    fun useBrandPalette() = preferences.useBrandPalette()
     fun setCustomSeedColor(seed: Long?) = preferences.setCustomSeedColor(seed)
     /**
      * ISSUE-P2-212：生物识别开关切换。**开启必须当场验证**（委托 [BiometricEnableCoordinator]），

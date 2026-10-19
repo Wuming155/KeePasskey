@@ -194,7 +194,8 @@ internal class VaultListActionController(
     // ---------------------------------------------------------------------
 
     fun createGroup(name: String, iconName: String = "folder") {
-        if (name.isBlank() || isReadOnly()) return
+        if (name.isBlank()) return
+        if (isReadOnly()) return rejectReadOnlyWrite()
         scope.launch {
             val newGroup = VaultGroup(
                 id = "group_${System.currentTimeMillis()}",
@@ -215,7 +216,8 @@ internal class VaultListActionController(
     }
 
     fun renameGroup(group: VaultGroup, newName: String) {
-        if (newName.isBlank() || isReadOnly()) return
+        if (newName.isBlank()) return
+        if (isReadOnly()) return rejectReadOnlyWrite()
         scope.launch {
             val result = repository.saveGroup(
                 group.copy(name = newName.trim(), updatedAt = strings.get(R.string.time_just_now))
@@ -229,17 +231,21 @@ internal class VaultListActionController(
     }
 
     fun changeGroupIcon(group: VaultGroup, newIcon: String) {
-        if (isReadOnly()) return
+        if (isReadOnly()) return rejectReadOnlyWrite()
         scope.launch {
-            repository.saveGroup(
+            val result = repository.saveGroup(
                 group.copy(iconName = newIcon, updatedAt = strings.get(R.string.time_just_now))
             )
-            onMessage(UiMessage(R.string.vault_group_icon_updated))
+            if (result is KdbxResult.Success) {
+                onMessage(UiMessage(R.string.vault_group_icon_updated))
+            } else {
+                onMessage(UiMessage(R.string.op_failed, listOf((result as KdbxResult.Failure).textArg(strings))))
+            }
         }
     }
 
     fun deleteGroup(groupId: String) {
-        if (isReadOnly()) return
+        if (isReadOnly()) return rejectReadOnlyWrite()
         scope.launch {
             val result = repository.deleteGroup(groupId)
             if (result is KdbxResult.Success) {
@@ -251,7 +257,7 @@ internal class VaultListActionController(
     }
 
     fun restoreEntry(entryId: String) {
-        if (isReadOnly()) return
+        if (isReadOnly()) return rejectReadOnlyWrite()
         scope.launch {
             val result = repository.restoreEntry(entryId)
             if (result is KdbxResult.Success) {
@@ -263,7 +269,7 @@ internal class VaultListActionController(
     }
 
     fun purgeEntry(entryId: String) {
-        if (isReadOnly()) return
+        if (isReadOnly()) return rejectReadOnlyWrite()
         scope.launch {
             val result = repository.deleteEntry(entryId)
             if (result is KdbxResult.Success) {
@@ -275,7 +281,7 @@ internal class VaultListActionController(
     }
 
     fun emptyRecycleBin() {
-        if (isReadOnly()) return
+        if (isReadOnly()) return rejectReadOnlyWrite()
         scope.launch {
             val result = repository.emptyRecycleBin()
             if (result is KdbxResult.Success) {
@@ -458,6 +464,10 @@ internal class VaultListActionController(
     /** 条目标题口径与注册路径同源（`PasskeyEntryCoordinator.passkeyTitle`）：`用户名@rpId` */
     private fun passkeyImportTitle(data: PasskeyData): String =
         "${data.userName}@${data.relyingPartyId}"
+
+    private fun rejectReadOnlyWrite() {
+        onMessage(UiMessage(R.string.readonly_save_rejected))
+    }
 
     private companion object {
         /** 本扫码入口只接受的 URI 方案前缀（全小写，比较前逐字符 lowercase）。 */

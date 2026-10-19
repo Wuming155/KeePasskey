@@ -48,10 +48,15 @@ internal class PasskeyImportDraftHost(
             onNotice(R.string.readonly_save_rejected)
             return false
         }
-        val outcome = try {
-            PasskeyCxfReader.read(toUtf8Bytes(decoded))
+        val payload = try {
+            toUtf8Bytes(decoded)
         } finally {
             decoded.fill('0')
+        }
+        val outcome = try {
+            PasskeyCxfReader.read(payload)
+        } finally {
+            payload.fill(0)
         }
         return when (outcome) {
             is PasskeyCxfOutcome.Rejected -> {

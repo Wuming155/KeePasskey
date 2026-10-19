@@ -220,19 +220,28 @@ class VaultRecoveryCoordinator @Inject constructor(
         return Preview(vaultName, snap.size, off.size, added, removed, modified)
     }
 
-    /** 差异指纹只用非敏感字段（标题 / 用户名 / 网址 / 备注 / 标签 / 附件与历史条数）。 */
+    /** 比较条目实际内容；受保护字段由领域模型按内容等值比较，不解密成普通字符串。 */
     private fun sameFingerprint(a: KdbxEntry, b: KdbxEntry): Boolean =
-        fingerprint(a) == fingerprint(b)
-
-    private fun fingerprint(entry: KdbxEntry): String = listOf(
-        entry.title,
-        entry.userName,
-        entry.url,
-        entry.notes,
-        entry.tags.joinToString(),
-        entry.attachments.size.toString(),
-        entry.history.size.toString()
-    ).joinToString(FINGERPRINT_SEPARATOR)
+        a.fieldsContentEquals(b) &&
+            a.customFields.size == b.customFields.size &&
+            a.customFields.zip(b.customFields).all { (left, right) ->
+                left.key == right.key &&
+                    left.isProtected == right.isProtected &&
+                    left.value.contentEquals(right.value)
+            } &&
+            a.attachments == b.attachments &&
+            a.history.size == b.history.size &&
+            a.history.zip(b.history).all { (left, right) -> sameFingerprint(left, right) } &&
+            a.tags == b.tags &&
+            a.autoType == b.autoType &&
+            a.backgroundColor == b.backgroundColor &&
+            a.foregroundColor == b.foregroundColor &&
+            a.overrideUrl == b.overrideUrl &&
+            a.qualityCheck == b.qualityCheck &&
+            a.customData == b.customData &&
+            a.parentGroupId == b.parentGroupId &&
+            a.iconId == b.iconId &&
+            a.customIconId == b.customIconId
 
     private fun suggestedName(entry: VaultRecoveryStore.Entry): String {
         val base = entry.vaultName.takeIf { it.isNotBlank() } ?: entry.pathIdentifier.substringAfterLast('/')
@@ -246,7 +255,6 @@ class VaultRecoveryCoordinator @Inject constructor(
     private companion object {
         const val TAG = "VaultRecovery"
         const val SAF_SCHEME = "content://"
-        const val FINGERPRINT_SEPARATOR = "\u0001"
         const val RECOVERED_STEM = "recovered"
         const val RECOVERED_SUFFIX = " (恢复)"
     }

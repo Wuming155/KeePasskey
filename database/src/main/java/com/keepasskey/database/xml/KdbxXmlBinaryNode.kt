@@ -7,7 +7,7 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.file.InnerHeader
 import org.xml.sax.Attributes
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
+import com.keepasskey.database.io.WipableByteArrayOutputStream
 import java.io.IOException
 import java.util.zip.GZIPInputStream
 
@@ -173,10 +173,10 @@ internal class BinaryNode(
             GZIP_INITIAL_CAP_BYTES,
             maxOutputBytes
         ).toInt()
-        val out = ByteArrayOutputStream(initialCap)
+        val out = WipableByteArrayOutputStream(initialCap)
+        val buffer = ByteArray(GZIP_COPY_BUFFER_BYTES)
         try {
             GZIPInputStream(ByteArrayInputStream(compressed), GZIP_INFLATER_BUFFER_BYTES).use { gzip ->
-                val buffer = ByteArray(GZIP_COPY_BUFFER_BYTES)
                 while (true) {
                     val read = gzip.read(buffer)
                     if (read < 0) break
@@ -188,12 +188,15 @@ internal class BinaryNode(
                     out.write(buffer, 0, read)
                 }
             }
+            return out.toByteArray()
         } catch (e: KdbxCorruptFileException) {
             throw e
         } catch (e: IOException) {
             throw KdbxCorruptFileException("内联附件 GZip 解压失败: key=$key", e)
+        } finally {
+            buffer.fill(0)
+            out.wipe()
         }
-        return out.toByteArray()
     }
 
     /**

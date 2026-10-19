@@ -101,6 +101,10 @@ interface SettingsRepository {
     suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette)
     suspend fun setOledBlackOptimization(enabled: Boolean)
     suspend fun setDynamicColorEnabled(enabled: Boolean)
+    suspend fun useBrandPalette() {
+        setCustomSeedColor(null)
+        setDynamicColorEnabled(false)
+    }
 
     /**
      * ISSUE-P3-441 AC①：设置/清除自定义种子色（ARGB；null = 清除）。

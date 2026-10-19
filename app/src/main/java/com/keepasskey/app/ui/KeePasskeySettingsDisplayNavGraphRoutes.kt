@@ -33,7 +33,7 @@ internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController
             onPaletteSelected = settingsViewModel::setThemePalette,
             // ISSUE-P3-263 / PD-30（候选 A）：动态取色生效期间调色盘置灰，
             // 「一步切回」＝关闭动态取色即可恢复品牌调色盘（偏好值已落盘，无须另行选择）
-            onSwitchToBrandPalette = { settingsViewModel.setDynamicColorEnabled(false) },
+            onSwitchToBrandPalette = settingsViewModel::useBrandPalette,
             // ISSUE-P3-441 AC①：自定义种子色（null = 清除；互斥写由仓库层原子事务兜底）
             onCustomSeedSelected = settingsViewModel::setCustomSeedColor,
             onLanguageSelected = settingsViewModel::setAppLanguage,

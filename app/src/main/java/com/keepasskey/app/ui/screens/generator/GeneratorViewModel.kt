@@ -34,6 +34,8 @@ class GeneratorViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(GeneratorUiState())
     val uiState: StateFlow<GeneratorUiState> = _uiState.asStateFlow()
+    private val generationLock = Any()
+    private var generation = 0L
 
     init {
         generateNewPassword()
@@ -172,6 +174,7 @@ class GeneratorViewModel @Inject constructor(
      */
     private fun generateNewPassword(recordInHistory: Boolean = true) {
         val currentState = _uiState.value
+        val requestGeneration = synchronized(generationLock) { ++generation }
         // ISSUE-P2-286：强度内核评估（CPU 热路径）与生成一并下沉 Dispatchers.Default（§3 规则 2）；
         // 熵读数收敛单一真相源：随机 / 掩码走 crypto 内核（calculateEntropy），
         // 口令短语走「词数 × log2(词表) + 变形位」模型（passphraseEntropyBits，AC②）
@@ -219,23 +222,29 @@ class GeneratorViewModel @Inject constructor(
                 }
             }
 
-            _uiState.update { current ->
-                val previous = current.currentPassword
-                val unchanged = previous.length > 0 && previous == newSecret
-                val historyWithPrevious = if (recordInHistory && previous.length > 0 && !unchanged) {
-                    listOf(previous) + current.history
-                } else {
-                    current.history
+            synchronized(generationLock) {
+                if (requestGeneration != generation) {
+                    newSecret.clear()
+                    return@launch
                 }
-                val keptHistory = historyWithPrevious.take(MAX_HISTORY_SIZE)
-                // 淘汰项与未被引用的旧当前值显式清零
-                historyWithPrevious.drop(MAX_HISTORY_SIZE).forEach { it.clear() }
-                if (keptHistory.none { it === previous }) previous.clear()
-                current.copy(
-                    currentPassword = newSecret,
-                    entropyBits = entropy,
-                    history = keptHistory
-                )
+                _uiState.update { current ->
+                    val previous = current.currentPassword
+                    val unchanged = previous.length > 0 && previous == newSecret
+                    val historyWithPrevious = if (recordInHistory && previous.length > 0 && !unchanged) {
+                        listOf(previous) + current.history
+                    } else {
+                        current.history
+                    }
+                    val keptHistory = historyWithPrevious.take(MAX_HISTORY_SIZE)
+                    // 淘汰项与未被引用的旧当前值显式清零
+                    historyWithPrevious.drop(MAX_HISTORY_SIZE).forEach { it.clear() }
+                    if (keptHistory.none { it === previous }) previous.clear()
+                    current.copy(
+                        currentPassword = newSecret,
+                        entropyBits = entropy,
+                        history = keptHistory
+                    )
+                }
             }
         }
     }
@@ -258,6 +267,7 @@ class GeneratorViewModel @Inject constructor(
     }
 
     private fun clearGeneratedSecrets() {
+        synchronized(generationLock) { generation++ }
         val current = _uiState.value
         current.currentPassword.clear()
         current.history.forEach { it.clear() }

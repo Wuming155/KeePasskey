@@ -286,18 +286,31 @@ internal class CbcDecryptingInputStream(
     private fun finishTailHeap(tailLength: Int, keep: Int): Boolean {
         val head = transformBlocks(buffer, 0, keep)
         val lastPlain = transformBlocks(buffer, keep, tailLength)
-        val stripped = Pkcs7.unpad(lastPlain)
-        Arrays.fill(lastPlain, 0)
-        Arrays.fill(buffer, 0, tailLength, 0)
-
-        if (stripped == null) {
-            // 基线：填充非法 → BadPaddingException → IOException
+        try {
+            val stripped = Pkcs7.unpad(lastPlain)
+            if (stripped == null) {
+                // 基线：填充非法 → BadPaddingException → IOException
+                throw IOException("CBC 解密流：PKCS#7 填充非法（密钥错误或数据被篡改）")
+            }
+            if (head.isEmpty()) {
+                out = stripped
+            } else {
+                try {
+                    out = head + stripped
+                } finally {
+                    Arrays.fill(head, 0)
+                    Arrays.fill(stripped, 0)
+                }
+            }
+            outPos = 0
+            return out.isNotEmpty()
+        } catch (t: Throwable) {
             Arrays.fill(head, 0)
-            throw IOException("CBC 解密流：PKCS#7 填充非法（密钥错误或数据被篡改）")
+            throw t
+        } finally {
+            Arrays.fill(lastPlain, 0)
+            Arrays.fill(buffer, 0, tailLength, 0)
         }
-        out = if (head.isEmpty()) stripped else head + stripped
-        outPos = 0
-        return out.isNotEmpty()
     }
 
     /** 变换结果不得与复用输入别名（见 [bodyScratch] 的契约说明；仅 byte[] 形态适用）。 */

@@ -151,25 +151,36 @@ fun CloudSyncScreen(
     /**
      * 持久化当前表单的同步配置，返回是否保存成功。
      *
-     * · **借用语义**（Wave 15 / ISSUE-P2-01）：保存成功即把凭据数组交给 ViewModel 消费，
-     *   并**立即清空本地副本**——不在组件内留下第二份明文；
+     * · 将秘密副本交给 ViewModel；失败时保留表单原件以便重试，成功时清零表单原件；
      * · 保存失败（https 校验拒绝 / 凭据封印失败）由 ViewModel 上浮反馈，本地不谎报「已保存」；
      * · 抽为局部函数供「保存并同步」与「保存配置」两个入口共用：两条路径若各写一份，
      *   迟早出现「一个入口清了凭据数组、另一个没清」这类偏差。
      */
     val persistConfig: () -> Boolean = {
         if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
-            val saved = onUpdateWebDav(webdavUrl, webdavUsername, webdavPasswordChars, webdavRemotePath)
+            val passwordCopy = webdavPasswordChars.copyOf()
+            val saved = try {
+                onUpdateWebDav(webdavUrl, webdavUsername, passwordCopy, webdavRemotePath)
+            } finally {
+                passwordCopy.fill('0')
+            }
             if (saved) {
                 saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
                 webdavPasswordChars = CharArray(0)
             }
             saved
         } else {
-            val saved = onUpdateS3(
-                s3Endpoint, s3Bucket, s3Region, s3AccessKeyChars,
-                s3SecretKeyChars, s3ObjectKey, s3UsePathStyle
-            )
+            val accessKeyCopy = s3AccessKeyChars.copyOf()
+            val secretKeyCopy = s3SecretKeyChars.copyOf()
+            val saved = try {
+                onUpdateS3(
+                    s3Endpoint, s3Bucket, s3Region, accessKeyCopy,
+                    secretKeyCopy, s3ObjectKey, s3UsePathStyle
+                )
+            } finally {
+                accessKeyCopy.fill('0')
+                secretKeyCopy.fill('0')
+            }
             if (saved) {
                 saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
                 s3AccessKeyChars.fill('0')
@@ -400,8 +411,7 @@ fun CloudSyncScreen(
                     // 先保存表单（含刚输入的密码），再走顺序编排（测连通过则同步），
                     // 让 lastSyncTime 真正写入，避免「徽章已同步 / 下方尚未同步」矛盾
                     onTestConnection = {
-                        persistConfig()
-                        onSyncAfterSave()
+                        if (persistConfig()) onSyncAfterSave()
                     }
                 )
             }

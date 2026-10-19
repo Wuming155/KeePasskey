@@ -14,12 +14,15 @@ from wsgidav.fs_dav_provider import FilesystemProvider
 from wsgidav.wsgidav_app import WsgiDAVApp
 
 PORT = int(os.environ.get("WEBDAV_PORT", "9443"))
-HOST = os.environ.get("WEBDAV_HOST", "0.0.0.0")
-USER = os.environ.get("WEBDAV_USER", "tester")
-PASSWORD = os.environ.get("WEBDAV_PASSWORD", "tester123")
+HOST = os.environ.get("WEBDAV_HOST", "127.0.0.1")
+USER = os.environ.get("WEBDAV_USER")
+PASSWORD = os.environ.get("WEBDAV_PASSWORD")
 DAV_ROOT = os.path.abspath(os.environ.get("WEBDAV_ROOT", "webdav-data"))
 CERT = os.path.abspath(os.environ.get("WEBDAV_CERT", "certs/cert.pem"))
 KEY = os.path.abspath(os.environ.get("WEBDAV_KEY", "certs/key.pem"))
+
+if not USER or not PASSWORD:
+    sys.exit("[FATAL] 请通过 WEBDAV_USER 和 WEBDAV_PASSWORD 提供本地联调凭据")
 
 if not os.path.isfile(CERT) or not os.path.isfile(KEY):
     sys.exit(f"[FATAL] 缺失证书文件：{CERT} / {KEY}")
@@ -149,8 +152,8 @@ server = wsgi.Server(
 server.ssl_adapter = BuiltinSSLAdapter(CERT, KEY)
 print(f"[WebDAV] HTTPS 监听 https://{HOST}:{PORT}  root={DAV_ROOT}")
 # 刻意不回显口令（CodeQL py/clear-text-logging-sensitive-data）：只提示凭据来源与账号，
-# 实际口令由 WEBDAV_PASSWORD 环境变量或本文件内置的本地默认值决定。
-print(f"[WebDAV] 账号 {USER}（口令取自 WEBDAV_PASSWORD 环境变量或内置本地默认值，按安全策略不回显）")
+# 实际口令仅由 WEBDAV_PASSWORD 环境变量提供。
+print(f"[WebDAV] 账号 {USER}（口令取自 WEBDAV_PASSWORD 环境变量，按安全策略不回显）")
 
 try:
     server.start()

@@ -30,8 +30,15 @@ object ByteJsonScanner {
     /** 扫描并解析；输入不是单个合法 JSON 值时返回 null（绝不抛出）。 */
     fun scan(text: ByteArray): ByteJson? {
         val scanner = Scanner(text)
-        val node = scanner.parseDocument() ?: return null
-        if (!scanner.atEnd()) return null
+        val node = scanner.parseDocument() ?: run {
+            scanner.wipeTemporaryNodes()
+            return null
+        }
+        if (!scanner.atEnd()) {
+            scanner.wipeTemporaryNodes()
+            return null
+        }
+        scanner.releaseTemporaryNodeReferences()
         return node
     }
 
@@ -43,6 +50,16 @@ object ByteJsonScanner {
     private class Scanner(private val src: ByteArray) {
 
         private var pos = 0
+        private val allocatedNodes = mutableListOf<ByteJson>()
+
+        fun wipeTemporaryNodes() {
+            allocatedNodes.forEach { it.wipe() }
+            allocatedNodes.clear()
+        }
+
+        fun releaseTemporaryNodeReferences() = allocatedNodes.clear()
+
+        private fun <T : ByteJson> track(node: T): T = node.also { allocatedNodes += it }
 
         fun atEnd(): Boolean {
             skipWhitespace()
@@ -80,13 +97,13 @@ object ByteJsonScanner {
             skipWhitespace()
             if (pos < src.size && src[pos].toInt() == RCURLY) {
                 pos++
-                return ByteJson.Obj(members)
+                return track(ByteJson.Obj(members))
             }
             while (true) {
                 skipWhitespace()
                 if (pos >= src.size || src[pos].toInt() != DQUOTE) return null
                 val keyNode = stringNode() ?: return null
-                val key = keyNode.asUtf8String() ?: return null
+                val key = try { keyNode.asUtf8String() ?: return null } finally { keyNode.wipe() }
                 skipWhitespace()
                 if (pos >= src.size || src[pos].toInt() != COLON) return null
                 pos++
@@ -98,7 +115,7 @@ object ByteJsonScanner {
                     COMMA -> pos++
                     RCURLY -> {
                         pos++
-                        return ByteJson.Obj(members)
+                        return track(ByteJson.Obj(members))
                     }
                     else -> return null
                 }
@@ -111,7 +128,7 @@ object ByteJsonScanner {
             skipWhitespace()
             if (pos < src.size && src[pos].toInt() == RSQUARE) {
                 pos++
-                return ByteJson.Arr(items)
+                return track(ByteJson.Arr(items))
             }
             while (true) {
                 val item = value(depth + 1) ?: return null
@@ -122,7 +139,7 @@ object ByteJsonScanner {
                     COMMA -> pos++
                     RSQUARE -> {
                         pos++
-                        return ByteJson.Arr(items)
+                        return track(ByteJson.Arr(items))
                     }
                     else -> return null
                 }
@@ -136,16 +153,20 @@ object ByteJsonScanner {
         private fun stringNode(): ByteJson.Str? {
             pos++ // '"'
             val out = ByteSink()
-            while (true) {
-                if (pos >= src.size) return null
-                val c = src[pos].toInt() and 0xFF
-                pos++
-                when {
-                    c == DQUOTE -> return ByteJson.Str(out.toByteArray())
-                    c == BACKSLASH -> if (!appendEscaped(out)) return null
-                    c < 0x20 -> return null // 串内裸控制字符：RFC 8259 要求转义，一律拒
-                    else -> out.add(c)
+            try {
+                while (true) {
+                    if (pos >= src.size) return null
+                    val c = src[pos].toInt() and 0xFF
+                    pos++
+                    when {
+                        c == DQUOTE -> return track(ByteJson.Str(out.toByteArray()))
+                        c == BACKSLASH -> if (!appendEscaped(out)) return null
+                        c < 0x20 -> return null // 串内裸控制字符：RFC 8259 要求转义，一律拒
+                        else -> out.add(c)
+                    }
                 }
+            } finally {
+                out.wipe()
             }
         }
 
@@ -277,10 +298,14 @@ sealed class ByteJson {
 
         /** 键集合（供诊断与「未知成员忽略」计数，不含值）。 */
         fun keys(): List<String> = members.map { it.first }
+
+        override fun wipe() = members.forEach { it.second.wipe() }
     }
 
     /** JSON 数组。 */
-    class Arr(val items: List<ByteJson>) : ByteJson()
+    class Arr(val items: List<ByteJson>) : ByteJson() {
+        override fun wipe() = items.forEach { it.wipe() }
+    }
 
     /** JSON 字符串值：已解码转义的 UTF-8 字节（可能承载秘密，调用方负责清零）。 */
     class Str(val bytes: ByteArray) : ByteJson() {
@@ -297,7 +322,7 @@ sealed class ByteJson {
          * 只清零**扫描器自己分配的副本**，不动调用方传入的载荷数组——
          * 后者归扫码链上层按各自的擦除契约处理。
          */
-        fun wipe() = bytes.fill(0)
+        override fun wipe() = bytes.fill(0)
     }
 
     /** JSON 数字：整数形态可得时 [longValue] 非空（版本号判定用），否则为 null（含小数 / 溢出）。 */
@@ -308,6 +333,8 @@ sealed class ByteJson {
 
     /** JSON `null`（与「键缺失」在口径上不同，故独立成型）。 */
     object NullValue : ByteJson()
+
+    open fun wipe() = Unit
 }
 
 /** 仅服务于扫描器的可增长字节缓冲（避免每字节一次数组拷贝）。 */
@@ -347,6 +374,11 @@ private class ByteSink {
     }
 
     fun toByteArray(): ByteArray = buf.copyOf(size)
+
+    fun wipe() {
+        buf.fill(0)
+        size = 0
+    }
 
     private fun ensure(extra: Int) {
         if (size + extra <= buf.size) return

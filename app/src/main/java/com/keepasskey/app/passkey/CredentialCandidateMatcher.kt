@@ -59,7 +59,9 @@ internal object CredentialCandidateMatcher {
         if (browserFlow) return domainMatch
         val packageMatch = packageDimensionAllowed && callingPackage.isNotBlank() &&
             DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
-        return domainMatch || packageMatch
+        // PD-77: an explicit RP ID is authoritative. The package dimension is only a
+        // fallback for legacy requests that omitted the RP ID.
+        return if (targetRpId.isNotBlank()) domainMatch else packageMatch
     }
 
     /** 密码候选入选判定 */

@@ -27,10 +27,10 @@ DATA_DIR = os.path.join(HERE, "minio-data")
 WEBDAV_PORT = 9443
 S3_PORT = 9000
 CONSOLE_PORT = 9001
-USER = "tester"
-PASSWORD = "tester1234"
-S3_USER = "tester"
-S3_PASSWORD = "tester1234"
+USER = "kp-test-" + uuid.uuid4().hex[:8]
+PASSWORD = uuid.uuid4().hex
+S3_USER = "kp-s3-" + uuid.uuid4().hex[:8]
+S3_PASSWORD = uuid.uuid4().hex
 BUCKET = "keepasskey-test"
 CERT_PATH = os.path.join(HERE, "certs", "cert.pem")
 LIVE_ARTIFACT_DIR = os.path.join(REPO, ".ci-artifacts", "live-sync-kdbx")
@@ -80,9 +80,9 @@ def run(cmd, display):
 def main():
     py = sys.executable
     # WebDAV 与两个测试 JVM 共用一次性本地凭据；不回显口令，且不依赖弱口令默认值。
-    os.environ.setdefault("WEBDAV_HOST", "127.0.0.1")
-    os.environ.setdefault("WEBDAV_USER", "kp-test-" + uuid.uuid4().hex[:8])
-    os.environ.setdefault("WEBDAV_PASSWORD", "kp-test-" + uuid.uuid4().hex)
+    os.environ["WEBDAV_HOST"] = "127.0.0.1"
+    os.environ["WEBDAV_USER"] = USER
+    os.environ["WEBDAV_PASSWORD"] = PASSWORD
     os.environ.setdefault("LIVE_SYNC_TEST", "1")
     wd = subprocess.Popen([py, os.path.join(HERE, "run_webdav.py")],
                           cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -97,7 +97,7 @@ def main():
     env["MINIO_ROOT_PASSWORD"] = S3_PASSWORD
     env["MINIO_CERTS_DIR"] = CERTS_DIR
     mproc = subprocess.Popen(
-        [MINIO, "server", DATA_DIR, "--address", f":{S3_PORT}", "--console-address", f":{CONSOLE_PORT}"],
+        [MINIO, "server", DATA_DIR, "--address", f"127.0.0.1:{S3_PORT}", "--console-address", f"127.0.0.1:{CONSOLE_PORT}"],
         cwd=HERE, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     PROCS.append(mproc)
     if not wait_port("localhost", S3_PORT, timeout=40):
