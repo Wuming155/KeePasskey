@@ -84,7 +84,7 @@ class DatabaseSession(
     }
 
     private val mutations = SessionContentMutations(
-        mutex, core.database, core.state, { core.readOnlyMode }
+        mutex, core.database, core.state, { core.readOnlyMode }, { core.credentialTicket }
     ) { core.persistedBaselineRevision() }
     private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress, mutations::publishCommittedDatabaseMeta, mutations)
     /** Atomic target snapshot and Meta commit entry points. */

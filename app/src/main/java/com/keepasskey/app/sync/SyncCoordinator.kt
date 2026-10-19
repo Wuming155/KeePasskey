@@ -310,14 +310,22 @@ open class SyncCoordinator @Inject constructor(
      * ISSUE-P2-625：挂锁由 [SyncCycleRunner] 在取得同步互斥锁后，仅包围本地密文快照准备段；
      * 网络请求与重试期间不持有挂锁，熄屏/后台锁定可立即清理会话和主凭据。
      */
-    suspend fun syncNow(): SyncOutcome = withSessionLockCancellation {
+    suspend fun syncNow(): SyncOutcome = syncNowForConfig(null)
+
+    /** ISSUE-P2-652：保存后测试编排用同一回执执行同步周期。 */
+    internal suspend fun syncNow(snapshot: SyncProviderConfigSnapshot): SyncOutcome =
+        syncNowForConfig(snapshot)
+
+    private suspend fun syncNowForConfig(snapshot: SyncProviderConfigSnapshot?): SyncOutcome =
+        withSessionLockCancellation {
         debugLog.info(SYNC_LOG_TAG, "手动/自动同步开始")
-        val probeTargetBefore = if (periodicSyncProbeStore != null && databaseSession.databaseFlow.value != null) {
+        // 保存回执周期内 providerTarget 来自提交快照，不能在此重新解析当前全局配置作探测归档。
+        val probeTargetBefore = if (snapshot == null && periodicSyncProbeStore != null && databaseSession.databaseFlow.value != null) {
             resolveProbeTarget()
         } else {
             null
         }
-        val outcome = cycle.runSyncCycle()
+        val outcome = if (snapshot == null) cycle.runSyncCycle() else cycle.runSyncCycle(snapshot)
         publishSyncEvents()
         _lastOutcome.value = outcome
         if (probeTargetBefore != null) {
@@ -432,13 +440,23 @@ open class SyncCoordinator @Inject constructor(
     /**
      * 测试当前云端同步配置连接连通性
      */
-    suspend fun testConnection(): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun testConnection(): Result<Unit> = testConnectionForConfig(null)
+
+    /** ISSUE-P2-652：测试连接显式消费刚成功保存的配置回执。 */
+    internal suspend fun testConnection(snapshot: SyncProviderConfigSnapshot): Result<Unit> =
+        testConnectionForConfig(snapshot)
+
+    private suspend fun testConnectionForConfig(snapshot: SyncProviderConfigSnapshot?): Result<Unit> =
+        withContext(Dispatchers.IO) {
         try {
-            providers.useProvider(testSyncProvider) { provider ->
-                provider.testConnection()
-            } ?: return@withContext Result.failure(
-                    IllegalStateException(effectiveStrings.get(R.string.sync_error_test_no_credentials))
-                )
+            val result = if (snapshot == null) {
+                providers.useProvider(testSyncProvider) { provider -> provider.testConnection() }
+            } else {
+                providers.useProviderAtSnapshot(snapshot, testSyncProvider) { provider -> provider.testConnection() }
+            }
+            result ?: return@withContext Result.failure(
+                IllegalStateException(effectiveStrings.get(R.string.sync_error_test_no_credentials))
+            )
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Result.failure(e)

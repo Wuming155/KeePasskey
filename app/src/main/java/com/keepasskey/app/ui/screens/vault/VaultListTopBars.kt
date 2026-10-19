@@ -65,6 +65,7 @@ internal fun VaultListBatchModeTopBar(
     onSelectAllBatch: () -> Unit,
     onBatchMoveClick: () -> Unit,
     onBatchDelete: () -> Unit,
+    isReadOnly: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     TopAppBar(
@@ -81,14 +82,22 @@ internal fun VaultListBatchModeTopBar(
             }
         },
         actions = {
-            IconButton(onClick = onSelectAllBatch) {
+            IconButton(onClick = onSelectAllBatch, enabled = !isReadOnly) {
                 Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.cd_select_all))
             }
-            IconButton(onClick = onBatchMoveClick) {
+            IconButton(onClick = onBatchMoveClick, enabled = !isReadOnly) {
                 Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = stringResource(R.string.cd_batch_move))
             }
-            IconButton(onClick = onBatchDelete) {
+            IconButton(onClick = onBatchDelete, enabled = !isReadOnly) {
                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.cd_batch_delete), tint = MaterialTheme.colorScheme.error)
+            }
+            if (isReadOnly) {
+                Text(
+                    text = stringResource(R.string.readonly_save_rejected),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -129,7 +138,8 @@ internal fun VaultListSearchTopBar(
     onSelectEntriesClick: (() -> Unit)? = null,
     /** ISSUE-P3-439 / ISSUE-P2-544：溢出菜单「高级搜索」项（打开选项对话框） */
     onAdvancedSearchClick: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isReadOnly: Boolean = false
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     val searchFocusRequester = remember { FocusRequester() }
@@ -255,7 +265,7 @@ internal fun VaultListSearchTopBar(
                             }
                         )
                         // ISSUE-P3-360 AC④a：批量模式的第二入口（首长按之外的可发现路径）
-                        if (onSelectEntriesClick != null) {
+                        if (onSelectEntriesClick != null && !isReadOnly) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.vault_menu_select_entries)) },
                                 leadingIcon = {

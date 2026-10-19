@@ -121,24 +121,55 @@ object PasskeyPrf {
         }
     }
 
-    private fun secretToProtected(secret: ByteArray): ProtectedString {
+    private fun secretToProtected(
+        secret: ByteArray,
+        observeTemporaryChars: ((CharArray) -> Unit)? = null
+    ): ProtectedString {
         val encoded = Base64.getEncoder().encode(secret)
         try {
-            return ProtectedString(CharArray(encoded.size) { encoded[it].toInt().toChar() }, isProtected = true)
+            val chars = CharArray(encoded.size) { encoded[it].toInt().toChar() }
+            try {
+                return ProtectedString(chars, isProtected = true)
+            } finally {
+                // ProtectedString 构造器会清理内部 UTF-8 中间量，但调用方传入的 CharArray
+                // 仍由本函数持有；在这里显式擦除本函数创建的独占字符副本。
+                Arrays.fill(chars, '\u0000')
+                observeTemporaryChars?.invoke(chars)
+            }
         } finally {
             encoded.fill(0)
         }
     }
 
-    private fun stripWhitespace(bytes: ByteArray): ByteArray {
+    /** 测试契约入口：与生产使用同一编码/构造路径。 */
+    internal fun secretToProtectedForTest(
+        secret: ByteArray,
+        observeTemporaryChars: (CharArray) -> Unit
+    ): ProtectedString = secretToProtected(secret, observeTemporaryChars)
+
+    private fun stripWhitespace(bytes: ByteArray, observeWipedWork: ((ByteArray) -> Unit)? = null): ByteArray {
         val out = ByteArray(bytes.size)
         var n = 0
-        for (b in bytes) {
-            val v = b.toInt() and 0xFF
-            if (v == ASCII_LF || v == ASCII_CR || v == ASCII_SPACE || v == ASCII_TAB) continue
-            out[n++] = b
+        try {
+            for (b in bytes) {
+                val v = b.toInt() and 0xFF
+                if (v == ASCII_LF || v == ASCII_CR || v == ASCII_SPACE || v == ASCII_TAB) continue
+                out[n++] = b
+            }
+            if (n == out.size) return out
+            return out.copyOf(n)
+        } finally {
+            // n == size 时 out 本身转移给调用方；缩短时 out 是独占旧工作数组。
+            if (n != out.size) {
+                Arrays.fill(out, 0)
+                observeWipedWork?.invoke(out)
+            }
         }
-        return if (n == out.size) out else out.copyOf(n)
+    }
+
+    /** 测试契约入口：观察缩短路径的工作数组清零及返回副本仍有效。 */
+    internal fun stripWhitespaceForTest(bytes: ByteArray, observeWorkArray: (ByteArray) -> Unit): ByteArray {
+        return stripWhitespace(bytes, observeWorkArray)
     }
 
     private fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {

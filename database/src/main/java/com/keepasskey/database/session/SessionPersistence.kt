@@ -92,6 +92,13 @@ internal class SessionPersistence(
      * 语义与 [save] **逐字相同**，仅去掉取锁（`Mutex` 不可重入，带锁版在锁内再调即自锁）。
      */
     internal suspend fun saveLocked(): KdbxResult<Unit> {
+        val request = currentCoroutineContext()[SessionCredentialRequest]
+        if (request != null && (request.expected == null || request.expected !== core.credentialTicket)) {
+            return KdbxResult.Failure(
+                SessionCredentialTicketMismatchException(),
+                code = KdbxError.SAVE_SESSION_CHANGED
+            )
+        }
         if (core.credentialWriteUncertain.value) {
             return KdbxResult.Failure(
                 IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),

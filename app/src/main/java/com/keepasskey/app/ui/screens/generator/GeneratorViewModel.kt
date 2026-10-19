@@ -7,6 +7,7 @@ import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.security.ProtectedString
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +15,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
+
+internal data class GeneratorGeneratedResult(
+    val secret: ProtectedString,
+    val entropyBits: Int
+)
 
 @HiltViewModel
 class GeneratorViewModel @Inject constructor(
@@ -34,6 +41,16 @@ class GeneratorViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(GeneratorUiState())
     val uiState: StateFlow<GeneratorUiState> = _uiState.asStateFlow()
+
+    /** 受控生成入口和调度器供 JVM 竞态用例设置屏障；生产默认仍使用真实引擎与 Default。 */
+    internal var generateResult: suspend (GeneratorUiState) -> GeneratorGeneratedResult = { state ->
+        generatePasswordResult(state)
+    }
+    internal var generationDispatcher: CoroutineDispatcher = Dispatchers.Default
+
+    /** 与清理/发布共用门闩，保证失效检查和状态提交之间不会插入锁定清理。 */
+    private val generationGate = Any()
+    private var generationEpoch = 0L
 
     init {
         generateNewPassword()
@@ -109,18 +126,23 @@ class GeneratorViewModel @Inject constructor(
     fun selectHistoryPassword(password: ProtectedString) {
         // ISSUE-P2-12：熵值计算走字符数组通道，不把种子物化为额外 String
         // ISSUE-P2-286：强度内核为 CPU 热路径，评估段下沉 Dispatchers.Default（§3 规则 2）
+        val requestEpoch = synchronized(generationGate) { ++generationEpoch }
         viewModelScope.launch {
             val entropy = withContext(Dispatchers.Default) {
                 password.useChars { PasswordGenerationEngine.calculateEntropy(it).toInt() }
             }
-            _uiState.update { current ->
-                // 被替换的当前值若未被历史引用则显式擦除（历史项仍是同一实例，不能误清）
-                val previous = current.currentPassword
-                if (current.history.none { it === previous }) previous.clear()
-                current.copy(
-                    currentPassword = password,
-                    entropyBits = entropy
-                )
+            synchronized(generationGate) {
+                if (requestEpoch == generationEpoch && !password.cleared) {
+                    _uiState.update { current ->
+                        // 被替换的当前值若未被历史引用则显式擦除（历史项仍是同一实例，不能误清）
+                        val previous = current.currentPassword
+                        if (current.history.none { it === previous }) previous.clear()
+                        current.copy(
+                            currentPassword = password,
+                            entropyBits = entropy
+                        )
+                    }
+                }
             }
         }
     }
@@ -172,71 +194,80 @@ class GeneratorViewModel @Inject constructor(
      */
     private fun generateNewPassword(recordInHistory: Boolean = true) {
         val currentState = _uiState.value
+        val requestEpoch = synchronized(generationGate) { ++generationEpoch }
         // ISSUE-P2-286：强度内核评估（CPU 热路径）与生成一并下沉 Dispatchers.Default（§3 规则 2）；
         // 熵读数收敛单一真相源：随机 / 掩码走 crypto 内核（calculateEntropy），
         // 口令短语走「词数 × log2(词表) + 变形位」模型（passphraseEntropyBits，AC②）
         viewModelScope.launch {
-            val (newSecret, entropy) = withContext(Dispatchers.Default) {
-                // ISSUE-P2-16：引擎返回 CharArray 独占副本（生成瞬间不再物化不可擦 String）。
-                // 熵值计算与 ProtectedString 密封复用同一副本，密封完成（内部已加密/拷贝）后立即清零。
-                val newPasswordChars = when (currentState.mode) {
-                    GeneratorMode.RANDOM -> {
-                        PasswordGenerationEngine.generateRandomPassword(
-                            length = currentState.randomLength,
-                            useUpper = currentState.useUpper,
-                            useLower = currentState.useLower,
-                            useDigits = currentState.useDigits,
-                            useSymbols = currentState.useSymbols,
-                            excludeAmbiguous = currentState.excludeAmbiguous
-                        )
-                    }
-                    GeneratorMode.PASSPHRASE -> {
-                        PasswordGenerationEngine.generatePassphrase(
-                            wordCount = currentState.wordCount,
-                            separator = currentState.separator,
-                            capitalize = currentState.capitalizeWords,
-                            includeNumber = currentState.includeNumberInPassphrase
-                        )
-                    }
-                    GeneratorMode.MASK -> {
-                        PasswordGenerationEngine.generateMaskedPassword(
-                            mask = currentState.maskPattern
-                        )
+            val completedResult = AtomicReference<GeneratorGeneratedResult?>(null)
+            var committed = false
+            try {
+                val result = withContext(generationDispatcher) {
+                    generateResult(currentState).also(completedResult::set)
+                }
+                synchronized(generationGate) {
+                    if (requestEpoch == generationEpoch) {
+                        val newSecret = result.secret
+                        val entropy = result.entropyBits
+                        _uiState.update { current ->
+                            val previous = current.currentPassword
+                            val unchanged = previous.length > 0 && previous == newSecret
+                            val historyWithPrevious = if (recordInHistory && previous.length > 0 && !unchanged) {
+                                listOf(previous) + current.history
+                            } else {
+                                current.history
+                            }
+                            val keptHistory = historyWithPrevious.take(MAX_HISTORY_SIZE)
+                            // 淘汰项与未被引用的旧当前值显式清零
+                            historyWithPrevious.drop(MAX_HISTORY_SIZE).forEach { it.clear() }
+                            if (keptHistory.none { it === previous }) previous.clear()
+                            current.copy(
+                                currentPassword = newSecret,
+                                entropyBits = entropy,
+                                history = keptHistory
+                            )
+                        }
+                        committed = true
                     }
                 }
-
-                try {
-                    val bits = when (currentState.mode) {
-                        GeneratorMode.PASSPHRASE -> PasswordGenerationEngine.passphraseEntropyBits(
-                            wordCount = currentState.wordCount,
-                            includeNumber = currentState.includeNumberInPassphrase
-                        )
-                        else -> PasswordGenerationEngine.calculateEntropy(newPasswordChars).toInt()
-                    }
-                    ProtectedString(newPasswordChars, isProtected = true) to bits
-                } finally {
-                    newPasswordChars.fill('0')
-                }
+            } finally {
+                if (!committed) completedResult.getAndSet(null)?.secret?.clear()
             }
+        }
+    }
 
-            _uiState.update { current ->
-                val previous = current.currentPassword
-                val unchanged = previous.length > 0 && previous == newSecret
-                val historyWithPrevious = if (recordInHistory && previous.length > 0 && !unchanged) {
-                    listOf(previous) + current.history
-                } else {
-                    current.history
-                }
-                val keptHistory = historyWithPrevious.take(MAX_HISTORY_SIZE)
-                // 淘汰项与未被引用的旧当前值显式清零
-                historyWithPrevious.drop(MAX_HISTORY_SIZE).forEach { it.clear() }
-                if (keptHistory.none { it === previous }) previous.clear()
-                current.copy(
-                    currentPassword = newSecret,
-                    entropyBits = entropy,
-                    history = keptHistory
+    /** 生产生成实现：CharArray 在密封和熵计算后立即清零。 */
+    private fun generatePasswordResult(currentState: GeneratorUiState): GeneratorGeneratedResult {
+        val newPasswordChars = when (currentState.mode) {
+            GeneratorMode.RANDOM -> PasswordGenerationEngine.generateRandomPassword(
+                length = currentState.randomLength,
+                useUpper = currentState.useUpper,
+                useLower = currentState.useLower,
+                useDigits = currentState.useDigits,
+                useSymbols = currentState.useSymbols,
+                excludeAmbiguous = currentState.excludeAmbiguous
+            )
+            GeneratorMode.PASSPHRASE -> PasswordGenerationEngine.generatePassphrase(
+                wordCount = currentState.wordCount,
+                separator = currentState.separator,
+                capitalize = currentState.capitalizeWords,
+                includeNumber = currentState.includeNumberInPassphrase
+            )
+            GeneratorMode.MASK -> PasswordGenerationEngine.generateMaskedPassword(
+                mask = currentState.maskPattern
+            )
+        }
+        try {
+            val bits = when (currentState.mode) {
+                GeneratorMode.PASSPHRASE -> PasswordGenerationEngine.passphraseEntropyBits(
+                    wordCount = currentState.wordCount,
+                    includeNumber = currentState.includeNumberInPassphrase
                 )
+                else -> PasswordGenerationEngine.calculateEntropy(newPasswordChars).toInt()
             }
+            return GeneratorGeneratedResult(ProtectedString(newPasswordChars, isProtected = true), bits)
+        } finally {
+            newPasswordChars.fill('0')
         }
     }
 
@@ -258,20 +289,22 @@ class GeneratorViewModel @Inject constructor(
     }
 
     private fun clearGeneratedSecrets() {
-        val current = _uiState.value
-        current.currentPassword.clear()
-        current.history.forEach { it.clear() }
-        // ISSUE-P2-287 AC①：擦除与状态失效**原子完成**——交出全新空实例引用
-        // （`ProtectedString.EMPTY` 共享单例，其 clear 为 no-op、读数恒为空），
-        // 令 UI 的 `remember(currentPassword)` 键变化：旧明文不再随已物化的
-        // remember 值留存屏上（此前「只 clear 不发新态」，键未变 ⇒ 不重算 ⇒
-        // 旧明文继续渲染，且点复制撞上 fail-fast 崩溃）。
-        _uiState.update {
-            it.copy(
-                currentPassword = ProtectedString.EMPTY,
-                entropyBits = 0,
-                history = emptyList()
-            )
+        synchronized(generationGate) {
+            generationEpoch++
+            val current = _uiState.value
+            current.currentPassword.clear()
+            current.history.forEach { it.clear() }
+            // ISSUE-P2-287 AC①：擦除与状态失效**原子完成**——交出全新空实例引用
+            // （`ProtectedString.EMPTY` 共享单例，其 clear 为 no-op、读数恒为空），
+            // 令 UI 的 `remember(currentPassword)` 键变化：旧明文不再随已物化的
+            // remember 值留存屏上。
+            _uiState.update {
+                it.copy(
+                    currentPassword = ProtectedString.EMPTY,
+                    entropyBits = 0,
+                    history = emptyList()
+                )
+            }
         }
     }
 }

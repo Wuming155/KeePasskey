@@ -12,6 +12,8 @@ package com.keepasskey.app.passkey
  *   而本条目的正确性主要由宿主用例担保，不可依赖平台桩；
  * - 故此处只做**最小**实现：一次线性扫描把 JSON 收成 [ByteJson] 节点树，**字符串值一律以
  *   `ByteArray`（UTF-8、转义已解码）承载**，只有键名（协议词表、非秘密）允许转 `String`。
+ * 成功扫描后树的所有权转移给调用方，调用方必须在确定性终态递归调用 [ByteJson.wipeAllStrings]；
+ * 扫描失败则本扫描器清理已经生成的所有字符串节点。
  *
  * ## 防御性边界
  *
@@ -30,9 +32,19 @@ object ByteJsonScanner {
     /** 扫描并解析；输入不是单个合法 JSON 值时返回 null（绝不抛出）。 */
     fun scan(text: ByteArray): ByteJson? {
         val scanner = Scanner(text)
-        val node = scanner.parseDocument() ?: return null
-        if (!scanner.atEnd()) return null
-        return node
+        return try {
+            val node = scanner.parseDocument()
+            if (node != null && scanner.atEnd()) {
+                scanner.transferStrings()
+                node
+            } else {
+                scanner.wipeStrings()
+                null
+            }
+        } catch (failure: Throwable) {
+            scanner.wipeStrings()
+            throw failure
+        }
     }
 
     /**
@@ -43,6 +55,14 @@ object ByteJsonScanner {
     private class Scanner(private val src: ByteArray) {
 
         private var pos = 0
+        private val strings = ArrayList<ByteJson.Str>()
+
+        fun transferStrings() = strings.clear()
+
+        fun wipeStrings() {
+            strings.forEach(ByteJson.Str::wipe)
+            strings.clear()
+        }
 
         fun atEnd(): Boolean {
             skipWhitespace()
@@ -86,7 +106,11 @@ object ByteJsonScanner {
                 skipWhitespace()
                 if (pos >= src.size || src[pos].toInt() != DQUOTE) return null
                 val keyNode = stringNode() ?: return null
-                val key = keyNode.asUtf8String() ?: return null
+                val key = try {
+                    keyNode.asUtf8String() ?: return null
+                } finally {
+                    keyNode.wipe()
+                }
                 skipWhitespace()
                 if (pos >= src.size || src[pos].toInt() != COLON) return null
                 pos++
@@ -136,16 +160,30 @@ object ByteJsonScanner {
         private fun stringNode(): ByteJson.Str? {
             pos++ // '"'
             val out = ByteSink()
-            while (true) {
-                if (pos >= src.size) return null
-                val c = src[pos].toInt() and 0xFF
-                pos++
-                when {
-                    c == DQUOTE -> return ByteJson.Str(out.toByteArray())
-                    c == BACKSLASH -> if (!appendEscaped(out)) return null
-                    c < 0x20 -> return null // 串内裸控制字符：RFC 8259 要求转义，一律拒
-                    else -> out.add(c)
+            try {
+                while (true) {
+                    if (pos >= src.size) return null
+                    val c = src[pos].toInt() and 0xFF
+                    pos++
+                    when {
+                        c == DQUOTE -> {
+                            val bytes = out.toByteArray()
+                            try {
+                                val node = ByteJson.Str(bytes)
+                                strings += node
+                                return node
+                            } catch (failure: Throwable) {
+                                bytes.fill(0)
+                                throw failure
+                            }
+                        }
+                        c == BACKSLASH -> if (!appendEscaped(out)) return null
+                        c < 0x20 -> return null // 串内裸控制字符：RFC 8259 要求转义，一律拒
+                        else -> out.add(c)
+                    }
                 }
+            } finally {
+                out.close()
             }
         }
 
@@ -310,8 +348,18 @@ sealed class ByteJson {
     object NullValue : ByteJson()
 }
 
+/** 扫描树独占其字符串数组；所有终态都清理整棵树，包括未选凭据与未知扩展字段。 */
+internal fun ByteJson.wipeAllStrings() {
+    when (this) {
+        is ByteJson.Str -> wipe()
+        is ByteJson.Obj -> members.forEach { (_, value) -> value.wipeAllStrings() }
+        is ByteJson.Arr -> items.forEach(ByteJson::wipeAllStrings)
+        is ByteJson.Num, is ByteJson.Bool, ByteJson.NullValue -> Unit
+    }
+}
+
 /** 仅服务于扫描器的可增长字节缓冲（避免每字节一次数组拷贝）。 */
-private class ByteSink {
+internal class ByteSink : java.io.Closeable {
 
     private var buf = ByteArray(64)
     private var size = 0
@@ -352,7 +400,14 @@ private class ByteSink {
         if (size + extra <= buf.size) return
         var cap = buf.size * 2
         while (cap < size + extra) cap *= 2
-        buf = buf.copyOf(cap)
+        val old = buf
+        buf = old.copyOf(cap)
+        old.fill(0)
+    }
+
+    override fun close() {
+        buf.fill(0)
+        size = 0
     }
 }
 

@@ -7,8 +7,8 @@ import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.file.InnerHeader
 import org.xml.sax.Attributes
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.util.Arrays
 import java.util.zip.GZIPInputStream
 
 /**
@@ -133,9 +133,18 @@ internal class BinaryNode(
             }
             // 官方 ProcessNode：受保护内联值与数据库级压缩互斥（Write.cs:947-963 二选一分支），
             // 故此处不叠加 Compressed 解压。空载荷不消耗密钥流（Write.cs:951-953 仅长度 > 0 才写出）。
-            val materialized = if (decoded.isEmpty()) ByteArray(0) else innerStreamCipher.processBytes(decoded)
-            attachmentBudget.accountInlineMaterialized(materialized.size)
-            return materialized
+            try {
+                val materialized = if (decoded.isEmpty()) ByteArray(0) else innerStreamCipher.processBytes(decoded)
+                try {
+                    attachmentBudget.accountInlineMaterialized(materialized.size)
+                    return materialized
+                } catch (t: Throwable) {
+                    Arrays.fill(materialized, 0)
+                    throw t
+                }
+            } finally {
+                Arrays.fill(decoded, 0)
+            }
         }
 
         val decoded = try {
@@ -144,15 +153,29 @@ internal class BinaryNode(
             throw KdbxCorruptFileException("无法解码内联附件 Base64 数据: key=$key", e)
         }
         if (!isCompressed) {
-            attachmentBudget.accountInlineMaterialized(decoded.size)
-            return decoded
+            try {
+                attachmentBudget.accountInlineMaterialized(decoded.size)
+                return decoded
+            } catch (t: Throwable) {
+                Arrays.fill(decoded, 0)
+                throw t
+            }
         }
-        // 先认领节点额度：超限在解压**之前**拒绝（不付出解压成本，也不再申请输出缓冲）
-        attachmentBudget.claimInlineCompressedNode()
-        // 本节点可用字节 = 累计预算的剩余量（单节点因此同样受累计上界约束）
-        val materialized = gunzip(decoded, attachmentBudget.remainingInlineBytes())
-        attachmentBudget.accountInlineMaterialized(materialized.size)
-        return materialized
+        try {
+            // 先认领节点额度：超限在解压**之前**拒绝（不付出解压成本，也不再申请输出缓冲）
+            attachmentBudget.claimInlineCompressedNode()
+            // 本节点可用字节 = 累计预算的剩余量（单节点因此同样受累计上界约束）
+            val materialized = gunzip(decoded, attachmentBudget.remainingInlineBytes())
+            try {
+                attachmentBudget.accountInlineMaterialized(materialized.size)
+                return materialized
+            } catch (t: Throwable) {
+                Arrays.fill(materialized, 0)
+                throw t
+            }
+        } finally {
+            Arrays.fill(decoded, 0)
+        }
     }
 
     /**
@@ -173,10 +196,10 @@ internal class BinaryNode(
             GZIP_INITIAL_CAP_BYTES,
             maxOutputBytes
         ).toInt()
-        val out = ByteArrayOutputStream(initialCap)
+        val out = WipingBinaryOutputStream(initialCap)
+        val buffer = ByteArray(GZIP_COPY_BUFFER_BYTES)
         try {
             GZIPInputStream(ByteArrayInputStream(compressed), GZIP_INFLATER_BUFFER_BYTES).use { gzip ->
-                val buffer = ByteArray(GZIP_COPY_BUFFER_BYTES)
                 while (true) {
                     val read = gzip.read(buffer)
                     if (read < 0) break
@@ -188,12 +211,15 @@ internal class BinaryNode(
                     out.write(buffer, 0, read)
                 }
             }
+            return out.toByteArray()
         } catch (e: KdbxCorruptFileException) {
             throw e
         } catch (e: IOException) {
             throw KdbxCorruptFileException("内联附件 GZip 解压失败: key=$key", e)
+        } finally {
+            Arrays.fill(buffer, 0)
+            out.wipe()
         }
-        return out.toByteArray()
     }
 
     /**
@@ -234,14 +260,21 @@ internal class BinaryNode(
                 )
             )
         } else {
-            onDone(
-                KdbxAttachment(
-                    name = key,
-                    refIndex = resolved.refIndex,
-                    isProtected = isProtected,
-                    data = resolved.data ?: ByteArray(0)
+            val data = resolved.data ?: ByteArray(0)
+            try {
+                onDone(
+                    KdbxAttachment(
+                        name = key,
+                        refIndex = resolved.refIndex,
+                        isProtected = isProtected,
+                        data = data
+                    )
                 )
-            )
+            } catch (t: Throwable) {
+                // 只有 onDone 正常返回才完成所有权交接；抛错时仍由本节点持有该独占副本。
+                Arrays.fill(data, 0)
+                throw t
+            }
         }
     }
 
@@ -290,6 +323,40 @@ internal class BinaryNode(
          * 反复进出 inflate；显式传入 64 KiB 后调用次数下降两个数量级（解压输出字节不变）。
          */
         private const val GZIP_INFLATER_BUFFER_BYTES = 64 * 1024
+    }
+}
+
+/** GZip 明文累计容器：扩容时清理旧存储，解压结束后由 [wipe] 擦除。 */
+internal class WipingBinaryOutputStream(
+    initialCapacity: Int,
+    private val onArrayWiped: ((ByteArray) -> Unit)? = null
+) {
+    private var buffer = ByteArray(initialCapacity)
+    private var count = 0
+
+    fun size(): Int = count
+
+    fun write(source: ByteArray, offset: Int, length: Int) {
+        if (length == 0) return
+        val needed = count + length
+        if (needed > buffer.size) {
+            val doubled = if (buffer.size > Int.MAX_VALUE / 2) Int.MAX_VALUE else buffer.size * 2
+            val grown = ByteArray(maxOf(needed, doubled))
+            System.arraycopy(buffer, 0, grown, 0, count)
+            Arrays.fill(buffer, 0)
+            onArrayWiped?.invoke(buffer)
+            buffer = grown
+        }
+        System.arraycopy(source, offset, buffer, count, length)
+        count = needed
+    }
+
+    fun toByteArray(): ByteArray = buffer.copyOf(count)
+
+    fun wipe() {
+        Arrays.fill(buffer, 0)
+        onArrayWiped?.invoke(buffer)
+        count = 0
     }
 }
 

@@ -307,7 +307,9 @@ class EntryEditViewModel @Inject constructor(
     fun onIconChange(icon: String) = _uiState.update { it.copy(iconName = icon, customIconId = null, isDirty = true) }
 
     /** TASK-15：选择/清除（null）自定义图标引用 */
-    fun onCustomIconSelected(iconId: String?) = _uiState.update { it.copy(customIconId = iconId, isDirty = it.customIconId != iconId) }
+    fun onCustomIconSelected(iconId: String?) = _uiState.update {
+        it.copy(customIconId = iconId, isDirty = it.isDirty || it.customIconId != iconId)
+    }
 
     /** TASK-15：上传 PNG 字节为库级自定义图标并选中；失败如实上浮 */
     fun onCustomIconUploaded(pngBytes: ByteArray) {

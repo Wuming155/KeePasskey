@@ -99,6 +99,8 @@ interface SettingsRepository {
     fun getSettings(): Flow<UserSettings>
     suspend fun setThemeMode(themeMode: AppThemeMode)
     suspend fun setThemePalette(themePalette: com.keepasskey.app.ui.theme.AppThemePalette)
+    /** ISSUE-P3-653：显式切回品牌调色盘来源，同时清理遮蔽品牌来源的动态与自定义状态。 */
+    suspend fun switchToBrandPalette()
     suspend fun setOledBlackOptimization(enabled: Boolean)
     suspend fun setDynamicColorEnabled(enabled: Boolean)
 

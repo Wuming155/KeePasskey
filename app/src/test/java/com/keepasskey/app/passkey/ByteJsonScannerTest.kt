@@ -1,5 +1,6 @@
 package com.keepasskey.app.passkey
 
+import java.lang.reflect.Field
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -137,5 +138,34 @@ class ByteJsonScannerTest {
         node.wipe()
         assertEquals("节点字节须被清零", List(node.bytes.size) { 0.toByte() }, node.bytes.toList())
         assertEquals("调用方传入的载荷数组不得被改动（擦除义务归调用链）", text, payload.decodeToString())
+    }
+
+    @Test
+    fun `十 工作缓冲扩容前后均可确定性清零`() {
+        val sink = ByteSink()
+        repeat(64) { sink.add(it) }
+        val backingField = ByteSink::class.java.getDeclaredField("buf").apply { isAccessible = true }
+        val oldBuffer = backingField.get(sink) as ByteArray
+
+        sink.add(65)
+        assertTrue("扩容后旧工作数组必须擦除", oldBuffer.all { it == 0.toByte() })
+
+        val activeBuffer = backingField.get(sink) as ByteArray
+        sink.close()
+        assertTrue("close 必须擦除当前工作数组", activeBuffer.all { it == 0.toByte() })
+    }
+
+    @Test
+    fun `十一 整棵解析树清零包含重复键和未选数组项`() {
+        val root = obj("""{"key":"first","key":"second","unknown":["nested"]}""")
+        val strings = listOf(
+            root.members[0].second as ByteJson.Str,
+            root.members[1].second as ByteJson.Str,
+            (((root.member("unknown") as ByteJson.Arr).items.single()) as ByteJson.Str)
+        )
+        root.wipeAllStrings()
+        strings.forEach { node ->
+            assertTrue("每个节点副本都应清零", node.bytes.all { it == 0.toByte() })
+        }
     }
 }

@@ -6,6 +6,7 @@ import com.keepasskey.app.sync.userText
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.sync.SyncProviderConfigSnapshot
 import com.keepasskey.app.sync.launchGuarded
 import com.keepasskey.app.ui.model.RelativeTimeFormatter
 import com.keepasskey.app.ui.model.UiMessage
@@ -85,6 +86,10 @@ internal class SettingsSyncController(
     )
 
     private val credentialForm = SettingsSyncCredentialForm(syncCredentialsStore, syncStateFlow)
+    /** 最近一次成功配置保存的密封回执；消费后即从控制器字段移除。 */
+    private var pendingSavedConfigSnapshot: SyncProviderConfigSnapshot? = null
+    /** 用于避免迟到的 A 验证结果把后来已保存的 B 标成已验证。 */
+    private var latestSavedConfigRevision: String? = null
 
     /**
      * ISSUE-P2-406：同步 UI 水合（wifi 偏好回填 + 凭据预填恢复 + 封印等级探测）。
@@ -155,9 +160,17 @@ internal class SettingsSyncController(
     fun clearS3AccessKeyPrefill() = credentialForm.clearS3AccessKeyPrefill()
 
     /** Wave 15 / ISSUE-P2-01：凭据恢复（语义见 [SettingsSyncCredentialForm.restoreSyncCredentials]）。 */
-    fun restoreSyncCredentials() = credentialForm.restoreSyncCredentials()
+    fun restoreSyncCredentials() {
+        pendingSavedConfigSnapshot = null
+        latestSavedConfigRevision = null
+        credentialForm.restoreSyncCredentials()
+    }
 
-    fun setSyncProvider(provider: CloudSyncProvider) = credentialForm.setSyncProvider(provider)
+    fun setSyncProvider(provider: CloudSyncProvider) {
+        pendingSavedConfigSnapshot = null
+        latestSavedConfigRevision = null
+        credentialForm.setSyncProvider(provider)
+    }
 
     /** Wave 15 / Wave 14：WebDAV 配置保存（借用语义 + HTTPS 强制校验），返回是否成功。 */
     fun updateWebDavConfig(
@@ -165,7 +178,14 @@ internal class SettingsSyncController(
         username: String,
         password: CharArray,
         remotePath: String
-    ): Boolean = credentialForm.updateWebDavConfig(url, username, password, remotePath)
+    ): Boolean {
+        pendingSavedConfigSnapshot = null
+        latestSavedConfigRevision = null
+        return credentialForm.updateWebDavConfig(url, username, password, remotePath) {
+            pendingSavedConfigSnapshot = it
+            latestSavedConfigRevision = it.revision
+        }
+    }
 
     /** Wave 15 / ISSUE-P2-01：S3 配置保存（AccessKey 与 SecretKey 均借用语义），返回是否成功。 */
     fun updateS3Config(
@@ -176,9 +196,16 @@ internal class SettingsSyncController(
         secretKey: CharArray,
         objectKey: String,
         usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
-    ): Boolean = credentialForm.updateS3Config(
-        endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
-    )
+    ): Boolean {
+        pendingSavedConfigSnapshot = null
+        latestSavedConfigRevision = null
+        return credentialForm.updateS3Config(
+            endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
+        ) {
+            pendingSavedConfigSnapshot = it
+            latestSavedConfigRevision = it.revision
+        }
+    }
 
     /**
      * ISSUE-P3-272：自动同步总开关改走进阶偏好统一通道（内存快照 + 持久化原子完成）——
@@ -352,6 +379,12 @@ internal class SettingsSyncController(
      * ISSUE-P3-257：实现体随 KDoc 自 `SettingsViewModel` 整体下沉，公开 API 形状不变。
      */
     fun verifyConnectionThenSync() {
+        val savedSnapshot = pendingSavedConfigSnapshot
+        pendingSavedConfigSnapshot = null
+        if (savedSnapshot != null) {
+            verifyAndSyncSavedConfiguration(savedSnapshot)
+            return
+        }
         val state = syncStateFlow.value
         if (state.isSyncing) return
         if (state.isConnectionVerified) {
@@ -363,6 +396,84 @@ internal class SettingsSyncController(
                 triggerSync()
             } else {
                 publishFeedback(UiMessage(R.string.sync_gate_test_failed))
+            }
+        }
+    }
+
+    /**
+     * ISSUE-P2-652：同一成功保存回执分别构造/释放测试 Provider 与同步 Provider；
+     * 中途全局配置即使被更新，也不会改变本次两个网络阶段使用的 endpoint 或密封凭据。
+     */
+    private fun verifyAndSyncSavedConfiguration(snapshot: SyncProviderConfigSnapshot) {
+        if (syncStateFlow.value.isSyncing) return
+        scope.launchGuarded(onFailure = ::onSyncFailure) {
+            val provider = snapshot.provider
+            syncStateFlow.update {
+                it.copy(
+                    isSyncing = true,
+                    isConnectionVerified = false,
+                    syncFeedbackMessage = UiMessage(
+                        R.string.sync_feedback_connecting,
+                        listOf(provider.protocol)
+                    )
+                )
+            }
+
+            val connectionResult = syncCoordinator.testConnection(snapshot)
+            if (connectionResult.isFailure) {
+                syncStateFlow.update {
+                    it.copy(
+                        isSyncing = false,
+                        isConnectionVerified = false,
+                        syncFeedbackMessage = UiMessage(R.string.sync_gate_test_failed)
+                    )
+                }
+                return@launchGuarded
+            }
+
+            syncStateFlow.update {
+                it.copy(
+                    isConnectionVerified = latestSavedConfigRevision == snapshot.revision,
+                    syncFeedbackMessage = UiMessage(
+                        R.string.sync_feedback_connecting,
+                        listOf(provider.protocol)
+                    )
+                )
+            }
+            val outcome = syncCoordinator.syncNow(snapshot)
+            refreshSyncRecoveryRequired()
+            val succeeded = outcome is SyncOutcome.UpToDate ||
+                outcome is SyncOutcome.UploadedLocal ||
+                outcome is SyncOutcome.MergedAndUploaded
+            val feedback = when (outcome) {
+                is SyncOutcome.UpToDate -> UiMessage(
+                    R.string.sync_feedback_done,
+                    listOf(provider.protocol),
+                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                )
+                is SyncOutcome.UploadedLocal -> UiMessage(
+                    R.string.sync_feedback_uploaded,
+                    listOf(provider.protocol),
+                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                )
+                is SyncOutcome.MergedAndUploaded -> UiMessage(
+                    R.string.sync_feedback_merged,
+                    listOf(provider.protocol),
+                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                )
+                is SyncOutcome.LocalPendingChanges -> UiMessage(R.string.sync_feedback_local_pending)
+                is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
+                is SyncOutcome.VaultBindingMismatch -> UiMessage(R.string.sync_vault_binding_mismatch)
+                is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
+                is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.userText))
+            }
+            syncStateFlow.update {
+                it.copy(
+                    isSyncing = false,
+                    syncFeedbackMessage = feedback,
+                    lastSyncTimeText = if (succeeded) formatSyncTimestamp() else it.lastSyncTimeText,
+                    isConnectionVerified = latestSavedConfigRevision == snapshot.revision
+                )
             }
         }
     }

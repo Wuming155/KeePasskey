@@ -15,8 +15,8 @@ import com.keepasskey.core.model.PasskeyKeyText
  * 全程走 [ByteJsonScanner] 的**字节通道**：载荷的 `key` 是 PKCS#8 私钥文本，任何 `String` 中间量
  * 都违反 `AGENTS.md` §3 铁律，而现成的 [SimpleJson] 入参正是 `String`、`org.json` 在宿主单测里是
  * 未实现桩（同一理由见 [CallingOriginResolver]）⇒ 私钥只以 `ByteArray`（DER）与 `CharArray`（PEM）
- * 存在，**永不进 `String`**（AC③）；本读取器消费掉的秘密节点（`key` / `credWithUV` /
- * `credWithoutUV` / `hmacSecret.secret` / `privateKey`）取用后即就地清零。
+ * 存在，**永不进 `String`**（AC③）。本读取器在所有结果与异常终态递归清整棵 AST（包括未知字段、
+ * 重复键与未选择凭据）；交付给 [ImportedPasskey] 的 PEM / PRF 是独立副本，擦除责任随结果转移给调用链。
  *
  * **判据分两层**（`PD-48` 裁决一）：① 仪式字段 `type` / `credentialId` / `rpId` / `userHandle` / `key`
  * 缺失、**空白（等同缺失）**、Base64 非法、解出零字节、或 PKCS#8 结构嗅不到已知 OID ⇒ 一律拒收，
@@ -47,9 +47,13 @@ object PasskeyCxfReader {
         }
         val root = ByteJsonScanner.scan(payload)
             ?: return PasskeyCxfOutcome.Rejected(PasskeyCxfReject.MalformedJson)
-        return when (val located = locate(root)) {
-            is Located.Bad -> PasskeyCxfOutcome.Rejected(located.reason)
-            is Located.Good -> extract(located)
+        return try {
+            when (val located = locate(root)) {
+                is Located.Bad -> PasskeyCxfOutcome.Rejected(located.reason)
+                is Located.Good -> extract(located)
+            }
+        } finally {
+            root.wipeAllStrings()
         }
     }
 

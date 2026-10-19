@@ -5,7 +5,6 @@ import com.keepasskey.crypto.cipher.CipherEngine
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import com.keepasskey.database.io.LittleEndianUtil
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.util.Arrays
 
 /**
@@ -119,30 +118,41 @@ internal object KdbxCipherKeyResolver {
         firstBlock: ByteArray,
         isGzipCompressed: Boolean
     ): Boolean {
-        val prefix = try {
+        var prefix: ByteArray? = null
+        try {
             val probe = cipherEngine.createDecryptingStream(ByteArrayInputStream(firstBlock), cipherKey, encryptionIv)
             probe.use { stream ->
                 val buffer = ByteArray(PROBE_READ_BUFFER_SIZE)
-                val collected = ByteArrayOutputStream()
+                val collected = WipingProbeOutputStream()
                 try {
-                    while (true) {
-                        val count = stream.read(buffer)
-                        if (count < 0) break
-                        collected.write(buffer, 0, count)
+                    try {
+                        while (true) {
+                            val count = stream.read(buffer)
+                            if (count < 0) break
+                            collected.write(buffer, 0, count)
+                        }
+                    } catch (_: java.io.IOException) {
+                        // 解密流收尾异常：截取已解出的前缀继续校验
                     }
-                } catch (_: java.io.IOException) {
-                    // 解密流收尾异常：截取已解出的前缀继续校验
+                    prefix = collected.toByteArray()
+                } finally {
+                    Arrays.fill(buffer, 0)
+                    collected.wipe()
                 }
-                collected.toByteArray()
+            }
+            val probePrefix = requireNotNull(prefix)
+            return if (isGzipCompressed) {
+                probePrefix.size >= GZIP_MAGIC.size &&
+                        probePrefix[0] == GZIP_MAGIC[0] &&
+                        probePrefix[1] == GZIP_MAGIC[1] &&
+                        probePrefix[2] == GZIP_MAGIC[2]
+            } else {
+                isPlausibleFieldSequence(probePrefix)
             }
         } catch (_: Exception) {
             return false
-        }
-        return if (isGzipCompressed) {
-            prefix.size >= GZIP_MAGIC.size &&
-                    prefix.copyOfRange(0, GZIP_MAGIC.size).contentEquals(GZIP_MAGIC)
-        } else {
-            isPlausibleFieldSequence(prefix)
+        } finally {
+            prefix?.let { Arrays.fill(it, 0) }
         }
     }
 
@@ -169,4 +179,35 @@ internal object KdbxCipherKeyResolver {
 
 /** RFC 1952 gzip 外层魔数（明文流头 3 字节，用于校验「声称压缩即须以 gzip 头起始」） */
 private val GZIP_MAGIC = byteArrayOf(0x1F.toByte(), 0x8B.toByte(), 0x08.toByte())
+}
+
+/** 探针累计容器：扩容时先擦旧数组，调用方负责最终 [wipe]。 */
+internal class WipingProbeOutputStream(
+    initialCapacity: Int = 32,
+    private val onArrayWiped: ((ByteArray) -> Unit)? = null
+) {
+    private var buffer = ByteArray(initialCapacity)
+    private var count = 0
+
+    fun write(source: ByteArray, offset: Int, length: Int) {
+        if (length == 0) return
+        val needed = count + length
+        if (needed > buffer.size) {
+            val grown = ByteArray(maxOf(needed, buffer.size * 2))
+            System.arraycopy(buffer, 0, grown, 0, count)
+            Arrays.fill(buffer, 0)
+            onArrayWiped?.invoke(buffer)
+            buffer = grown
+        }
+        System.arraycopy(source, offset, buffer, count, length)
+        count = needed
+    }
+
+    fun toByteArray(): ByteArray = buffer.copyOf(count)
+
+    fun wipe() {
+        Arrays.fill(buffer, 0)
+        onArrayWiped?.invoke(buffer)
+        count = 0
+    }
 }

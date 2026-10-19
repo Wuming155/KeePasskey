@@ -263,4 +263,18 @@ class KdbxBinaryNodeValueFormTest {
             KdbxConstants.Xml.COMPRESSED
         )
     }
+
+    @Test
+    fun `GZip工作输出容器扩容旧数组及最终数组清零但交付副本有效`() {
+        val wiped = mutableListOf<ByteArray>()
+        val output = WipingBinaryOutputStream(initialCapacity = 2, onArrayWiped = { wiped += it })
+        val plaintext = "attachment-secret".toByteArray()
+        output.write(plaintext, 0, plaintext.size)
+        val delivered = output.toByteArray()
+        output.wipe()
+
+        assertTrue("测试数据必须真实触发扩容", wiped.size >= 2)
+        wiped.forEach { assertArrayEquals(ByteArray(it.size), it) }
+        assertArrayEquals(plaintext, delivered)
+    }
 }

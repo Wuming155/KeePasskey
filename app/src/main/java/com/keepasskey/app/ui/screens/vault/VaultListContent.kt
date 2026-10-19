@@ -130,7 +130,8 @@ fun VaultListContent(
                     onClearBatch = onClearBatch,
                     onSelectAllBatch = onSelectAllBatch,
                     onBatchMoveClick = { dialogs.showBatchMoveDialog = true },
-                    onBatchDelete = { dialogs.showBatchDeleteConfirm = true } // ISSUE-P2-357 AC①：先确认再删
+                    onBatchDelete = { dialogs.showBatchDeleteConfirm = true }, // ISSUE-P2-357 AC①：先确认再删
+                    isReadOnly = uiState.isReadOnly
                 )
             } else {
                 VaultListSearchTopBar(
@@ -147,6 +148,7 @@ fun VaultListContent(
                     onKillApp = onKillApp,
                     onScanClick = onScanClick,
                     onSelectEntriesClick = onSelectEntriesBatch,
+                    isReadOnly = uiState.isReadOnly,
                     // ISSUE-P2-544：高级搜索入口（溢出菜单项 → 选项对话框）
                     onAdvancedSearchClick = { dialogs.showSearchAdvancedDialog = true }
                 )
@@ -236,6 +238,7 @@ fun VaultListContent(
                 items(uiState.currentGroups, key = { "group_${it.id}" }) { group ->
                     KeePassGroupRow(
                         group = group,
+                        readOnly = uiState.isReadOnly,
                         highlightQuery = uiState.searchQuery, // ISSUE-P3-360 AC④c：命中高亮取**已生效**的过滤词（防抖后），非输入回显
                         icon = uiState.groupIcons[group.id],
                         densitySpec = densitySpec,

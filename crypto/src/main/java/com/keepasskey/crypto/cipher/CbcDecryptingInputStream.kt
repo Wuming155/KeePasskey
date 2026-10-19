@@ -285,19 +285,34 @@ internal class CbcDecryptingInputStream(
     /** byte[] 形态收尾（逐字保留原实现）。 */
     private fun finishTailHeap(tailLength: Int, keep: Int): Boolean {
         val head = transformBlocks(buffer, 0, keep)
-        val lastPlain = transformBlocks(buffer, keep, tailLength)
-        val stripped = Pkcs7.unpad(lastPlain)
-        Arrays.fill(lastPlain, 0)
-        Arrays.fill(buffer, 0, tailLength, 0)
-
-        if (stripped == null) {
-            // 基线：填充非法 → BadPaddingException → IOException
-            Arrays.fill(head, 0)
-            throw IOException("CBC 解密流：PKCS#7 填充非法（密钥错误或数据被篡改）")
+        try {
+            val lastPlain = transformBlocks(buffer, keep, tailLength)
+            try {
+                val stripped = Pkcs7.unpad(lastPlain)
+                    ?: throw IOException("CBC 解密流：PKCS#7 填充非法（密钥错误或数据被篡改）")
+                out = mergeHeapTail(head, stripped)
+                outPos = 0
+                return out.isNotEmpty()
+            } finally {
+                Arrays.fill(lastPlain, 0)
+            }
+        } finally {
+            // transform / unpad 任一路径失败时均清理头段；若头为空，mergeHeapTail 已将
+            // stripped 所有权移交给 out，不能擦除该有效输出。
+            if (head.isNotEmpty()) Arrays.fill(head, 0)
+            Arrays.fill(buffer, 0, tailLength, 0)
         }
-        out = if (head.isEmpty()) stripped else head + stripped
-        outPos = 0
-        return out.isNotEmpty()
+    }
+
+    /** 合并 CBC 尾段；head 非空时两个输入副本由本函数消费并清零，head 为空时转移 stripped。 */
+    internal fun mergeHeapTail(head: ByteArray, stripped: ByteArray): ByteArray {
+        if (head.isEmpty()) return stripped
+        return try {
+            head + stripped
+        } finally {
+            Arrays.fill(head, 0)
+            Arrays.fill(stripped, 0)
+        }
     }
 
     /** 变换结果不得与复用输入别名（见 [bodyScratch] 的契约说明；仅 byte[] 形态适用）。 */

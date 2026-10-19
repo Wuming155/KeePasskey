@@ -90,4 +90,33 @@ class SettingsPaletteMutualExclusionTest {
         assertEquals("点选调色盘必须清除种子色（否则关动态取色后意外落回 CUSTOM）", null, settings.customSeedColor)
         assertFalse(settings.dynamicColorEnabled)
     }
+
+    @Test
+    fun `切回品牌来源清除动态和自定义覆盖但保留已选调色盘`() = runTest {
+        val repository = FakeSettingsRepository()
+        repository.setThemePalette(AppThemePalette.EMERALD)
+        repository.setCustomSeedColor(0xFF00897B)
+        repository.setDynamicColorEnabled(true)
+
+        repository.switchToBrandPalette()
+
+        val settings = repository.getSettings().first()
+        assertFalse(settings.dynamicColorEnabled)
+        assertEquals(null, settings.customSeedColor)
+        assertEquals(AppThemePalette.EMERALD, settings.themePalette)
+    }
+
+    @Test
+    fun `单纯关闭动态开关仍保留自定义色以便恢复`() = runTest {
+        val repository = FakeSettingsRepository()
+        repository.setCustomSeedColor(0xFF00897B)
+        repository.setDynamicColorEnabled(true)
+
+        repository.setDynamicColorEnabled(false)
+
+        val settings = repository.getSettings().first()
+        assertFalse(settings.dynamicColorEnabled)
+        assertEquals(0xFF00897B, settings.customSeedColor)
+    }
+
 }

@@ -220,6 +220,7 @@ class SettingsViewModel @Inject constructor(
     fun setAppLanguage(language: AppLanguage) = preferences.setAppLanguage(language)
     fun setThemeMode(themeMode: AppThemeMode) = preferences.setThemeMode(themeMode)
     fun setThemePalette(themePalette: AppThemePalette) = preferences.setThemePalette(themePalette)
+    fun switchToBrandPalette() = preferences.switchToBrandPalette()
     fun setOledBlackOptimization(enabled: Boolean) = preferences.setOledBlackOptimization(enabled)
     fun setDynamicColorEnabled(enabled: Boolean) = preferences.setDynamicColorEnabled(enabled)
     fun setCustomSeedColor(seed: Long?) = preferences.setCustomSeedColor(seed)

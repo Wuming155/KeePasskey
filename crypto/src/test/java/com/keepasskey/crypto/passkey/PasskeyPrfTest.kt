@@ -90,4 +90,37 @@ class PasskeyPrfTest {
             PasskeyPrf.computeValue(notBase64, ByteArray(32) { 5 })
         )
     }
+
+    @Test
+    fun `PRF Base64字符工作副本清零且受保护输出仍可还原`() {
+        val secretBytes = ByteArray(PasskeyPrf.SECRET_BYTES) { (it * 5 + 3).toByte() }
+        var temporary: CharArray? = null
+        val protected = PasskeyPrf.secretToProtectedForTest(secretBytes) { temporary = it }
+
+        assertTrue("Base64字符临时数组应可观测", temporary != null)
+        assertTrue("构造完成后字符数组必须清零", temporary!!.all { it == '\u0000' })
+        val restored = PasskeyPrf.secretBytesForTest(protected)
+        try {
+            assertArrayEquals("交付给 ProtectedString 的内容仍须有效", secretBytes, restored)
+        } finally {
+            restored.fill(0)
+            secretBytes.fill(0)
+            protected.close()
+        }
+    }
+
+    @Test
+    fun `Base64空白缩短旧数组清零且独立解码副本有效`() {
+        val source = "QUJD\n REVG\t".toByteArray(Charsets.US_ASCII)
+        var work: ByteArray? = null
+        val compact = PasskeyPrf.stripWhitespaceForTest(source) { work = it }
+        try {
+            assertTrue("含空白应触发缩短并观察旧工作数组", work != null)
+            assertArrayEquals(ByteArray(work!!.size), work)
+            assertArrayEquals("QUJDREVG".toByteArray(Charsets.US_ASCII), compact)
+            assertArrayEquals("输入是借用缓冲，不能被改写", "QUJD\n REVG\t".toByteArray(Charsets.US_ASCII), source)
+        } finally {
+            compact.fill(0)
+        }
+    }
 }

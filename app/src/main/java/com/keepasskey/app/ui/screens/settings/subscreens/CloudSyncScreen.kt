@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -134,6 +135,7 @@ fun CloudSyncScreen(
     var s3ObjectKey by remember(uiState.s3ObjectKey) { mutableStateOf(uiState.s3ObjectKey) }
     var s3UsePathStyle by remember(uiState.s3UsePathStyle) { mutableStateOf(uiState.s3UsePathStyle) }
     var s3SecretKeyVisible by remember { mutableStateOf(false) }
+    var credentialFieldWipeGeneration by remember { mutableStateOf(0) }
 
     // Wave 15 整改：离场（离开组合）擦除本地密码驻留
     DisposableEffect(Unit) {
@@ -159,23 +161,32 @@ fun CloudSyncScreen(
      */
     val persistConfig: () -> Boolean = {
         if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
-            val saved = onUpdateWebDav(webdavUrl, webdavUsername, webdavPasswordChars, webdavRemotePath)
+            val saved = withSyncCredentialSubmissionCopy(webdavPasswordChars) { submission ->
+                onUpdateWebDav(webdavUrl, webdavUsername, submission, webdavRemotePath)
+            }
             if (saved) {
                 saveFeedbackMessage = UiMessage(R.string.sync_webdav_saved)
+                webdavPasswordChars.fill('0')
                 webdavPasswordChars = CharArray(0)
+                credentialFieldWipeGeneration++
             }
             saved
         } else {
-            val saved = onUpdateS3(
-                s3Endpoint, s3Bucket, s3Region, s3AccessKeyChars,
-                s3SecretKeyChars, s3ObjectKey, s3UsePathStyle
-            )
+            val saved = withSyncCredentialSubmissionCopy(s3AccessKeyChars) { accessKeySubmission ->
+                withSyncCredentialSubmissionCopy(s3SecretKeyChars) { secretKeySubmission ->
+                    onUpdateS3(
+                        s3Endpoint, s3Bucket, s3Region, accessKeySubmission,
+                        secretKeySubmission, s3ObjectKey, s3UsePathStyle
+                    )
+                }
+            }
             if (saved) {
                 saveFeedbackMessage = UiMessage(R.string.sync_s3_saved)
                 s3AccessKeyChars.fill('0')
                 s3AccessKeyChars = CharArray(0)
                 s3SecretKeyChars.fill('0')
                 s3SecretKeyChars = CharArray(0)
+                credentialFieldWipeGeneration++
             }
             saved
         }
@@ -243,76 +254,80 @@ fun CloudSyncScreen(
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         if (uiState.syncProvider == CloudSyncProvider.WEBDAV) {
-                            WebDavConfigFields(
-                                url = webdavUrl,
-                                onUrlChange = { webdavUrl = it },
-                                username = webdavUsername,
-                                onUsernameChange = { webdavUsername = it },
-                                isPasswordVisible = webdavPasswordVisible,
-                                onTogglePasswordVisibility = { webdavPasswordVisible = !webdavPasswordVisible },
-                                passwordPrefill = webdavPasswordPrefill,
-                                onPasswordCharsChange = { chars ->
-                                    webdavPasswordChars.fill('0')
-                                    webdavPasswordChars = chars.copyOf()
-                                    onWebDavPasswordEdited()
-                                },
-                                remotePath = webdavRemotePath,
-                                onRemotePathChange = { webdavRemotePath = it },
-                                onBrowseRemote = {
-                                    showBrowseDialog = true
-                                    // ISSUE-P3-395/396：宿主清零入参故传 copyOf；路径字段可能是文件，浏览其父目录
-                                    onBrowseWebDav(
-                                        webdavUrl,
-                                        webdavUsername,
-                                        webdavPasswordChars.copyOf(),
-                                        com.keepasskey.app.sync.parentDirectoryPath(webdavRemotePath),
-                                        null
-                                    )
-                                }
-                            )
+                            key(credentialFieldWipeGeneration) {
+                                WebDavConfigFields(
+                                    url = webdavUrl,
+                                    onUrlChange = { webdavUrl = it },
+                                    username = webdavUsername,
+                                    onUsernameChange = { webdavUsername = it },
+                                    isPasswordVisible = webdavPasswordVisible,
+                                    onTogglePasswordVisibility = { webdavPasswordVisible = !webdavPasswordVisible },
+                                    passwordPrefill = webdavPasswordPrefill,
+                                    onPasswordCharsChange = { chars ->
+                                        webdavPasswordChars.fill('0')
+                                        webdavPasswordChars = chars.copyOf()
+                                        onWebDavPasswordEdited()
+                                    },
+                                    remotePath = webdavRemotePath,
+                                    onRemotePathChange = { webdavRemotePath = it },
+                                    onBrowseRemote = {
+                                        showBrowseDialog = true
+                                        // ISSUE-P3-395/396：宿主清零入参故传 copyOf；路径字段可能是文件，浏览其父目录
+                                        onBrowseWebDav(
+                                            webdavUrl,
+                                            webdavUsername,
+                                            webdavPasswordChars.copyOf(),
+                                            com.keepasskey.app.sync.parentDirectoryPath(webdavRemotePath),
+                                            null
+                                        )
+                                    }
+                                )
+                            }
                         } else {
-                            S3ConfigFields(
-                                endpoint = s3Endpoint,
-                                onEndpointChange = { s3Endpoint = it },
-                                bucket = s3Bucket,
-                                onBucketChange = { s3Bucket = it },
-                                region = s3Region,
-                                onRegionChange = { s3Region = it },
-                                isAccessKeyVisible = s3AccessKeyVisible,
-                                onToggleAccessKeyVisibility = { s3AccessKeyVisible = !s3AccessKeyVisible },
-                                accessKeyPrefill = s3AccessKeyPrefill,
-                                onAccessKeyCharsChange = { chars ->
-                                    s3AccessKeyChars.fill('0')
-                                    s3AccessKeyChars = chars.copyOf()
-                                    onS3AccessKeyEdited()
-                                },
-                                isSecretKeyVisible = s3SecretKeyVisible,
-                                onToggleSecretKeyVisibility = { s3SecretKeyVisible = !s3SecretKeyVisible },
-                                secretKeyPrefill = s3SecretKeyPrefill,
-                                onSecretKeyCharsChange = { chars ->
-                                    s3SecretKeyChars.fill('0')
-                                    s3SecretKeyChars = chars.copyOf()
-                                    onS3SecretKeyEdited()
-                                },
-                                objectKey = s3ObjectKey,
-                                onObjectKeyChange = { s3ObjectKey = it },
-                                usePathStyle = s3UsePathStyle,
-                                onUsePathStyleChange = { s3UsePathStyle = it },
-                                onBrowseRemote = {
-                                    showBrowseDialog = true
-                                    // ISSUE-P3-395/396：对象键可能是文件，浏览其父目录
-                                    onBrowseS3(
-                                        s3Endpoint,
-                                        s3Bucket,
-                                        s3Region,
-                                        s3AccessKeyChars.copyOf(),
-                                        s3SecretKeyChars.copyOf(),
-                                        com.keepasskey.app.sync.parentDirectoryPath(s3ObjectKey),
-                                        s3UsePathStyle,
-                                        null
-                                    )
-                                }
-                            )
+                            key(credentialFieldWipeGeneration) {
+                                S3ConfigFields(
+                                    endpoint = s3Endpoint,
+                                    onEndpointChange = { s3Endpoint = it },
+                                    bucket = s3Bucket,
+                                    onBucketChange = { s3Bucket = it },
+                                    region = s3Region,
+                                    onRegionChange = { s3Region = it },
+                                    isAccessKeyVisible = s3AccessKeyVisible,
+                                    onToggleAccessKeyVisibility = { s3AccessKeyVisible = !s3AccessKeyVisible },
+                                    accessKeyPrefill = s3AccessKeyPrefill,
+                                    onAccessKeyCharsChange = { chars ->
+                                        s3AccessKeyChars.fill('0')
+                                        s3AccessKeyChars = chars.copyOf()
+                                        onS3AccessKeyEdited()
+                                    },
+                                    isSecretKeyVisible = s3SecretKeyVisible,
+                                    onToggleSecretKeyVisibility = { s3SecretKeyVisible = !s3SecretKeyVisible },
+                                    secretKeyPrefill = s3SecretKeyPrefill,
+                                    onSecretKeyCharsChange = { chars ->
+                                        s3SecretKeyChars.fill('0')
+                                        s3SecretKeyChars = chars.copyOf()
+                                        onS3SecretKeyEdited()
+                                    },
+                                    objectKey = s3ObjectKey,
+                                    onObjectKeyChange = { s3ObjectKey = it },
+                                    usePathStyle = s3UsePathStyle,
+                                    onUsePathStyleChange = { s3UsePathStyle = it },
+                                    onBrowseRemote = {
+                                        showBrowseDialog = true
+                                        // ISSUE-P3-395/396：对象键可能是文件，浏览其父目录
+                                        onBrowseS3(
+                                            s3Endpoint,
+                                            s3Bucket,
+                                            s3Region,
+                                            s3AccessKeyChars.copyOf(),
+                                            s3SecretKeyChars.copyOf(),
+                                            com.keepasskey.app.sync.parentDirectoryPath(s3ObjectKey),
+                                            s3UsePathStyle,
+                                            null
+                                        )
+                                    }
+                                )
+                            }
                         }
 
                         // ISSUE-P3-387：远端目录浏览对话框（段落组件见 RemoteBrowseSection.kt）
@@ -399,10 +414,7 @@ fun CloudSyncScreen(
                     onRecoverByKeepingLocal = onRecoverSyncByKeepingLocal,
                     // 先保存表单（含刚输入的密码），再走顺序编排（测连通过则同步），
                     // 让 lastSyncTime 真正写入，避免「徽章已同步 / 下方尚未同步」矛盾
-                    onTestConnection = {
-                        persistConfig()
-                        onSyncAfterSave()
-                    }
+                    onTestConnection = { persistThenContinue(persistConfig, onSyncAfterSave) }
                 )
             }
 
@@ -467,6 +479,25 @@ fun CloudSyncScreen(
             onDismiss = { showConflictDialog = false }
         )
     }
+}
+
+/**
+ * 提交凭据数组的独立工作副本；调用方保留草稿所有权，本函数无论返回或抛错都擦除工作副本。
+ */
+internal fun <T> withSyncCredentialSubmissionCopy(draft: CharArray, submit: (CharArray) -> T): T {
+    val submission = draft.copyOf()
+    return try {
+        submit(submission)
+    } finally {
+        submission.fill('0')
+    }
+}
+
+/** 保存失败时短路后续联网动作，返回值如实表示是否已继续。 */
+internal fun persistThenContinue(persist: () -> Boolean, continueAfterPersist: () -> Unit): Boolean {
+    if (!persist()) return false
+    continueAfterPersist()
+    return true
 }
 
 // IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI

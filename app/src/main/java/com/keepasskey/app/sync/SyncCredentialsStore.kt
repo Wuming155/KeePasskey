@@ -13,6 +13,31 @@ import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * 保存时捕获的不可变同步配置回执。凭据仅以 Store 中已封印的 IV / 密文保存；
+ * 生产 Provider 每次使用时再由 Store 解封独立数组并由调用方清理。
+ */
+internal class SyncProviderConfigSnapshot internal constructor(
+    val provider: CloudSyncProvider,
+    val revision: String,
+    internal val scope: String?,
+    internal val webDavUrl: String? = null,
+    internal val webDavUsername: String? = null,
+    internal val webDavRemotePath: String? = null,
+    internal val webDavPasswordIv: String? = null,
+    internal val webDavPasswordCipher: String? = null,
+    internal val s3Endpoint: String? = null,
+    internal val s3Bucket: String? = null,
+    internal val s3Region: String? = null,
+    internal val s3ObjectKey: String? = null,
+    internal val s3UsePathStyle: Boolean = false,
+    internal val s3AccessKeyIv: String? = null,
+    internal val s3AccessKeyCipher: String? = null,
+    internal val s3SecretKeyIv: String? = null,
+    internal val s3SecretKeyCipher: String? = null,
+    internal val s3ClockOffsetMillis: Long = 0L
+)
+
 /** 仅由非秘密配置字段派生的当前云目标快照。 */
 data class SyncProviderTarget(
     val remotePath: String,
@@ -109,6 +134,7 @@ class SyncCredentialsStore @Inject constructor(
         return SyncRotationTargetMetadata.capture(snapshot, scope, vaultNamespace.currentId(), defaultFileName)
     }
 
+    @Synchronized
     fun saveProvider(provider: CloudSyncProvider, dbId: String? = null) {
         val scope = resolveScope(dbId)
         prefs.edit().putString(keyOf(SyncCredentialKeys.PROVIDER, scope), provider.name).apply()
@@ -205,6 +231,7 @@ class SyncCredentialsStore @Inject constructor(
      * `ISSUE-P2-465`：[dbId] 非空即显式落该库命名空间（云端打开导入的解锁前提交），
      * 为空即落当前活动库。
      */
+    @Synchronized
     fun saveWebDavConfig(
         url: String,
         username: String,
@@ -212,13 +239,22 @@ class SyncCredentialsStore @Inject constructor(
         remotePath: String,
         dbId: String? = null
     ): Boolean {
+        return saveWebDavConfigAtScope(url, username, password, remotePath, resolveScope(dbId))
+    }
+
+    private fun saveWebDavConfigAtScope(
+        url: String,
+        username: String,
+        password: CharArray,
+        remotePath: String,
+        scope: String?
+    ): Boolean {
         // ISSUE-P2-403：非空但全 '0' 的凭据 = 擦除后误存的「擦零指纹」（真机实证：云端打开后
         // 同步 401，设置页预填整串 0）——拒绝封印，绝不把垃圾密文落盘顶掉既有可用凭据
         if (isAllZero(password)) {
             debugLog?.warn(TAG, "拒绝封印 WebDAV 密码：内容为全零串（疑似擦除后误存）")
             return false
         }
-        val scope = resolveScope(dbId)
         try {
             // 先封印再落盘：封印失败不得写入任何键（含 URL），避免半写状态
             val passwordIv: String?
@@ -245,6 +281,20 @@ class SyncCredentialsStore @Inject constructor(
         } finally {
             password.fill('0')
         }
+    }
+
+    /** 原子保存 WebDAV 配置并返回该次提交的密封配置快照。 */
+    @Synchronized
+    internal fun saveWebDavConfigWithSnapshot(
+        url: String,
+        username: String,
+        password: CharArray,
+        remotePath: String,
+        dbId: String? = null
+    ): SyncProviderConfigSnapshot? {
+        val scope = resolveScope(dbId)
+        if (!saveWebDavConfigAtScope(url, username, password, remotePath, scope)) return null
+        return captureConfigSnapshot(CloudSyncProvider.WEBDAV, scope)
     }
 
     /** Wave 15 整改：读取解密以 [CharArray] 承载（借用语义），调用方用毕立即清零 */
@@ -288,6 +338,7 @@ class SyncCredentialsStore @Inject constructor(
      * Wave 15 整改：AccessKey/SecretKey 以 [CharArray] 借用语义提交，封印后立即擦除调用方数组；
      * 返回保存结果（语义同 [saveWebDavConfig]：**空密钥 = 保留已保存密钥**）。
      */
+    @Synchronized
     fun saveS3Config(
         endpoint: String,
         bucket: String,
@@ -298,12 +349,26 @@ class SyncCredentialsStore @Inject constructor(
         usePathStyle: Boolean = false,
         dbId: String? = null
     ): Boolean {
+        return saveS3ConfigAtScope(
+            endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle, resolveScope(dbId)
+        )
+    }
+
+    private fun saveS3ConfigAtScope(
+        endpoint: String,
+        bucket: String,
+        region: String,
+        accessKey: CharArray,
+        secretKey: CharArray,
+        objectKey: String,
+        usePathStyle: Boolean,
+        scope: String?
+    ): Boolean {
         // ISSUE-P2-403：全零串拒绝封印（语义同 saveWebDavConfig）
         if (isAllZero(accessKey) || isAllZero(secretKey)) {
             debugLog?.warn(TAG, "拒绝封印 S3 密钥：内容为全零串（疑似擦除后误存）")
             return false
         }
-        val scope = resolveScope(dbId)
         try {
             // 先封印再落盘：失败不得写入任何键
             val accessIv: String?
@@ -349,6 +414,174 @@ class SyncCredentialsStore @Inject constructor(
             accessKey.fill('0')
             secretKey.fill('0')
         }
+    }
+
+    /** 原子保存 S3 配置并返回该次提交的密封配置快照。 */
+    @Synchronized
+    internal fun saveS3ConfigWithSnapshot(
+        endpoint: String,
+        bucket: String,
+        region: String,
+        accessKey: CharArray,
+        secretKey: CharArray,
+        objectKey: String,
+        usePathStyle: Boolean = false,
+        dbId: String? = null
+    ): SyncProviderConfigSnapshot? {
+        val scope = resolveScope(dbId)
+        if (!saveS3ConfigAtScope(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle, scope)) {
+            return null
+        }
+        return captureConfigSnapshot(CloudSyncProvider.S3_COMPATIBLE, scope)
+    }
+
+    /** 解封指定提交快照；返回的凭据 CharArray 由调用方以 finally 负责擦除。 */
+    internal fun loadWebDavConfig(snapshot: SyncProviderConfigSnapshot): WebDavCredentials? {
+        if (snapshot.provider != CloudSyncProvider.WEBDAV) return null
+        val url = snapshot.webDavUrl ?: return null
+        val iv = snapshot.webDavPasswordIv
+        val cipher = snapshot.webDavPasswordCipher
+        val password = when {
+            iv.isNullOrBlank() && cipher.isNullOrBlank() -> CharArray(0)
+            isCipherTextPresent(iv, cipher) -> sealer.decrypt(iv, cipher, customDecryptor) ?: return null
+            else -> return null
+        }
+        return WebDavCredentials(
+            url = url,
+            username = snapshot.webDavUsername.orEmpty(),
+            password = password,
+            remotePath = snapshot.webDavRemotePath.orEmpty()
+        )
+    }
+
+    /** 解封指定提交快照；若第二项凭据解封失败，首项也立即擦除。 */
+    internal fun loadS3Config(snapshot: SyncProviderConfigSnapshot): S3Credentials? {
+        if (snapshot.provider != CloudSyncProvider.S3_COMPATIBLE) return null
+        val endpoint = snapshot.s3Endpoint ?: return null
+        val accessKey = decryptSnapshotSecret(snapshot.s3AccessKeyIv, snapshot.s3AccessKeyCipher) ?: return null
+        val secretKey = decryptSnapshotSecret(snapshot.s3SecretKeyIv, snapshot.s3SecretKeyCipher)
+            ?: run {
+                accessKey.fill('0')
+                return null
+            }
+        return S3Credentials(
+            endpoint = endpoint,
+            bucket = snapshot.s3Bucket.orEmpty(),
+            region = snapshot.s3Region.orEmpty(),
+            accessKey = accessKey,
+            secretKey = secretKey,
+            objectKey = snapshot.s3ObjectKey.orEmpty(),
+            usePathStyle = snapshot.s3UsePathStyle
+        )
+    }
+
+    private fun decryptSnapshotSecret(iv: String?, cipher: String?): CharArray? = when {
+        iv.isNullOrBlank() && cipher.isNullOrBlank() -> CharArray(0)
+        isCipherTextPresent(iv, cipher) -> sealer.decrypt(iv, cipher, customDecryptor)
+        else -> null
+    }
+
+    /** 必须在持有本存储器监视器时调用，使保存与快照捕获处于同一提交边界。 */
+    private fun captureConfigSnapshot(provider: CloudSyncProvider, scope: String?): SyncProviderConfigSnapshot? {
+        val values = prefs.all
+        fun string(base: String, default: String? = null): String? =
+            values[keyOf(base, scope)] as? String ?: default
+        fun boolean(base: String, default: Boolean = false): Boolean =
+            values[keyOf(base, scope)] as? Boolean ?: default
+        fun long(base: String, default: Long = 0L): Long =
+            values[keyOf(base, scope)] as? Long ?: default
+
+        return when (provider) {
+            CloudSyncProvider.WEBDAV -> {
+                val url = string(SyncCredentialKeys.WEBDAV_URL) ?: return null
+                val username = string(SyncCredentialKeys.WEBDAV_USERNAME).orEmpty()
+                val remotePath = string(
+                    SyncCredentialKeys.WEBDAV_REMOTE_PATH,
+                    WebDavDefaults.DEFAULT_REMOTE_PATH
+                ).orEmpty()
+                val iv = string(SyncCredentialKeys.WEBDAV_PASSWORD_IV)
+                val cipher = string(SyncCredentialKeys.WEBDAV_PASSWORD_CIPHER)
+                if (!validCipherPair(iv, cipher)) return null
+                val revision = targetIdentity(
+                    "WEBDAV", url, username, remotePath, iv.orEmpty(), cipher.orEmpty()
+                )
+                SyncProviderConfigSnapshot(
+                    provider = provider,
+                    revision = revision,
+                    scope = scope,
+                    webDavUrl = url,
+                    webDavUsername = username,
+                    webDavRemotePath = remotePath,
+                    webDavPasswordIv = iv,
+                    webDavPasswordCipher = cipher
+                )
+            }
+            CloudSyncProvider.S3_COMPATIBLE -> {
+                val endpoint = string(SyncCredentialKeys.S3_ENDPOINT) ?: return null
+                val bucket = string(SyncCredentialKeys.S3_BUCKET).orEmpty()
+                var accessIv = string(SyncCredentialKeys.S3_ACCESS_KEY_IV)
+                var accessCipher = string(SyncCredentialKeys.S3_ACCESS_KEY_CIPHER)
+                val legacyAccess = string(SyncCredentialKeys.S3_ACCESS_KEY)
+                if (!accessIv.isNullOrBlank() || !accessCipher.isNullOrBlank()) {
+                    if (!validCipherPair(accessIv, accessCipher)) return null
+                } else if (!legacyAccess.isNullOrBlank()) {
+                    val legacyChars = legacyAccess.toCharArray()
+                    val encrypted = try {
+                        sealer.encrypt(legacyChars, customEncryptor)
+                    } finally {
+                        legacyChars.fill('0')
+                    }
+                    if (encrypted == null) return null
+                    accessIv = encrypted.first
+                    accessCipher = encrypted.second
+                    prefs.edit()
+                        .putString(keyOf(SyncCredentialKeys.S3_ACCESS_KEY_IV, scope), accessIv)
+                        .putString(keyOf(SyncCredentialKeys.S3_ACCESS_KEY_CIPHER, scope), accessCipher)
+                        .remove(keyOf(SyncCredentialKeys.S3_ACCESS_KEY, scope))
+                        .apply()
+                }
+                val secretIv = string(SyncCredentialKeys.S3_SECRET_IV)
+                val secretCipher = string(SyncCredentialKeys.S3_SECRET_CIPHER)
+                if (!validCipherPair(secretIv, secretCipher)) return null
+                val region = string(SyncCredentialKeys.S3_REGION, "us-east-1").orEmpty()
+                val objectKey = string(SyncCredentialKeys.S3_OBJECT_KEY, "keepasskey.kdbx").orEmpty()
+                val usePathStyle = boolean(SyncCredentialKeys.S3_USE_PATH_STYLE)
+                val offset = long(SyncCredentialKeys.S3_CLOCK_OFFSET)
+                val revision = targetIdentity(
+                    "S3", endpoint, bucket, region, objectKey, usePathStyle.toString(),
+                    accessIv.orEmpty(), accessCipher.orEmpty(), secretIv.orEmpty(), secretCipher.orEmpty()
+                )
+                SyncProviderConfigSnapshot(
+                    provider = provider,
+                    revision = revision,
+                    scope = scope,
+                    s3Endpoint = endpoint,
+                    s3Bucket = bucket,
+                    s3Region = region,
+                    s3ObjectKey = objectKey,
+                    s3UsePathStyle = usePathStyle,
+                    s3AccessKeyIv = accessIv,
+                    s3AccessKeyCipher = accessCipher,
+                    s3SecretKeyIv = secretIv,
+                    s3SecretKeyCipher = secretCipher,
+                    s3ClockOffsetMillis = offset
+                )
+            }
+        }
+    }
+
+    private fun validCipherPair(iv: String?, cipher: String?): Boolean =
+        (iv.isNullOrBlank() && cipher.isNullOrBlank()) || isCipherTextPresent(iv, cipher)
+
+    /** 只在该快照仍是指定库当前 S3 配置时保存服务端时钟偏移，避免迟到响应污染新配置。 */
+    @Synchronized
+    internal fun saveS3ClockOffsetForSnapshot(snapshot: SyncProviderConfigSnapshot, offsetMillis: Long) {
+        if (snapshot.provider != CloudSyncProvider.S3_COMPATIBLE) return
+        val current = captureConfigSnapshot(snapshot.provider, snapshot.scope) ?: return
+        if (current.revision != snapshot.revision) return
+        prefs.edit()
+            .putLong(keyOf(SyncCredentialKeys.S3_CLOCK_OFFSET, snapshot.scope), offsetMillis)
+            .apply()
     }
 
     /** Wave 15 整改：读取解密以 [CharArray] 承载（借用语义），调用方用毕立即清零 */
@@ -416,6 +649,7 @@ class SyncCredentialsStore @Inject constructor(
      * `ISSUE-P2-465`：本方法刻意保持「整文件清空」语义（含各库命名空间与绑定登记）——
      * 它服务的是「终止全部同步关系」这一类整体动作；**单库**清理走 [clearFor]。
      */
+    @Synchronized
     fun clear() {
         prefs.edit().clear().apply()
         syncCacheEvictor?.evictAll()
@@ -431,6 +665,7 @@ class SyncCredentialsStore @Inject constructor(
      *
      * [dbId] 与读写面同口径：裸文件名（沙盒扫描条目）归一为沙盒内绝对路径。
      */
+    @Synchronized
     fun clearFor(dbId: String) {
         val scope = vaultNamespace.idFor(dbId) ?: return
         SyncCredentialKeys.removeScoped(prefs, scope)
@@ -448,6 +683,7 @@ class SyncCredentialsStore @Inject constructor(
         prefs.getLong(keyOf(SyncCredentialKeys.S3_CLOCK_OFFSET, resolveScope(null)), 0L)
 
     /** TASK-45：保存最新探测的 S3 时钟偏移（由 S3SyncProvider 刷新回调驱动，尽力而为） */
+    @Synchronized
     fun saveS3ClockOffsetMillis(offsetMillis: Long) {
         val key = keyOf(SyncCredentialKeys.S3_CLOCK_OFFSET, resolveScope(null))
         prefs.edit().putLong(key, offsetMillis).apply()

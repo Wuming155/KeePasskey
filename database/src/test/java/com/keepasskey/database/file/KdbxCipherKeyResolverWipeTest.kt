@@ -5,11 +5,13 @@ import com.keepasskey.crypto.exception.CryptoException
 import com.keepasskey.crypto.kdf.KdfParameters
 import com.keepasskey.database.exception.KdbxCorruptFileException
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.IOException
 
 /**
  * `ISSUE-P2-290` AC①／AC③：`KdbxCipherKeyResolver.resolve` 的派生调用点保护范围回归。
@@ -38,6 +40,29 @@ class KdbxCipherKeyResolverWipeTest {
             throw UnsupportedOperationException()
         override fun createDecryptingStream(inputStream: InputStream, key: ByteArray, iv: ByteArray): InputStream =
             throw UnsupportedOperationException()
+    }
+
+    private class PrefixCipherEngine(private val buffers: MutableList<ByteArray>) : CipherEngine {
+        override val cipherUuid = com.keepasskey.core.model.KdbxConstants.Cipher.AES_256_CBC
+        override val name = "PrefixStub"
+        override val ivLength = 16
+        override fun encrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray = error("unused")
+        override fun decrypt(key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray = error("unused")
+        override fun createEncryptingStream(outputStream: OutputStream, key: ByteArray, iv: ByteArray): OutputStream =
+            error("unused")
+        override fun createDecryptingStream(inputStream: InputStream, key: ByteArray, iv: ByteArray): InputStream =
+            object : InputStream() {
+                private var emitted = false
+                override fun read(): Int = -1
+                override fun read(target: ByteArray, offset: Int, length: Int): Int {
+                    buffers += target
+                    if (emitted) return -1
+                    emitted = true
+                    val prefix = byteArrayOf(0x1F, 0x8B.toByte(), 0x08)
+                    System.arraycopy(prefix, 0, target, offset, prefix.size)
+                    return prefix.size
+                }
+            }
     }
 
     private val header = KdbxHeader(
@@ -103,5 +128,37 @@ class KdbxCipherKeyResolverWipeTest {
             }
         }
         assertTrue(thrown.message!!.contains("派生失败"))
+    }
+
+    @Test
+    fun `探针读取缓冲在命中前缀后清零且解析结果仍有效`() {
+        val readBuffers = mutableListOf<ByteArray>()
+        val key = ByteArray(32) { 0x31 }
+        val resolution = KdbxCipherKeyResolver.resolve(
+            cipherEngine = PrefixCipherEngine(readBuffers),
+            header = header,
+            firstBlock = firstBlock,
+            officialKey = key,
+            isGzipCompressed = true
+        ) { error("官方派生命中后不得派生旧密钥") }
+
+        assertTrue("探针应确实读取过解密输出", readBuffers.isNotEmpty())
+        readBuffers.forEach { assertArrayEquals(ByteArray(it.size), it) }
+        assertTrue("有效官方密钥仍由裁决结果借用", resolution.activeKey === key)
+        assertTrue("gzip 前缀应判为可行", resolution.legacyKeyToWipe == null)
+    }
+
+    @Test
+    fun `累计探针容器扩容旧数组及关闭数组均清零而副本保持有效`() {
+        val wiped = mutableListOf<ByteArray>()
+        val output = WipingProbeOutputStream(initialCapacity = 2, onArrayWiped = { wiped += it })
+        val payload = byteArrayOf(9, 8, 7, 6)
+        output.write(payload, 0, payload.size)
+        val delivered = output.toByteArray()
+        output.wipe()
+
+        assertEquals(2, wiped.size)
+        wiped.forEach { assertArrayEquals(ByteArray(it.size), it) }
+        assertArrayEquals(payload, delivered)
     }
 }

@@ -3,6 +3,7 @@ package com.keepasskey.app.security
 import android.content.Context
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.files.NewVaultNames
+import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
@@ -12,6 +13,7 @@ import com.keepasskey.database.session.AtomicFileWriter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -216,23 +218,78 @@ class VaultRecoveryCoordinator @Inject constructor(
         val off = official.rootGroup.allEntries().associateBy { it.id }
         val added = snap.keys.count { it !in off.keys }
         val removed = off.keys.count { it !in snap.keys }
-        val modified = snap.keys.count { id -> off[id]?.let { !sameFingerprint(snap.getValue(id), it) } == true }
+        val modified = snap.keys.count { id -> off[id]?.let { !sameContent(snap.getValue(id), it) } == true }
         return Preview(vaultName, snap.size, off.size, added, removed, modified)
     }
 
-    /** 差异指纹只用非敏感字段（标题 / 用户名 / 网址 / 备注 / 标签 / 附件与历史条数）。 */
-    private fun sameFingerprint(a: KdbxEntry, b: KdbxEntry): Boolean =
-        fingerprint(a) == fingerprint(b)
+    /** 比较完整条目内容；受保护字段只通过其受控等值契约比较，不物化明文或长期摘要。 */
+    private fun sameContent(a: KdbxEntry, b: KdbxEntry): Boolean {
+        if (a.parentGroupId != b.parentGroupId || a.iconId != b.iconId ||
+            a.customIconId != b.customIconId || !a.fieldsContentEquals(b) ||
+            a.customFields.size != b.customFields.size || a.times != b.times ||
+            a.tags != b.tags || a.autoType != b.autoType ||
+            a.backgroundColor != b.backgroundColor || a.foregroundColor != b.foregroundColor ||
+            a.overrideUrl != b.overrideUrl || a.qualityCheck != b.qualityCheck ||
+            a.previousParentGroup != b.previousParentGroup || a.customData != b.customData ||
+            a.attachments.size != b.attachments.size || a.history.size != b.history.size
+        ) return false
 
-    private fun fingerprint(entry: KdbxEntry): String = listOf(
-        entry.title,
-        entry.userName,
-        entry.url,
-        entry.notes,
-        entry.tags.joinToString(),
-        entry.attachments.size.toString(),
-        entry.history.size.toString()
-    ).joinToString(FINGERPRINT_SEPARATOR)
+        if (a.customFields.indices.any { index ->
+                val left = a.customFields[index]
+                val right = b.customFields[index]
+                left.key != right.key || left.isProtected != right.isProtected || left.value != right.value
+            }) return false
+
+        if (a.attachments.indices.any { index -> !sameAttachment(a.attachments[index], b.attachments[index]) }) {
+            return false
+        }
+        return a.history.indices.all { index -> sameContent(a.history[index], b.history[index]) }
+    }
+
+    /** 固定内存预算比较附件流；缓冲区退出时清零，不构造附件副本或摘要。 */
+    private fun sameAttachment(a: KdbxAttachment, b: KdbxAttachment): Boolean {
+        if (a.name != b.name || a.isProtected != b.isProtected || a.size != b.size) return false
+        val leftBuffer = ByteArray(ATTACHMENT_COMPARE_BUFFER_SIZE)
+        val rightBuffer = ByteArray(ATTACHMENT_COMPARE_BUFFER_SIZE)
+        return try {
+            a.openStream().use { left ->
+                b.openStream().use { right ->
+                    var equal = true
+                    while (equal) {
+                        val leftCount = readChunk(left, leftBuffer)
+                        val rightCount = readChunk(right, rightBuffer)
+                        if (leftCount != rightCount) {
+                            equal = false
+                        } else if (leftCount == END_OF_STREAM) {
+                            break
+                        } else {
+                            for (index in 0 until leftCount) {
+                                if (leftBuffer[index] != rightBuffer[index]) {
+                                    equal = false
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    equal
+                }
+            }
+        } finally {
+            leftBuffer.fill(0)
+            rightBuffer.fill(0)
+        }
+    }
+
+    private fun readChunk(input: InputStream, buffer: ByteArray): Int {
+        var count = 0
+        while (count < buffer.size) {
+            val read = input.read(buffer, count, buffer.size - count)
+            if (read < 0) break
+            if (read == 0) continue
+            count += read
+        }
+        return if (count == 0) END_OF_STREAM else count
+    }
 
     private fun suggestedName(entry: VaultRecoveryStore.Entry): String {
         val base = entry.vaultName.takeIf { it.isNotBlank() } ?: entry.pathIdentifier.substringAfterLast('/')
@@ -246,7 +303,8 @@ class VaultRecoveryCoordinator @Inject constructor(
     private companion object {
         const val TAG = "VaultRecovery"
         const val SAF_SCHEME = "content://"
-        const val FINGERPRINT_SEPARATOR = "\u0001"
+        const val ATTACHMENT_COMPARE_BUFFER_SIZE = 8 * 1024
+        const val END_OF_STREAM = -1
         const val RECOVERED_STEM = "recovered"
         const val RECOVERED_SUFFIX = " (恢复)"
     }

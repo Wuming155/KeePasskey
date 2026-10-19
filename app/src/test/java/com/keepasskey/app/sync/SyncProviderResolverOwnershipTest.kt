@@ -8,6 +8,8 @@ import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.SyncTransferOptions
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -171,6 +173,107 @@ class SyncProviderResolverOwnershipTest {
         assertNull(fixture.factory.accessKeyClone)
     }
 
+    @Test
+    fun `保存回执在并发改为B后测试与后续独立Provider仍只解析A`() = runTest {
+        val fixture = Fixture()
+        val snapshot = requireNotNull(
+            fixture.store.saveS3ConfigWithSnapshot(
+                endpoint = "https://s3-a.example.test",
+                bucket = "bucket-a",
+                region = "region-a",
+                accessKey = "fake-access-a".toCharArray(),
+                secretKey = "fake-secret-a".toCharArray(),
+                objectKey = "vault-a.kdbx"
+            )
+        )
+        fixture.store.saveProvider(CloudSyncProvider.S3_COMPATIBLE)
+        fixture.factory.captureCreatedCredentials = true
+
+        val enteredTest = CompletableDeferred<Unit>()
+        val releaseTest = CompletableDeferred<Unit>()
+        var testCalls = 0
+        fixture.factory.testAction = {
+            if (testCalls++ == 0) {
+                enteredTest.complete(Unit)
+                releaseTest.await()
+            }
+            Result.success(Unit)
+        }
+
+        val test = async {
+            fixture.resolver.useProviderAtSnapshot(snapshot) { provider -> provider.testConnection() }
+        }
+        enteredTest.await()
+        assertTrue(
+            "并发持久化 B 成功",
+            fixture.store.saveS3Config(
+                endpoint = "https://s3-b.example.test",
+                bucket = "bucket-b",
+                region = "region-b",
+                accessKey = "fake-access-b".toCharArray(),
+                secretKey = "fake-secret-b".toCharArray(),
+                objectKey = "vault-b.kdbx"
+            )
+        )
+        releaseTest.complete(Unit)
+        assertTrue(requireNotNull(test.await()).isSuccess)
+
+        val syncResult = fixture.resolver.useProviderWithTargetAtSnapshot(
+            defaultFileName = "fallback.kdbx",
+            snapshot = snapshot
+        ) { provider, target ->
+            assertEquals("vault-a.kdbx", target?.remotePath)
+            provider.getMetadata(requireNotNull(target).remotePath)
+        }
+
+        try {
+            assertTrue(requireNotNull(syncResult).isFailure)
+            assertEquals(
+                listOf("https://s3-a.example.test", "https://s3-a.example.test"),
+                fixture.factory.s3Endpoints
+            )
+            assertEquals(
+                listOf("fake-access-a", "fake-access-a"),
+                fixture.factory.createdAccessKeys.map { String(it) }
+            )
+            assertEquals(
+                listOf("fake-secret-a", "fake-secret-a"),
+                fixture.factory.createdSecretKeys.map { String(it) }
+            )
+            assertEquals("测试与同步 Provider 各自构造并释放", 2, fixture.factory.releaseCalls)
+        } finally {
+            fixture.factory.createdAccessKeys.forEach { it.fill('0') }
+            fixture.factory.createdSecretKeys.forEach { it.fill('0') }
+        }
+    }
+
+    @Test
+    fun `快照Provider取消时释放Provider并清理两类凭据缓冲`() = runTest {
+        val fixture = Fixture()
+        val snapshot = requireNotNull(
+            fixture.store.saveS3ConfigWithSnapshot(
+                endpoint = "https://s3-cancel.example.test",
+                bucket = "bucket-cancel",
+                region = "region-cancel",
+                accessKey = "fake-access-cancel".toCharArray(),
+                secretKey = "fake-secret-cancel".toCharArray(),
+                objectKey = "cancel.kdbx"
+            )
+        )
+
+        try {
+            fixture.resolver.useProviderAtSnapshot(snapshot) {
+                throw CancellationException("synthetic cancellation")
+            }
+            throw AssertionError("expected cancellation")
+        } catch (_: CancellationException) {
+            // Resolver 必须先释放独占 Provider，再保留取消语义向上传播。
+        }
+
+        assertReleased(fixture.factory)
+        assertEquals("取消时恰好释放一次 Provider", 1, fixture.factory.releaseCalls)
+    }
+
     private class Fixture {
         val preferences = InMemorySharedPreferences()
         val store = SyncCredentialsStore(preferences.context(), keystoreManager = null)
@@ -227,6 +330,11 @@ class SyncProviderResolverOwnershipTest {
         var releaseCalls = 0
         var createCalls = 0
         var failS3Creation = false
+        var testAction: suspend () -> Result<Unit> = { Result.success(Unit) }
+        var captureCreatedCredentials = false
+        val s3Endpoints = mutableListOf<String>()
+        val createdAccessKeys = mutableListOf<CharArray>()
+        val createdSecretKeys = mutableListOf<CharArray>()
 
         override fun createWebDav(
             serverUrl: String,
@@ -237,7 +345,7 @@ class SyncProviderResolverOwnershipTest {
         ): SyncProvider {
             createCalls++
             webDavPassword = passwordChars
-            provider = RecordingProvider()
+            provider = RecordingProvider(testAction)
             return provider
         }
 
@@ -253,10 +361,15 @@ class SyncProviderResolverOwnershipTest {
             clockOffsetUpdater: (Long) -> Unit
         ): SyncProvider {
             createCalls++
+            s3Endpoints += endpoint
+            if (captureCreatedCredentials) {
+                createdAccessKeys += accessKeyId.copyOf()
+                createdSecretKeys += secretAccessKey.copyOf()
+            }
             accessKeyClone = accessKeyId
             secretKeyClone = secretAccessKey
             if (failS3Creation) throw IllegalArgumentException("synthetic")
-            provider = RecordingProvider()
+            provider = RecordingProvider(testAction)
             return provider
         }
 
@@ -267,8 +380,10 @@ class SyncProviderResolverOwnershipTest {
         }
     }
 
-    private class RecordingProvider : SyncProvider {
-        override suspend fun testConnection(): Result<Unit> = Result.success(Unit)
+    private class RecordingProvider(
+        private val testAction: suspend () -> Result<Unit> = { Result.success(Unit) }
+    ) : SyncProvider {
+        override suspend fun testConnection(): Result<Unit> = testAction()
 
         override suspend fun getMetadata(remotePath: String): Result<RemoteFileMetadata> =
             Result.failure(UnsupportedOperationException())

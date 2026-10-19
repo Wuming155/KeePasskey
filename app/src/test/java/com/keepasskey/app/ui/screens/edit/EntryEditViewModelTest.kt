@@ -223,6 +223,42 @@ class EntryEditViewModelTest {
         assertTrue("编辑发生后必须报告脏表单", registry.hasUnsavedEdits())
     }
 
+    @Test
+    fun `重复选择当前自定义图标保留其它字段的脏态`() = runTest {
+        val viewModel = EntryEditViewModel(SavedStateHandle(), FakeVaultRepository())
+        MainDispatcherGuard.track(viewModel)
+        testScheduler.runCurrent()
+
+        viewModel.onTitleChange("尚未保存的标题")
+        viewModel.onCustomIconSelected(null)
+
+        assertTrue("重复选择当前空图标不得清掉标题编辑的脏位", viewModel.uiState.value.isDirty)
+    }
+
+    @Test
+    fun `连续选择同一新自定义图标仍保持脏态`() = runTest {
+        val viewModel = EntryEditViewModel(SavedStateHandle(), FakeVaultRepository())
+        MainDispatcherGuard.track(viewModel)
+        testScheduler.runCurrent()
+
+        viewModel.onCustomIconSelected("icon-a")
+        assertTrue("首次选择新图标应置脏", viewModel.uiState.value.isDirty)
+        viewModel.onCustomIconSelected("icon-a")
+
+        assertTrue("再次选择同一新图标不得清掉首次选择产生的脏位", viewModel.uiState.value.isDirty)
+    }
+
+    @Test
+    fun `未编辑时重复选择当前图标保持未脏`() = runTest {
+        val viewModel = EntryEditViewModel(SavedStateHandle(), FakeVaultRepository())
+        MainDispatcherGuard.track(viewModel)
+        testScheduler.runCurrent()
+
+        viewModel.onCustomIconSelected(null)
+
+        assertFalse("无字段编辑且图标未变化时应保持干净", viewModel.uiState.value.isDirty)
+    }
+
     /**
      * `ISSUE-P3-359` AC②：标题必填校验必须落到**字段级**错误位——保存被拒置位、
      * 用户重新输入即清除（标题框据此渲染 `isError + supportingText` 并聚焦）。

@@ -79,6 +79,7 @@ fun KeePassGroupRow(
     onRename: () -> Unit,
     onChangeIcon: () -> Unit,
     onDelete: () -> Unit,
+    readOnly: Boolean = false,
     icon: BitmapEntryIcon? = null,
     densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
     highlightQuery: String = "", // ISSUE-P3-360 AC④c：搜索命中高亮词
@@ -145,18 +146,29 @@ fun KeePassGroupRow(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.vault_folder_rename)) },
                             leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            enabled = !readOnly,
                             onClick = { showMenu = false; onRename() }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.vault_folder_change_icon)) },
                             leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
+                            enabled = !readOnly,
                             onClick = { showMenu = false; onChangeIcon() }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.vault_folder_delete), color = MaterialTheme.colorScheme.error) },
                             leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            enabled = !readOnly,
                             onClick = { showMenu = false; onDelete() }
                         )
+                        if (readOnly) {
+                            Text(
+                                text = stringResource(R.string.readonly_save_rejected),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -176,6 +188,7 @@ internal fun KeePassGroupRowPreview() {
             onRename = {},
             onChangeIcon = {},
             onDelete = {},
+            readOnly = false,
             icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
             densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
         )
@@ -193,21 +206,25 @@ internal fun KeePassGroupRowSemanticColorPreview() {
             KeePassGroupRow(
                 group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-a", name = "网站登录", iconName = "folder"),
                 onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                readOnly = false,
                 densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
             )
             KeePassGroupRow(
                 group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-b", name = "银行卡", iconName = "bank"),
                 onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                readOnly = false,
                 densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
             )
             KeePassGroupRow(
                 group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-c", name = "安全便签", iconName = "note"),
                 onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                readOnly = false,
                 densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
             )
             KeePassGroupRow(
                 group = com.keepasskey.app.ui.preview.PreviewGroupLogins.copy(id = "g-rb", name = "回收站", iconName = "trash", isRecycleBin = true),
                 onClick = {}, onRename = {}, onChangeIcon = {}, onDelete = {},
+                readOnly = false,
                 densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
             )
         }

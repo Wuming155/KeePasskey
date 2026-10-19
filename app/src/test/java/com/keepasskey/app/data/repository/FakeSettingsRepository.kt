@@ -25,6 +25,11 @@ class FakeSettingsRepository() : SettingsRepository {
         settingsFlow.update { it.copy(themePalette = themePalette, dynamicColorEnabled = false, customSeedColor = null) }
     }
 
+    /** ISSUE-P3-653：切回品牌来源，保留已选 palette，同时清理动态与自定义覆盖。 */
+    override suspend fun switchToBrandPalette() {
+        settingsFlow.update { it.copy(dynamicColorEnabled = false, customSeedColor = null) }
+    }
+
     override suspend fun setDynamicColorEnabled(enabled: Boolean) {
         settingsFlow.update { it.copy(dynamicColorEnabled = enabled) }
     }

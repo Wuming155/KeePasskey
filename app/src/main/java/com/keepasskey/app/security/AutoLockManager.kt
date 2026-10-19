@@ -71,7 +71,6 @@ class AutoLockManager @Inject constructor(
     /** 本地锁态镜像（前台闲置调度用）；对外真相源仍是 [isLocked] 的 StateFlow */
     private var sessionLocked: Boolean = false
     private var lastInteractionAtMillis: Long = System.currentTimeMillis()
-    private var foregroundLockJob: Job? = null
 
     /**
      * ISSUE-P3-381：回前台监听器集合。进程 onStart（含冷启动补偿判定之后）时逐个回调，
@@ -81,6 +80,15 @@ class AutoLockManager @Inject constructor(
 
     /** 后台延迟锁定任务；到点即锁，取消路径覆盖 onStart / onUnlockSuccess / triggerLock / 设置变更 */
     private var backgroundLockJob: Job? = null
+
+    private val foregroundIdleTimer = ForegroundIdleLockTimer(
+        scope = scope,
+        settingsRepository = settingsRepository,
+        isInBackground = { isInBackground },
+        isLocked = { sessionLocked },
+        lastInteractionMillis = { lastInteractionAtMillis },
+        triggerLock = { reason -> triggerLock(reason) }
+    )
 
     /**
      * ISSUE-P3-381：注册回前台监听（幂等重复注册由调用方负责；进程级单例生命周期）。
@@ -113,42 +121,7 @@ class AutoLockManager @Inject constructor(
     }
 
     private fun scheduleForegroundIdleLock() {
-        foregroundLockJob?.cancel()
-        foregroundLockJob = null
-        scope.launch {
-            val settings = settingsRepository.getSettings().first()
-            if (!settings.autoLockForegroundEnabled || sessionLocked) {
-                return@launch
-            }
-            val decision = ForegroundIdleLockPolicy.decide(
-                idleTimeoutSeconds = settings.autoLockForegroundTimeoutSeconds,
-                lastInteractionMillis = lastInteractionAtMillis,
-                nowMillis = System.currentTimeMillis()
-            )
-            when (decision) {
-                is ForegroundIdleLockPolicy.IdleDecision.LockNow -> {
-                    sessionGuard.triggerLock(decision.reason)
-                }
-
-                ForegroundIdleLockPolicy.IdleDecision.NeverIdleLock -> Unit
-                ForegroundIdleLockPolicy.IdleDecision.KeepAlive -> {
-                    val lockAt = ForegroundIdleLockPolicy.nextLockAtMillis(
-                        settings.autoLockForegroundTimeoutSeconds,
-                        lastInteractionAtMillis
-                    ) ?: return@launch
-                    val delayMs = (lockAt - System.currentTimeMillis()).coerceAtLeast(0L)
-                    delay(delayMs)
-                    val recheck = ForegroundIdleLockPolicy.decide(
-                        idleTimeoutSeconds = settings.autoLockForegroundTimeoutSeconds,
-                        lastInteractionMillis = lastInteractionAtMillis,
-                        nowMillis = System.currentTimeMillis()
-                    )
-                    if (recheck is ForegroundIdleLockPolicy.IdleDecision.LockNow) {
-                        sessionGuard.triggerLock(recheck.reason)
-                    }
-                }
-            }
-        }
+        foregroundIdleTimer.schedule()
     }
 
     private val screenOffReceiver = object : BroadcastReceiver() {
@@ -203,8 +176,7 @@ class AutoLockManager @Inject constructor(
     override fun onStop(owner: LifecycleOwner) {
         // 应用整体退至后台：持久化起始时刻（进程重建后可恢复）并按当前超时值启动延迟锁定任务
         isInBackground = true
-        foregroundLockJob?.cancel()
-        foregroundLockJob = null
+        foregroundIdleTimer.cancel()
         backgroundStamp.markBackground(System.currentTimeMillis())
         scheduleBackgroundLock()
     }
@@ -279,8 +251,7 @@ class AutoLockManager @Inject constructor(
     fun triggerLock(reason: String = "安全锁定") {
         sessionLocked = true
         cancelBackgroundLock()
-        foregroundLockJob?.cancel()
-        foregroundLockJob = null
+        foregroundIdleTimer.cancel()
         scope.launch {
             sessionGuard.triggerLock(reason)
         }
@@ -294,8 +265,7 @@ class AutoLockManager @Inject constructor(
         lastInteractionAtMillis = System.currentTimeMillis()
         backgroundStamp.clear()
         cancelBackgroundLock()
-        foregroundLockJob?.cancel()
-        foregroundLockJob = null
+        foregroundIdleTimer.cancel()
         sessionGuard.onUnlockSuccess()
         if (!isInBackground) scheduleForegroundIdleLock()
     }

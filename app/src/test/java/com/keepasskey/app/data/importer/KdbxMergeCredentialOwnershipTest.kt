@@ -50,6 +50,7 @@ class KdbxMergeCredentialOwnershipTest {
                 DebugLogBuffer()
             ),
             debugLog = DebugLogBuffer(),
+            databaseSession = DatabaseSession(),
             kdbxMergeController = merge
         )
 

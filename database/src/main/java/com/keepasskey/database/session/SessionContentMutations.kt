@@ -6,6 +6,7 @@ import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.crypto.kdf.KdfParameters
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -32,12 +33,22 @@ internal class SessionContentMutations(
     private val databaseFlow: MutableStateFlow<KdbxDatabase?>,
     private val stateFlow: MutableStateFlow<DatabaseSession.SessionState>,
     private val readOnly: () -> Boolean,
+    private val currentTicket: () -> SessionCredentialTicket?,
     /** `ISSUE-P1-631`：「校验-采用」的附加条件读取口（持久化基线修订；见 [adoptDatabaseIfUnchanged]） */
     private val persistedBaselineRevision: () -> Long = { 0L }
 ) {
 
+    /** 在获取 [mutex] 后、实际变更前校验受理票据。 */
+    private suspend fun requireCurrentCredentialRequest() {
+        val request = currentCoroutineContext()[SessionCredentialRequest] ?: return
+        if (request.expected == null || request.expected !== currentTicket()) {
+            throw SessionCredentialTicketMismatchException()
+        }
+    }
+
     /** 更新或保存条目。 */
     suspend fun saveEntry(entry: KdbxEntry) = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val edit = SessionTreeEditor.updateOrAddEntry(currentDb.rootGroup, entry)
@@ -68,6 +79,7 @@ internal class SessionContentMutations(
      * @return 目标分组存在且写入已发布时为 true；只读态 / 无活动库 / 目标分组不存在为 false。
      */
     suspend fun saveEntryInGroup(entry: KdbxEntry, targetParentId: KdbxUuid): Boolean = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock false
         val currentDb = databaseFlow.value ?: return@withLock false
         val targetGroup = currentDb.rootGroup.findGroup(targetParentId) ?: return@withLock false
@@ -82,6 +94,7 @@ internal class SessionContentMutations(
 
     /** 删除条目。 */
     suspend fun deleteEntry(entryId: KdbxUuid) = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val updatedRoot = SessionTreeEditor.removeEntry(currentDb.rootGroup, entryId)
@@ -102,6 +115,7 @@ internal class SessionContentMutations(
      * 元数据的调用路径意外清空子条目与子分组。
      */
     suspend fun saveGroup(group: KdbxGroup) = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val edit = if (group.id == currentDb.rootGroup.id) {
@@ -133,6 +147,7 @@ internal class SessionContentMutations(
         entryId: KdbxUuid,
         transform: (KdbxEntry) -> KdbxEntry
     ): KdbxEntry? = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock null
         val currentDb = databaseFlow.value ?: return@withLock null
         val edit = SessionTreeEditor.updateEntryById(currentDb.rootGroup, entryId, transform)
@@ -157,6 +172,7 @@ internal class SessionContentMutations(
      * [updateEntryById]（后者额外提供会话 Mutex 内的原子读-改-写）。
      */
     suspend fun updateDatabaseMeta(transform: (KdbxDatabase) -> KdbxDatabase) = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val updated = transform(currentDb)
@@ -229,6 +245,7 @@ internal class SessionContentMutations(
         replacement: KdbxDatabase,
         expectedPersistedBaselineRevision: Long? = null
     ): Boolean = mutex.withLock {
+        requireCurrentCredentialRequest()
         adoptDatabaseIfUnchangedLocked(expectedAtCycleStart, replacement, expectedPersistedBaselineRevision)
     }
 
@@ -267,6 +284,7 @@ internal class SessionContentMutations(
 
     /** 删除分组。 */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         if (groupId == currentDb.rootGroup.id) return@withLock
@@ -278,6 +296,7 @@ internal class SessionContentMutations(
 
     /** 批量移动条目。 */
     suspend fun batchMoveEntries(entryIds: Set<KdbxUuid>, targetGroupId: KdbxUuid?) = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         val entriesToMove = currentDb.rootGroup.allEntries().filter { it.id in entryIds }
@@ -304,6 +323,7 @@ internal class SessionContentMutations(
 
     /** 批量删除条目。 */
     suspend fun batchDeleteEntries(entryIds: Set<KdbxUuid>) = mutex.withLock {
+        requireCurrentCredentialRequest()
         if (readOnly()) return@withLock
         val currentDb = databaseFlow.value ?: return@withLock
         // ISSUE-P3-160：单趟按 id 集合剪枝，取代「对每个 id 各调一次 removeEntry」

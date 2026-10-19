@@ -60,6 +60,75 @@ class SyncCacheTest {
     }
 
     @Test
+    fun `P2-636 cache交付前失败时缺失cache不能被判clean`() {
+        val dir = tmpFolder.newFolder("p2-636-before-cache-rename")
+        val remotePath = "remote/vault.kdbx"
+        val cache = SyncCache(dir)
+        cache.updateBase(remotePath, baseVersion = SyncCache.sha256Hex("A".toByteArray()))
+        blockTarget(dir, remotePath, SyncCache.SUFFIX_CACHE)
+
+        assertTrue(runCatching { cache.writeCache(remotePath, "B".toByteArray()) }.isFailure)
+        assertTrue("已有基线但cache未交付，必须要求核对/同步", SyncCache(dir).hasLocalChanges(remotePath))
+    }
+
+    @Test
+    fun `P2-636 cache交付后version提交失败时重启仍识别本地修改`() {
+        val dir = tmpFolder.newFolder("p2-636-before-version-rename")
+        val remotePath = "remote/vault.kdbx"
+        val cache = SyncCache(dir)
+        val a = "A".toByteArray()
+        val b = "B".toByteArray()
+        val versionKey = SyncCache.sha256Hex(remotePath.toByteArray(Charsets.UTF_8))
+        cache.writeCache(remotePath, a)
+        cache.updateBase(remotePath, baseVersion = SyncCache.sha256Hex(a), etag = "\"etag-A\"")
+        val blockedVersion = File(dir, "$versionKey${SyncCache.SUFFIX_VERSION}").apply {
+            delete()
+            mkdirs()
+            File(this, "busy").writeText("x")
+        }
+
+        assertTrue("版本目标阻塞应使 writeCache 失败", runCatching { cache.writeCache(remotePath, b) }.isFailure)
+        assertTrue(b.contentEquals(SyncCache(dir).readCache(remotePath)))
+        assertTrue("新cache/旧version/旧base的恢复必须标为dirty", SyncCache(dir).hasLocalChanges(remotePath))
+        val metadataFile = File(dir, "$versionKey.meta")
+        assertTrue("版本提交失败不得损坏既有 ETag 元数据", metadataFile.readText().contains("etag=etag-A"))
+        assertTrue("测试故障注入目录仍存在", blockedVersion.isDirectory)
+    }
+
+    @Test
+    fun `P2-636 version已提交后重启按cache摘要与base比较`() {
+        val dir = tmpFolder.newFolder("p2-636-after-version-commit")
+        val remotePath = "remote/vault.kdbx"
+        val cache = SyncCache(dir)
+        val a = "A".toByteArray()
+        val b = "B".toByteArray()
+        cache.writeCache(remotePath, a)
+        cache.updateBase(remotePath, baseVersion = SyncCache.sha256Hex(a))
+        cache.writeCache(remotePath, b)
+
+        assertEquals(SyncCache.sha256Hex(b), SyncCache(dir).getState(remotePath)?.localVersion)
+        assertTrue(SyncCache(dir).hasLocalChanges(remotePath))
+    }
+
+    @Test
+    fun `P2-636 缺失或损坏version按cache实际摘要恢复`() {
+        val dir = tmpFolder.newFolder("p2-636-bad-version")
+        val remotePath = "remote/vault.kdbx"
+        val cache = SyncCache(dir)
+        val a = "A".toByteArray()
+        val b = "B".toByteArray()
+        cache.writeCache(remotePath, a)
+        cache.updateBase(remotePath, baseVersion = SyncCache.sha256Hex(a))
+        cache.writeCache(remotePath, b)
+        val versionFile = File(dir, "${SyncCache.sha256Hex(remotePath.toByteArray())}${SyncCache.SUFFIX_VERSION}")
+
+        versionFile.writeText("corrupt")
+        assertTrue("损坏标记不能覆盖实际cache摘要", SyncCache(dir).hasLocalChanges(remotePath))
+        versionFile.delete()
+        assertTrue("缺失标记不能按clean处理", SyncCache(dir).hasLocalChanges(remotePath))
+    }
+
+    @Test
     fun `未缓存路径读取返回null`() {
         val cache = newCache()
         assertNull(cache.readCache("not-exist.kdbx"))

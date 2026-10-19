@@ -2,6 +2,9 @@ package com.keepasskey.sync.engine
 
 import com.keepasskey.sync.model.cleanEtag
 import java.io.File
+import java.io.FileInputStream
+import java.security.DigestInputStream
+import java.security.MessageDigest
 
 /**
  * 同步缓存的**元数据 / 基准快照 / 清理**面（ISSUE-P3-305 自 [SyncCache] 按职责拆出，逐行搬运）。
@@ -28,14 +31,27 @@ internal class SyncCacheMaintenance(
      */
     fun hasLocalChanges(remotePath: String): Boolean {
         val versionFile = getFile(remotePath, SyncCache.SUFFIX_VERSION)
-        if (!versionFile.exists()) return false
-
         val baseVersionFile = getFile(remotePath, SUFFIX_BASE_VERSION)
-        if (!baseVersionFile.exists()) return true
+        val cacheFile = getFile(remotePath, SyncCache.SUFFIX_CACHE)
+        if (!cacheFile.isFile) return versionFile.exists() || baseVersionFile.exists()
 
-        val localVer = versionFile.readText().trim()
+        // `.cache` 与 `.version` 是两个独立原子替换，进程可能在两者之间退出。
+        // 以缓存实际字节摘要作为恢复依据，绝不让缺失/陈旧/损坏的版本文件把新内容判成 clean。
+        val localVer = sha256Hex(cacheFile)
+        if (!baseVersionFile.exists()) return true
         val baseVer = baseVersionFile.readText().trim()
         return localVer != baseVer
+    }
+
+    private fun sha256Hex(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { input ->
+            DigestInputStream(input, digest).use { stream ->
+                val buffer = ByteArray(HASH_BUFFER_SIZE)
+                while (stream.read(buffer) != -1) Unit
+            }
+        }
+        return digest.digest().toHexString()
     }
 
     /**
@@ -230,5 +246,6 @@ internal class SyncCacheMaintenance(
         private const val KEY_REMOTE_PATH = "remotePath"
         private const val KEY_ETAG = "etag"
         private const val KEY_LAST_SYNC_MILLIS = "lastSyncMillis"
+        private const val HASH_BUFFER_SIZE = 8192
     }
 }

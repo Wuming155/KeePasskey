@@ -14,6 +14,7 @@ import com.keepasskey.app.data.importer.KdbxMergeController
 import com.keepasskey.app.data.importer.VaultImporter
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -53,6 +54,7 @@ class VaultImportController @Inject constructor(
     private val registry: ImporterRegistry,
     private val vaultImporter: VaultImporter,
     private val debugLog: DebugLogBuffer,
+    private val databaseSession: DatabaseSession,
     /** ISSUE-P3-384：`.kdbx` 并入执行体（KDBX_MERGE 路径，不经 EntryImporter）。 */
     private val kdbxMergeController: KdbxMergeController
 ) {
@@ -98,10 +100,17 @@ class VaultImportController @Inject constructor(
             return
         }
         if (mutableUiState.value is ImportUiState.Parsing) return
+        val request = databaseSession.captureCredentialRequest()
+        if (request.ticket == null) {
+            mutableUiState.value = ImportUiState.Failed(source, ImportFailureReason.LOCKED)
+            return
+        }
         val gen = ++generation
         mutableUiState.value = ImportUiState.Parsing(source, stage = ImportStage.READING)
         importJob = scope.launch {
-            val finalState = runImport(source, uri, policy, gen)
+            val finalState = databaseSession.withCredentialRequest(request) {
+                runImport(source, uri, policy, gen)
+            }
             // 取消与完成可能竞态：代际已变（被取消 / 被新一轮替代）或状态已离开 Parsing 时不回写终态
             if (gen == generation && mutableUiState.value is ImportUiState.Parsing) {
                 mutableUiState.value = finalState

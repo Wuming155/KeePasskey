@@ -160,6 +160,12 @@ class RealSettingsRepository @Inject constructor(
         it.remove(KEY_CUSTOM_SEED_COLOR)
     }
 
+    /** ISSUE-P3-653：一次 DataStore 事务切回品牌来源；当前选中的品牌 palette 保持不变。 */
+    override suspend fun switchToBrandPalette() = edit {
+        it[KEY_DYNAMIC_COLOR] = false
+        it.remove(KEY_CUSTOM_SEED_COLOR)
+    }
+
     /**
      * ISSUE-P3-441 AC①：设置/清除自定义种子色（ARGB；null = 清除）。
      * 非 null 写入在同一原子事务内幂等关闭动态取色（PD-30 三态互斥兜底），

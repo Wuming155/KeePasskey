@@ -13,6 +13,9 @@ class SessionCredentialTicket internal constructor(
     internal fun next() = SessionCredentialTicket(pathIdentifier, credentialGeneration + 1, sessionIdentity)
 }
 
+/** 排队写入时捕获的会话已失效，不再属于当前已解锁会话。 */
+class SessionCredentialTicketMismatchException : IllegalStateException("受理后的会话已改变")
+
 /** 每次受理独享请求；只有该请求实际提交才登记 [committedTicket]，不能借用另一任务的提交事实。 */
 class SessionCredentialRequest internal constructor(internal val expected: SessionCredentialTicket?) :
     AbstractCoroutineContextElement(Key) {

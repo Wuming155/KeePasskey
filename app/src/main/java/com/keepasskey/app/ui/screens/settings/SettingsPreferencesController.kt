@@ -397,6 +397,13 @@ internal class SettingsPreferencesController(
         }
     }
 
+    /** ISSUE-P3-653：将显式切回品牌来源委托给仓库的原子偏好动作。 */
+    fun switchToBrandPalette() {
+        scope.launch {
+            settingsRepository.switchToBrandPalette()
+        }
+    }
+
     fun setOledBlackOptimization(enabled: Boolean) {
         scope.launch {
             settingsRepository.setOledBlackOptimization(enabled)

@@ -29,7 +29,8 @@ import java.nio.charset.StandardCharsets
  */
 internal class PasskeyImportDraftHost(
     private val isReadOnly: () -> Boolean,
-    private val onNotice: (Int) -> Unit
+    private val onNotice: (Int) -> Unit,
+    private val readPayload: (ByteArray) -> PasskeyCxfOutcome = PasskeyCxfReader::read
 ) {
 
     private val pendingFlow = MutableStateFlow<PasskeyImportDraft?>(null)
@@ -49,7 +50,12 @@ internal class PasskeyImportDraftHost(
             return false
         }
         val outcome = try {
-            PasskeyCxfReader.read(toUtf8Bytes(decoded))
+            val payload = toUtf8Bytes(decoded)
+            try {
+                readPayload(payload)
+            } finally {
+                payload.fill(0)
+            }
         } finally {
             decoded.fill('0')
         }
@@ -101,8 +107,9 @@ internal class PasskeyImportDraftHost(
     private fun toUtf8Bytes(chars: CharArray): ByteArray =
         CharBuffer.wrap(chars).let { buffer ->
             val utf8 = StandardCharsets.UTF_8.encode(buffer)
-            ByteArray(utf8.remaining()).also { out ->
-                utf8.get(out)
+            try {
+                ByteArray(utf8.remaining()).also { out -> utf8.get(out) }
+            } finally {
                 if (utf8.hasArray()) utf8.array().fill(0)
             }
         }

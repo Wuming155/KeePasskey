@@ -119,9 +119,24 @@ class ThemePaletteMutualExclusionWiringTest {
             readSource(NAV_GRAPH_ROUTES) +
             readSource(NAV_GRAPH_DISPLAY_ROUTES)
         assertTrue(
-            "NavGraph 必须把一步切回接线到关闭动态取色（偏好值已落盘，无须另行选择）",
-            navGraph.contains("onSwitchToBrandPalette = { settingsViewModel.setDynamicColorEnabled(false) }")
+            "NavGraph 必须把一步切回接线到品牌来源原子动作",
+            navGraph.contains("onSwitchToBrandPalette = settingsViewModel::switchToBrandPalette")
         )
+    }
+
+    @Test
+    fun `品牌来源原子动作关动态清种子且不覆盖已选调色盘`() {
+        val repository = readSource(REPOSITORY)
+        val body = extractSwitchToBrandPaletteBody(repository)
+        assertTrue("品牌切换必须关动态取色", body.contains("it[KEY_DYNAMIC_COLOR] = false"))
+        assertTrue("品牌切换必须清自定义种子色", body.contains("it.remove(KEY_CUSTOM_SEED_COLOR)"))
+        assertTrue("品牌切换的两个键操作必须属于单次 DataStore edit", body.contains("= edit {"))
+        assertFalse("品牌切换不得重写已选品牌调色盘", body.contains("KEY_THEME_PALETTE"))
+        assertTrue("动态开关仍应仅写 dynamic key，保留自定义色恢复语义", extractSetDynamicColorBody(repository).contains("it[KEY_DYNAMIC_COLOR] = enabled"))
+        assertTrue("偏好加载必须从持久化读取选中 palette", repository.contains("themePalette = enumValueOrDefault(prefs[KEY_THEME_PALETTE]"))
+        assertTrue("偏好加载必须从持久化读取 seed 以供负对照", repository.contains("customSeedColor = prefs[KEY_CUSTOM_SEED_COLOR]"))
+        assertTrue("SettingsViewModel 必须委托品牌来源动作", readSource(SETTINGS_VIEW_MODEL).contains("fun switchToBrandPalette() = preferences.switchToBrandPalette()"))
+        assertTrue("设置偏好控制器必须将动作提交至 SettingsRepository", readSource(SETTINGS_PREFERENCES).contains("settingsRepository.switchToBrandPalette()"))
     }
 
     @Test
@@ -159,12 +174,30 @@ class ThemePaletteMutualExclusionWiringTest {
         return source.substring(start, if (end > start) end else source.length)
     }
 
+    private fun extractSwitchToBrandPaletteBody(source: String): String {
+        val start = source.indexOf("override suspend fun switchToBrandPalette")
+        assertTrue("RealSettingsRepository 缺 switchToBrandPalette", start >= 0)
+        val end = source.indexOf("override suspend fun setCustomSeedColor", start)
+        return source.substring(start, if (end > start) end else source.length)
+    }
+
+    private fun extractSetDynamicColorBody(source: String): String {
+        val start = source.indexOf("override suspend fun setDynamicColorEnabled")
+        assertTrue("RealSettingsRepository 缺 setDynamicColorEnabled", start >= 0)
+        val end = source.indexOf("override suspend fun setAppLanguage", start)
+        return source.substring(start, if (end > start) end else source.length)
+    }
+
     private companion object {
         const val SUBSCREEN_DIR =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens"
 
         const val REPOSITORY =
             "app/src/main/java/com/keepasskey/app/data/repository/RealSettingsRepository.kt"
+        const val SETTINGS_VIEW_MODEL =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt"
+        const val SETTINGS_PREFERENCES =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsPreferencesController.kt"
         const val COMPONENTS = "$SUBSCREEN_DIR/ThemeSettingsComponents.kt"
         const val SECTIONS = "$SUBSCREEN_DIR/ThemeSettingsSections.kt"
         const val NAV_GRAPH = "app/src/main/java/com/keepasskey/app/ui/KeePasskeySettingsNavGraph.kt"

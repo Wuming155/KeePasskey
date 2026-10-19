@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
 import com.keepasskey.app.sync.SyncCredentialsStore
+import com.keepasskey.app.sync.SyncProviderConfigSnapshot
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -120,7 +121,8 @@ internal class SettingsSyncCredentialForm(
         url: String,
         username: String,
         password: CharArray,
-        remotePath: String
+        remotePath: String,
+        onSavedSnapshot: (SyncProviderConfigSnapshot) -> Unit = {}
     ): Boolean {
         // Wave 14 全站强制 HTTPS：保存时即时校验端点（fail-fast），
         // 显式 http:// 直接拒绝并反馈；无 scheme 输入自动归一化为 https://
@@ -132,14 +134,17 @@ internal class SettingsSyncCredentialForm(
             password.fill('0')
             return false
         }
-        val saved = syncCredentialsStore.saveWebDavConfig(normalizedUrl, username, password, remotePath)
+        val snapshot = syncCredentialsStore.saveWebDavConfigWithSnapshot(
+            normalizedUrl, username, password, remotePath
+        )
         password.fill('0')
-        if (!saved) {
+        if (snapshot == null) {
             state.update {
                 it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
             }
             return false
         }
+        onSavedSnapshot(snapshot)
         state.update {
             it.copy(
                 webdavUrl = normalizedUrl,
@@ -169,7 +174,8 @@ internal class SettingsSyncCredentialForm(
         accessKey: CharArray,
         secretKey: CharArray,
         objectKey: String,
-        usePathStyle: Boolean = state.value.s3UsePathStyle
+        usePathStyle: Boolean = state.value.s3UsePathStyle,
+        onSavedSnapshot: (SyncProviderConfigSnapshot) -> Unit = {}
     ): Boolean {
         // Wave 14 全站强制 HTTPS：与 WebDAV 一致的保存期端点校验
         val normalizedEndpoint = normalizeHttpsEndpoint(endpoint)
@@ -182,17 +188,18 @@ internal class SettingsSyncCredentialForm(
             return false
         }
         // AccessKey ID 与 SecretKey 均为借用语义：存储库封印后由库内统一擦除，此处兜底再擦一次
-        val saved = syncCredentialsStore.saveS3Config(
+        val snapshot = syncCredentialsStore.saveS3ConfigWithSnapshot(
             normalizedEndpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
         )
         accessKey.fill('0')
         secretKey.fill('0')
-        if (!saved) {
+        if (snapshot == null) {
             state.update {
                 it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
             }
             return false
         }
+        onSavedSnapshot(snapshot)
         state.update {
             it.copy(
                 s3Endpoint = normalizedEndpoint,

@@ -1,19 +1,26 @@
 package com.keepasskey.database.session
 
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
 import java.io.Closeable
 import java.io.File
 import kotlin.io.path.createTempDirectory
+import org.junit.rules.TemporaryFolder
 
 /** 锁屏障覆盖受理、等锁、提交三阶段；票据不依赖树实例或文件路径相等。 */
 class SessionCredentialTicketTest {
+    @get:Rule
+    val tempFolder = TemporaryFolder()
+
     private class Fixture : Closeable {
         val core = SessionCore()
         val mutex = Mutex()
@@ -81,6 +88,72 @@ class SessionCredentialTicketTest {
                 assertSame(request, currentCoroutineContext()[SessionCredentialRequest])
             }
         }
+    }
+
+    @Test fun `旧批次票据在换库后于条目分组删除与保存边界均被拒绝`() = runBlocking<Unit> {
+        val session = openedSession("ticket-target-A")
+        val oldRequest = session.captureCredentialRequest()
+        val oldEntry = KdbxEntry(id = KdbxUuid.random())
+        val oldGroup = KdbxGroup(name = "旧批次分组")
+
+        session.lock()
+        assertTrue(session.create(
+            File(tempFolder.root, "ticket-target-B-${System.nanoTime()}.kdbx"),
+            "Target B", "TicketTarget#Fake".toCharArray(), useArgon2 = false
+        ).isSuccess)
+
+        session.withCredentialRequest(oldRequest) {
+            assertSessionTicketMismatch { session.saveEntry(oldEntry) }
+            assertSessionTicketMismatch { session.saveGroup(oldGroup) }
+            assertSessionTicketMismatch { session.deleteEntry(oldEntry.id) }
+            assertTrue("过期票据不得序列化或保存后来会话", session.save().isFailure)
+        }
+
+        assertTrue("换入库B后不得出现旧批次条目", session.databaseFlow.value!!.rootGroup.allEntries().isEmpty())
+        assertTrue("换入库B后不得出现旧批次分组", session.databaseFlow.value!!.rootGroup.allGroups().none { it.name == oldGroup.name })
+        session.close()
+    }
+
+    @Test fun `同会话批次票据允许正常条目分组变更与保存`() = runBlocking<Unit> {
+        val session = openedSession("ticket-target-positive")
+        val request = session.captureCredentialRequest()
+        val entry = KdbxEntry(id = KdbxUuid.random())
+        val group = KdbxGroup(name = "同会话导入分组")
+
+        session.withCredentialRequest(request) {
+            session.saveGroup(group)
+            session.saveEntry(entry)
+            assertTrue("当前票据应允许保存", session.save().isSuccess)
+        }
+
+        assertTrue(session.databaseFlow.value!!.rootGroup.allEntries().any { it.id == entry.id })
+        assertTrue(session.databaseFlow.value!!.rootGroup.allGroups().any { it.name == group.name })
+        session.close()
+    }
+
+    private suspend fun assertSessionTicketMismatch(block: suspend () -> Unit) {
+        val thrown = try {
+            block()
+            null
+        } catch (failure: Throwable) {
+            failure
+        }
+        assertTrue(
+            "会话切换后的挂起写入必须拒绝过期票据，而不是丢失协程上下文",
+            thrown is SessionCredentialTicketMismatchException
+        )
+    }
+
+    private suspend fun openedSession(name: String): DatabaseSession {
+        val session = DatabaseSession()
+        val result = session.create(
+            File(tempFolder.root, "$name-${System.nanoTime()}.kdbx"),
+            name,
+            "SessionTicket#Fake".toCharArray(),
+            useArgon2 = false
+        )
+        assertTrue("测试库必须成功创建", result.isSuccess)
+        return session
     }
 
     private suspend fun rejectAfterReplacement(f: Fixture, path: String) = coroutineScope {

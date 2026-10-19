@@ -229,12 +229,18 @@ internal class VaultListActionController(
     }
 
     fun changeGroupIcon(group: VaultGroup, newIcon: String) {
-        if (isReadOnly()) return
+        if (isReadOnly()) {
+            onMessage(UiMessage(R.string.readonly_save_rejected))
+            return
+        }
         scope.launch {
-            repository.saveGroup(
+            when (val result = repository.saveGroup(
                 group.copy(iconName = newIcon, updatedAt = strings.get(R.string.time_just_now))
-            )
-            onMessage(UiMessage(R.string.vault_group_icon_updated))
+            )) {
+                is KdbxResult.Success -> onMessage(UiMessage(R.string.vault_group_icon_updated))
+                is KdbxResult.Failure ->
+                    onMessage(UiMessage(R.string.op_failed, listOf(result.textArg(strings))))
+            }
         }
     }
 

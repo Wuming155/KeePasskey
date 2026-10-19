@@ -108,7 +108,9 @@ private fun RecoveryDialog(viewModel: RecoveryViewModel, state: RecoveryViewMode
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { viewModel.select(if (key == state.selectedKey) null else key) }
+                            .clickable(enabled = !state.busy) {
+                                viewModel.select(if (key == state.selectedKey) null else key)
+                            }
                     )
                 }
                 if (selected != null) {
@@ -134,7 +136,7 @@ private fun RecoveryDialog(viewModel: RecoveryViewModel, state: RecoveryViewMode
             if (selected != null) {
                 Button(
                     onClick = { viewModel.restore(selected, forceOverwrite = false) },
-                    enabled = !state.busy && state.preview != null
+                    enabled = !state.busy && state.preview != null && state.previewBinding != null
                 ) { Text(stringResource(R.string.recovery_restore_action)) }
             } else {
                 TextButton(onClick = viewModel::keep) { Text(stringResource(R.string.btn_close)) }
