@@ -31,8 +31,8 @@ allprojects {
         // 等价于永不失败）收紧为 **CVSS ≥ 7.0（HIGH 及以上）即阻断构建**。
         // 分级依据：0.1-3.9 LOW / 4.0-6.9 MEDIUM / 7.0-8.9 HIGH / 9.0-10.0 CRITICAL；
         // 密码管理器属高价值目标，HIGH 及以上不容许「带病发布」。
-        // 误报处置：经人工核实后写入 .github/owasp-dependency-suppressions.xml
-        // （该文件当前为空白名单，即尚无任何豁免），并按其维护纪律登记核实依据。
+        // 误报处置：仅经人工核实后写入 .github/owasp-dependency-suppressions.xml，
+        // 并按其维护纪律登记核实依据；清单是现行豁免的唯一事实源。
         // 本阈值改动**未在本环境验证**（需联网执行完整 NVD 数据同步）——若 CI 首次运行
         // 因存量依赖高危告警而红，正确处理是「修依赖或登记误报」，**不得回调阈值**。
         failBuildOnCVSS = 7.0f
