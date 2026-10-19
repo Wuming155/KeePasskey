@@ -409,6 +409,7 @@ def main() -> None:
         print(f"预置导入件公钥 {load_expected_keys(args.expected_keys)} 条")
     httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(CERT_DIR / "server.pem", CERT_DIR / "server.key")
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
     print(f"HTTPS RP 监听 {args.bind}:{args.port}（模拟器侧仍用 https://10.0.2.2:{args.port}/，因 SLIRP 把 10.0.2.2 转发到宿主回环）")
