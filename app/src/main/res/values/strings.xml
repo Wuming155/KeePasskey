@@ -1710,4 +1710,7 @@
     <string name="dbset_child_db_err_terminated">根库已锁定，本次操作已取消</string>
     <string name="dbset_child_db_err_unknown">子库操作失败</string>
 
+    <string name="import_error_session_changed">密码库会话已变化，导入已停止。请重新选择目标库后再试。</string>
+    <string name="import_report_session_changed">密码库会话已变化，导入已停止，尚未处理 %1$d 条；此前已保存的修改保留在原库。</string>
+    <string name="import_report_recycle_incomplete">其中 %1$d 条已保存，但尚未移入回收站，请在原库核对。</string>
 </resources>

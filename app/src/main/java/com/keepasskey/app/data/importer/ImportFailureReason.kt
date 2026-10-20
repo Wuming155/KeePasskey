@@ -36,6 +36,12 @@ enum class ImportFailureReason(@StringRes val messageRes: Int) {
     /** 读取所选文件失败（SAF 通道异常）。 */
     IO(R.string.import_error_io),
 
+    /** 所选密钥文件为空、无法读取或授权失效；禁止丢弃该因子继续提交。 */
+    KEY_FILE(R.string.unlock_keyfile_read_failed),
+
+    /** 导入受理后发生锁定、换库或同路径重开。 */
+    SESSION_CHANGED(R.string.import_error_session_changed),
+
     /** 落库失败（写入内存树或落盘失败）。 */
     PERSIST(R.string.import_error_persist),
 
@@ -52,6 +58,7 @@ enum class ImportFailureReason(@StringRes val messageRes: Int) {
          * 顺序敏感：子类型必须先于 [ImportFormatException] 判定。
          */
         fun classify(error: Throwable): ImportFailureReason = when (error) {
+            is com.keepasskey.database.exception.KdbxSessionChangedException -> SESSION_CHANGED
             is ImportVaultLockedException -> LOCKED
             is ImportEncodingException -> ENCODING
             is ImportRequiredColumnMissingException -> MISSING_REQUIRED_COLUMN

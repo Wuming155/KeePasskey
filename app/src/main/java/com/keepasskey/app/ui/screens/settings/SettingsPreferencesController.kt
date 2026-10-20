@@ -43,7 +43,7 @@ internal class SettingsPreferencesController(
     private val autofillSaveBlocklistStore: AutofillSaveBlocklistStore,
     // ISSUE-P3-43 ②：字段签名级屏蔽（写入方在手动选择器；此处仅计数回显与整体清除）
     private val autofillFieldBlocklistStore: AutofillFieldBlocklistStore,
-    private val debugLogBuffer: DebugLogBuffer,
+    debugLogBuffer: DebugLogBuffer,
     // ISSUE-P2-19 / P3-59：活动库会话（可为 null——单测注入；null 时加密配置保持空态占位）
     private val databaseSession: DatabaseSession?,
     private val scope: CoroutineScope
@@ -72,13 +72,12 @@ internal class SettingsPreferencesController(
     // ISSUE-P3-362：原 securityTimeoutStateFlow（初值 0、无仓库播种）已移除——
     // 自动锁定超时的回显改由投影直读 userSettings 单一真相源（本类只保留仓库写通道）。
 
-    /** 调试日志真实缓冲快照（随刷新/清除动作更新） */
-    private val debugLogLinesFlow = MutableStateFlow(debugLogBuffer.snapshot())
+    private val debugLogActions = SettingsDebugLogActions(debugLogBuffer)
 
     // ISSUE-P2-228：原 `autofillState`（三条通道开关的纯内存回显）已删除——
     // 那三个开关改由 ExtendedSettingsStore 持久化，UI 状态在 SettingsUiStateProjection 直接取自 extState。
     val databaseConfigState: StateFlow<DatabaseConfigUiState> = databaseConfigStateFlow
-    val debugLogLines: StateFlow<List<String>> = debugLogLinesFlow
+    val debugLogLines: StateFlow<List<String>> = debugLogActions.debugLogLines
 
     // ISSUE-P2-602：库级设置写盘的过程态与一次性反馈（正在保存 / 成功 / 失败）。回显**不**由本类
     // 自持：失败不落盘 ⇒ databaseFlow 不重发 ⇒ 回显保持磁盘真值（不做假应用），重试通道天然保留。
@@ -492,11 +491,10 @@ internal class SettingsPreferencesController(
 
     // ========== KP2A 扩展：调试日志（真实进程内缓冲） ==========
     fun refreshDebugLogs() {
-        debugLogLinesFlow.value = debugLogBuffer.snapshot()
+        debugLogActions.refreshDebugLogs()
     }
 
     fun clearDebugLogs() {
-        debugLogBuffer.clear()
-        debugLogLinesFlow.value = emptyList()
+        debugLogActions.clearDebugLogs()
     }
 }

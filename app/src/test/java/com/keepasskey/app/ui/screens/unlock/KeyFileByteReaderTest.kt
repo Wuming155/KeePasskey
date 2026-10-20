@@ -20,6 +20,26 @@ import java.io.ByteArrayInputStream
 class KeyFileByteReaderTest {
 
     @Test
+    fun `读取取消时工作缓冲在退出前清零`() {
+        var borrowed: ByteArray? = null
+        var active = true
+        val stream = object : java.io.InputStream() {
+            override fun read(): Int = error("必须分块读取")
+            override fun read(bytes: ByteArray, off: Int, len: Int): Int {
+                borrowed = bytes
+                bytes.fill(0x5A.toByte(), off, off + minOf(8, len))
+                active = false
+                return minOf(8, len)
+            }
+        }
+        try {
+            readKeyFileBytes(stream) { if (!active) throw kotlinx.coroutines.CancellationException() }
+            org.junit.Assert.fail("取消必须传播")
+        } catch (_: kotlinx.coroutines.CancellationException) { }
+        assertTrue(borrowed!!.all { it == 0.toByte() })
+    }
+
+    @Test
     fun `常规密钥文件按原样读出`() {
         val bytes = ByteArray(32) { (it * 3 + 1).toByte() }
 

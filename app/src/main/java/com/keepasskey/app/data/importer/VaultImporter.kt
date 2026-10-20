@@ -5,6 +5,9 @@ import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.exception.KdbxSessionChangedException
+import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.SessionCredentialRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -45,8 +48,12 @@ import javax.inject.Singleton
 class VaultImporter @Inject constructor(
     private val repository: VaultRepository,
     private val strings: StringsProvider,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    private val databaseSession: DatabaseSession? = null
 ) {
+
+    /** 在接受文件选择时固定目标，不能等解析完成后重新捕获后来活动的库。 */
+    fun captureRequest(): SessionCredentialRequest? = databaseSession?.captureCredentialRequest()
 
     /**
      * 落库 [batch]；[policy] 缺省为 [ImportConflictPolicy.SKIP_EXISTING]。
@@ -60,10 +67,24 @@ class VaultImporter @Inject constructor(
     suspend fun persist(
         batch: ImportBatch,
         policy: ImportConflictPolicy = ImportConflictPolicy.SKIP_EXISTING,
-        onProgress: (Int, Int) -> Unit = { _, _ -> }
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+        request: SessionCredentialRequest? = captureRequest()
     ): KdbxResult<ImportOutcome> {
         return try {
-            withContext(Dispatchers.IO) { persistInternal(batch, policy, onProgress) }
+            withContext(Dispatchers.IO) {
+                val session = databaseSession
+                if (session == null) persistInternal(batch, policy, onProgress) else {
+                    val ticket = request?.ticket
+                        ?: return@withContext KdbxResult.Failure(KdbxSessionChangedException())
+                    session.withCredentialRequest(request) {
+                        persistInternal(batch, policy, onProgress) {
+                            if (!session.isCredentialTicketCurrent(ticket)) throw KdbxSessionChangedException()
+                        }
+                    }
+                }
+            }
+        } catch (changed: KdbxSessionChangedException) {
+            KdbxResult.Failure(changed, code = com.keepasskey.core.result.KdbxError.SAVE_SESSION_CHANGED)
         } finally {
             // 擦除纪律：成功 / 失败 / 提前返回 / 协程取消，全路径清零
             batch.entries.forEach { it.clear() }
@@ -73,8 +94,10 @@ class VaultImporter @Inject constructor(
     private suspend fun persistInternal(
         batch: ImportBatch,
         policy: ImportConflictPolicy,
-        onProgress: (Int, Int) -> Unit
+        onProgress: (Int, Int) -> Unit,
+        checkTarget: () -> Unit = {}
     ): KdbxResult<ImportOutcome> {
+        checkTarget()
         if (batch.entries.size > ImportLimits.MAX_ENTRIES_PER_IMPORT) {
             return ImportParseGuard.failure(ImportLimitExceededException(OVER_ENTRY_LIMIT), batch.entries)
         }
@@ -88,7 +111,8 @@ class VaultImporter @Inject constructor(
             resolver = resolver,
             policy = policy,
             untitledLabel = strings.get(R.string.import_untitled_entry),
-            warnings = warnings
+            warnings = warnings,
+            checkTarget = checkTarget
         )
         run.seed(repository.getEntries().first())
         run.run(batch.entries, onProgress)
@@ -100,6 +124,9 @@ class VaultImporter @Inject constructor(
         run: ImportPersistRun,
         warnings: ImportWarningCollector
     ): KdbxResult<ImportOutcome> {
+        if (run.imported + run.updated == 0 && run.sessionChanged) {
+            return KdbxResult.Failure(KdbxSessionChangedException(), code = com.keepasskey.core.result.KdbxError.SAVE_SESSION_CHANGED)
+        }
         if (run.imported + run.updated == 0 && run.failed > 0) {
             // 整体失败：不留「部分成功」的错觉，向上显式返回 Failure
             debugLog.error(
@@ -117,7 +144,10 @@ class VaultImporter @Inject constructor(
             skipped = run.skipped,
             failed = run.failed,
             movedToRecycleBin = run.movedToRecycleBin,
-            warnings = warnings.snapshot()
+            warnings = warnings.snapshot(),
+            unprocessed = run.unprocessed,
+            sessionChanged = run.sessionChanged,
+            recycleBinIncomplete = run.recycleBinIncomplete
         )
         // 审计留痕（ISSUE-P2-10 同一治理口径）：只记计数与来源标识，绝不记录任何条目字段
         debugLog.audit(

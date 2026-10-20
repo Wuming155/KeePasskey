@@ -70,7 +70,9 @@ internal class GroupPathResolver(
             parentId = parentId,
             iconName = FOLDER_ICON_NAME
         )
-        if (createGroup(group).isFailure) return null
+        val result = createGroup(group)
+        result.throwIfSessionChanged()
+        if (result.isFailure) return null
         known += group
         return group
     }

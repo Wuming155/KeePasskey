@@ -100,6 +100,17 @@ class PasswordDraftActivity : BaseCredentialActivity() {
         } catch (_: Exception) {
             null
         }
+        if (CredentialPendingIntents.requestIdFromIntent(intent) != null && beginRequest == null) {
+            failAndFinish()
+            return
+        }
+        if (beginRequest != null) {
+            if (!credentialSessionGate.bind(intent, CredentialEntryRequestType.PASSWORD_DRAFT, allowUnlock = true) ||
+                !credentialSessionGate.matchesCaller(extrasWebDomain, extrasPackage)) {
+                failAndFinish()
+                return
+            }
+        }
 
         // CM 路径：系统背书调用方与本应用下发 extras 交叉核对（两者均可得且不一致 ⇒ 拒绝；
         // 取不到系统侧时保持既有判定面——组件非 exported，extras 只能来自本应用自身下发）
@@ -208,7 +219,7 @@ class PasswordDraftActivity : BaseCredentialActivity() {
                     notes = if (isWebBinding) "" else "Package: $callingPackage",
                     groupId = null
                 )
-                when (val result = vaultRepository.saveEntry(entry, passwordChars = submission)) {
+                when (val result = credentialSessionGate.withRequest { vaultRepository.saveEntry(entry, passwordChars = submission) }) {
                     is com.keepasskey.core.result.KdbxResult.Success -> deliver(entryId)
                     is com.keepasskey.core.result.KdbxResult.Failure -> {
                         AppLog.e(TAG, "口令新建落库失败", result.error)
@@ -228,10 +239,9 @@ class PasswordDraftActivity : BaseCredentialActivity() {
     }
 
     /** 按来源通道交付：CM 回凭据本身（完成本次登录）；选择器回条目 id（走既有数据集链路） */
-    private fun deliver(entryId: String) {
+    private suspend fun deliver(entryId: String) {
         if (settled) return
         settled = true
-        credentialLastUsedStore.record(entryId)
         if (beginRequest != null) {
             val resultIntent = Intent()
             PendingIntentHandler.setGetCredentialResponse(
@@ -242,11 +252,16 @@ class PasswordDraftActivity : BaseCredentialActivity() {
                     PasswordCredential(userName.trim(), String(draftPassword))
                 )
             )
-            setResult(RESULT_OK, resultIntent)
+            if (!credentialSessionGate.complete {
+                credentialLastUsedStore.record(entryId)
+                setResult(RESULT_OK, resultIntent)
+                finish()
+            }) failAndFinish()
         } else {
+            credentialLastUsedStore.record(entryId)
             setResult(RESULT_OK, Intent().putExtra(EXTRA_DRAFT_ENTRY_ID, entryId))
         }
-        finish()
+        if (beginRequest == null) finish()
     }
 
     override fun onDestroy() {

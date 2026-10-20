@@ -78,7 +78,7 @@
 - 问题：导入generation只防止旧进度覆盖UI；persist开头只检查一次isLocked，后续各条saveEntry/saveGroup面向当前活动单例，没有捕获目标path/session ticket。锁库/换库/重新解锁交错下，剩余条目可能写入另一个库。
 - 影响与触发：可能产生跨库错投或部分导入；目前只有缺少目标绑定的静态证据，实际UI/锁定交错需确定性验证，不宣称已发生数据泄露。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/importer/VaultImportController.kt:91`；`app/src/main/java/com/keepasskey/app/data/importer/VaultImporter.kt:81`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：确定性复现与反证收敛、实现、失败对照及相应运行验收；静态结论不代表已闭环。
+- 已实现（2026-10-20）：在接受文件选择时固定会话请求，分组、条目、软删与正式保存均在原会话互斥锁内复核票据；会话变化立即停止余下导入，分别报告已写入、未处理及回收站归位未完成条目。运行证据：已通过导入/会话 JVM 回归及 A→B 真实 CSV/生产仓库 AVD 1/1；尚未完成取消再启动、进程终止与完整设备矩阵，见独立方案。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-640/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-641 CM Passkey与创建保存入口未消费已登记的库代次上下文
@@ -87,16 +87,16 @@
 - 问题：构造入口时已登记databaseId/sessionTicket，但只有PasswordFill消费并最终复核。Passkey断言/创建及密码保存/草稿读取当前活动库；BaseCredentialActivity仅做窗口保护，没有补偿票据检查。
 - 影响与触发：旧A入口在活动库变B后可能对B同UUID条目计数/签名或把创建数据写入B，造成账户/库上下文混淆。需用户选择与验证；未证明任意应用、静默或跨RP泄漏。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt:370`；`app/src/main/java/com/keepasskey/app/passkey/PasskeyAssertionActivity.kt:102`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
+- 已实现（2026-10-20）：四类 CM 入口消费已登记的随机请求上下文，绑定库路径和会话票据；实际改树、落盘及成功回传均复核原票据。锁定时无票据的创建入口仅允许解锁登记的原路径后绑定一次；传统 Autofill 保留独立令牌语义。运行证据：JVM 会话门控 2 例与 Android Intent/正式文件门控 1/1 均通过。尚未完成：真实 Credential Manager 四入口跨进程、认证中换库、相同 UUID 签名/计数与正式文件全矩阵。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-641/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
-### ISSUE-P2-649 合并库密钥文件在主线程无上限读取且失败静默降级
+### ISSUE-P2-649 合并库密钥文件同步读取且失败静默降级
 
 - 核实：2026-10-16（Asia/Shanghai），当前源码与定向调用链；静态确认；置信度：高。
 - 问题：密钥文件URI重载由按钮回调同步进入presenter，直接openInputStream().readBytes()，没有IO调度或累计上限；catch Throwable后用null继续提交，读取失败被解释成未提供密钥因子。
-- 影响与触发：慢SAF提供者或巨大/未知长度文件可阻塞主线程、引发内存压力；错误被延后呈现为解锁失败且用户选定因子未兑现。该入口不同于已加上限的附件/漂移读取。 触发序列及反证详见方案。
+- 影响与触发：慢SAF提供者或巨大/未知长度文件可阻塞主线程、引发内存压力；错误被延后呈现为解锁失败且用户选定因子未兑现。读取大小按既有用户裁决不设上限，见限界 §37；本项修复调度、反馈和清理，不改变合法密钥材料范围。触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsImportPresenter.kt:71`；`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsViewModel.kt:127`。
-- 已实现：无，本轮仅审查和编制方案。尚未完成：原路径产品复现、实现、失败对照及相应运行验收；静态结论不代表已闭环。
+- 已实现（2026-10-20）：所选密钥文件改在受控并入作业中经生产 KeyFileAccess 的 IO 通道读取；空、不可读或读取异常明确停止并入，取消接入并入作业，工作缓冲与取消交接未交付结果清零。按既有用户裁决和限界 §37 保留合法大密钥文件无大小上限的完整读取。尚未完成：完整 SAF 异常/慢流/虚报 SIZE 矩阵及实际凭据表单 UI 验收；已通过密钥读取/所有权 JVM 回归及 AVD 不可读拒绝、2.28 MB 完整读取 2/2，见独立方案。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-649/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-651 同步配置保存失败后输入显示与已擦除凭据副本不一致

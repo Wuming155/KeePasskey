@@ -7,6 +7,7 @@ import androidx.annotation.StringRes
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
+import javax.inject.Inject
 
 /**
  * 凭据交互 Activity 公共抽象基类。
@@ -18,6 +19,9 @@ import com.keepasskey.app.security.ApplyObscuredTouchFilter
  * 使「下发前用户验证」在同一受保护窗口内闭环完成。
  */
 abstract class BaseCredentialActivity : FragmentActivity() {
+
+    @Inject
+    lateinit var credentialSessionGate: CredentialSessionGate
 
     /** 拒绝页是否**已呈现**：防重复渲染致后一次覆盖前一次的原因（ISSUE-P3-221） */
     private var rejectionPresented = false

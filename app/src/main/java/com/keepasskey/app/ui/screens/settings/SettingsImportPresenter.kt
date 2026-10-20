@@ -64,20 +64,15 @@ internal class SettingsImportPresenter(
     /**
      * ISSUE-P3-384：UI 入口——密码 + 可选密钥文件 Uri。
      *
-     * 字节读取在本方法完成；无 Context / 读取失败时仅用密码提交。读出的 `keyBytes` 与
-     * `passwordChars` 一并交给上一重载，由其 `finally` 统一清零（本链唯一原件清零收口点，
-     * 见其 KDoc；ISSUE-P3-580）——本方法自身不再二次清零。
+     * 控制器同步复制密码后，在受控作业中经 KeyFileAccess 异步读取所选密钥文件。
+     * 读取失败停止并入，不得降级成仅密码提交；本入口只清零交入的密码原件。
      */
     fun submitMergeCredentials(passwordChars: CharArray, keyFileUri: Uri?) {
-        val ctx = appContext
-        val keyBytes = keyFileUri?.let { uri ->
-            try {
-                ctx?.contentResolver?.openInputStream(uri)?.use { it.readBytes() }
-            } catch (t: Throwable) {
-                null
-            }
+        try {
+            controller?.submitMergeCredentialsFromUri(passwordChars, keyFileUri)
+        } finally {
+            passwordChars.fill('0')
         }
-        submitMergeCredentials(passwordChars, keyBytes)
     }
 
     /** ISSUE-P3-384：取消等待凭据 / 进行中的并入。 */

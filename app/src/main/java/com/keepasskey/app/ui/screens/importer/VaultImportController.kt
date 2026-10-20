@@ -98,10 +98,11 @@ class VaultImportController @Inject constructor(
             return
         }
         if (mutableUiState.value is ImportUiState.Parsing) return
+        val request = vaultImporter.captureRequest()
         val gen = ++generation
         mutableUiState.value = ImportUiState.Parsing(source, stage = ImportStage.READING)
         importJob = scope.launch {
-            val finalState = runImport(source, uri, policy, gen)
+            val finalState = runImport(source, uri, policy, gen, request)
             // 取消与完成可能竞态：代际已变（被取消 / 被新一轮替代）或状态已离开 Parsing 时不回写终态
             if (gen == generation && mutableUiState.value is ImportUiState.Parsing) {
                 mutableUiState.value = finalState
@@ -119,6 +120,11 @@ class VaultImportController @Inject constructor(
      */
     fun submitMergeCredentials(passwordChars: CharArray, keyFileData: ByteArray? = null) {
         kdbxMergeController.submitCredentials(passwordChars, keyFileData)
+    }
+
+    /** 所选密钥文件由并入作业异步读取；密码仍为只读借用，由门面清零原件。 */
+    fun submitMergeCredentialsFromUri(passwordChars: CharArray, keyFileUri: Uri?) {
+        kdbxMergeController.submitCredentialsFromUri(passwordChars, keyFileUri)
     }
 
     /** ISSUE-P3-384：取消等待凭据 / 进行中的并入。 */
@@ -171,7 +177,8 @@ class VaultImportController @Inject constructor(
         source: ImportSource,
         uri: Uri,
         policy: ImportConflictPolicy,
-        generation: Int
+        generation: Int,
+        request: com.keepasskey.database.session.SessionCredentialRequest?
     ): ImportUiState {
         val importer = registry.find(source)
             ?: return ImportUiState.Failed(source, ImportFailureReason.SOURCE_UNAVAILABLE)
@@ -211,7 +218,8 @@ class VaultImportController @Inject constructor(
                             publishParsing(generation) { parsing ->
                                 parsing.copy(stage = ImportStage.PERSISTING, processed = done, total = total)
                             }
-                        }
+                        },
+                        request = request
                     )) {
                         is KdbxResult.Failure -> {
                             debugLog.warn(

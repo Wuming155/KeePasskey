@@ -80,7 +80,12 @@ internal class SessionPersistence(
     /**
      * 保存当前内存中的活动数据库并写入文件/URI 通道
      */
-    suspend fun save(): KdbxResult<Unit> = mutex.withLock { saveLocked() }
+    suspend fun save(): KdbxResult<Unit> = mutex.withLock {
+        try { saveLocked() }
+        catch (changed: com.keepasskey.database.exception.KdbxSessionChangedException) {
+            KdbxResult.Failure(changed, code = KdbxError.SAVE_SESSION_CHANGED)
+        }
+    }
 
     /**
      * `ISSUE-P1-631`（原子采纳 + 落盘）：[save] 的**无锁内核**（已在会话临界区内调用）。
@@ -92,6 +97,7 @@ internal class SessionPersistence(
      * 语义与 [save] **逐字相同**，仅去掉取锁（`Mutex` 不可重入，带锁版在锁内再调即自锁）。
      */
     internal suspend fun saveLocked(): KdbxResult<Unit> {
+        requireCurrentSessionRequest(core.credentialTicket)
         if (core.credentialWriteUncertain.value) {
             return KdbxResult.Failure(
                 IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),

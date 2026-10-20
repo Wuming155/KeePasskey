@@ -66,6 +66,11 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        if (!credentialSessionGate.bind(intent, CredentialEntryRequestType.PASSKEY_ASSERTION)) {
+            failAndFinish()
+            return
+        }
+
         // ISSUE-P3-188：`onCreate` 收敛为「解析调用方 → 解析请求 → 派发」三段编排，
         // 请求面解析下沉同包协作对象；判定顺序与 fail-closed 口径**逐字不变**
         val caller = PasskeyAssertionRequestParser.resolveAttestedCaller(
@@ -82,9 +87,14 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             failAndFinish()
             return
         }
+        if (!credentialSessionGate.matchesEntry(context.entryId) ||
+            !credentialSessionGate.matchesCaller(context.origin, context.expectedPackage)) {
+            failAndFinish()
+            return
+        }
         lifecycleScope.launch {
             try {
-                performAssertion(context)
+                credentialSessionGate.withRequest { performAssertion(context) }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 认证执行失败", t)
@@ -275,7 +285,9 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 // ISSUE-P3-27 子项 2：先把签名计数器**原子递增并落库**，再据其返回值签名。
                 // ISSUE-P1-590：只有计数器真正落盘才签发——落盘失败一律拒签（否则签名值已交 RP
                 // 而库内计数器未提交，重启后即回退），并按「未命中」与「落盘失败」分型收尾。
-                val signCount = when (val signResult = vaultRepository.incrementPasskeySignCount(entryId)) {
+                val signCount = when (val signResult = credentialSessionGate.withRequest {
+                    vaultRepository.incrementPasskeySignCount(entryId)
+                }) {
                     is KdbxResult.Success -> signResult.data
                     is KdbxResult.Failure -> {
                         if (signResult.code == KdbxError.PASSKEY_ENTRY_NOT_FOUND) {
@@ -311,13 +323,14 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
 
                 // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP
                 // ISSUE-P3-298 ⑥：回传成功 = 用户真实选用了本条目，记录上次使用时刻
-                credentialLastUsedStore.record(entryId)
                 val resultIntent = Intent()
                 val response = GetCredentialResponse(PublicKeyCredential(assertionJson))
                 PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
-                setResult(RESULT_OK, resultIntent)
-
-                finish()
+                if (!credentialSessionGate.complete {
+                    credentialLastUsedStore.record(entryId)
+                    setResult(RESULT_OK, resultIntent)
+                    finish()
+                }) failAndFinish()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 认证执行失败", t)

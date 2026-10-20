@@ -11,6 +11,8 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.orFallback
 import com.keepasskey.app.ui.screens.importer.ImportStage
 import com.keepasskey.app.ui.screens.importer.ImportUiState
+import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
+import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
@@ -26,6 +28,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,7 +63,8 @@ class KdbxMergeController @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val syncSessionState: SyncSessionState,
     stringsProvider: StringsProvider? = null,
-    private val debugLog: DebugLogBuffer
+    private val debugLog: DebugLogBuffer,
+    private val keyFileAccess: KeyFileAccess? = null
 ) {
     private val strings: StringsProvider = stringsProvider.orFallback(context)
 
@@ -115,6 +119,15 @@ class KdbxMergeController @Inject constructor(
      * @param keyFileData 第二库密钥文件字节（可选；借用：同上）
      */
     fun submitCredentials(passwordChars: CharArray, keyFileData: ByteArray? = null) {
+        launchMerge(passwordChars, keyFileData, keyFileUri = null)
+    }
+
+    /** 所选密钥文件按现有无大小上限契约读取；失败不调用解密或合并。 */
+    fun submitCredentialsFromUri(passwordChars: CharArray, keyFileUri: Uri?) {
+        launchMerge(passwordChars, keyFileData = null, keyFileUri = keyFileUri)
+    }
+
+    private fun launchMerge(passwordChars: CharArray, keyFileData: ByteArray?, keyFileUri: Uri?) {
         val uri = pendingUri
         if (uri == null) {
             // ISSUE-P3-580：借用引用——原件清零由调用方收口，早退分支同样不代擦
@@ -122,7 +135,7 @@ class KdbxMergeController @Inject constructor(
             return
         }
         val current = mutableUiState.value
-        if (current !is ImportUiState.AwaitingMergeCredentials && current !is ImportUiState.Parsing) {
+        if (current !is ImportUiState.AwaitingMergeCredentials) {
             return
         }
         val gen = ++generation
@@ -131,11 +144,35 @@ class KdbxMergeController @Inject constructor(
             stage = ImportStage.READING
         )
         val pwd = passwordChars.copyOf()
-        val key = keyFileData?.copyOf()
-        mergeJob = scope.launch {
-            val finalState = runMerge(uri, pwd, key, gen)
-            if (gen == generation && mutableUiState.value is ImportUiState.Parsing) {
-                mutableUiState.value = finalState
+        var key = keyFileData?.copyOf()
+        // 立即进入 try/finally，确保用户立刻取消时也会清理已复制的秘密。
+        mergeJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                if (keyFileUri != null) {
+                    when (val read = keyFileAccess?.read(keyFileUri.toString()) ?: KeyFileReadResult.Unreadable) {
+                        is KeyFileReadResult.Success -> key = read.bytes
+                        else -> {
+                            if (gen == generation) {
+                                mutableUiState.value = ImportUiState.Failed(ImportSource.KDBX_MERGE, ImportFailureReason.KEY_FILE)
+                            }
+                            return@launch
+                        }
+                    }
+                }
+                val finalState = runMerge(uri, pwd, key, gen)
+                if (gen == generation && mutableUiState.value is ImportUiState.Parsing) {
+                    mutableUiState.value = finalState
+                }
+            } catch (c: CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                debugLog.warn(TAG, "并入凭据读取失败: ${e.javaClass.simpleName}")
+                if (gen == generation) {
+                    mutableUiState.value = ImportUiState.Failed(ImportSource.KDBX_MERGE, ImportFailureReason.KEY_FILE)
+                }
+            } finally {
+                pwd.fill('0')
+                key?.fill(0)
             }
         }
     }

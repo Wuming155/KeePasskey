@@ -53,6 +53,11 @@ class PasswordSaveActivity : BaseCredentialActivity() {
             null
         }
         val callingReq = providerReq?.callingRequest
+        if (providerReq != null &&
+            !credentialSessionGate.bind(intent, CredentialEntryRequestType.PASSWORD_SAVE, allowUnlock = true)) {
+            failAndFinish()
+            return
+        }
         val username = when {
             callingReq is CreatePasswordRequest -> callingReq.id
             else -> intent.getStringExtra(EXTRA_USERNAME).orEmpty()
@@ -68,6 +73,10 @@ class PasswordSaveActivity : BaseCredentialActivity() {
         // H1 同源整改（审计观察 1）：web 域只信任本应用 Provider 服务填充的 EXTRA_WEB_DOMAIN，
         // 绝不回退读取调用方可控的 candidateQueryData
         val webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)
+        if (providerReq != null && !credentialSessionGate.matchesCaller(webDomain.orEmpty(), targetPackage)) {
+            failAndFinish()
+            return
+        }
 
         if (password.isNullOrBlank()) {
             AppLog.e(TAG, "缺少待保存的密码数据")
@@ -150,12 +159,12 @@ class PasswordSaveActivity : BaseCredentialActivity() {
                 }
 
                 val boundPackage = targetPackage.ifBlank { callingPackage ?: packageName }
-                val saveResult = vaultRepository.saveAutofillCredential(
+                val saveResult = credentialSessionGate.withRequest { vaultRepository.saveAutofillCredential(
                     packageName = boundPackage,
                     webDomain = webDomain,
                     username = username,
                     passwordChars = passwordChars
-                )
+                ) }
 
                 // ISSUE-P2-84：保存失败**不得**回传成功结果（原实现丢弃 KdbxResult 后无条件 RESULT_OK，
                 // 落盘失败被谎报为保存成功，系统据此可能不再提示保存——用户口令静默丢失）。
@@ -181,13 +190,15 @@ class PasswordSaveActivity : BaseCredentialActivity() {
                     val response = CreatePasswordResponse()
                     val resultIntent = Intent()
                     PendingIntentHandler.setCreateCredentialResponse(resultIntent, response)
-                    setResult(RESULT_OK, resultIntent)
+                    if (!credentialSessionGate.complete { setResult(RESULT_OK, resultIntent); finish() }) {
+                        failAndFinish()
+                    }
                 } else {
                     setResult(RESULT_OK)
                 }
                 // ISSUE-P2-603：仅在实际落盘（成功路径）后才登记消费
                 consumeRequest(requestToken)
-                finish()
+                if (providerReq == null) finish()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "保存密码凭据失败", t)

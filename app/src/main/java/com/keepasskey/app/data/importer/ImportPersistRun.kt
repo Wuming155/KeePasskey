@@ -5,6 +5,7 @@ import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.exception.KdbxSessionChangedException
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -17,7 +18,8 @@ internal class ImportPersistRun(
     private val resolver: GroupPathResolver,
     private val policy: ImportConflictPolicy,
     private val untitledLabel: String,
-    private val warnings: ImportWarningCollector
+    private val warnings: ImportWarningCollector,
+    private val checkTarget: () -> Unit = {}
 ) {
 
     private val known = mutableMapOf<EntryKey, UiVaultEntry>()
@@ -31,6 +33,13 @@ internal class ImportPersistRun(
     var failed: Int = 0
         private set
     var movedToRecycleBin: Int = 0
+        private set
+
+    var unprocessed: Int = 0
+        private set
+    var sessionChanged: Boolean = false
+        private set
+    var recycleBinIncomplete: Int = 0
         private set
 
     /** 首个落库异常的**类型名**（仅用于日志留痕，绝不记录异常消息以免夹带明文）。 */
@@ -54,11 +63,22 @@ internal class ImportPersistRun(
         entries: List<ImportedEntry>,
         onProgress: (Int, Int) -> Unit = { _, _ -> }
     ) {
-        entries.forEachIndexed { index, entry ->
+        for ((index, entry) in entries.withIndex()) {
+            val processedBefore = imported + updated + skipped + failed
+            val recycledBefore = movedToRecycleBin
             try {
+                checkTarget()
                 persistOne(index + 1, entry)
             } catch (cancellation: CancellationException) {
                 throw cancellation
+            } catch (changed: KdbxSessionChangedException) {
+                sessionChanged = true
+                val processedNow = imported + updated + skipped + failed
+                if (entry.deleted && processedNow > processedBefore && movedToRecycleBin == recycledBefore) {
+                    recycleBinIncomplete++
+                }
+                unprocessed = entries.size - index - (processedNow - processedBefore)
+                return
             } catch (t: Throwable) {
                 recordFailure(index + 1, t)
             } finally {
@@ -116,6 +136,7 @@ internal class ImportPersistRun(
         } finally {
             submission.fill(NUL_CHAR)
         }
+        result.throwIfSessionChanged()
         if (result.isSuccess) updated++ else recordFailure(ordinal, null)
     }
 
@@ -144,6 +165,7 @@ internal class ImportPersistRun(
             passwordCopy.fill(NUL_CHAR)
             totpCopy?.fill(NUL_CHAR)
         }
+        saved.throwIfSessionChanged()
         if (saved.isFailure) {
             recordFailure(ordinal, null)
             return
@@ -166,10 +188,12 @@ internal class ImportPersistRun(
         } catch (t: Throwable) {
             KdbxResult.Failure(t)
         }
+        moved.throwIfSessionChanged()
         if (moved.isSuccess) movedToRecycleBin++ else recordFailure(ordinal, null)
     }
 
     private fun recordFailure(ordinal: Int, error: Throwable?) {
+        if (error is KdbxSessionChangedException) throw error
         failed++
         if (firstFailureType == null && error != null) firstFailureType = error.javaClass.simpleName
         warnings.add(ImportWarningLocation.entry(ordinal), ImportWarningReason.ENTRY_SAVE_FAILED)
@@ -180,5 +204,13 @@ internal class ImportPersistRun(
 
     private companion object {
         const val NUL_CHAR = '\u0000'
+    }
+}
+
+/** 会话失效不能作为单条失败继续，更不能降级到较浅分组。 */
+internal fun KdbxResult<*>.throwIfSessionChanged() {
+    if (this is KdbxResult.Failure &&
+        (error is KdbxSessionChangedException || code == com.keepasskey.core.result.KdbxError.SAVE_SESSION_CHANGED)) {
+        throw KdbxSessionChangedException()
     }
 }

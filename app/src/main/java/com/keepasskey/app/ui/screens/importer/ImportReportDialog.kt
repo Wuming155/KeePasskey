@@ -196,6 +196,18 @@ fun ImportOutcomeReport(outcome: ImportOutcome, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall
             )
         }
+        if (outcome.sessionChanged) {
+            Text(
+                text = stringResource(R.string.import_report_session_changed, outcome.unprocessed),
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+        if (outcome.recycleBinIncomplete > 0) {
+            Text(
+                text = stringResource(R.string.import_report_recycle_incomplete, outcome.recycleBinIncomplete),
+                color = MaterialTheme.colorScheme.error
+            )
+        }
         if (outcome.movedToRecycleBin > 0) {
             Text(
                 text = stringResource(R.string.import_report_recycled, outcome.movedToRecycleBin),
@@ -316,6 +328,18 @@ internal fun ImportOutcomeReportPreview() {
                 )
             )
         )
+    }
+}
+
+@Preview(name = "ImportReport - SessionChanged", showBackground = true)
+@Composable
+internal fun ImportOutcomeSessionChangedPreview() {
+    KeePasskeyTheme {
+        ImportOutcomeReport(ImportOutcome(
+            source = ImportSource.BROWSER_CSV, parsed = 3, sourceSkipped = 0,
+            imported = 1, updated = 0, skipped = 0, failed = 0,
+            movedToRecycleBin = 0, warnings = emptyList(), unprocessed = 2, sessionChanged = true, recycleBinIncomplete = 1
+        ))
     }
 }
 

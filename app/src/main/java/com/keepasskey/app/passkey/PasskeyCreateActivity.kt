@@ -96,6 +96,11 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        if (!credentialSessionGate.bind(intent, CredentialEntryRequestType.PASSKEY_CREATE, allowUnlock = true)) {
+            rejectAndFinish(CredentialRejectionReason.REQUEST_INVALID)
+            return
+        }
+
         // ISSUE-P2-199：base Intent 上的 extras 只是**组装期的展示缓存**（含设备侧可读的
         // 条目文案与请求摘要），不再参与任何安全判定——判定一律依据系统经 fillIn Intent
         // 注入的「本次」请求（`providerReq` / `callingRequest` / `callingAppInfo`）。
@@ -185,6 +190,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
      * 一律静默 `failAndFinish()`，被安全门控拒绝的用户只看到「点了继续就断」。
      */
     private suspend fun awaitRegistration() {
+        credentialSessionGate.withRequest { Unit }
         if (vaultRepository.isLocked()) {
             AppLog.w(TAG, "密码库仍未解锁，无法注册新 Passkey")
             rejectAndFinish(CredentialRejectionReason.VAULT_LOCKED)
@@ -195,6 +201,10 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         // ISSUE-P2-72：仅接受**系统背书**的 CallingAppInfo 包名，取不到即返回 null。
         val callingAppInfo = providerReq?.callingAppInfo
         val callerPackage = CallingOriginResolver.systemAttestedPackageName(callingAppInfo)
+        if (!credentialSessionGate.matchesCaller(origin, callerPackage.orEmpty())) {
+            rejectAndFinish(CredentialRejectionReason.REQUEST_INVALID)
+            return
+        }
         val certDigests = callingAppInfo?.let { CallingOriginResolver.certDigests(it) }
             ?: CallerCertDigests.EMPTY
         val skipDalVerification = extendedSettingsStore.load().skipDalVerification
@@ -345,10 +355,10 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 // 2. 存储至 KDBX 密码库（原子落盘）；同 rpId + 用户名已有条目则原地替换。
                 // ISSUE-P1-590：**只有落盘成功**才继续——保存失败时既不向 Credential Manager
                 // 回传成功，也不写入调用方信任绑定，避免 RP 登记一把本机未持久化的私钥。
-                val saveResult = vaultRepository.saveOrReplacePasskeyEntry(
+                val saveResult = credentialSessionGate.withRequest { vaultRepository.saveOrReplacePasskeyEntry(
                     data = generated,
                     boundPackage = if (CallingOriginResolver.isBrowserOrigin(origin)) null else callerPackage
-                )
+                ) }
                 if (saveResult is KdbxResult.Failure) {
                     AppLog.e(
                         TAG,
@@ -375,8 +385,10 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 val resultIntent = Intent()
                 val response = CreatePublicKeyCredentialResponse(regResponseJson)
                 PendingIntentHandler.setCreateCredentialResponse(resultIntent, response)
-                setResult(RESULT_OK, resultIntent)
-                finish()
+                if (!credentialSessionGate.complete {
+                    setResult(RESULT_OK, resultIntent)
+                    finish()
+                }) rejectAndFinish(CredentialRejectionReason.REQUEST_INVALID)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 注册异常", t)

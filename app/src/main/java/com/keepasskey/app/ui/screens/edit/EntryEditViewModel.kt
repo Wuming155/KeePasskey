@@ -83,6 +83,14 @@ class EntryEditViewModel @Inject constructor(
     private val _customIconOptions = MutableStateFlow<Map<String, ByteArray>>(emptyMap())
     val customIconOptions: StateFlow<Map<String, ByteArray>> = _customIconOptions.asStateFlow()
 
+    private val iconActions = EntryEditIconActions(
+        scope = viewModelScope,
+        vaultRepository = vaultRepository,
+        uiState = _uiState,
+        customIconOptions = _customIconOptions,
+        strings = strings
+    )
+
     /** TASK-10：既有 TOTP 种子的一次性预填通道（语义同 [loadedPassword]） */
     private val _loadedTotpSecret = MutableStateFlow<CharArray?>(null)
     val loadedTotpSecret: StateFlow<CharArray?> = _loadedTotpSecret.asStateFlow()
@@ -304,26 +312,13 @@ class EntryEditViewModel @Inject constructor(
     }
 
     // TASK-15：标准图标与自定义图标互斥——选标准图标即清除自定义引用
-    fun onIconChange(icon: String) = _uiState.update { it.copy(iconName = icon, customIconId = null, isDirty = true) }
+    fun onIconChange(icon: String) = iconActions.onIconChange(icon)
 
     /** TASK-15：选择/清除（null）自定义图标引用 */
-    fun onCustomIconSelected(iconId: String?) = _uiState.update {
-        it.copy(customIconId = iconId, isDirty = it.isDirty || it.customIconId != iconId)
-    }
+    fun onCustomIconSelected(iconId: String?) = iconActions.onCustomIconSelected(iconId)
 
     /** TASK-15：上传 PNG 字节为库级自定义图标并选中；失败如实上浮 */
-    fun onCustomIconUploaded(pngBytes: ByteArray) {
-        viewModelScope.launch {
-            when (val result = vaultRepository.addCustomIcon(pngBytes)) {
-                is com.keepasskey.core.result.KdbxResult.Success -> {
-                    _customIconOptions.value = vaultRepository.getCustomIconBytes()
-                    _uiState.update { it.copy(customIconId = result.data, isDirty = true) }
-                }
-                is com.keepasskey.core.result.KdbxResult.Failure ->
-                    _uiState.update { it.copy(userMessage = UiMessage(R.string.edit_save_failed, listOf(strings.get(com.keepasskey.app.ui.model.KdbxErrorTexts.resIdFor(result.code))))) }
-            }
-        }
-    }
+    fun onCustomIconUploaded(pngBytes: ByteArray) = iconActions.onCustomIconUploaded(pngBytes)
     // ISSUE-P3-359 AC②：任何标题输入即清除字段级校验位（问题修复的即时反馈）
     fun onTitleChange(title: String) = _uiState.update { it.copy(title = title, isDirty = true, titleError = false) }
     fun onUsernameChange(username: String) = _uiState.update { it.copy(username = username, isDirty = true) }

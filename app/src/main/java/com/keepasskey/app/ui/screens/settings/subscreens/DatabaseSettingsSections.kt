@@ -211,7 +211,7 @@ internal fun VaultImportSection(
                 onReportDismiss()
             }
         },
-        onCancel = onCancelImport
+        onCancel = if (mergeState is ImportUiState.Parsing) onCancelMerge else onCancelImport
     )
 }
 

@@ -10,6 +10,8 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -49,31 +51,47 @@ class SafKeyFileAccess @Inject constructor(
             }
     }
 
-    override suspend fun read(uri: String): KeyFileReadResult = withContext(Dispatchers.IO) {
-        // cancel-n/a: Uri.parse 为纯 CPU 解析，无挂起点（persistReadPermission / hasPersistedReadPermission 同）
-        val target = runCatching { Uri.parse(uri) }.getOrNull()
-        if (target == null || uri.isBlank()) {
-            debugLog.warn(TAG, "密钥文件 Uri 非法，拒绝读取")
-            return@withContext KeyFileReadResult.Unreadable
-        }
+    override suspend fun read(uri: String): KeyFileReadResult {
+        var ownedBytes: ByteArray? = null
+        var transferred = false
         try {
-            val stream = context.contentResolver.openInputStream(target)
-            if (stream == null) {
-                debugLog.warn(TAG, "密钥文件流不可打开（提供方拒绝或已失效）")
-                return@withContext KeyFileReadResult.Unreadable
+            val result = withContext(Dispatchers.IO) {
+                // cancel-n/a: Uri.parse 为纯 CPU 解析，无挂起点（persistReadPermission / hasPersistedReadPermission 同）
+                val target = runCatching { Uri.parse(uri) }.getOrNull()
+                if (target == null || uri.isBlank()) {
+                    debugLog.warn(TAG, "密钥文件 Uri 非法，拒绝读取")
+                    return@withContext KeyFileReadResult.Unreadable
+                }
+                try {
+                    val stream = context.contentResolver.openInputStream(target)
+                    if (stream == null) {
+                        debugLog.warn(TAG, "密钥文件流不可打开（提供方拒绝或已失效）")
+                        return@withContext KeyFileReadResult.Unreadable
+                    }
+                    // use{} 强关闭；分块缓冲与内部缓冲在 readKeyFileBytes 内清零
+                    val readContext = currentCoroutineContext()
+                    val bytes = stream.use {
+                        readKeyFileBytes(it) { readContext.ensureActive() }.also { result -> ownedBytes = result }
+                    }
+                    if (bytes.isEmpty()) {
+                        debugLog.warn(TAG, "密钥文件为空文件，拒绝作为密钥材料")
+                        KeyFileReadResult.Empty
+                    } else {
+                        KeyFileReadResult.Success(bytes, queryDisplayName(target))
+                    }
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (e: Exception) {
+                    // 禁止静默失败：仅留痕异常类名，不外传 Uri / 异常 message
+                    debugLog.warn(TAG, "密钥文件读取失败: ${e.javaClass.simpleName}")
+                    KeyFileReadResult.Unreadable
+                }
             }
-            // use{} 强关闭；分块缓冲与内部缓冲在 readKeyFileBytes 内清零
-            val bytes = stream.use { readKeyFileBytes(it) }
-            if (bytes.isEmpty()) {
-                debugLog.warn(TAG, "密钥文件为空文件，拒绝作为密钥材料")
-                KeyFileReadResult.Empty
-            } else {
-                KeyFileReadResult.Success(bytes, queryDisplayName(target))
-            }
-        } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式流读取（readKeyFileBytes 非挂起）
-            // 禁止静默失败：仅留痕异常类名，不外传 Uri / 异常 message
-            debugLog.warn(TAG, "密钥文件读取失败: ${e.javaClass.simpleName}")
-            KeyFileReadResult.Unreadable
+            // withContext 的取消交接可能丢弃结果；只有实际交付成功才转移数组所有权。
+            transferred = result is KeyFileReadResult.Success
+            return result
+        } finally {
+            if (!transferred) ownedBytes?.fill(0)
         }
     }
 
@@ -183,12 +201,14 @@ internal fun querySafDisplayName(context: Context, uri: Uri): String = runCatchi
  * [WipeableByteArrayOutputStream] 内部缓冲在返回前清零——堆上仅保留移交调用方的结果数组
  * （调用方用毕 `fill(0)`）。
  */
-internal fun readKeyFileBytes(input: InputStream): ByteArray {
+internal fun readKeyFileBytes(input: InputStream, checkActive: () -> Unit = {}): ByteArray {
     val sink = WipeableByteArrayOutputStream()
     val chunk = ByteArray(READ_CHUNK_BYTES)
     try {
         while (true) {
+            checkActive()
             val read = input.read(chunk)
+            checkActive()
             if (read < 0) break
             sink.write(chunk, 0, read)
         }

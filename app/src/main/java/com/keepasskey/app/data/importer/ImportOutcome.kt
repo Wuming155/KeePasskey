@@ -30,7 +30,7 @@ enum class ImportConflictPolicy {
 /**
  * 落库阶段的结果报告（**全部字段非敏感**，可直接进 UI 状态流）。
  *
- * 计数恒等式：`imported + updated + skipped + failed == parsed`；
+ * 计数恒等式：`imported + updated + skipped + failed + unprocessed == parsed`；
  * 解析阶段被跳过的源记录另行由 [sourceSkipped] 表达（那部分从未进入落库队列）。
  */
 data class ImportOutcome(
@@ -51,7 +51,12 @@ data class ImportOutcome(
     /** [imported] 中已被归位至回收站的条目数（源数据里的已删除条目）。 */
     val movedToRecycleBin: Int,
     /** 全程警告快照（技术定位符 + 稳定编码，见 [ImportWarningReason]）。 */
-    val warnings: List<ImportWarning>
+    val warnings: List<ImportWarning>,
+    /** 会话变化后尚未处理的条目，不计为已写入或普通失败。 */
+    val unprocessed: Int = 0,
+    val sessionChanged: Boolean = false,
+    /** 已写入原库但会话变化导致未完成回收站归位的条目。 */
+    val recycleBinIncomplete: Int = 0
 ) {
     /** 真正写入库内的条目数。 */
     val written: Int get() = imported + updated

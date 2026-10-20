@@ -84,8 +84,10 @@ class DatabaseSession(
     }
 
     private val mutations = SessionContentMutations(
-        mutex, core.database, core.state, { core.readOnlyMode }
-    ) { core.persistedBaselineRevision() }
+        mutex, core.database, core.state, { core.readOnlyMode },
+        persistedBaselineRevision = { core.persistedBaselineRevision() },
+        credentialTicket = { core.credentialTicket }
+    )
     private val persistence = SessionPersistence(mutex, core, credentials, fileWriter, ::publishProgress, mutations::publishCommittedDatabaseMeta, mutations)
     /** Atomic target snapshot and Meta commit entry points. */
     val writeIntents = DatabaseSessionWriteIntents(mutex, core, persistence)
@@ -122,9 +124,11 @@ class DatabaseSession(
     fun removeLockObserver(observer: SessionLockObserver): Boolean = lockRegistry.remove(observer)
 
     /** 受理时同步固定当前会话及凭据代次；请求不持有密码或数据库树。 */
-    fun captureCredentialRequest(): SessionCredentialRequest = SessionCredentialRequest(core.credentialTicket)
+    fun captureCredentialRequest(
+        ticket: SessionCredentialTicket? = core.credentialTicket
+    ): SessionCredentialRequest = SessionCredentialRequest(ticket)
 
-    /** 只传播票据，不获取 mutex；仓库可以在块内正常调用会话写入入口。 */
+    /** 传播票据而不获取 mutex；实际改树和写盘各自在原有临界区内复核。 */
     suspend fun <T> withCredentialRequest(request: SessionCredentialRequest, block: suspend () -> T): T {
         val enclosing = currentCoroutineContext()[SessionCredentialRequest]
         check(enclosing == null || enclosing === request) { "禁止嵌套覆盖已受理凭据请求" }

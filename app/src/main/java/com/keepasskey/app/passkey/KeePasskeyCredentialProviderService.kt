@@ -236,7 +236,8 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         val callingAppInfo = request.callingAppInfo
         val callingOrigin = extractOrigin(callingAppInfo)
         val sessionTicket = databaseSession.captureCredentialRequest().ticket
-        val databaseId = sessionTicket?.pathIdentifier ?: activeDatabaseId()
+        // 私有库的目录 ID 是文件名，票据目标是完整路径；锁定入口也必须登记同一种身份。
+        val databaseId = sessionTicket?.pathIdentifier ?: activeDatabasePath()
         // ISSUE-P3-188：入口装配下沉同包协作对象，本函数只保留「门控 → 分派 → 收口」编排；
         // 分派不命中任何已知请求类型时不追加条目（与拆分前的空 `when` 完全一致）
         val createEntry = when (request) {
@@ -315,6 +316,12 @@ class KeePasskeyCredentialProviderService : CredentialProviderService() {
         .first()
         .firstOrNull { it.isActive }
         ?.id
+        ?.takeIf { it.isNotBlank() }
+
+    private suspend fun activeDatabasePath(): String? = vaultRepository.getDatabases()
+        .first()
+        .firstOrNull { it.isActive }
+        ?.path
         ?.takeIf { it.isNotBlank() }
 
     /**
