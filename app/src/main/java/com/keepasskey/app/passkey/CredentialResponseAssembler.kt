@@ -272,11 +272,7 @@ class CredentialResponseAssembler @Inject constructor(
         callingOrigin: String,
         browserFlow: Boolean
     ): String? {
-        val rpIdFromOption = try {
-            JSONObject(option.requestJson).optJSONObject(WebAuthnJson.RP)?.optString(WebAuthnJson.ID).orEmpty()
-        } catch (_: Exception) {
-            ""
-        }
+        val rpIdFromOption = WebAuthnRequest.parse(option.requestJson)?.rpId.orEmpty()
         if (!browserFlow) return rpIdFromOption.trim()
         val targetRpId = rpIdFromOption.ifBlank { DomainMatcher.extractDomain(callingOrigin) }
         if (targetRpId.isBlank()) return null

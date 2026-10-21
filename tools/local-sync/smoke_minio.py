@@ -1,135 +1,69 @@
 #!/usr/bin/env python3
-"""一体化 MinIO(S3) 冒烟：子进程拉起 HTTPS MinIO，等待端口就绪后通过 mc 执行
-建桶 / 上传 / 下载 / 删除，验证 S3 兼容存储的真实 HTTPS + SigV4 通路。"""
+"""MinIO(S3) 冒烟：独立数据目录 + 按次随机凭据 + 仅 loopback，走真实 HTTPS SigV4。
+
+ISSUE-P3-650 起：
+- 不再使用源码固定的 `tester/tester1234`；
+- 不再用 `--address :9000`（等于监听所有接口），默认只绑 127.0.0.1；
+- 数据目录是 `build/local-sync-lab/<run-id>/` 下的一次性目录，不读写 `tools/local-sync/minio-data`；
+- 退出只结束本脚本启动的 PID。
+"""
 import os
-import socket
 import subprocess
 import sys
-import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-BIN = os.path.join(HERE, "bin")
-MINIO = os.path.join(BIN, "minio.exe")
-MC = os.path.join(BIN, "mc.exe")
-CERTS_DIR = os.path.join(HERE, "certs", "minio")
-DATA_DIR = os.path.join(HERE, "minio-data")
-API_PORT = 9000
-CONSOLE_PORT = 9001
-USER = "tester"
-PASSWORD = "tester1234"
-BUCKET = "keepasskey-test"
-ENDPOINT = "https://localhost:9000"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import lab_services  # noqa: E402
+
+BUCKET = "keepasskey-smoke"
+OBJECT = "vault.kdbx"
+PAYLOAD = b"s3-kdbx-bytes-payload"
 
 
-def wait_port(host, port, timeout=30):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=2):
-                return True
-        except OSError:
-            time.sleep(0.5)
-    return False
-
-
-def _redact(text):
-    """**纵深防御**：若子进程输出意外带出口令，回显前擦除。
-
-    注意：CodeQL 的 `py/clear-text-logging-sensitive-data` **不把** `str.replace` 视为净化器，
-    因此不能依赖本函数来阻断该规则——真正的手段是让口令根本不进入任何 `print` 路径（见 `run`）。
-    本函数只用于「子进程输出」这一条非污点路径的兜底。
-    """
-    for secret in (PASSWORD,):
-        if secret:
-            text = text.replace(secret, "***")
-    return text
-
-
-def run(cmd, display, **kw):
-    """执行 `cmd`；`display` 是**调用方显式构造、不含任何凭据**的命令摘要，仅用于回显。
-
-    刻意不把 `cmd`（可能内嵌同步凭据）传入 `print`：CodeQL 不把字符串替换识别为净化器，
-    「先擦除再回显」仍会被判为明文日志，故改为结构性隔离——
-    机密值只出现在传给 `subprocess` 的实参里，日志只接受调用方提供的安全摘要。
-    """
-    print("  $", display)
-    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, **kw)
-    out = (r.stdout or "") + (r.stderr or "")
-    for line in out.splitlines():
-        print("    >", _redact(line))
-    return r.returncode == 0, out
+def mc(lab, *args):
+    env = dict(os.environ)
+    env["MC_CONFIG_DIR"] = os.path.join(lab.root, "mc-config")
+    return subprocess.run([lab_services.MC, "--insecure", *args], env=env,
+                          capture_output=True, text=True)
 
 
 def main():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    env = dict(os.environ)
-    env["MINIO_ROOT_USER"] = USER
-    env["MINIO_ROOT_PASSWORD"] = PASSWORD
-    env["MINIO_CERTS_DIR"] = CERTS_DIR
-
-    proc = subprocess.Popen(
-        [MINIO, "server", DATA_DIR, "--address", f":{API_PORT}",
-         "--console-address", f":{CONSOLE_PORT}"],
-        cwd=HERE, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
-    )
+    lab = lab_services.Lab(bind_host=lab_services.LOOPBACK, s3_port=19000, console_port=19001)
+    print(f"[smoke] 独立目录 {lab.root}（凭据按次随机，值不落日志）")
+    ok = True
     try:
-        if not wait_port("localhost", API_PORT, timeout=40):
+        lab.start_minio()
+        if not lab_services.wait_port(lab.host_for_client(), lab.s3_port, timeout=40):
             print("[FATAL] MinIO API 端口未就绪")
-            for line in proc.stdout:
-                print("  >", line.rstrip())
             return 1
+        alias = "smoke"
+        endpoint = f"https://{lab.host_for_client()}:{lab.s3_port}"
 
-        ok = True
-        # mc 对自签名证书用 --insecure 跳过校验（仅测试客户端侧；App 端以真实证书信任）
-        alias = "local"
-        s, _ = run(
-            [MC, "--insecure", "alias", "set", alias, ENDPOINT, USER, PASSWORD],
-            display=f"{MC} --insecure alias set {alias} {ENDPOINT} {USER} ***",
-        )
-        ok = ok and s
-        s, o = run(
-            [MC, "--insecure", "mb", f"{alias}/{BUCKET}"],
-            display=f"{MC} --insecure mb {alias}/{BUCKET}",
-        )
-        ok = ok and (s or "already exists" in o or "exists" in o)
-        # 上传
-        with open(os.path.join(HERE, "_s3_tmp.txt"), "w") as f:
-            f.write("s3-kdbx-bytes-payload")
-        s, _ = run(
-            [MC, "--insecure", "cp", "_s3_tmp.txt", f"{alias}/{BUCKET}/vault.kdbx"],
-            display=f"{MC} --insecure cp _s3_tmp.txt {alias}/{BUCKET}/vault.kdbx",
-        )
-        ok = ok and s
-        # 下载并比对
-        s, _ = run(
-            [MC, "--insecure", "cp", f"{alias}/{BUCKET}/vault.kdbx", "_s3_dl.txt"],
-            display=f"{MC} --insecure cp {alias}/{BUCKET}/vault.kdbx _s3_dl.txt",
-        )
-        ok = ok and s
-        with open(os.path.join(HERE, "_s3_dl.txt")) as f:
-            dl = f.read()
-        ok = ok and (dl == "s3-kdbx-bytes-payload")
-        print(f"[{'PASS' if dl == 's3-kdbx-bytes-payload' else 'FAIL'}] 下载字节一致 (len={len(dl)})")
-        # 删除
-        s, _ = run(
-            [MC, "--insecure", "rm", f"{alias}/{BUCKET}/vault.kdbx"],
-            display=f"{MC} --insecure rm {alias}/{BUCKET}/vault.kdbx",
-        )
-        ok = ok and s
+        results = []
+        results.append(("建别名（真实 SigV4 认证）",
+                        mc(lab, "alias", "set", alias, endpoint, lab.s3_user, lab.s3_password).returncode == 0))
+        created = mc(lab, "mb", f"{alias}/{BUCKET}")
+        results.append(("建桶", created.returncode == 0 or "exists" in (created.stdout + created.stderr)))
+
+        local_put = os.path.join(lab.root, "put.bin")
+        local_get = os.path.join(lab.root, "get.bin")
+        with open(local_put, "wb") as handle:
+            handle.write(PAYLOAD)
+        results.append(("上传", mc(lab, "cp", local_put, f"{alias}/{BUCKET}/{OBJECT}").returncode == 0))
+        results.append(("下载", mc(lab, "cp", f"{alias}/{BUCKET}/{OBJECT}", local_get).returncode == 0))
+        with open(local_get, "rb") as handle:
+            downloaded = handle.read()
+        results.append(("下载字节一致", downloaded == PAYLOAD))
+        results.append(("删除", mc(lab, "rm", f"{alias}/{BUCKET}/{OBJECT}").returncode == 0))
+
+        for name, passed in results:
+            print(f"[{'PASS' if passed else 'FAIL'}] {name}")
+            ok = ok and passed
         print("RESULT:", "ALL PASS" if ok else "HAS FAILURE")
         return 0 if ok else 1
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        for t in ("_s3_tmp.txt", "_s3_dl.txt"):
-            try:
-                os.remove(os.path.join(HERE, t))
-            except OSError:
-                pass
+        lab.stop_all()
+        lab.cleanup()
 
 
 if __name__ == "__main__":

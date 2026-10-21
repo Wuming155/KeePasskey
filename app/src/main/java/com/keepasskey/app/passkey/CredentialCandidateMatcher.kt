@@ -16,9 +16,8 @@ import java.time.Instant
  *
  * ## 判定口径（与组装器逐字一致，不得各自漂移）
  *
- * - 通行密钥候选：**RP-ID 域匹配**（浏览器委派与「无可信 web origin 的调用方」同口径，
- *   见 `ISSUE-P2-530`）**或** `android://` 包名维度命中（后者须通过签名绑定门控
- *   [CredentialManagerPackageBindingGate]）；两条维度并存，任一命中即入选；
+ * - 通行密钥候选：显式 RP 必须与凭据 RP 归一化后精确相等；仅原生请求缺失 RP 时
+ *   才退回 `android://` 包名维度，且须通过 [CredentialManagerPackageBindingGate]；
  *   **且**（请求给出 `allowCredentials` 时）凭据 id 必须在白名单内 —— WebAuthn 规范要求
  *   认证器只呈现请求列出的凭据，否则用户可能选中 RP 明确不接受的凭据导致登录失败；
  *   > **为什么非浏览器调用方也按 RP-ID 匹配**：候选**筛选**与凭据**归属校验**是两件事。
@@ -35,9 +34,8 @@ internal object CredentialCandidateMatcher {
     /**
      * 通行密钥候选入选判定。
      *
-     * @param browserFlow 调用方是否持**系统背书**的 https web origin。为 `true` 时只认 RP-ID
-     *   域匹配（该 `targetRpId` 已由组装器校验为 origin 的可注册后缀，行为与整改前逐字一致）；
-     *   为 `false` 时 RP-ID 域匹配与 `android://` 包名维度**并存**。
+     * @param browserFlow 调用方是否持系统背书的 https origin；浏览器只认 RP，
+     *   原生调用仅在 RP 缺失时允许包名回退。
      * @param allowedCredentialIds 请求 `allowCredentials[].id` 的 Base64URL 文本集合；
      *   **空集表示请求未限定**（无用户名 / discoverable 流程），此时不做 id 收敛。
      */
@@ -55,12 +53,11 @@ internal object CredentialCandidateMatcher {
         if (allowedCredentialIds.isNotEmpty() && passkey.credentialId !in allowedCredentialIds) return false
         // ISSUE-P3-339：域维度只认凭据自身的 `rpId` 一个真相源（`entry.url` 不参与 passkey 候选）
         val domainMatch = targetRpId.isNotBlank() &&
-            DomainMatcher.isDomainMatch(passkey.relyingPartyId, targetRpId)
+            PasskeyRequestRpBinding.matches(targetRpId, passkey.relyingPartyId)
         if (browserFlow) return domainMatch
         val packageMatch = packageDimensionAllowed && callingPackage.isNotBlank() &&
             DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
-        // PD-77: an explicit RP ID is authoritative. The package dimension is only a
-        // fallback for legacy requests that omitted the RP ID.
+        // 显式 RP 是权威；只有缺失 RP 的旧请求才退回包名维度。
         return if (targetRpId.isNotBlank()) domainMatch else packageMatch
     }
 

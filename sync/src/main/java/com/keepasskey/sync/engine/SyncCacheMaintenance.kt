@@ -64,13 +64,23 @@ internal class SyncCacheMaintenance(
      * 此前两文件各自独立走「tmp -> fsync -> rename」，两写之间存在崩溃窗口：
      * baseversion 已更新而 meta（etag/lastSyncMillis）仍是旧值，下一轮同步会以
      * 过期 etag 发起 If-Match，制造本可避免的假冲突。
-     * 整改后：先把两份内容分别写入唯一 tmp 并 fsync（慢路径），随后背靠背执行两次
+     * 整改后：先把各份内容分别写入唯一 tmp 并 fsync（慢路径），随后背靠背执行
      * 原子 rename（快路径，微秒级）——把不一致窗口从「两次完整写盘」压缩到
-     * 「两个原子 rename 之间」，且崩溃残留 tmp 由 [SyncCacheFiles.deleteOrphanTmpFiles] 通配清理。
+     * 「原子 rename 之间」，且崩溃残留 tmp 由 [SyncCacheFiles.deleteOrphanTmpFiles] 通配清理。
      * （跨多文件的完全原子性受 POSIX 限制不存在，此为工程上可达的最小窗口。）
+     *
+     * `ISSUE-P2-636`：同一次调用还收敛 `<hash>.version` 到同一摘要。本地赢 / 远端丢失自愈
+     * 上传的是**缓存中已有字节**、不经 `writeCache`，崩溃窗口里落后的标记不会自行刷新；
+     * 基线前移即「本地内容已等于基线」，三份标记必须同源，否则 `hasLocalChanges` 会因
+     * 陈旧标记恒为真而每轮重复上传。
      */
-    fun updateBase(remotePath: String, baseVersion: String, etag: String? = null) {
+    fun updateBase(remotePath: String, baseVersion: String, etag: String? = null) =
+        synchronized(files.pathLock(remotePath)) { updateBaseLocked(remotePath, baseVersion, etag) }
+
+    private fun updateBaseLocked(remotePath: String, baseVersion: String, etag: String?) {
+        val trimmedVersion = baseVersion.trim()
         val baseFile = getFile(remotePath, SUFFIX_BASE_VERSION)
+        val versionFile = getFile(remotePath, SyncCache.SUFFIX_VERSION)
         val oldState = getState(remotePath)
         val cleanEtagStr = cleanEtag(etag ?: oldState?.etag)
         val metaFile = getFile(remotePath, SUFFIX_META)
@@ -82,15 +92,19 @@ internal class SyncCacheMaintenance(
 
         val baseTmp = files.tmpFileFor(baseFile)
         val metaTmp = files.tmpFileFor(metaFile)
+        val versionTmp = files.tmpFileFor(versionFile)
         try {
-            files.writeTmpSynced(baseTmp, baseVersion.trim().toByteArray(Charsets.UTF_8))
+            files.writeTmpSynced(baseTmp, trimmedVersion.toByteArray(Charsets.UTF_8))
             files.writeTmpSynced(metaTmp, metaContent.toByteArray(Charsets.UTF_8))
+            files.writeTmpSynced(versionTmp, trimmedVersion.toByteArray(Charsets.UTF_8))
             files.moveAtomically(baseTmp, baseFile)
             files.moveAtomically(metaTmp, metaFile)
+            files.moveAtomically(versionTmp, versionFile)
         } finally {
             // 任一步失败时清理未交付的 tmp（rename 成功后对应 tmp 已不存在，delete 幂等）
             baseTmp.delete()
             metaTmp.delete()
+            versionTmp.delete()
         }
     }
 

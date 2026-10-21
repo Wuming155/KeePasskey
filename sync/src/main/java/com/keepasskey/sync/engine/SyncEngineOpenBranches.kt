@@ -84,6 +84,37 @@ import com.keepasskey.sync.model.SyncException
         }
     }
 
+    /**
+     * [openRemote] 已缓存分支的裁决：无本地修改 → 远端裁决刷新；有本地修改 → 本地赢 / 冲突。
+     *
+     * `ISSUE-P2-636`：本地赢分支的 `localVersion` 必须取**实际缓存字节**的摘要，不能取
+     * `.version` 标记。`writeCache` 先原子替换 `.cache`、再独立写 `.version`，两步之间崩溃会
+     * 留下「新字节 + 旧标记」；把旧标记当成基线前移的版本会让 `baseversion` 写成陈旧摘要，
+     * 此后 `hasLocalChanges` 恒为真 ⇒ 每轮重复上传，且基准内容快照与 `baseversion` 长期错配。
+     * `cachedBytes` 正是本次将要上传的字节，取其摘要即真值（代价：本分支多一次内容 SHA-256，
+     * 相对一次全库序列化 / 上传可忽略）。
+     */
+    internal suspend fun SyncEngine.openCachedBranch(
+        remotePath: String,
+        cachedBytes: ByteArray,
+        baseEtag: String,
+        baseVersionHash: String,
+        remoteProbe: RemoteConsistencyProbe,
+        remoteEtag: String
+    ): SyncOpenResult =
+        if (!cache.hasLocalChanges(remotePath)) {
+            openCachedWithoutLocalChanges(remotePath, cachedBytes, baseEtag, baseVersionHash, remoteProbe, remoteEtag)
+        } else {
+            openCachedWithLocalChanges(
+                remotePath,
+                cachedBytes,
+                SyncCache.sha256Hex(cachedBytes),
+                baseEtag,
+                remoteProbe,
+                remoteEtag
+            )
+        }
+
     /** [openRemote] 分支 2：已缓存且本地无修改 -> 远端无变直接返回 / 远端修改则下载刷新。 */
     internal suspend fun SyncEngine.openCachedWithoutLocalChanges(
         remotePath: String,

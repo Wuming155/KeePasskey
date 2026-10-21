@@ -26,11 +26,17 @@ import com.keepasskey.core.model.PasskeyKeyText
  * 规范**没有** `alg` 成员，「`key.alg` 与嗅探交叉核对」对本载荷恒不触发，属虚构。
  * 白名单外的成员一律**忽略而非拒收**（§3.1.1「MUST ignore unknown fields or enumeration values」）；
  * **重复键取首个**（[ByteJson.Obj.member]，「后写覆盖」会让载荷尾部悄悄改写仪式字段）；
- * **多把凭据**取第一把 + 计数点名（`PD-49` 裁决三）；扩展处置细则见 [readHmac]。
+ * **多把凭据**取第一把 + 计数点名（`PD-49` 裁决三）；扩展处置细则见 [PasskeyCxfExtensions.read]。
  * KeePassXC 形的 `url` 成员被**忽略**（口径 6：标题与归属按实际 rpId 呈现，不采信导出方的 URL 文本）。
  *
  * **擦除义务**：本读取器只清零自己的中间量；[ImportedPasskey] 返回的秘密三件套由调用链
  * （第 3 片落库接线）按 `saveEntry(totpSecretChars = …)` 同族契约负责，**含用户取消路径**。
+ * 具体分工（`ISSUE-P3-647`，契约 §4 的 R2 / R4）：进入解析链的全部密码学材料——
+ * 扫描器 `ByteSink` 的**每个容量代次**、AST 全部字符串副本（含未选中的多凭据、未知成员与
+ * 失败分支）、`key` 解码出的 DER、两种形态的 PEM 字符工作数组——都只在本类可见的确定性钩子上
+ * 处理：`read` 的 `finally` 递归清零 AST，`extract*` 的 `finally` 按「转移 / 清零」二选一
+ * 处理 PEM（只有 `Take.Good` 才把同一实例转移给 `ImportedPasskey`，草案生命周期由
+ * `PasskeyImportDraftHost` 的确认 / 取消 / 销毁钩子收口）。
  */
 object PasskeyCxfReader {
 
@@ -41,18 +47,27 @@ object PasskeyCxfReader {
     const val MAX_IMPORT_PAYLOAD_BYTES: Int = 4096
 
     /** 解析入口。[payload] 为 UTF-8 载荷字节，所有权归调用方（本函数不改动、不清零它）。 */
-    fun read(payload: ByteArray): PasskeyCxfOutcome {
+    fun read(payload: ByteArray): PasskeyCxfOutcome = read(payload, null)
+
+    /**
+     * 同上，并把扫描工作缓冲、AST 字符串副本与私钥 DER 工作数组在**分配时**交给 [probe]
+     * 保留引用，供同模块契约测试直接断言清零（`ISSUE-P3-647`）。
+     *
+     * 生产路径传 null；[probe] 由调用方持有，**只许保存引用**，不得回写或清零。
+     */
+    internal fun read(payload: ByteArray, probe: PasskeyCxfWorkProbe?): PasskeyCxfOutcome {
         if (payload.size > MAX_IMPORT_PAYLOAD_BYTES) {
             return PasskeyCxfOutcome.Rejected(PasskeyCxfReject.PayloadTooLarge)
         }
-        val root = ByteJsonScanner.scan(payload)
+        val root = ByteJsonScanner.scan(payload, probe)
             ?: return PasskeyCxfOutcome.Rejected(PasskeyCxfReject.MalformedJson)
         return try {
             when (val located = locate(root)) {
                 is Located.Bad -> PasskeyCxfOutcome.Rejected(located.reason)
-                is Located.Good -> extract(located)
+                is Located.Good -> extract(located, probe)
             }
         } finally {
+            // 未选中的凭据、未知成员、失败分支的字符串副本一并递归清零（PD-49 裁决三：多把也只导第一把）
             root.wipe()
         }
     }
@@ -153,13 +168,13 @@ object PasskeyCxfReader {
         class Bad(val reason: PasskeyCxfReject) : Take()
     }
 
-    private fun extract(located: Located.Good): PasskeyCxfOutcome {
+    private fun extract(located: Located.Good, probe: PasskeyCxfWorkProbe?): PasskeyCxfOutcome {
         // PD-49 裁决三：多把凭据导第一把，其余由确认对话框点名（不建逐把选择列表）
         val obj = located.candidates.first()
         val taken = if (located.shape == PasskeyCxfSourceShape.KeePassXCPasskeyFile) {
-            extractKeePassXCPasskey(obj)
+            extractKeePassXCPasskey(obj, probe)
         } else {
-            extractCxfPasskey(obj)
+            extractCxfPasskey(obj, probe)
         }
         return when (taken) {
             is Take.Bad -> PasskeyCxfOutcome.Rejected(taken.reason)
@@ -176,35 +191,41 @@ object PasskeyCxfReader {
         }
     }
 
-    private fun extractCxfPasskey(obj: ByteJson.Obj): Take {
+    private fun extractCxfPasskey(obj: ByteJson.Obj, probe: PasskeyCxfWorkProbe?): Take {
         val rpId = obj.textValue(FIELD_RP_ID) ?: return Take.Bad(PasskeyCxfReject.MissingCeremonyField)
         val credentialId = obj.canonicalB64Field(FIELD_CREDENTIAL_ID)
             ?: return obj.fieldFailure(FIELD_CREDENTIAL_ID)
         val userHandle = obj.canonicalB64Field(FIELD_USER_HANDLE)
             ?: return obj.fieldFailure(FIELD_USER_HANDLE)
         val keyNode = obj.strNode(FIELD_KEY) ?: return Take.Bad(PasskeyCxfReject.MissingCeremonyField)
-        val der = Base64Codec.decode(keyNode.bytes)
-        if (der == null || der.isEmpty()) {
-            keyNode.wipe()
-            return Take.Bad(PasskeyCxfReject.InvalidBase64Url)
-        }
-        val algorithm = PasskeyKeyText.sniffAlgorithmId(der)
-        val pem = if (algorithm == null) {
-            der.fill(0)
-            keyNode.wipe()
-            return Take.Bad(PasskeyCxfReject.UnsupportedKeyAlgorithm)
-        } else {
+        // 所有权：der 与 pem 都是本函数独占的中间量（`Base64Codec.decode` / `derToPemChars` 都返回新数组）。
+        // 只有 `Take.Good` 交出 pem 才把责任转移给 ImportedPasskey（`transferred`）——其余一切出口
+        // （Base64 非法、OID 不识别、PEM 编码或嗅探抛错、finish 自身抛错）都由 finally 清零。
+        // keyNode 属 AST，这里提前擦以缩短驻留窗口（`read` 的 `root.wipe()` 仍兜底）。
+        var pem: CharArray? = null
+        var transferred = false
+        try {
+            val der = Base64Codec.decode(keyNode.bytes)?.also { probe?.derBytes?.add(it) }
+            if (der == null || der.isEmpty()) return Take.Bad(PasskeyCxfReject.InvalidBase64Url)
             try {
-                PasskeyKeyText.derToPemChars(der) // PEM 恒 ASCII，驻留形态与生成侧一致
+                val algorithm = PasskeyKeyText.sniffAlgorithmId(der)
+                    ?: return Take.Bad(PasskeyCxfReject.UnsupportedKeyAlgorithm)
+                val chars = PasskeyKeyText.derToPemChars(der) // PEM 恒 ASCII，驻留形态与生成侧一致
+                probe?.pemChars?.add(chars)
+                pem = chars
+                val taken = finish(obj, rpId, credentialId, userHandle, chars, algorithm)
+                transferred = taken is Take.Good
+                return taken
             } finally {
                 der.fill(0)
-                keyNode.wipe()
             }
+        } finally {
+            if (!transferred) pem?.fill('0')
+            keyNode.wipe()
         }
-        return finish(obj, rpId, credentialId, userHandle, pem, algorithm)
     }
 
-    private fun extractKeePassXCPasskey(obj: ByteJson.Obj): Take {
+    private fun extractKeePassXCPasskey(obj: ByteJson.Obj, probe: PasskeyCxfWorkProbe?): Take {
         val rpId = obj.textValue(KPXC_FIELD_RELYING_PARTY)
             ?: return Take.Bad(PasskeyCxfReject.MissingCeremonyField)
         val credentialId = obj.canonicalB64Field(FIELD_CREDENTIAL_ID)
@@ -213,19 +234,32 @@ object PasskeyCxfReader {
             ?: return obj.fieldFailure(FIELD_USER_HANDLE)
         val pemNode = obj.strNode(KPXC_FIELD_PRIVATE_KEY)
             ?: return Take.Bad(PasskeyCxfReject.MissingCeremonyField)
-        val algorithm = PasskeyKeyText.sniffAlgorithmId(pemNode.bytes)
-        val pem = if (algorithm == null) {
-            pemNode.wipe()
-            return Take.Bad(PasskeyCxfReject.UnsupportedKeyAlgorithm)
-        } else {
+        // 同上：字符副本只在 `Take.Good` 时转移，拒收 / 抛错 / finish 失败都清零
+        var pem: CharArray? = null
+        var transferred = false
+        try {
+            val algorithm = PasskeyKeyText.sniffAlgorithmId(pemNode.bytes)
+                ?: return Take.Bad(PasskeyCxfReject.UnsupportedKeyAlgorithm)
             val chars = asciiChars(pemNode.bytes) // PEM 恒 ASCII：逐字节转 CharArray，不经过 String
+                ?: return Take.Bad(PasskeyCxfReject.MissingCeremonyField)
+            probe?.pemChars?.add(chars)
+            pem = chars
+            val taken = finish(obj, rpId, credentialId, userHandle, chars, algorithm)
+            transferred = taken is Take.Good
+            return taken
+        } finally {
+            if (!transferred) pem?.fill('0')
             pemNode.wipe()
-            if (chars == null) return Take.Bad(PasskeyCxfReject.MissingCeremonyField) else chars
         }
-        return finish(obj, rpId, credentialId, userHandle, pem, algorithm)
     }
 
-    /** 两种形态共用的收尾：展示字段补齐 + `fido2Extensions` 读取。 */
+    /**
+     * 两种形态共用的收尾：展示字段补齐 + `fido2Extensions` 读取。
+     *
+     * 所有权：`pem` 由调用方（两个 `extract*`）持有，**只有**本函数返回 [Take.Good] 时才转移给
+     * [ImportedPasskey]；本函数自身抛错时不得擦 `pem`（由调用方的 `finally` 按 `transferred` 判定）。
+     * `PasskeyCxfExtensions.read` 产出的两枚 PRF 种子本函数独占，构造草案失败时在此收口清零，不留悬挂副本。
+     */
     private fun finish(
         obj: ByteJson.Obj,
         rpId: String,
@@ -234,23 +268,29 @@ object PasskeyCxfReader {
         pem: CharArray,
         algorithm: Int
     ): Take {
-        val hmac = readHmac(obj)
-        val (userName, displayName, missing) = displayFieldsOf(obj, rpId)
-        return Take.Good(
-            credential = ImportedPasskey(
-                relyingPartyId = rpId,
-                credentialId = credentialId,
-                userHandle = userHandle,
-                userName = userName,
-                userDisplayName = displayName,
-                privateKeyPemChars = pem,
-                algorithmId = algorithm,
-                prfWithUv = hmac.prfWithUv,
-                prfWithoutUv = hmac.prfWithoutUv
-            ),
-            dropped = hmac.dropped,
-            missingDisplayFields = missing
-        )
+        val hmac = PasskeyCxfExtensions.read(obj)
+        return try {
+            val (userName, displayName, missing) = displayFieldsOf(obj, rpId)
+            Take.Good(
+                credential = ImportedPasskey(
+                    relyingPartyId = rpId,
+                    credentialId = credentialId,
+                    userHandle = userHandle,
+                    userName = userName,
+                    userDisplayName = displayName,
+                    privateKeyPemChars = pem,
+                    algorithmId = algorithm,
+                    prfWithUv = hmac.prfWithUv,
+                    prfWithoutUv = hmac.prfWithoutUv
+                ),
+                dropped = hmac.dropped,
+                missingDisplayFields = missing
+            )
+        } catch (failure: Throwable) {
+            hmac.prfWithUv?.fill(0)
+            hmac.prfWithoutUv?.fill(0)
+            throw failure
+        }
     }
 
     /** 展示字段容错补齐（`PD-48` 裁决一 (b)）：只进展示字段，不参与任何仪式计算。 */
@@ -270,72 +310,6 @@ object PasskeyCxfReader {
         val userDisplayName: String,
         val missing: List<PasskeyCxfDisplayField>
     )
-
-    // ------------------------------------------------------------------
-    // fido2Extensions（口径 2′）
-    // ------------------------------------------------------------------
-
-    private class HmacRead(
-        val prfWithUv: ByteArray?,
-        val prfWithoutUv: ByteArray?,
-        val dropped: List<PasskeyCxfDropped>
-    )
-
-    /**
-     * 读 `fido2Extensions`，只取本库能承载或有账目价值的面（逐条对齐条目口径 2′）：
-     * - **两种拼写都认**：§3.3.12.2 `hmacCredentials{algorithm, credWithUV, credWithoutUV}` 与
-     *   **规范附录 A 示例**的遗留形 `hmacSecret{algorithm, secret}`（键名 / 成员数 / 算法值三项与
-     *   §3.3.12.2~.4 全部冲突）——只按 CDDL 拼写取值会让**规范自己的示例**解出「无 PRF」；
-     *   规范形存在时**优先**，别名仅在其缺席时消费，其 `secret` 视作 withUV 那一枚；
-     * - **算法同义**：`hmac-sha256`（§3.3.12.4 唯一枚举）与 `HS256`（示例值）都指 HMAC-SHA-256；
-     *   其余值按 §3.3.12.3「unknown algorithm **SHOULD ignore this entry**」⇒ **只丢该扩展项、
-     *   保留凭据**（「ignore this entry」≠ ignore this credential），丢弃项进确认清单；
-     * - **长度不判、不裁、不拒收**（规范用词「SHOULD be 32 bytes」，`PD-49` 裁决二），非 32 字节
-     *   原样保真存、**不进**丢弃清单；别名形天然只有一枚 ⇒ `prfWithoutUv` 留空且**不**记缺失
-     *   （禁止复制出第二枚假种子），规范形缺一枚才记 [PasskeyCxfDropped.HmacIncomplete]；
-     * - `credBlob` / `largeBlob` / `payments(true)` 本库不承载 ⇒ 逐条进丢弃清单（AC⑪②）；
-     *   `payments(false)` 无内容可丢、不点名；其余未知成员按 §3.1.1 静默忽略。
-     */
-    private fun readHmac(obj: ByteJson.Obj): HmacRead {
-        val ext = obj.member(FIELD_FIDO2_EXTENSIONS) as? ByteJson.Obj
-            ?: return HmacRead(null, null, emptyList())
-        val canonical = ext.member(EXT_FIELD_HMAC_CREDENTIALS) as? ByteJson.Obj
-        val alias = ext.member(EXT_FIELD_HMAC_SECRET) as? ByteJson.Obj
-        val holder = canonical ?: alias
-        val dropped = ArrayList<PasskeyCxfDropped>(4)
-        var withUv: ByteArray? = null
-        var withoutUv: ByteArray? = null
-        if (holder != null) {
-            val withNode = holder.member(EXT_FIELD_CRED_WITH_UV) as? ByteJson.Str
-                ?: if (canonical == null) holder.member(EXT_FIELD_SECRET) as? ByteJson.Str else null
-            val withoutNode = holder.member(EXT_FIELD_CRED_WITHOUT_UV) as? ByteJson.Str
-            val algorithm = (holder.member(EXT_FIELD_ALGORITHM) as? ByteJson.Str)?.asUtf8String()
-            if (algorithm != null && algorithm.lowercase() in KNOWN_HMAC_ALGORITHMS) {
-                withUv = withNode?.takeUnless { it.isBlankUtf8() }?.let { decodeAndWipe(it) }
-                withoutUv = withoutNode?.takeUnless { it.isBlankUtf8() }?.let { decodeAndWipe(it) }
-                if (withUv == null || withUv.isEmpty()) {
-                    withUv = null
-                    dropped += PasskeyCxfDropped.HmacIncomplete
-                } else if (canonical != null && (withoutUv == null || withoutUv.isEmpty())) {
-                    withoutUv = null
-                    dropped += PasskeyCxfDropped.HmacIncomplete
-                }
-            } else {
-                dropped += PasskeyCxfDropped.HmacUnknownAlgorithm
-                withNode?.wipe()
-                withoutNode?.wipe()
-            }
-        }
-        if (ext.has(EXT_FIELD_CRED_BLOB)) dropped += PasskeyCxfDropped.CredBlob
-        if (ext.has(EXT_FIELD_LARGE_BLOB)) dropped += PasskeyCxfDropped.LargeBlob
-        if ((ext.member(EXT_FIELD_PAYMENTS) as? ByteJson.Bool)?.value == true) {
-            dropped += PasskeyCxfDropped.Payments
-        }
-        return HmacRead(withUv, withoutUv, dropped)
-    }
-
-    private fun decodeAndWipe(node: ByteJson.Str): ByteArray? =
-        Base64Codec.decode(node.bytes)?.takeIf { it.isNotEmpty() }?.also { node.wipe() }
 
     // ------------------------------------------------------------------
     // 值读取小工具
@@ -386,7 +360,6 @@ object PasskeyCxfReader {
     private const val FIELD_USER_DISPLAY_NAME = "userDisplayName"
     private const val FIELD_USER_HANDLE = "userHandle"
     private const val FIELD_KEY = "key"
-    private const val FIELD_FIDO2_EXTENSIONS = "fido2Extensions"
     private const val FIELD_VERSION = "version"
     private const val FIELD_MAJOR = "major"
     private const val FIELD_ACCOUNTS = "accounts"
@@ -394,22 +367,9 @@ object PasskeyCxfReader {
     private const val FIELD_CREDENTIALS = "credentials"
     private const val TYPE_PASSKEY = "passkey"
 
-    private const val EXT_FIELD_HMAC_CREDENTIALS = "hmacCredentials"
-    private const val EXT_FIELD_HMAC_SECRET = "hmacSecret"
-    private const val EXT_FIELD_ALGORITHM = "algorithm"
-    private const val EXT_FIELD_CRED_WITH_UV = "credWithUV"
-    private const val EXT_FIELD_CRED_WITHOUT_UV = "credWithoutUV"
-    private const val EXT_FIELD_SECRET = "secret"
-    private const val EXT_FIELD_CRED_BLOB = "credBlob"
-    private const val EXT_FIELD_LARGE_BLOB = "largeBlob"
-    private const val EXT_FIELD_PAYMENTS = "payments"
-
     /** KeePassXC `.passkey` 独有的键名（其余 `credentialId` / `userHandle` / `username` 与 CXF 同名）。 */
     private const val KPXC_FIELD_PRIVATE_KEY = "privateKey"
     private const val KPXC_FIELD_RELYING_PARTY = "relyingParty"
-
-    /** §3.3.12.4 唯一枚举值与附录 A 示例值 `HS256` 视为同义：两者都指 HMAC-SHA-256。 */
-    private val KNOWN_HMAC_ALGORITHMS = setOf("hmac-sha256", "hs256")
 
     private const val LF = 0x0A
     private const val CR = 0x0D

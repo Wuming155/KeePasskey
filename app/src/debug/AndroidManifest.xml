@@ -58,8 +58,40 @@
             android:excludeFromRecents="true"
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
+        <!--
+          ISSUE-P3-643：编辑页脏位与离页确认的设备验收宿主。组合件仍是生产的 EntryEditScreen，
+          差别仅在于把生产的 EntryEditViewModel 暴露给用例（图标 tile 无 contentDescription，
+          连续选择同一图标无法经无障碍树点击）。
+        -->
+        <activity
+            android:name="com.keepasskey.app.ui.EntryEditDirtyConfirmDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
         <activity
             android:name="com.keepasskey.app.ui.SyncConflictDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+        <!--
+          ISSUE-P3-644：分组图标写反馈与只读菜单/批量入口的设备验收宿主。
+          挂载**生产**组合件 `VaultListContent`（分组行菜单 / 图标选择对话框 / 批量顶栏）
+          与 `VaultListActionController`，消息走生产的 AppSnackbarChannel →
+          AppGlobalSnackbarHost；用例以无障碍节点真实点击菜单项与图标。
+        -->
+        <activity
+            android:name="com.keepasskey.app.ui.VaultGroupFeedbackDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+        <!--
+          ISSUE-P2-651/652：云端同步设置页的真实 UI 验收宿主。挂载的是**生产**组合件
+          `CloudSyncScreen`（含 `SecurePasswordField` 与离页 `DisposableEffect`），只把
+          生产 `SettingsSyncController` 暴露给用例，以便在测试进程内用真实 HTTPS 接收方
+          统计请求、并在 A 的测连在途时改存 B。
+        -->
+        <activity
+            android:name="com.keepasskey.app.ui.CloudSyncDeviceHostActivity"
             android:excludeFromRecents="true"
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />

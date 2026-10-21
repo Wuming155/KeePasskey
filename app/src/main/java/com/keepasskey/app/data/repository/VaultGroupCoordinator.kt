@@ -49,7 +49,15 @@ internal class VaultGroupCoordinator(
                         // 与条目侧 UiVaultEntry.customIconId 同形态，供 KeePassGroupRow 渲染，
                         // 并与条目共用同一 IconBitmapCache（避免同一图标重复解码）。
                         customIconId = kdbxGroup.customIconId?.toHexString(),
-                        iconName = if (isRecycle || kdbxGroup.iconId == RealVaultRepository.ICON_TRASH_BIN) "delete" else "folder",
+                        // ISSUE-P3-644：分组图标必须按**已落盘的 iconId** 投影回 UI 名——
+                        // 此前恒写 `"folder"`（仅回收站写 `"delete"`），导致：(a) 用户选过的图标
+                        // 重进列表即回退成文件夹；(b) 下一次改名 / 改图标按旧投影写回，把已保存的
+                        // iconId 覆盖回 48。投影与写侧共用 `VaultIconMapping` 这一对互逆映射。
+                        iconName = if (isRecycle || kdbxGroup.iconId == RealVaultRepository.ICON_TRASH_BIN) {
+                            "delete"
+                        } else {
+                            VaultIconMapping.nameOf(kdbxGroup.iconId)
+                        },
                         updatedAt = entryMapper.formatInstant(kdbxGroup.times.lastModificationTime),
                         createdAt = entryMapper.formatInstant(kdbxGroup.times.creationTime),
                         isRecycleBin = isRecycle,

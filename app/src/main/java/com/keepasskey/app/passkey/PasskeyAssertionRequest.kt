@@ -101,24 +101,22 @@ internal object PasskeyAssertionRequestParser {
         // 系统下发的断言请求（权威来源）：请求 JSON 与**特权调用方自带的 clientDataJSON 摘要**
         val option = caller.providerReq?.credentialOptions
             ?.firstOrNull { it is GetPublicKeyCredentialOption } as? GetPublicKeyCredentialOption
-        val requestJson = option?.requestJson
-            ?: intent.getStringExtra(PasskeyAssertionActivity.EXTRA_REQUEST_JSON).orEmpty()
-        // 特权调用方（自带 clientDataJSON 的浏览器）下发摘要时必须直接对其签名——自建 JSON
-        // 的哈希与其预期不一致会让 RP 侧验签失败（KeePassDX 同口径）
-        val request = WebAuthnRequest.parse(requestJson)
+        if (option == null) return null
+        val request = WebAuthnRequest.parse(option.requestJson) ?: return null
+        if (request.challenge.isBlank()) return null
         return PasskeyAssertionContext(
             entryId = entryId,
-            // ISSUE-P2-199：challenge 以系统请求 JSON 为准（权威），组装期副本仅在系统侧缺失时兜底
-            challenge = request?.challenge?.takeIf { it.isNotBlank() }
-                ?: intent.getStringExtra(PasskeyAssertionActivity.EXTRA_CHALLENGE).orEmpty(),
+            challenge = request.challenge,
             // ISSUE-P2-199：origin 取 [resolveAttestedCaller] 的派生结果，不再直接读组装期副本
             origin = caller.origin,
             expectedPackage = caller.expectedPackage,
             clientDataPackage = caller.clientDataPackage,
             providerReq = caller.providerReq,
-            providedClientDataHash = option?.clientDataHash?.takeIf { it.isNotEmpty() },
-            prfEval = request?.prfEval,
-            requireBiometric = request?.userVerification == WebAuthnRequest.UserVerification.REQUIRED
+            providedClientDataHash = option.clientDataHash?.takeIf { it.isNotEmpty() },
+            prfEval = request.prfEval,
+            requireBiometric = request.userVerification == WebAuthnRequest.UserVerification.REQUIRED,
+            requestRpId = request.rpId,
+            allowedCredentialIds = request.allowCredentialIds
         )
     }
 }
@@ -149,5 +147,7 @@ internal data class PasskeyAssertionContext(
     val providerReq: ProviderGetCredentialRequest?,
     val providedClientDataHash: ByteArray?,
     val prfEval: WebAuthnRequest.PrfEval?,
-    val requireBiometric: Boolean
+    val requireBiometric: Boolean,
+    val requestRpId: String = "",
+    val allowedCredentialIds: Set<String> = emptySet()
 )

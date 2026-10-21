@@ -7,6 +7,8 @@ import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.exception.KdbxSessionChangedException
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.withCredentialRequestScope
+import com.keepasskey.database.session.currentRequest
 import com.keepasskey.database.session.SessionCredentialRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -55,6 +57,10 @@ class VaultImporter @Inject constructor(
     /** 在接受文件选择时固定目标，不能等解析完成后重新捕获后来活动的库。 */
     fun captureRequest(): SessionCredentialRequest? = databaseSession?.captureCredentialRequest()
 
+    /** 当前协程上下文已受理的凭据请求（无则 null）：批量续用同一次受理时必须取它。 */
+    private suspend fun currentSessionCredentialRequest(): SessionCredentialRequest? =
+        databaseSession?.currentRequest()
+
     /**
      * 落库 [batch]；[policy] 缺省为 [ImportConflictPolicy.SKIP_EXISTING]。
      *
@@ -74,9 +80,14 @@ class VaultImporter @Inject constructor(
             withContext(Dispatchers.IO) {
                 val session = databaseSession
                 if (session == null) persistInternal(batch, policy, onProgress) else {
-                    val ticket = request?.ticket
+                    // 调用方可能已在同一协程上下文里受理过凭据请求（导入由控制器在外层受理）：
+                    // 此时**必须复用外层 request**，否则 `requireCurrentSessionRequest` 会拿外层受理
+                    // 时刻的票据与本次重新捕获的票据比较，判定为「会话已变」并让整批落库失败
+                    // （实测 `uiState=Failed(PERSIST)`、首个异常 IllegalStateException）。
+                    val effective = currentSessionCredentialRequest() ?: request ?: captureRequest()
+                    val ticket = effective?.ticket
                         ?: return@withContext KdbxResult.Failure(KdbxSessionChangedException())
-                    session.withCredentialRequest(request) {
+                    session.withCredentialRequestScope(effective) {
                         persistInternal(batch, policy, onProgress) {
                             if (!session.isCredentialTicketCurrent(ticket)) throw KdbxSessionChangedException()
                         }

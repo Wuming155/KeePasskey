@@ -42,19 +42,24 @@ composeBom = "2026.09.00"
 # TASK-07：M3 Expressive 公开 API（MaterialExpressiveTheme/MotionScheme）在 1.5.0 才毕业公开，
 # 1.4.0 stable 中仍为 internal。
 # ISSUE-P3-09（ZT-20）AC3 管控结论（2026-09-10 核对 Google Maven material3 maven-metadata.xml：
-# 当时 latest = release = 1.5.0-alpha28；**2026-10-07 复核：渠道最新已为 1.5.0-alpha29**，
-# 1.5.0 线仍无 stable，稳定渠道最新 1.4.0）：
+# 当时 latest = release = 1.5.0-alpha28；**2026-10-07 复核：渠道最新已为 1.5.0-alpha29**；
+# **2026-10-21 复核：渠道已推进到 1.5.0-beta01，同线（1.5.0）预发布通道，仍无 1.5.0 stable**，
+# 稳定渠道最新 1.4.0）：
 #   **无法降级到 stable**——降级即失去 MaterialExpressiveTheme/MotionScheme，编译失败，
-#   故按「必须保留 alpha」处理，显式登记管控信息：
+#   故按「必须保留 1.5.0 预发布线」处理，显式登记管控信息：
 #   - 必要性：ui/theme/Theme.kt 依赖 M3 Expressive 主题与弹性动效（产品级视觉规范）；
-#   - 风险：alpha 渠道存在 API 破坏性变更与未修复回归，不由稳定版语义背书；
-#   - 约束：本值仅允许在 1.5.0-alphaN 内部随安全修复上调，禁止跨 minor 跳跃；
+#   - 风险：预发布渠道存在 API 破坏性变更与未修复回归，不由稳定版语义背书；
+#   - 约束：本值仅允许在 **1.5.0 预发布线内部**（alphaN / betaN 之间）随上游推进上调，
+#     禁止跨 minor 跳跃、禁止跳向 1.5.0 之后的版本；跨线/跨 minor 须先复核构建与视觉回归；
 #   - **alpha28 → alpha29（2026-10-07，Dependabot PR #13）性质如实记录**：本次上调**不是**安全修复，
 #     而是上游的 bug fix 批 + 一处**源码级破坏性变更**——`Slider` / `RangeSlider` 的 `onValueChange`
 #     变为必填参数且在参数表中的位置调整（据官方 release notes「Source breaking change」）；
 #     本仓唯一 `Slider` 调用点 `ui/components/ValueSlider.kt:84` 全部使用具名实参，实测编译通过，
 #     故该破坏性变更对本仓无影响（若将来新增位置实参调用须改具名）。同批含 `ripple()` 新公开 API。
-#     该次上调已按本约束的「1.5.0-alphaN 内部」范围判定为允许，未跨 minor；
+#     该次上调已按本约束的「1.5.0 预发布线内部」范围判定为允许，未跨 minor；
+#   - **alpha29 → beta01（2026-10-20，Dependabot PR #17）性质如实记录**：同为 1.5.0 预发布线内的
+#     通道推进（alpha → beta），未跨 minor；本次在隔离 AVD 的完整 JVM 回归与构建通过，
+#     `DependencyResolutionDeterminismTest` 的钉版线判据已同步扩为 `1.5.0-(alpha|beta)\d+`；
 #   - 退出条件：material3 1.5.0 stable 发布后，删除本项与 compose-material3-alpha 别名，
 #     回归 Compose BOM 托管（升级判据与步骤见 docs/records/退役依据承接-ISSUE-P3-09.md）。
 material3 = "1.5.0-beta01"

@@ -61,6 +61,7 @@
             android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleTop"
+            android:process=":cm_save_client"
             android:theme="@android:style/Theme.Material.Light.NoActionBar"
             android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
 

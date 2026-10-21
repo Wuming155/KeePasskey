@@ -98,8 +98,8 @@ class DependencyResolutionDeterminismTest {
         val bomVersion = requireTomlValue(catalog, "composeBom")
 
         assertTrue(
-            "钉版 material3 = \"$pinned\" 已越出 1.5.0-alphaN 线——版本目录约束为"
-                + "「仅允许在 1.5.0-alphaN 内部上调，禁止跨 minor 跳跃」；若为有意升级，"
+            "钉版 material3 = \"$pinned\" 已越出 1.5.0 预发布线（alphaN / betaN）——版本目录约束为"
+                + "「仅允许在 1.5.0 预发布线内部随上游推进上调，禁止跨 minor 跳跃」；若为有意跨线升级，"
                 + "须同步更新该约束注释与 `docs/records/退役依据承接-ISSUE-P3-09.md` 的退出条件判定",
             MATERIAL3_PINNED_LINE.matches(pinned)
         )
@@ -247,7 +247,7 @@ class DependencyResolutionDeterminismTest {
         const val APP_BUILD_GRADLE = "app/build.gradle.kts"
 
         /** material3 钉版的允许形态：仅 `1.5.0-alphaN`（N ≥ 1，允许 alpha 序号上调） */
-        val MATERIAL3_PINNED_LINE = Regex("""1\.5\.0-alpha\d+""")
+        val MATERIAL3_PINNED_LINE = Regex("""1\.5\.0-(alpha|beta)\d+""")
 
         /** BOM POM 的 `<dependency>…</dependency>` 块 */
         val DEPENDENCY_BLOCK = Regex("""<dependency>.*?</dependency>""", RegexOption.DOT_MATCHES_ALL)

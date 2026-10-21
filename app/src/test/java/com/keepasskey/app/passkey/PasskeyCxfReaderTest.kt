@@ -9,6 +9,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -479,12 +480,217 @@ class PasskeyCxfReaderTest {
     }
 
     // ------------------------------------------------------------------
-    // 七、AC③：私钥不经 String 的源码级守卫（本片这一层的可证形态）
+    // 七、ISSUE-P3-647：工作缓冲与 AST 副本的直接观测
+    // ------------------------------------------------------------------
+
+    /**
+     * 成功路径：AST 的全部字符串副本、扫描工作缓冲、私钥 DER 工作数组在 `read` 返回时都已清零，
+     * 而交付的 [ImportedPasskey] 私钥仍是**独立且有效**的副本（未被提前擦）。
+     */
+    @Test
+    fun `二十一 成功解析后工作数组全部清零 草案秘密保持有效`() {
+        val probe = PasskeyCxfWorkProbe()
+        val p = parsed(PasskeyCxfReader.read(jsonOf(fixturePasskey()).toByteArray(Charsets.UTF_8), probe))
+        assertWorkBuffersErased(probe, "成功路径", p.credential.privateKeyPemChars)
+        assertTrue("私钥 DER 工作数组须被观察并清零", probe.derBytes.isNotEmpty())
+        assertTrue(
+            "交付的私钥不得被提前擦（否则用户确认后落库的是一把废凭据）",
+            String(p.credential.privateKeyPemChars).startsWith(PEM_HEADER)
+        )
+        assertEquals("PRF 别名形种子仍须有效", "secret_key_data".toByteArray().toList(), p.credential.prfWithUv?.toList())
+        p.credential.wipeSecrets()
+    }
+
+    /** 多凭据：只导第一把，其余凭据的私钥 / PRF 文本副本同样不得留在 AST 里。 */
+    @Test
+    fun `二十二 多凭据时未选中的私钥与PRF副本也已清零`() {
+        val second = fixturePasskey().toMutableMap().apply {
+            this["rpId"] = "second.example"
+            this["fido2Extensions"] = canonical("hmac-sha256")
+        }
+        val probe = PasskeyCxfWorkProbe()
+        val p = parsed(
+            PasskeyCxfReader.read(jsonOf(linkedDocument(credentials = listOf(fixturePasskey(), second))).toByteArray(Charsets.UTF_8), probe)
+        )
+        assertEquals("取第一把", "webauthn.io", p.credential.relyingPartyId)
+        assertEquals("其余凭据须被点名", 1, p.notes.additionalPasskeyCount)
+        assertWorkBuffersErased(probe, "多凭据路径", p.credential.privateKeyPemChars)
+        assertTrue("交付的私钥仍有效", String(p.credential.privateKeyPemChars).startsWith(PEM_HEADER))
+        p.credential.wipeSecrets()
+    }
+
+    /** 未知成员：白名单外成员的字符串值按 §3.1.1 忽略，但它是载荷明文，必须一并清零。 */
+    @Test
+    fun `二十三 未知成员的字符串副本也已清零`() {
+        val payload = fixturePasskey().toMutableMap().apply {
+            put("someFutureSecret", "UNKNOWN_MEMBER_SECRET_TEXT")
+            put("someFutureObject", mapOf("nested" to "NESTED_UNKNOWN_SECRET"))
+        }
+        val probe = PasskeyCxfWorkProbe()
+        val p = parsed(PasskeyCxfReader.read(jsonOf(payload).toByteArray(Charsets.UTF_8), probe))
+        assertWorkBuffersErased(probe, "未知成员路径", p.credential.privateKeyPemChars)
+        p.credential.wipeSecrets()
+    }
+
+    /** 语法失败：扫描器已解出的字符串副本在整棵放弃时同样清零。 */
+    @Test
+    fun `二十四 语法失败时已解出的字符串副本也已清零`() {
+        val key = SimpleJson.string(fixturePasskey(), "key").orEmpty()
+        val complete = """{"type":"passkey","rpId":"webauthn.io","key":"$key"}"""
+        val truncated = complete.dropLast(1)
+        val probe = PasskeyCxfWorkProbe()
+        val rejected = PasskeyCxfReader.read(truncated.toByteArray(Charsets.UTF_8), probe) as PasskeyCxfOutcome.Rejected
+        assertEquals(PasskeyCxfReject.MalformedJson, rejected.reason)
+        assertTrue("失败路径也须观察到字符串副本", probe.stringCopies.isNotEmpty())
+        assertWorkBuffersErased(probe, "语法失败路径")
+    }
+
+    /** 字段拒绝（Base64 非法）：拒收前已解码 / 已读取的 AST 副本与 DER 工作数组都清零。 */
+    @Test
+    fun `二十五 字段拒绝时工作数组与已分配副本都已清零`() {
+        val badKey = fixturePasskey().toMutableMap().apply {
+            put("key", Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(20)))
+        }
+        val probe = PasskeyCxfWorkProbe()
+        val rejected = PasskeyCxfReader.read(jsonOf(badKey).toByteArray(Charsets.UTF_8), probe) as PasskeyCxfOutcome.Rejected
+        assertEquals(PasskeyCxfReject.UnsupportedKeyAlgorithm, rejected.reason)
+        assertTrue("DER 工作数组须被观察", probe.derBytes.isNotEmpty())
+        assertWorkBuffersErased(probe, "字段拒绝路径")
+
+        val badCredentialId = mutation { it["credentialId"] = "!!!!" }
+        val second = PasskeyCxfWorkProbe()
+        assertEquals(
+            PasskeyCxfReject.InvalidBase64Url,
+            (PasskeyCxfReader.read(jsonOf(badCredentialId).toByteArray(Charsets.UTF_8), second) as PasskeyCxfOutcome.Rejected).reason
+        )
+        assertWorkBuffersErased(second, "仪式字段拒绝路径")
+    }
+
+    /**
+     * KeePassXC 形拒绝的两条路径：非 ASCII PEM 在算法嗅探阶段即拒；
+     * 而「嗅探通过、逐字节转字符时才发现非 ASCII」则落在 `asciiChars` 的 null 分支
+     * （32 字节原始种子含 `>= 0x80` 字节 ⇒ 嗅探按 Ed25519 收，转字符失败）。
+     * 两条都必须在返回前把 AST 副本与工作缓冲清零。
+     */
+    @Test
+    fun `二十六 KeePassXC形拒绝时字符工作副本也已清零`() {
+        val nonAsciiPem = mapOf(
+            "relyingParty" to "webauthn.io",
+            "credentialId" to "Y3JlZGVudGlhbElkRXhhbXBsZQ",
+            "userHandle" to "aGFuZGxl",
+            "privateKey" to "-----BEGIN PRIVATE KEY-----\n\u00ff\n-----END PRIVATE KEY-----\n"
+        )
+        val probe = PasskeyCxfWorkProbe()
+        val rejected = PasskeyCxfReader.read(jsonOf(nonAsciiPem).toByteArray(Charsets.UTF_8), probe) as PasskeyCxfOutcome.Rejected
+        assertEquals("PEM 解不出 DER ⇒ 算法嗅探失败", PasskeyCxfReject.UnsupportedKeyAlgorithm, rejected.reason)
+        assertWorkBuffersErased(probe, "KeePassXC 形非 ASCII PEM 路径")
+
+        // 30 个 ASCII + 1 个两字节 UTF-8 字符 = 32 字节（嗅探按 Ed25519 种子收），转字符时发现非 ASCII；
+        // 该字符必须是**非空白**（U+00A0 会被嗅探侧的 stripWhitespace 剔除，只剩 30 字节而提前失败）
+        val highByteSeed = mapOf(
+            "relyingParty" to "webauthn.io",
+            "credentialId" to "Y3JlZGVudGlhbElkRXhhbXBsZQ",
+            "userHandle" to "aGFuZGxl",
+            "privateKey" to "A".repeat(30) + "\u00e9"
+        )
+        val second = PasskeyCxfWorkProbe()
+        val seedRejected = PasskeyCxfReader.read(jsonOf(highByteSeed).toByteArray(Charsets.UTF_8), second) as PasskeyCxfOutcome.Rejected
+        assertEquals(
+            "嗅探通过但字符副本含非 ASCII ⇒ 走 asciiChars 的 fail-closed 分支",
+            PasskeyCxfReject.MissingCeremonyField,
+            seedRejected.reason
+        )
+        assertWorkBuffersErased(second, "KeePassXC 形非 ASCII 字符路径")
+    }
+
+    /** 超上限早退：连扫描都不发生，观察器里不得出现任何残留引用。 */
+    @Test
+    fun `二十七 超上限早退不分配任何工作缓冲`() {
+        val probe = PasskeyCxfWorkProbe()
+        val rejected = PasskeyCxfReader.read(ByteArray(PasskeyCxfReader.MAX_IMPORT_PAYLOAD_BYTES + 1), probe)
+        assertEquals(PasskeyCxfReject.PayloadTooLarge, (rejected as PasskeyCxfOutcome.Rejected).reason)
+        assertTrue("早退路径不得进入扫描器", probe.sinkBuffers.isEmpty() && probe.stringCopies.isEmpty())
+    }
+
+    /**
+     * R2 的所有权二选一：PEM 字符工作数组**要么原实例交给草案**（转移，内容有效），
+     * **要么已清零**；不允许既没交出也没擦除。两种形态各测一次。
+     */
+    @Test
+    fun `二十八 PEM字符工作数组在两条形态上都满足转移或清零`() {
+        val cxf = PasskeyCxfWorkProbe()
+        val cxfParsed = parsed(PasskeyCxfReader.read(jsonOf(fixturePasskey()).toByteArray(Charsets.UTF_8), cxf))
+        val cxfPem = cxf.pemChars.singleOrNull() ?: error("CXF 形须观察到一份 PEM 字符数组")
+        assertSame("成功路径必须是**转移**：草案持有同一实例，不做多余副本", cxfPem, cxfParsed.credential.privateKeyPemChars)
+        assertTrue("转移后内容仍须有效", cxfPem.all { it != '0' } || String(cxfPem).startsWith(PEM_HEADER))
+        cxfParsed.credential.wipeSecrets()
+
+        val kpxc = PasskeyCxfWorkProbe()
+        val kpxcPayload = mapOf(
+            "relyingParty" to "webauthn.io",
+            "credentialId" to "Y3JlZGVudGlhbElkRXhhbXBsZQ",
+            "userHandle" to "aGFuZGxl",
+            "privateKey" to String(fixturePasskeyPem(), Charsets.UTF_8)
+        )
+        val kpxcParsed = parsed(PasskeyCxfReader.read(jsonOf(kpxcPayload).toByteArray(Charsets.UTF_8), kpxc))
+        val kpxcPem = kpxc.pemChars.singleOrNull() ?: error("KeePassXC 形须观察到一份 PEM 字符数组")
+        assertSame("KeePassXC 形同样是转移（逐字节转换出的数组直接交付）", kpxcPem, kpxcParsed.credential.privateKeyPemChars)
+        assertTrue("转移后内容仍须有效", String(kpxcPem).startsWith(PEM_HEADER))
+        kpxcParsed.credential.wipeSecrets()
+    }
+
+    /** 负例对照：拒收路径不得把 PEM 字符数组交出去（必须清零）。 */
+    @Test
+    fun `二十九 拒收路径的PEM字符数组一律清零不交出`() {
+        val probe = PasskeyCxfWorkProbe()
+        // finish 之后的拒收不存在，故用「嗅探通过但字符非法」这条能走到 asciiChars 的路径
+        val payload = mapOf(
+            "relyingParty" to "webauthn.io",
+            "credentialId" to "Y3JlZGVudGlhbElkRXhhbXBsZQ",
+            "userHandle" to "aGFuZGxl",
+            "privateKey" to "A".repeat(30) + "\u00a0"
+        )
+        val rejected = PasskeyCxfReader.read(jsonOf(payload).toByteArray(Charsets.UTF_8), probe) as PasskeyCxfOutcome.Rejected
+        assertEquals(PasskeyCxfReject.MissingCeremonyField, rejected.reason)
+        assertWorkBuffersErased(probe, "拒收路径 PEM 字符")
+    }
+
+    /**
+     * 统一断言：观察到的所有工作数组逐字节为零。
+     *
+     * [transferredPem] 是**已转移**给草案的那一份 PEM 字符数组（成功路径传草案实例）：
+     * 按 R2，它属接收方所有，不得被读取器清零；其余 PEM 代次仍须为零。
+     */
+    private fun assertWorkBuffersErased(
+        probe: PasskeyCxfWorkProbe,
+        label: String,
+        transferredPem: CharArray? = null
+    ) {
+        probe.sinkBuffers.forEachIndexed { index, buffer ->
+            assertTrue("$label：第 $index 代 ByteSink 工作缓冲仍有非零字节", buffer.all { it == 0.toByte() })
+        }
+        probe.stringCopies.forEachIndexed { index, copy ->
+            assertTrue("$label：第 $index 份 AST 字符串副本仍有非零字节（递归 wipe 未覆盖）", copy.all { it == 0.toByte() })
+        }
+        probe.derBytes.forEachIndexed { index, der ->
+            assertTrue("$label：第 $index 份私钥 DER 工作数组仍有非零字节", der.all { it == 0.toByte() })
+        }
+        probe.pemChars.forEachIndexed { index, pem ->
+            if (pem === transferredPem) {
+                assertTrue("$label：已转移的 PEM 字符数组不得被读取器清零", String(pem).startsWith(PEM_HEADER))
+            } else {
+                assertTrue("$label：第 $index 份 PEM 字符工作数组仍有非零字节", pem.all { it == '0' })
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 八、AC③：私钥不经 String 的源码级守卫（本片这一层的可证形态）
     // ------------------------------------------------------------------
 
     @Test
     fun `二十 守卫 读取器与扫描器不得把私钥节点转成 String`() {
-        val sources = listOf(READER_SOURCE, SCANNER_SOURCE)
+        val sources = listOf(READER_SOURCE, SCANNER_SOURCE, EXTENSIONS_SOURCE)
         for (path in sources) {
             val file = File(repositoryRoot, path)
             assertTrue("源码文件不存在（是否被重命名/移动）：$path", file.isFile)
@@ -556,6 +762,8 @@ class PasskeyCxfReaderTest {
         const val APPENDIX_RESOURCE = "/passkey-import/cxf-appendix-a-example.json"
         const val READER_SOURCE = "app/src/main/java/com/keepasskey/app/passkey/PasskeyCxfReader.kt"
         const val SCANNER_SOURCE = "app/src/main/java/com/keepasskey/app/passkey/ByteJsonScanner.kt"
+        const val EXTENSIONS_SOURCE = "app/src/main/java/com/keepasskey/app/passkey/PasskeyCxfExtensions.kt"
+        const val PEM_HEADER = "-----BEGIN PRIVATE KEY-----"
 
         /** 私钥类节点被转成 String 的形态（同行内 `key` / `privateKey` / PRF 节点紧邻 asUtf8String） */
         val SECRET_TO_STRING = Regex(

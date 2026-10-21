@@ -3,6 +3,7 @@ package com.keepasskey.app.passkey
 import android.content.Intent
 import com.keepasskey.database.exception.KdbxSessionChangedException
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.withCredentialRequest
 import com.keepasskey.database.session.SessionCredentialTicket
 import javax.inject.Inject
 

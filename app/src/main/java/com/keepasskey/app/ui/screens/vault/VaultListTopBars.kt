@@ -56,6 +56,10 @@ import com.keepasskey.app.R
 
 /**
  * 批量选择操作顶栏
+ *
+ * ISSUE-P3-644：只读会话下三个批量写按钮（全选 / 批量移动 / 批量删除）一律置灰，
+ * 并在操作区说明原因——整改前它们照常可点，控制器在 `launch` 前静默 `return`，
+ * 用户只看到「点了没反应」。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +69,8 @@ internal fun VaultListBatchModeTopBar(
     onSelectAllBatch: () -> Unit,
     onBatchMoveClick: () -> Unit,
     onBatchDelete: () -> Unit,
+    // ISSUE-P3-644：只读会话（VaultListUiState.isReadOnly）禁用三个批量写按钮
+    isReadOnly: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     TopAppBar(
@@ -76,19 +82,29 @@ internal fun VaultListBatchModeTopBar(
             )
         },
         navigationIcon = {
+            // 「取消批量」只退出选择模式、不写库 ⇒ 只读下保持可用
             IconButton(onClick = onClearBatch) {
                 Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.cd_cancel_batch))
             }
         },
         actions = {
-            IconButton(onClick = onSelectAllBatch) {
+            IconButton(onClick = onSelectAllBatch, enabled = !isReadOnly) {
                 Icon(Icons.Default.SelectAll, contentDescription = stringResource(R.string.cd_select_all))
             }
-            IconButton(onClick = onBatchMoveClick) {
+            IconButton(onClick = onBatchMoveClick, enabled = !isReadOnly) {
                 Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = stringResource(R.string.cd_batch_move))
             }
-            IconButton(onClick = onBatchDelete) {
+            IconButton(onClick = onBatchDelete, enabled = !isReadOnly) {
                 Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.cd_batch_delete), tint = MaterialTheme.colorScheme.error)
+            }
+            // ISSUE-P3-644：置灰必须配原因，否则只读用户只看到「坏了」
+            if (isReadOnly) {
+                Text(
+                    text = stringResource(R.string.readonly_save_rejected),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -108,6 +124,11 @@ internal fun VaultListBatchModeTopBar(
  *
  * 扫码项（otpauth 二维码 → 直接创建验证码条目）：[onScanClick] 为 null 时不渲染该项
  * （只读会话隐藏，与写入口同口径）。
+ *
+ * ISSUE-P3-644：[isReadOnly] 为真时**隐藏**「选择」批量入口——批量模式下的移动 / 删除
+ * 在只读会话不可执行，提供入口只会把用户带进一个全是置灰按钮的模式。
+ * 宿主（[VaultListContent]）仍显式传 `onSelectEntriesClick`，隐藏判定收在本组件内，
+ * 与扫码项「由宿主传 null」的既有口径并存不冲突（两条路径都只读 ⇒ 都不渲染）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -127,6 +148,8 @@ internal fun VaultListSearchTopBar(
     onScanClick: (() -> Unit)? = null,
     /** ISSUE-P3-360 AC④a：非空才呈现溢出菜单「选择」项（进入批量模式；回收站内无溢出菜单） */
     onSelectEntriesClick: (() -> Unit)? = null,
+    // ISSUE-P3-644：只读会话隐藏「选择」批量入口（批量写按钮在该会话一律不可执行）
+    isReadOnly: Boolean = false,
     /** ISSUE-P3-439 / ISSUE-P2-544：溢出菜单「高级搜索」项（打开选项对话框） */
     onAdvancedSearchClick: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -255,7 +278,8 @@ internal fun VaultListSearchTopBar(
                             }
                         )
                         // ISSUE-P3-360 AC④a：批量模式的第二入口（首长按之外的可发现路径）
-                        if (onSelectEntriesClick != null) {
+                        // ISSUE-P3-644：只读会话不提供——批量写按钮在该会话一律不可执行
+                        if (onSelectEntriesClick != null && !isReadOnly) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.vault_menu_select_entries)) },
                                 leadingIcon = {
@@ -313,50 +337,4 @@ internal fun VaultListSearchTopBar(
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
     )
-}
-
-// IDE 预览标注：仅开发期在 Android Studio Preview 面板可见，不参与运行时 UI
-@androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun VaultListSearchTopBarPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        VaultListSearchTopBar(
-            searchQuery = "预览",
-            onSearchQueryChange = {},
-            isInsideRecycleBin = false,
-            sortOption = VaultSortOption.NAME_ASC,
-            onSortClick = {},
-            onLockClick = {},
-            onEmptyRecycleBinClick = {},
-            autoActivateSearch = false,
-            onAutoActivateSearchConsumed = {},
-            onKillApp = {}
-        )
-    }
-}
-
-/**
- * `ISSUE-P3-340`：补 `autoActivateSearch = true` 那一态（从搜索入口进来了、搜索框须自动聚焦并弹键盘）。
- * 该态与默认态的差别在**焦点与光标**，只在真机点过一次才看得见；预览虽不模拟键盘，
- * 但至少把「该态有没有把标题挤掉」这一层暴露给导出图。
- */
-@androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏-自动聚焦 - 浅色", showBackground = true)
-@androidx.compose.ui.tooling.preview.Preview(name = "列表搜索顶栏-自动聚焦 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-internal fun VaultListSearchTopBarAutoFocusPreview() {
-    com.keepasskey.app.ui.theme.KeePasskeyTheme {
-        VaultListSearchTopBar(
-            searchQuery = "",
-            onSearchQueryChange = {},
-            isInsideRecycleBin = false,
-            sortOption = VaultSortOption.NAME_ASC,
-            onSortClick = {},
-            onLockClick = {},
-            onEmptyRecycleBinClick = {},
-            autoActivateSearch = true,
-            onAutoActivateSearchConsumed = {},
-            onKillApp = {}
-        )
-    }
 }

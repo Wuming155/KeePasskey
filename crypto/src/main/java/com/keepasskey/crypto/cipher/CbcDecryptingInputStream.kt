@@ -58,7 +58,16 @@ internal class CbcDecryptingInputStream(
      */
     private val ownedSecrets: List<ByteArray> = emptyList(),
     /** direct 形态变换（与 [transform] **二选一**，见 [CbcDirectBlockTransform] KDoc）。 */
-    private val directTransform: CbcDirectBlockTransform? = null
+    private val directTransform: CbcDirectBlockTransform? = null,
+    /**
+     * 仅测试可见：把**进入擦除域的堆缓冲**交给观察回调（回调只用于保留引用，不得产生副作用）。
+     *
+     * 存在理由：本类的 O 类缓冲（读取缓冲、复用输入缓冲、交付缓冲、收尾的头段/末块/去填充结果）
+     * 生命周期都只有一次 `refill`/`close`，若没有观察入口，测试只能断言「明文读对了」，
+     * 无法区分「close 时确实擦除」与「丢引用等 GC」（敏感缓冲所有权契约 R3 明令禁止后者）。
+     * 回调传出的数组**所有权不变**：仍由本流负责擦除，观察方只许读。
+     */
+    private val observeBuffer: ((ByteArray) -> Unit)? = null
 ) : InputStream() {
 
     init {
@@ -114,6 +123,14 @@ internal class CbcDecryptingInputStream(
     private var outPos = 0
     private var eofDone = false
     private var closed = false
+
+    init {
+        // 仅测试可见：实例级缓冲在全部属性初始化后暴露，便于断言 close 兜底擦除
+        observeBuffer?.invoke(buffer)
+        observeBuffer?.invoke(bodyScratch)
+        observeBuffer?.invoke(chain)
+        ownedSecrets.forEach { observeBuffer?.invoke(it) }
+    }
 
     override fun read(): Int {
         val single = ByteArray(1)
@@ -218,6 +235,7 @@ internal class CbcDecryptingInputStream(
             // 首块（尚未扣留，载荷为 chunkSize - 16）等非等长情形：沿用一次分配路径
             transformBlocks(buffer, 0, keep)
         }
+        observeBuffer?.invoke(out)
         outPos = 0
     }
 
@@ -246,6 +264,7 @@ internal class CbcDecryptingInputStream(
         val d = direct!!
         val transformDirect = requireNotNull(directTransform) { "两种变换形态必须二选一" }
         val lastPlain = ByteArray(Pkcs7.BLOCK_SIZE)
+        observeBuffer?.invoke(lastPlain)
         val stripped: ByteArray?
         try {
             d.clear()
@@ -285,30 +304,30 @@ internal class CbcDecryptingInputStream(
     /** byte[] 形态收尾（逐字保留原实现）。 */
     private fun finishTailHeap(tailLength: Int, keep: Int): Boolean {
         val head = transformBlocks(buffer, 0, keep)
-        val lastPlain = transformBlocks(buffer, keep, tailLength)
+        observeBuffer?.invoke(head)
+        var lastPlain: ByteArray? = null
+        var stripped: ByteArray? = null
+        var outputTransferred = false
         try {
-            val stripped = Pkcs7.unpad(lastPlain)
-            if (stripped == null) {
-                // 基线：填充非法 → BadPaddingException → IOException
-                throw IOException("CBC 解密流：PKCS#7 填充非法（密钥错误或数据被篡改）")
-            }
+            lastPlain = transformBlocks(buffer, keep, tailLength)
+            observeBuffer?.invoke(lastPlain)
+            stripped = Pkcs7.unpad(lastPlain)
+                ?: throw IOException("CBC 解密流：PKCS#7 填充非法（密钥错误或数据被篡改）")
+            observeBuffer?.invoke(stripped)
             if (head.isEmpty()) {
                 out = stripped
+                outputTransferred = true
             } else {
-                try {
-                    out = head + stripped
-                } finally {
-                    Arrays.fill(head, 0)
-                    Arrays.fill(stripped, 0)
-                }
+                out = head + stripped
             }
+            observeBuffer?.invoke(out)
             outPos = 0
             return out.isNotEmpty()
-        } catch (t: Throwable) {
-            Arrays.fill(head, 0)
-            throw t
         } finally {
-            Arrays.fill(lastPlain, 0)
+            // 第二次变换或合并抛错时，已分配的 head 同样必须清零。
+            Arrays.fill(head, 0)
+            lastPlain?.fill(0)
+            if (!outputTransferred) stripped?.fill(0)
             Arrays.fill(buffer, 0, tailLength, 0)
         }
     }
@@ -325,6 +344,7 @@ internal class CbcDecryptingInputStream(
     private fun transformBlocks(source: ByteArray, from: Int, to: Int): ByteArray {
         if (to <= from) return EMPTY
         val slice = source.copyOfRange(from, to)
+        observeBuffer?.invoke(slice)
         return try {
             requireNotNull(transform) { "两种变换形态必须二选一" }(key, chain, slice)
         } finally {

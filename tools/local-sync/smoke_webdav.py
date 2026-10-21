@@ -1,48 +1,43 @@
 #!/usr/bin/env python3
-"""一体化 WebDAV 冒烟：子进程拉起 HTTPS WebDAV，等待端口就绪后执行真实协议自测，最后回收。"""
+"""WebDAV 冒烟：独立数据目录 + 按次随机凭据 + 仅 loopback，跑真实协议自测。
+
+ISSUE-P3-650 起不再有源码固定口令，也不再复用 `webdav-data` 目录；
+退出只结束本脚本启动的 PID。
+"""
 import os
-import socket
-import subprocess
 import sys
-import time
 
-import verify_webdav
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-PY = sys.executable
-HERE = os.path.dirname(os.path.abspath(__file__))
-PORT = 9443
-
-
-def wait_port(host, port, timeout=20):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=2):
-                return True
-        except OSError:
-            time.sleep(0.5)
-    return False
+import lab_services  # noqa: E402
+import verify_webdav  # noqa: E402
 
 
 def main():
-    proc = subprocess.Popen([PY, os.path.join(HERE, "run_webdav.py")],
-                            cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1)
+    lab = lab_services.Lab(bind_host=lab_services.LOOPBACK, webdav_port=19443,
+                           s3_port=19010, console_port=19011)
+    print(f"[smoke] 独立目录 {lab.root}（凭据按次随机，值不落日志）")
     try:
-        if not wait_port("localhost", PORT):
+        lab.start_webdav()
+        if not lab_services.wait_port(lab.host_for_client(), lab.webdav_port, timeout=30):
             print("[FATAL] WebDAV 端口未在预期时间内就绪")
-            for line in proc.stdout:
-                print("  >", line.rstrip())
             return 1
+        # 自测脚本只读环境变量：此处把本轮随机凭据与独立根目录传进去
+        os.environ["WEBDAV_HOST"] = lab.host_for_client()
+        os.environ["WEBDAV_PORT"] = str(lab.webdav_port)
+        os.environ["WEBDAV_USER"] = lab.webdav_user
+        os.environ["WEBDAV_PASSWORD"] = lab.webdav_password
+        os.environ["WEBDAV_CERT"] = lab_services.CERT_PATH
+        verify_webdav.HOST = lab.host_for_client()
+        verify_webdav.PORT = lab.webdav_port
+        verify_webdav.USER = lab.webdav_user
+        verify_webdav.PASSWORD = lab.webdav_password
+        verify_webdav.CERT = lab_services.CERT_PATH
         print("[smoke] WebDAV 已就绪，开始协议自测")
-        ok = verify_webdav.run_checks()
-        return 0 if ok else 1
+        return 0 if verify_webdav.run_checks() else 1
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        lab.stop_all()
+        lab.cleanup()
 
 
 if __name__ == "__main__":

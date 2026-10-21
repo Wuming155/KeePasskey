@@ -13,7 +13,13 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Optional AVD integration test against a separately running S3-compatible HTTP service. */
+/**
+ * Optional AVD integration test against a separately running S3-compatible HTTP service.
+ *
+ * ISSUE-P2-655 / P3-650：服务端凭据可由 runner 参数 `s3AccessKey` / `s3SecretKey` 提供——
+ * 联调脚本按次生成随机凭据时，本用例才能与之对齐；未提供时退回仓库内既有的**显式测试
+ * fixture**（仅用于本地隔离服务，不进入生产工具，也不作为任何默认口令）。
+ */
 @RunWith(AndroidJUnit4::class)
 class S3IndependentServiceDeviceTest {
 
@@ -22,18 +28,24 @@ class S3IndependentServiceDeviceTest {
 
     @Before
     fun setUp() {
-        endpoint = InstrumentationRegistry.getArguments().getString(ARG_ENDPOINT).orEmpty()
+        val arguments = InstrumentationRegistry.getArguments()
+        endpoint = arguments.getString(ARG_ENDPOINT).orEmpty()
         assumeTrue("Provide -Pandroid.testInstrumentationRunnerArguments.$ARG_ENDPOINT", !endpoint.isNullOrBlank())
-        provider = S3SyncProvider(
-            endpoint = endpoint,
-            bucketName = BUCKET,
-            region = REGION,
-            accessKeyId = ACCESS_KEY.toCharArray(),
-            secretAccessKey = SECRET_KEY.toCharArray(),
-            usePathStyle = true,
-            client = OkHttpClient()
+        provider = newProvider(
+            access = arguments.getString(ARG_ACCESS_KEY) ?: ACCESS_KEY,
+            secret = arguments.getString(ARG_SECRET_KEY) ?: SECRET_KEY
         )
     }
+
+    private fun newProvider(access: String, secret: String): S3SyncProvider = S3SyncProvider(
+        endpoint = endpoint,
+        bucketName = BUCKET,
+        region = REGION,
+        accessKeyId = access.toCharArray(),
+        secretAccessKey = secret.toCharArray(),
+        usePathStyle = true,
+        client = OkHttpClient()
+    )
 
     @After
     fun tearDown() {
@@ -86,8 +98,12 @@ class S3IndependentServiceDeviceTest {
 
     private companion object {
         const val ARG_ENDPOINT = "s3Endpoint"
+        const val ARG_ACCESS_KEY = "s3AccessKey"
+        const val ARG_SECRET_KEY = "s3SecretKey"
         const val BUCKET = "kp-device-validation"
         const val REGION = "us-east-1"
+
+        /** 显式测试 fixture（仅用于本地隔离服务；生产工具与本用例默认值都不来自此常量）。 */
         const val ACCESS_KEY = "DEVICEACCESSKEY"
         const val SECRET_KEY = "devicesecretkey"
         const val CLOCK_TOLERANCE_MILLIS = 5 * 60 * 1000L

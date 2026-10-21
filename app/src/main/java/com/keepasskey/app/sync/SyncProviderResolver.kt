@@ -5,12 +5,6 @@ import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.SyncTransferOptions
 import com.keepasskey.sync.provider.SyncProvider
-import com.keepasskey.sync.s3.S3SyncProvider
-import com.keepasskey.sync.webdav.WebDavSyncProvider
-import dagger.Binds
-import dagger.Module
-import dagger.hilt.InstallIn
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -151,6 +145,100 @@ class SyncProviderResolver @Inject constructor(
     }
 
     /**
+     * 从已保存回执创建 Provider。每次 use 都重新解封独立凭据副本，但端点、路径与凭据密文
+     * 固定来自回执，不会重新读取当前全局配置。
+     */
+    private fun resolveProviderWithSnapshot(
+        defaultFileName: String,
+        snapshot: SyncProviderConfigSnapshot
+    ): ResolvedProviderTarget? {
+        return when (snapshot.provider) {
+        CloudSyncProvider.WEBDAV -> {
+            val cfg = syncCredentialsStore.loadWebDavConfig(snapshot) ?: return null
+            try {
+                if (cfg.url.isBlank()) return null
+                val remotePath = cfg.remotePath.trim().takeIf(String::isNotBlank)
+                    ?.let { if (it.startsWith("/")) it else "/$it" }
+                    ?: "/$defaultFileName"
+                val target = SyncProviderTarget(
+                    remotePath = remotePath,
+                    identity = syncCredentialsStore.targetIdentity(
+                        CloudSyncProvider.WEBDAV.name,
+                        cfg.url,
+                        cfg.username,
+                        remotePath
+                    )
+                )
+                val provider = providerFactory.createWebDav(
+                    serverUrl = cfg.url,
+                    username = cfg.username,
+                    passwordChars = cfg.password,
+                    networkOptions = SyncNetworkOptions(),
+                    transferOptions = transferOptions()
+                )
+                ResolvedProviderTarget(provider, target)
+            } finally {
+                cfg.password.fill('0')
+            }
+        }
+        CloudSyncProvider.S3_COMPATIBLE -> {
+            val cfg = syncCredentialsStore.loadS3Config(snapshot) ?: return null
+            try {
+                if (cfg.endpoint.isBlank() || cfg.bucket.isBlank()) return null
+                val accessKeyClone = cfg.accessKey.clone()
+                var secretKeyClone: CharArray? = null
+                var ownershipTransferred = false
+                try {
+                    val secretForProvider = cfg.secretKey.clone().also { secretKeyClone = it }
+                    val objectKey = cfg.objectKey.trim().takeIf(String::isNotBlank) ?: defaultFileName
+                    val target = SyncProviderTarget(
+                        remotePath = objectKey,
+                        identity = syncCredentialsStore.targetIdentity(
+                            CloudSyncProvider.S3_COMPATIBLE.name,
+                            cfg.endpoint,
+                            cfg.bucket,
+                            cfg.region,
+                            objectKey,
+                            cfg.usePathStyle.toString()
+                        )
+                    )
+                    val provider = providerFactory.createS3(
+                        endpoint = cfg.endpoint,
+                        bucketName = cfg.bucket,
+                        region = cfg.region,
+                        accessKeyId = accessKeyClone,
+                        secretAccessKey = secretForProvider,
+                        usePathStyle = cfg.usePathStyle,
+                        networkOptions = SyncNetworkOptions(),
+                        initialClockOffsetMillis = snapshot.s3ClockOffsetMillis,
+                        clockOffsetUpdater = { offset ->
+                            try {
+                                syncCredentialsStore.saveS3ClockOffsetForSnapshot(snapshot, offset)
+                            } catch (failure: Exception) {
+                                debugLog.warn(
+                                    SYNC_LOG_TAG,
+                                    "S3 时钟偏移持久化失败: ${failure.javaClass.simpleName}"
+                                )
+                            }
+                        }
+                    )
+                    ownershipTransferred = true
+                    ResolvedProviderTarget(provider, target)
+                } finally {
+                    if (!ownershipTransferred) {
+                        accessKeyClone.fill('0')
+                        secretKeyClone?.fill('0')
+                    }
+                }
+            } finally {
+                cfg.accessKey.fill('0')
+                cfg.secretKey.fill('0')
+            }
+        }
+        }
+    }
+
+    /**
      * 在单一拥有式作用域内使用 Provider。
      *
      * 测试覆写是借用依赖，作用域不会释放它；生产 Provider 从构造成功起归本作用域所有，
@@ -177,6 +265,55 @@ class SyncProviderResolver @Inject constructor(
         } finally {
             providerFactory.releaseOwned(provider)
         }
+    }
+
+    /** 使用保存回执构造独立 Provider；生产 Provider 在作用域退出时照常释放。 */
+    internal suspend fun <T> useProviderAtSnapshot(
+        snapshot: SyncProviderConfigSnapshot,
+        testOverride: SyncProvider? = null,
+        block: suspend (SyncProvider) -> T
+    ): T? = useProviderWithTargetAtSnapshot(
+        defaultFileName = DEFAULT_REMOTE_FILE_NAME,
+        snapshot = snapshot,
+        testOverride = testOverride
+    ) { provider, _ -> block(provider) }
+
+    /** 同一份回执用于周期目标和 Provider，生产 Provider 仍由本次 use 独占并释放。 */
+    internal suspend fun <T> useProviderWithTargetAtSnapshot(
+        defaultFileName: String,
+        snapshot: SyncProviderConfigSnapshot,
+        testOverride: SyncProvider? = null,
+        block: suspend (SyncProvider, SyncProviderTarget?) -> T
+    ): T? {
+        if (testOverride != null) return block(testOverride, null)
+
+        var providerBuiltBeforeDispatch: ResolvedProviderTarget? = null
+        val resolved = try {
+            withContext(Dispatchers.IO) {
+                resolveProviderWithSnapshot(defaultFileName, snapshot)
+                    .also { providerBuiltBeforeDispatch = it }
+            }
+        } catch (failure: Throwable) {
+            providerBuiltBeforeDispatch?.provider?.let(providerFactory::releaseOwned)
+            throw failure
+        } ?: return null
+        return try {
+            block(resolved.provider, resolved.target)
+        } finally {
+            providerFactory.releaseOwned(resolved.provider)
+        }
+    }
+
+    /** 明确流程可按需绑定保存回执；null 分支保持既有普通同步解析语义。 */
+    internal suspend fun <T> useProviderWithTargetForConfig(
+        defaultFileName: String,
+        testOverride: SyncProvider?,
+        snapshot: SyncProviderConfigSnapshot?,
+        block: suspend (SyncProvider, SyncProviderTarget?) -> T
+    ): T? = if (snapshot == null) {
+        useProviderWithTarget(defaultFileName, testOverride, block)
+    } else {
+        useProviderWithTargetAtSnapshot(defaultFileName, snapshot, testOverride, block)
     }
 
     /**
@@ -257,79 +394,4 @@ class SyncProviderResolver @Inject constructor(
         val provider: SyncProvider,
         val target: SyncProviderTarget
     )
-}
-
-/** 生产 Provider 构造与拥有实例的释放策略；测试可替换此接口并检查相同 CharArray 所有权边界。 */
-interface SyncProviderFactory {
-    fun createWebDav(
-        serverUrl: String,
-        username: String,
-        passwordChars: CharArray,
-        networkOptions: SyncNetworkOptions,
-        transferOptions: SyncTransferOptions
-    ): SyncProvider
-
-    fun createS3(
-        endpoint: String,
-        bucketName: String,
-        region: String,
-        accessKeyId: CharArray,
-        secretAccessKey: CharArray,
-        usePathStyle: Boolean,
-        networkOptions: SyncNetworkOptions,
-        initialClockOffsetMillis: Long,
-        clockOffsetUpdater: (Long) -> Unit
-    ): SyncProvider
-
-    fun releaseOwned(provider: SyncProvider)
-}
-
-@Singleton
-class ProductionSyncProviderFactory @Inject constructor() : SyncProviderFactory {
-    override fun createWebDav(
-        serverUrl: String,
-        username: String,
-        passwordChars: CharArray,
-        networkOptions: SyncNetworkOptions,
-        transferOptions: SyncTransferOptions
-    ): SyncProvider = WebDavSyncProvider(
-        serverUrl = serverUrl,
-        username = username,
-        passwordChars = passwordChars,
-        networkOptions = networkOptions,
-        transferOptions = transferOptions
-    )
-
-    override fun createS3(
-        endpoint: String,
-        bucketName: String,
-        region: String,
-        accessKeyId: CharArray,
-        secretAccessKey: CharArray,
-        usePathStyle: Boolean,
-        networkOptions: SyncNetworkOptions,
-        initialClockOffsetMillis: Long,
-        clockOffsetUpdater: (Long) -> Unit
-    ): SyncProvider = S3SyncProvider(
-        endpoint = endpoint,
-        bucketName = bucketName,
-        region = region,
-        accessKeyId = accessKeyId,
-        secretAccessKey = secretAccessKey,
-        usePathStyle = usePathStyle,
-        networkOptions = networkOptions,
-        initialClockOffsetMillis = initialClockOffsetMillis,
-        clockOffsetUpdater = clockOffsetUpdater
-    )
-
-    override fun releaseOwned(provider: SyncProvider) {
-        (provider as? S3SyncProvider)?.clearCredentials()
-    }
-}
-
-@Module
-@InstallIn(SingletonComponent::class)
-abstract class SyncProviderFactoryBinding {
-    @Binds
-    abstract fun bindSyncProviderFactory(factory: ProductionSyncProviderFactory): SyncProviderFactory
 }

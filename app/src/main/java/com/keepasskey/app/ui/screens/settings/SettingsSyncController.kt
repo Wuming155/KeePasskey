@@ -2,10 +2,11 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
-import com.keepasskey.app.sync.userText
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.sync.SyncOutcome
+import com.keepasskey.app.sync.userText
+import com.keepasskey.app.sync.SyncProviderConfigSnapshot
 import com.keepasskey.app.sync.launchGuarded
 import com.keepasskey.app.ui.model.RelativeTimeFormatter
 import com.keepasskey.app.ui.model.UiMessage
@@ -85,6 +86,28 @@ internal class SettingsSyncController(
     )
 
     private val credentialForm = SettingsSyncCredentialForm(syncCredentialsStore, syncStateFlow)
+    /** 保存回执与预填通道的归属（拆分自本类，语义原样保留）。 */
+    private val configSaver = SettingsSyncConfigSaver(syncStateFlow, credentialForm)
+    /** 「保存后测连 + 同步」的编排（拆分自本类，语义原样保留）。 */
+    private val savedFlow = SettingsSyncSavedFlow(
+        coordinator = syncCoordinator,
+        state = syncStateFlow,
+        scope = scope,
+        configSaver = configSaver,
+        onFailure = ::onSyncFailure,
+        onRecoveryRefresh = { refreshSyncRecoveryRequired() },
+        formatTimestamp = ::formatSyncTimestamp,
+        clearBusyIfStillBusy = ::clearSyncBusyIfStillBusy
+    )
+    /** 待恢复采纳的探测与用户处置（拆分自本类，语义原样保留）。 */
+    private val recovery = SettingsSyncRecovery(
+        syncCoordinator = syncCoordinator,
+        state = syncStateFlow,
+        strings = strings,
+        scope = scope,
+        onFailure = ::onSyncFailure,
+        formatTimestamp = ::formatSyncTimestamp
+    )
 
     /**
      * ISSUE-P2-406：同步 UI 水合（wifi 偏好回填 + 凭据预填恢复 + 封印等级探测）。
@@ -100,64 +123,29 @@ internal class SettingsSyncController(
         }
     }
 
-    private suspend fun refreshSyncRecoveryRequired() {
-        val required = syncCoordinator.hasPendingUserRecoveryForActiveVault()
-        val canKeepLocal = syncCoordinator.hasPendingAdoptionRecoveryForActiveVault()
-        syncStateFlow.update {
-            it.copy(syncRecoveryRequired = required, syncRecoveryCanKeepLocal = canKeepLocal)
-        }
-    }
+    private suspend fun refreshSyncRecoveryRequired() = recovery.refresh()
 
     /** User-confirmed recovery: retain the current local database and conditionally publish it. */
-    fun recoverPendingSyncByKeepingLocal() {
-        if (syncStateFlow.value.isSyncing) return
-        val provider = syncStateFlow.value.provider
-        scope.launchGuarded(onFailure = ::onSyncFailure) {
-            syncStateFlow.update {
-                it.copy(
-                    isSyncing = true,
-                    syncFeedbackMessage = UiMessage(R.string.sync_recovery_uploading, listOf(provider.protocol))
-                )
-            }
-            val outcome = syncCoordinator.recoverPendingAcceptanceByPublishingLocal()
-            refreshSyncRecoveryRequired()
-            val succeeded = outcome is SyncOutcome.UploadedLocal
-            val feedback = if (succeeded) {
-                UiMessage(R.string.sync_recovery_upload_complete, listOf(provider.protocol))
-            } else if (outcome is SyncOutcome.Error) {
-                UiMessage(R.string.sync_feedback_error, listOf(outcome.userText))
-            } else {
-                UiMessage(R.string.sync_feedback_error, listOf(strings.get(R.string.sync_error_recovery_required)))
-            }
-            syncStateFlow.update {
-                it.copy(
-                    isSyncing = false,
-                    syncFeedbackMessage = feedback,
-                    lastSyncTimeText = if (succeeded) formatSyncTimestamp() else it.lastSyncTimeText,
-                    isConnectionVerified = if (succeeded) true else it.isConnectionVerified
-                )
-            }
-        }
-    }
+    fun recoverPendingSyncByKeepingLocal() = recovery.keepLocal()
 
     val state: StateFlow<SyncUiState> = syncStateFlow.asStateFlow()
 
-    /** Wave 15 整改：明文一次性预填通道（见 [SettingsSyncCredentialForm]）。 */
-    val webdavPasswordPrefill: StateFlow<CharArray?> get() = credentialForm.webdavPasswordPrefill
-    val s3SecretKeyPrefill: StateFlow<CharArray?> get() = credentialForm.s3SecretKeyPrefill
-    val s3AccessKeyPrefill: StateFlow<CharArray?> get() = credentialForm.s3AccessKeyPrefill
+    /** 明文一次性预填通道与配置保存回执（见 [SettingsSyncConfigSaver]）。 */
+    val webdavPasswordPrefill: StateFlow<CharArray?> get() = configSaver.webdavPasswordPrefill
+    val s3SecretKeyPrefill: StateFlow<CharArray?> get() = configSaver.s3SecretKeyPrefill
+    val s3AccessKeyPrefill: StateFlow<CharArray?> get() = configSaver.s3AccessKeyPrefill
 
-    fun clearWebDavPasswordPrefill() = credentialForm.clearWebDavPasswordPrefill()
+    fun clearWebDavPasswordPrefill() = configSaver.clearWebDavPasswordPrefill()
 
-    fun clearS3SecretKeyPrefill() = credentialForm.clearS3SecretKeyPrefill()
+    fun clearS3SecretKeyPrefill() = configSaver.clearS3SecretKeyPrefill()
 
     /** ISSUE-P2-01：用户开始编辑 AccessKey 后终结预填通道生命周期（语义同上） */
-    fun clearS3AccessKeyPrefill() = credentialForm.clearS3AccessKeyPrefill()
+    fun clearS3AccessKeyPrefill() = configSaver.clearS3AccessKeyPrefill()
 
     /** Wave 15 / ISSUE-P2-01：凭据恢复（语义见 [SettingsSyncCredentialForm.restoreSyncCredentials]）。 */
-    fun restoreSyncCredentials() = credentialForm.restoreSyncCredentials()
+    fun restoreSyncCredentials() = configSaver.restore()
 
-    fun setSyncProvider(provider: CloudSyncProvider) = credentialForm.setSyncProvider(provider)
+    fun setSyncProvider(provider: CloudSyncProvider) = configSaver.setProvider(provider)
 
     /** Wave 15 / Wave 14：WebDAV 配置保存（借用语义 + HTTPS 强制校验），返回是否成功。 */
     fun updateWebDavConfig(
@@ -165,7 +153,7 @@ internal class SettingsSyncController(
         username: String,
         password: CharArray,
         remotePath: String
-    ): Boolean = credentialForm.updateWebDavConfig(url, username, password, remotePath)
+    ): Boolean = configSaver.updateWebDav(url, username, password, remotePath)
 
     /** Wave 15 / ISSUE-P2-01：S3 配置保存（AccessKey 与 SecretKey 均借用语义），返回是否成功。 */
     fun updateS3Config(
@@ -176,9 +164,7 @@ internal class SettingsSyncController(
         secretKey: CharArray,
         objectKey: String,
         usePathStyle: Boolean = syncStateFlow.value.s3UsePathStyle
-    ): Boolean = credentialForm.updateS3Config(
-        endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
-    )
+    ): Boolean = configSaver.updateS3(endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle)
 
     /**
      * ISSUE-P3-272：自动同步总开关改走进阶偏好统一通道（内存快照 + 持久化原子完成）——
@@ -201,6 +187,9 @@ internal class SettingsSyncController(
     fun triggerSync() {
         if (syncStateFlow.value.isSyncing) return
         val provider = syncStateFlow.value.provider
+        // 本轮开始时的保存修订：期间若又保存了新配置，本轮的成功结论只对旧配置成立，
+        // 不得把新配置标成已验证（ISSUE-P2-652 的同一判据，普通同步入口此前缺失）。
+        val revisionAtStart = configSaver.latestRevisionOrNull()
         // ISSUE-P0-531：同步编排段异常不得逃逸杀进程（见 launchGuarded KDoc），失败即复位 isSyncing
         scope.launchGuarded(onFailure = ::onSyncFailure) {
             syncStateFlow.update {
@@ -209,49 +198,37 @@ internal class SettingsSyncController(
                     syncFeedbackMessage = UiMessage(R.string.sync_feedback_connecting, listOf(provider.protocol))
                 )
             }
-
-            val outcome = syncCoordinator.syncNow()
-            refreshSyncRecoveryRequired()
-            val feedback = when (outcome) {
-                is SyncOutcome.UpToDate -> UiMessage(
-                    R.string.sync_feedback_done,
-                    listOf(provider.protocol),
-                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
-                )
-                is SyncOutcome.UploadedLocal -> UiMessage(
-                    R.string.sync_feedback_uploaded,
-                    listOf(provider.protocol),
-                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
-                )
-                is SyncOutcome.MergedAndUploaded -> UiMessage(
-                    R.string.sync_feedback_merged,
-                    listOf(provider.protocol),
-                    durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
-                )
-                // ISSUE-P1-591：远端已接受本轮上传版本，但本地仍有未同步修改——如实提示，不谎报已同步
-                is SyncOutcome.LocalPendingChanges -> UiMessage(R.string.sync_feedback_local_pending)
-                is SyncOutcome.ConflictNeedsUser -> UiMessage(R.string.sync_feedback_conflict)
-                // ISSUE-P2-291 AC②：绑定拦截只提示，确认入口在库列表页（下拉刷新触发），
-                // 设置页不提供第二处「整库覆盖」闸门
-                is SyncOutcome.VaultBindingMismatch -> UiMessage(R.string.sync_vault_binding_mismatch)
-                is SyncOutcome.Offline -> UiMessage(R.string.sync_feedback_offline)
-                // ISSUE-P3-550：经 [SyncOutcome.Error.userText] 命名出口取文案
-                is SyncOutcome.Error -> UiMessage(R.string.sync_feedback_error, listOf(outcome.userText))
-            }
-            // H1 整改：syncLastTime 由真实同步完成时刻填充，不再展示写死的演示文案
-            val syncedNow = outcome is SyncOutcome.UpToDate ||
-                    outcome is SyncOutcome.UploadedLocal ||
-                    outcome is SyncOutcome.MergedAndUploaded
-            syncStateFlow.update {
-                it.copy(
-                    isSyncing = false,
-                    syncFeedbackMessage = feedback,
-                    lastSyncTimeText = if (syncedNow) formatSyncTimestamp() else syncStateFlow.value.lastSyncTimeText,
-                    // 成功同步即视为连接可用；失败/冲突/离线不置位
-                    isConnectionVerified = if (syncedNow) true else it.isConnectionVerified
-                )
+            try {
+                val outcome = syncCoordinator.syncNow()
+                refreshSyncRecoveryRequired()
+                val feedback = syncOutcomeFeedback(outcome, provider.protocol)
+                // H1 整改：syncLastTime 由真实同步完成时刻填充，不再展示写死的演示文案
+                val syncedNow = outcome.isSuccessfulSync()
+                val revisionStillCurrent = configSaver.matchesLatest(revisionAtStart)
+                syncStateFlow.update {
+                    it.copy(
+                        isSyncing = false,
+                        syncFeedbackMessage = feedback,
+                        lastSyncTimeText = if (syncedNow) formatSyncTimestamp() else it.lastSyncTimeText,
+                        // 成功同步即视为连接可用；失败/冲突/离线不置位。
+                        // 迟到的成功结论不得把期间新保存的配置标成已验证。
+                        isConnectionVerified = if (syncedNow && revisionStillCurrent) {
+                            true
+                        } else {
+                            it.isConnectionVerified
+                        }
+                    )
+                }
+            } finally {
+                // 协程取消（锁库 / 作用域销毁）不经 onFailure；不在这里复位，指示器会永久停在「同步中」。
+                clearSyncBusyIfStillBusy()
             }
         }
+    }
+
+    /** 取消路径的忙态复位：只在仍为 true 时写回，避免覆盖并发收尾已写入的终态。 */
+    private fun clearSyncBusyIfStillBusy() {
+        syncStateFlow.update { if (it.isSyncing) it.copy(isSyncing = false) else it }
     }
 
     /**
@@ -352,6 +329,11 @@ internal class SettingsSyncController(
      * ISSUE-P3-257：实现体随 KDoc 自 `SettingsViewModel` 整体下沉，公开 API 形状不变。
      */
     fun verifyConnectionThenSync() {
+        val savedSnapshot = configSaver.consumeSnapshot()
+        if (savedSnapshot != null) {
+            verifyAndSyncSavedConfiguration(savedSnapshot)
+            return
+        }
         val state = syncStateFlow.value
         if (state.isSyncing) return
         if (state.isConnectionVerified) {
@@ -366,6 +348,10 @@ internal class SettingsSyncController(
             }
         }
     }
+
+    /** ISSUE-P2-652：以保存回执执行测连 + 同步（实现见 [SettingsSyncSavedFlow]）。 */
+    private fun verifyAndSyncSavedConfiguration(snapshot: SyncProviderConfigSnapshot) =
+        savedFlow.run(snapshot)
 
     fun clearSyncFeedbackMessage() {
         syncStateFlow.update { it.copy(syncFeedbackMessage = null) }

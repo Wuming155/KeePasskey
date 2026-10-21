@@ -26,8 +26,41 @@ import java.io.ByteArrayOutputStream
  * 同属本模块，`internal` 即三处调用方的共用可见性；无跨模块消费者，故不扩为 `public`。
  * 所有权登记见 `docs/architecture/敏感缓冲所有权契约.md` §4 #10。
  */
-internal class WipableByteArrayOutputStream(initialSize: Int = DEFAULT_SIZE) :
+internal class WipableByteArrayOutputStream(
+    initialSize: Int = DEFAULT_SIZE,
+    private val observeBuffer: ((ByteArray) -> Unit)? = null
+) :
     ByteArrayOutputStream(initialSize) {
+
+    init { observeBuffer?.invoke(buf) }
+
+    @Synchronized
+    override fun write(value: Int) {
+        ensureWipableCapacity(count.toLong() + 1)
+        buf[count++] = value.toByte()
+    }
+
+    @Synchronized
+    override fun write(bytes: ByteArray, offset: Int, length: Int) {
+        if (offset < 0 || length < 0 || offset > bytes.size - length) throw IndexOutOfBoundsException()
+        ensureWipableCapacity(count.toLong() + length)
+        bytes.copyInto(buf, count, offset, offset + length)
+        count += length
+    }
+
+    /** 父类扩容会直接遗弃旧数组；替换前显式清零旧缓冲，覆盖所有容量代次。 */
+    private fun ensureWipableCapacity(required: Long) {
+        if (required > Int.MAX_VALUE) throw OutOfMemoryError("输出缓冲超出数组容量")
+        if (required <= buf.size) return
+        val capacity = maxOf(required, buf.size.toLong() * 2, DEFAULT_SIZE.toLong())
+            .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val previous = buf
+        val expanded = ByteArray(capacity)
+        previous.copyInto(expanded, endIndex = count)
+        previous.fill(0)
+        buf = expanded
+        observeBuffer?.invoke(expanded)
+    }
 
     /**
      * 清零内部缓冲并复位计数。

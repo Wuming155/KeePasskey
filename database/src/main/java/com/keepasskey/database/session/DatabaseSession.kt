@@ -128,12 +128,8 @@ class DatabaseSession(
         ticket: SessionCredentialTicket? = core.credentialTicket
     ): SessionCredentialRequest = SessionCredentialRequest(ticket)
 
-    /** 传播票据而不获取 mutex；实际改树和写盘各自在原有临界区内复核。 */
-    suspend fun <T> withCredentialRequest(request: SessionCredentialRequest, block: suspend () -> T): T {
-        val enclosing = currentCoroutineContext()[SessionCredentialRequest]
-        check(enclosing == null || enclosing === request) { "禁止嵌套覆盖已受理凭据请求" }
-        return withContext(request) { block() }
-    }
+    // 请求传播与续用入口见同包 `SessionCredentialRequestScope.kt`
+    // （`withCredentialRequest` / `withCredentialRequestScope` / `currentRequest`）。
 
     /**
      * 本地收尾的窄临界区；调用者须限时。闭包只可同步维护本地封印存储，禁止重入数据库、
@@ -414,7 +410,8 @@ class DatabaseSession(
      * ISSUE-P3-305：实现下沉 [SessionPersistence.exportToBytes]（逐行搬运）。
      */
     suspend fun exportToBytes(): KdbxResult<ByteArray> = persistence.exportToBytes()
-
+    suspend fun captureEncryptedSnapshot() = persistence.captureEncryptedSnapshot()
+    suspend fun copyPreparedSnapshot(expected: KdbxDatabase, prepared: PreparedSerializedSave) = persistence.copyPreparedSnapshot(expected, prepared)
     /**
      * TASK-13 整改：导出会话绑定的密钥文件原始字节（SAF 导出用）。
      * 缓存的是用户导入时的密钥文件原件字节（克隆语义）；

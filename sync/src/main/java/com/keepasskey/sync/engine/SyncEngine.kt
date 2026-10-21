@@ -212,11 +212,7 @@ class SyncEngine(
             baseVersionHash = baseVersionHash
         )
 
-        if (!cache.hasLocalChanges(remotePath)) {
-            openCachedWithoutLocalChanges(remotePath, cachedBytes, baseEtag, baseVersionHash, remoteProbe, remoteEtag)
-        } else {
-            openCachedWithLocalChanges(remotePath, cachedBytes, state?.localVersion, baseEtag, remoteProbe, remoteEtag)
-        }
+        openCachedBranch(remotePath, cachedBytes, baseEtag, baseVersionHash, remoteProbe, remoteEtag)
     }
 
     /** [openRemote] 分支 1：未缓存 -> 下载 + 写缓存 + 基线设为远端 ETag。 */

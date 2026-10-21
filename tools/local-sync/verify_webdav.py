@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """对本地 HTTPS WebDAV 做真实协议自测（PROPFIND/PUT/GET/MOVE/DELETE）。
 使用 certs/cert.pem 建立真实 TLS 信任（模拟 App 端证书验证）。
-可在 verify 模式下直接运行，或由 smoke 脚本导入 run_checks()。"""
+可在 verify 模式下直接运行，或由 smoke 脚本导入 run_checks()。
+
+ISSUE-P3-650：**不得**回退到源码固定测试口令。凭据只能由环境提供
+（`WEBDAV_USER` / `WEBDAV_PASSWORD`，联调脚本按次随机生成）；缺失即拒绝运行。
+"""
 import base64
 import os
 import ssl
 import http.client
 
-HOST = "localhost"
-PORT = 9443
-USER = os.environ.get("WEBDAV_USER", "tester")
-PASSWORD = os.environ.get("WEBDAV_PASSWORD", "tester123")
-CERT = os.path.abspath("certs/cert.pem")
+HOST = os.environ.get("WEBDAV_HOST", "localhost")
+PORT = int(os.environ.get("WEBDAV_PORT", "9443"))
+USER = os.environ.get("WEBDAV_USER")
+PASSWORD = os.environ.get("WEBDAV_PASSWORD")
+CERT = os.path.abspath(os.environ.get("WEBDAV_CERT", "certs/cert.pem"))
+
+
+def _require_credentials():
+    if not USER or not PASSWORD:
+        raise SystemExit("[FATAL] 请通过 WEBDAV_USER / WEBDAV_PASSWORD 提供联调凭据（不再有固定默认口令）")
 
 
 def _conn():
@@ -34,6 +43,7 @@ def _req(method, path, body=None, headers=None):
 
 
 def run_checks():
+    _require_credentials()
     ok = True
 
     def check(name, cond, extra=""):
@@ -60,7 +70,8 @@ def run_checks():
     etag_val = m.group(1).strip().strip('"') if m else ""
     check("PROPFIND 文件含 ETag(响应体)", st in (207, 200) and etag_val, f"HTTP {st} ETag={etag_val}")
 
-    st, _, _ = _req("MOVE", "/test.kdbx", headers={"Destination": "https://localhost:9443/test-moved.kdbx", "Overwrite": "T"})
+    st, _, _ = _req("MOVE", "/test.kdbx",
+                    headers={"Destination": f"https://{HOST}:{PORT}/test-moved.kdbx", "Overwrite": "T"})
     check("MOVE 原子重命名", st in (201, 204), f"HTTP {st}")
 
     st, _, _ = _req("DELETE", "/test-moved.kdbx")

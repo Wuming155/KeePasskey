@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
 import com.keepasskey.app.sync.SyncCredentialsStore
+import com.keepasskey.app.sync.SyncProviderConfigSnapshot
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -112,15 +113,17 @@ internal class SettingsSyncCredentialForm(
     }
 
     /**
-     * Wave 15 整改：密码以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
-     * 返回保存结果——Wave 14 https 校验拒绝或 Wave 15 凭据封印失败时如实回传 false 并上浮反馈，
-     * 不再无条件谎报「已保存」。
+     * Wave 15 整改：密码以 [CharArray] **所有权转移**方式提交——表单传入的是自己草稿的独立副本
+     * （见 `withSyncCredentialSubmissionCopy`），本方法消费并擦除的是该副本，不会动表单草稿；
+     * 明文不再回写状态流。返回保存结果——Wave 14 https 校验拒绝或 Wave 15 凭据封印失败时
+     * 如实回传 false 并上浮反馈，不再无条件谎报「已保存」。
      */
     fun updateWebDavConfig(
         url: String,
         username: String,
         password: CharArray,
-        remotePath: String
+        remotePath: String,
+        onSavedSnapshot: (SyncProviderConfigSnapshot) -> Unit = {}
     ): Boolean {
         // Wave 14 全站强制 HTTPS：保存时即时校验端点（fail-fast），
         // 显式 http:// 直接拒绝并反馈；无 scheme 输入自动归一化为 https://
@@ -132,21 +135,26 @@ internal class SettingsSyncCredentialForm(
             password.fill('0')
             return false
         }
-        val saved = syncCredentialsStore.saveWebDavConfig(normalizedUrl, username, password, remotePath)
+        val snapshot = syncCredentialsStore.saveWebDavConfigWithSnapshot(
+            normalizedUrl, username, password, remotePath
+        )
         password.fill('0')
-        if (!saved) {
+        if (snapshot == null) {
             state.update {
                 it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
             }
             return false
         }
+        onSavedSnapshot(snapshot)
         state.update {
             it.copy(
                 webdavUrl = normalizedUrl,
                 webdavUsername = username,
                 webdavRemotePath = remotePath,
                 // 配置变更后须重新验证连接
-                isConnectionVerified = false
+                isConnectionVerified = false,
+                // 保存成功须清掉上一次失败留下的提示，避免「已保存」与「保存失败」同时可见
+                syncFeedbackMessage = null
             )
         }
         // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）
@@ -158,8 +166,9 @@ internal class SettingsSyncCredentialForm(
     }
 
     /**
-     * Wave 15 整改：SecretKey 以 [CharArray] 借用语义提交（本方法消费后立即擦除），明文不再回写状态流；
-     * ISSUE-P2-01：AccessKey ID 亦改为 [CharArray] 借用语义（消费后即擦除，不再驻留状态流）。
+     * Wave 15 整改：SecretKey 以 [CharArray] **所有权转移**方式提交（同上：提交方传入独立副本，
+     * 擦除的是副本而非表单草稿），明文不再回写状态流；
+     * ISSUE-P2-01：AccessKey ID 同法（消费后即擦除提交副本，不再驻留状态流）。
      * 返回保存结果（语义同 [updateWebDavConfig]）。
      */
     fun updateS3Config(
@@ -169,7 +178,8 @@ internal class SettingsSyncCredentialForm(
         accessKey: CharArray,
         secretKey: CharArray,
         objectKey: String,
-        usePathStyle: Boolean = state.value.s3UsePathStyle
+        usePathStyle: Boolean = state.value.s3UsePathStyle,
+        onSavedSnapshot: (SyncProviderConfigSnapshot) -> Unit = {}
     ): Boolean {
         // Wave 14 全站强制 HTTPS：与 WebDAV 一致的保存期端点校验
         val normalizedEndpoint = normalizeHttpsEndpoint(endpoint)
@@ -181,18 +191,19 @@ internal class SettingsSyncCredentialForm(
             secretKey.fill('0')
             return false
         }
-        // AccessKey ID 与 SecretKey 均为借用语义：存储库封印后由库内统一擦除，此处兜底再擦一次
-        val saved = syncCredentialsStore.saveS3Config(
+        // AccessKey ID 与 SecretKey 均由提交方转入所有权：存储库封印时擦除其副本，此处兜底再擦一次
+        val snapshot = syncCredentialsStore.saveS3ConfigWithSnapshot(
             normalizedEndpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle
         )
         accessKey.fill('0')
         secretKey.fill('0')
-        if (!saved) {
+        if (snapshot == null) {
             state.update {
                 it.copy(syncFeedbackMessage = UiMessage(R.string.sync_config_save_failed))
             }
             return false
         }
+        onSavedSnapshot(snapshot)
         state.update {
             it.copy(
                 s3Endpoint = normalizedEndpoint,
@@ -201,7 +212,9 @@ internal class SettingsSyncCredentialForm(
                 s3ObjectKey = objectKey,
                 s3UsePathStyle = usePathStyle,
                 // 配置变更后须重新验证连接
-                isConnectionVerified = false
+                isConnectionVerified = false,
+                // 保存成功须清掉上一次失败留下的提示（语义同 WebDAV 分支）
+                syncFeedbackMessage = null
             )
         }
         // 保存成功后旧预填通道失效（最新凭据已由存储库持有，重进页面将重新恢复）

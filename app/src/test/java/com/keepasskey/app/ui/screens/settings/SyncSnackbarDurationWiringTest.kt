@@ -83,15 +83,29 @@ class SyncSnackbarDurationWiringTest {
 
     @Test
     fun `设置页同步状态类反馈挂短档`() {
-        val controller = readSource(SETTINGS_SYNC)
+        // ISSUE-P2-645：结果→文案映射已收敛到唯一实现 `SyncOutcomeFeedback.kt`，控制器只调用它；
+        // 判据随之从「控制器内联 ≥3 处」改为「控制器确实走唯一映射 + 该映射内短档与错误分支正确」，
+        // 覆盖面不缩小（仍要求三态短档存在，且错误分支不得挂档）。
+        // 编排体按职责拆在控制器与 `SettingsSyncSavedFlow` 两处（保存回执测连 + 同步），
+        // 两条入口都必须经同一映射，故按**两份源码合计**计数。
+        val controller = readSource(SETTINGS_SYNC) + readSource(SETTINGS_SYNC_SAVED_FLOW)
+        assertTrue(
+            "设置页同步反馈必须走唯一映射 syncOutcomeFeedback",
+            countOccurrences(controller, "syncOutcomeFeedback(") >= 2
+        )
+        assertFalse(
+            "控制器不得再内联第二份结果→文案映射",
+            controller.contains("is SyncOutcome.UpToDate -> UiMessage")
+        )
+        val feedback = readSource(SYNC_FEEDBACK)
         assertTrue(
             "设置页 done/uploaded/merged 等状态反馈须挂短档（≥3 处）",
-            countOccurrences(controller, "durationMillis = UiMessage.SYNC_STATUS_DURATION_MS") >= 3
+            countOccurrences(feedback, "durationMillis = UiMessage.SYNC_STATUS_DURATION_MS") >= 3
         )
         assertFalse(
             "设置页 error 反馈不得挂同步状态短档",
             Regex("""sync_feedback_error[\s\S]{0,160}SYNC_STATUS_DURATION_MS""")
-                .containsMatchIn(controller)
+                .containsMatchIn(feedback)
         )
     }
 
@@ -129,6 +143,10 @@ class SyncSnackbarDurationWiringTest {
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListSyncController.kt"
         const val SETTINGS_SYNC =
             "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt"
+        const val SETTINGS_SYNC_SAVED_FLOW =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncSavedFlow.kt"
+        const val SYNC_FEEDBACK =
+            "app/src/main/java/com/keepasskey/app/ui/screens/settings/SyncOutcomeFeedback.kt"
         const val PUBLISH =
             "app/src/main/java/com/keepasskey/app/ui/screens/vault/VaultListMessagePublish.kt"
 

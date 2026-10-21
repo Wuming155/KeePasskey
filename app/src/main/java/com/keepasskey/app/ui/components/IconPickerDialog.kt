@@ -54,6 +54,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
@@ -221,6 +225,9 @@ fun IconPickerDialog(
                 ) {
                     items(availableVaultIcons) { item ->
                         val isSelected = item.id == selectedIconName
+                        val selectionDescription = stringResource(
+                            if (isSelected) R.string.icon_picker_selected else R.string.icon_picker_not_selected
+                        )
                         Box(
                             modifier = Modifier
                                 .size(56.dp)
@@ -238,6 +245,13 @@ fun IconPickerDialog(
                                 .clickable {
                                     onSelectIcon(item.id)
                                     onDismiss()
+                                }
+                                // 每个图标格子必须是**独立可聚焦的按钮**语义节点：此前读屏只能
+                                // 聚焦整个网格容器，既选不出具体图标，也让自动化点击落到容器上。
+                                // `stateDescription` 需在组合期取值（semantics 块不是 @Composable）。
+                                .semantics(mergeDescendants = true) {
+                                    role = Role.Button
+                                    stateDescription = selectionDescription
                                 },
                             contentAlignment = Alignment.Center
                         ) {

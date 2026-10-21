@@ -31,36 +31,30 @@ class SessionRecoveryCoordinator @Inject constructor(
 ) : SessionRecoveryPolicy {
 
     override suspend fun onSaveFailedBeforeLock(): LockOutcome = withContext(NonCancellable) {
-        val identity = currentIdentity()
-        if (identity == null) {
-            debugLog.error(TAG, "补存失败但无库身份，无法写恢复副本")
-            return@withContext registerPreservationFailure(vaultId = UNKNOWN_VAULT_ID)
-        }
-
-        val exported = databaseSession.exportToBytes()
+        val exported = databaseSession.captureEncryptedSnapshot()
         if (exported is KdbxResult.Failure) {
             debugLog.error(TAG, "恢复副本序列化失败: ${exported.error.javaClass.simpleName}")
-            return@withContext registerPreservationFailure(identity.vaultId)
+            return@withContext registerPreservationFailure(UNKNOWN_VAULT_ID)
         }
-
-        val bytes = exported.getOrThrow()
+        val snapshot = exported.getOrThrow()
         val committed = try {
-            store.write(
-                vaultId = identity.vaultId,
-                vaultName = identity.vaultName,
-                pathIdentifier = identity.pathIdentifier,
-                kdbxBytes = bytes
-            )
-        } finally {
-            // 整库密文副本用毕即清零（不等待 GC）
-            bytes.fill(0)
-        }
+            val staged = snapshot.borrowEncryptedBytes { bytes ->
+                store.stage(snapshot.pathIdentifier, snapshot.vaultName, snapshot.pathIdentifier, bytes)
+            }
+            if (staged == null) false else try {
+                var saved = false
+                withContext(Dispatchers.IO) {
+                    databaseSession.useCredentialTicket(snapshot.ticket) { saved = store.commit(staged) }
+                }
+                saved
+            } finally { staged.close() }
+        } finally { snapshot.wipe() }
 
         if (committed) {
             debugLog.info(TAG, "补存失败，已写独立加密恢复副本（下次冷启动可恢复）")
             LockOutcome.RecoveryCommitted
         } else {
-            registerPreservationFailure(identity.vaultId)
+            registerPreservationFailure(snapshot.pathIdentifier)
         }
     }
 
@@ -78,23 +72,6 @@ class SessionRecoveryCoordinator @Inject constructor(
         debugLog.error(TAG, "未能保全未落盘修改（告警已持久化=$persisted）")
         return LockOutcome.PreservationFailed(alertPersisted = persisted)
     }
-
-    private fun currentIdentity(): RecoveryIdentity? {
-        val pathIdentifier = databaseSession.currentPathIdentifier
-        val file = databaseSession.currentFile
-        val vaultId = pathIdentifier ?: file?.absolutePath ?: return null
-        val vaultName = databaseSession.databaseFlow.value?.databaseName
-            ?: file?.name
-            ?: vaultId
-        return RecoveryIdentity(vaultId = vaultId, pathIdentifier = pathIdentifier ?: vaultId, vaultName = vaultName)
-    }
-
-    /** 库身份三元组（非敏感）：库标识 / 路径标识 / 显示名。 */
-    private data class RecoveryIdentity(
-        val vaultId: String,
-        val pathIdentifier: String,
-        val vaultName: String
-    )
 
     private companion object {
         const val TAG = "SessionRecovery"

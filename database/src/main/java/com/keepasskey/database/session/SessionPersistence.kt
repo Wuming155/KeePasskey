@@ -30,23 +30,6 @@ import kotlin.coroutines.CoroutineContext
  * 仍在 [mutex] 临界区内执行（与拆分前 `DatabaseSession` 自持该锁的覆盖范围逐行等价），
  * 只读态判定、失败回滚顺序与凭据擦除时机一律未改。
  */
-/**
- * `ISSUE-P1-631`（生命周期收口）：预序列化产物——密文整库字节 + 修剪后的候选树根（**未发布**）。
- *
- * [bytes] 即整库密文（头部外全加密），任何退出路径（提交消耗 / 失败 / 取消 / 放弃）都必须
- * [wipe] 清零，与 `saveLocked` 对 `serialized` 的 P3-551 义务同型；[prunedRoot] 仅在
- * `SessionPersistence.commitPreparedSave` 成功路径被发布。实例只能由预备段创建（构造器 internal），
- * 调用方（漂移处置）拥有并负责用毕清零。
- */
-class PreparedSerializedSave internal constructor(
-    internal val bytes: ByteArray,
-    internal val prunedRoot: KdbxGroup
-) {
-    /** 密文缓冲就地清零（幂等；提交段与调用方 finally 都可调用） */
-    fun wipe() {
-        bytes.fill(0)
-    }
-}
 
 internal class SessionPersistence(
     private val mutex: Mutex,
@@ -72,6 +55,14 @@ internal class SessionPersistence(
     ) { database, password, keyFile, onProgress ->
         serializeToBytes(database, password, keyFile, onProgress)
     }
+
+    private val snapshots = SessionEncryptedSnapshots(mutex, core, credentials) { db, pwd, key ->
+        serializeToBytes(db, pwd, key)
+    }
+
+    suspend fun captureEncryptedSnapshot() = snapshots.capture()
+    suspend fun copyPreparedSnapshot(expected: KdbxDatabase, prepared: PreparedSerializedSave) =
+        snapshots.copyPrepared(expected, prepared)
 
     private val rotation = SessionCredentialRotation(core, credentials, fileWriter) { db, pwd, key ->
         serializeToBytes(db, pwd, key)
@@ -195,6 +186,7 @@ internal class SessionPersistence(
     suspend fun prepareSerializedSave(
         candidate: KdbxDatabase
     ): KdbxResult<PreparedSerializedSave> {
+        val ticket = core.credentialTicket
         if (core.credentialWriteUncertain.value) {
             return KdbxResult.Failure(
                 IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),
@@ -231,7 +223,7 @@ internal class SessionPersistence(
             credentials.currentKeyFile(),
             null
         )
-        return KdbxResult.Success(PreparedSerializedSave(bytes, prunedRoot))
+        return KdbxResult.Success(PreparedSerializedSave(bytes, prunedRoot, ticket))
     }
 
     /**

@@ -18,6 +18,9 @@ import java.nio.charset.StandardCharsets
  *   不进任何 `UiState`（`P2-105` 立的规矩）；
  * - 入参 [CharArray] 归调用方所有，本类**无论成功失败都负责擦除**（它就是私钥明文的上行副本）；
  *   解析用的 UTF-8 工作字节在解析器返回后即刻清零，含编码器内部 `ByteBuffer`（P0-7 同口径）；
+ *   解析链内部的 `ByteSink` 各容量代次、AST 字符串副本与私钥 DER 由 `PasskeyCxfReader` 收口
+ *   （`ISSUE-P3-647`，见 [PasskeyCxfReader] 的擦除义务段）。所有权边界（契约 §3 R2）：
+ *   本类只**转移**草案里的私钥 / PRF，不清零已交给 [pending] 的那一份；
  * - 拒收一律只报**静态文案资源 id**（[onNotice]），**不回显载荷**（AC② / 口径 3 末句）。
  *
  * 确认与落库**不在本类**：两条写入口的语义不同（顶栏 `saveNewPasskeyEntry` 落当前分组、
@@ -42,19 +45,27 @@ internal class PasskeyImportDraftHost(
      *
      * @return 是否已进入确认环节（false 表示已按静态文案拒绝，调用方不得再落库）
      */
-    fun begin(decoded: CharArray): Boolean {
+    fun begin(decoded: CharArray): Boolean = begin(decoded, null)
+
+    /**
+     * 同上，并把本层与解析器的**工作缓冲**（UTF-8 载荷数组、扫描器字符串缓冲、私钥 DER）
+     * 在分配时交给 [probe] 保留引用，供同模块契约测试直接断言清零（`ISSUE-P3-647`）。
+     *
+     * 生产路径传 null。[probe] 只许保存引用，不得回写或清零——清零责任仍在本类与解析链。
+     */
+    internal fun begin(decoded: CharArray, probe: PasskeyCxfWorkProbe?): Boolean {
         if (isReadOnly()) {
             decoded.fill('0')
             onNotice(R.string.readonly_save_rejected)
             return false
         }
         val payload = try {
-            toUtf8Bytes(decoded)
+            toUtf8Bytes(decoded).also { probe?.utf8Payloads?.add(it) }
         } finally {
             decoded.fill('0')
         }
         val outcome = try {
-            PasskeyCxfReader.read(payload)
+            PasskeyCxfReader.read(payload, probe)
         } finally {
             payload.fill(0)
         }
@@ -102,15 +113,18 @@ internal class PasskeyImportDraftHost(
      *
      * 单独成函数而不是直接 `String.toByteArray()`：后者会留下一份**不可擦**的 String 中间量
      * （§3 敏感数据铁律）。入参归调用方所有，本函数不擦（由 [begin] 的 finally 统一负责）。
+     *
+     * 编码器内部数组的清理挂在 `finally`：`utf8.get(out)` 或分配抛错时同样不得把已编码的
+     * 明文副本留给 GC（所有者是本函数，钩子只能是这里）。
      */
-    private fun toUtf8Bytes(chars: CharArray): ByteArray =
-        CharBuffer.wrap(chars).let { buffer ->
-            val utf8 = StandardCharsets.UTF_8.encode(buffer)
-            ByteArray(utf8.remaining()).also { out ->
-                utf8.get(out)
-                if (utf8.hasArray()) utf8.array().fill(0)
-            }
+    private fun toUtf8Bytes(chars: CharArray): ByteArray {
+        val utf8 = StandardCharsets.UTF_8.encode(CharBuffer.wrap(chars))
+        try {
+            return ByteArray(utf8.remaining()).also { utf8.get(it) }
+        } finally {
+            if (utf8.hasArray()) utf8.array().fill(0)
         }
+    }
 }
 
 /**

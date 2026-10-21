@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,6 +72,10 @@ private fun groupTileColors(group: VaultGroup): Pair<Color, Color> =
  * - 未绑定（[icon] 为 null 或 [EntryIcon.Default]）→ 既有标准矢量图标语义。
  *
  * ISSUE-P3-17：[densitySpec] 驱动行高 / 内边距 / 字号，数值只在 [ListDensityPresenter] 定义。
+ *
+ * ISSUE-P3-644：只读会话下三个写菜单项**不可执行**，故菜单项的 `enabled` 取 `!readOnly`，
+ * 并在菜单底部说明原因（[R.string.readonly_save_rejected]）——整改前菜单照常可点、控制器在
+ * `launch` 前静默 `return`，用户只看到「点了没反应」。控制器的只读硬守卫仍保留（第二道防线）。
  */
 @Composable
 fun KeePassGroupRow(
@@ -79,6 +84,8 @@ fun KeePassGroupRow(
     onRename: () -> Unit,
     onChangeIcon: () -> Unit,
     onDelete: () -> Unit,
+    // ISSUE-P3-644：只读会话（VaultListUiState.isReadOnly）禁用重命名 / 换图标 / 删除
+    readOnly: Boolean = false,
     icon: BitmapEntryIcon? = null,
     densitySpec: ListDensitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL),
     highlightQuery: String = "", // ISSUE-P3-360 AC④c：搜索命中高亮词
@@ -132,33 +139,80 @@ fun KeePassGroupRow(
             )
 
             if (!group.isRecycleBin) {
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = stringResource(R.string.btn_more),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.vault_folder_rename)) },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = { showMenu = false; onRename() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.vault_folder_change_icon)) },
-                            leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
-                            onClick = { showMenu = false; onChangeIcon() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.vault_folder_delete), color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = { showMenu = false; onDelete() }
-                        )
-                    }
-                }
+                GroupRowMenu(
+                    readOnly = readOnly,
+                    showMenu = showMenu,
+                    onOpenMenu = { showMenu = true },
+                    onDismissMenu = { showMenu = false },
+                    onRename = onRename,
+                    onChangeIcon = onChangeIcon,
+                    onDelete = onDelete
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 分组行的三点溢出菜单（ISSUE-P3-644 自 [KeePassGroupRow] 拆出：母函数加只读分支后
+ * 越过 100 行函数门禁，按职责把「菜单及其三个写项」独立成件；渲染与点击语义零变化）。
+ *
+ * 只读会话下三项 `enabled = false` 并在菜单底部说明原因——整改前菜单照常可点、
+ * 控制器在 `launch` 前静默 `return`，用户只看到「点了没反应」。
+ */
+@Composable
+private fun GroupRowMenu(
+    readOnly: Boolean,
+    showMenu: Boolean,
+    onOpenMenu: () -> Unit,
+    onDismissMenu: () -> Unit,
+    onRename: () -> Unit,
+    onChangeIcon: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Box {
+        IconButton(onClick = onOpenMenu) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = stringResource(R.string.btn_more),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        DropdownMenu(expanded = showMenu, onDismissRequest = onDismissMenu) {
+            // 只读会话：合并语义节点，让整个菜单项（含文本）随 `enabled = false` 一并被读屏/
+            // 无障碍树标记为禁用——分割子节点时文本节点自身的 enabled 不反映父项状态。
+            DropdownMenuItem(
+                modifier = Modifier.semantics(mergeDescendants = true) {},
+                text = { Text(stringResource(R.string.vault_folder_rename)) },
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                // ISSUE-P3-644：只读会话不伪装可执行——置灰而非「点了没反应」
+                enabled = !readOnly,
+                onClick = { onDismissMenu(); onRename() }
+            )
+            DropdownMenuItem(
+                modifier = Modifier.semantics(mergeDescendants = true) {},
+                text = { Text(stringResource(R.string.vault_folder_change_icon)) },
+                leadingIcon = { Icon(Icons.Default.Image, contentDescription = null) },
+                enabled = !readOnly,
+                onClick = { onDismissMenu(); onChangeIcon() }
+            )
+            DropdownMenuItem(
+                modifier = Modifier.semantics(mergeDescendants = true) {},
+                text = { Text(stringResource(R.string.vault_folder_delete), color = MaterialTheme.colorScheme.error) },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                enabled = !readOnly,
+                onClick = { onDismissMenu(); onDelete() }
+            )
+            // ISSUE-P3-644：菜单仍可展开（浏览操作照常可见），但必须在菜单内说明
+            // 三项为何不可点——否则置灰只留下「坏了」的观感
+            if (readOnly) {
+                Text(
+                    text = stringResource(R.string.readonly_save_rejected),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
             }
         }
     }
@@ -176,6 +230,28 @@ internal fun KeePassGroupRowPreview() {
             onRename = {},
             onChangeIcon = {},
             onDelete = {},
+            icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
+            densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
+        )
+    }
+}
+
+// ISSUE-P3-644：只读态预览——菜单项置灰与原因说明只在展开菜单后可见：
+// 预览面板无法点击展开，故本态的**可见性**由该预览留档，行为判据由
+// `VaultGroupWriteFeedbackWiringTest`（源码守卫）与 `VaultGroupWriteFeedbackDeviceTest`
+// （真实点击 + 无障碍节点 `isEnabled` 断言）承担，避免默认态以外的分支不可见。
+@androidx.compose.ui.tooling.preview.Preview(name = "分组行只读 - 浅色", showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "分组行只读 - 深色", showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+internal fun KeePassGroupRowReadOnlyPreview() {
+    com.keepasskey.app.ui.theme.KeePasskeyTheme {
+        KeePassGroupRow(
+            group = com.keepasskey.app.ui.preview.PreviewGroupLogins,
+            onClick = {},
+            onRename = {},
+            onChangeIcon = {},
+            onDelete = {},
+            readOnly = true,
             icon = com.keepasskey.app.ui.preview.PreviewDefaultIcon,
             densitySpec = ListDensityPresenter.specOf(ListDensity.NORMAL)
         )

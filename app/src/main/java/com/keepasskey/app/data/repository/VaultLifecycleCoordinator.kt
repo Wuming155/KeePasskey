@@ -384,9 +384,9 @@ internal class VaultLifecycleCoordinator(
         refresh()
     }
 
-    /** 当前会话是否**非** `OPENED`（锁定 / 关闭 / 未打开一律为 true）。 */
-    fun isLocked(): Boolean {
-        return databaseSession.state.value != DatabaseSession.SessionState.OPENED
+    /** 当前会话是否处于锁定 / 关闭 / 未打开态（排除 DIRTY：它是已解锁的未落盘态）。 */
+    fun isLocked(): Boolean = databaseSession.state.value.let {
+        it == DatabaseSession.SessionState.CLOSED || it == DatabaseSession.SessionState.LOCKED
     }
 
     companion object {

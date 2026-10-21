@@ -286,6 +286,8 @@
 
     <!-- 图标选择器 -->
     <string name="icon_picker_title">选择图标</string>
+    <string name="icon_picker_selected">已选中</string>
+    <string name="icon_picker_not_selected">未选中</string>
 
     <!-- 设置相关 -->
     <string name="settings_title">设置</string>

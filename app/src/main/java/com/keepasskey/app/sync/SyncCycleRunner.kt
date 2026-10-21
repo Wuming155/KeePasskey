@@ -155,11 +155,17 @@ class SyncCycleRunner @Inject constructor(
      * （仅「已与远端收敛」的结论记录，判据见 [SyncOutcome.isInSyncWithRemote]）——
      * 记录放在锁外是因为它只读本地文件并写进程内摘要，不触碰任何周期共享状态。
      */
-    suspend fun runSyncCycle(): SyncOutcome {
+    suspend fun runSyncCycle(): SyncOutcome = runSyncCycleForConfig(null)
+
+    /** ISSUE-P2-652：设置页保存后编排将提交回执显式传至本周期。 */
+    internal suspend fun runSyncCycle(snapshot: SyncProviderConfigSnapshot): SyncOutcome =
+        runSyncCycleForConfig(snapshot)
+
+    private suspend fun runSyncCycleForConfig(snapshot: SyncProviderConfigSnapshot?): SyncOutcome {
         session.checkpointDatabase = null
         var confirmedDatabase: KdbxDatabase? = null
         val outcome = try {
-            runCycleUnderLock().also { confirmedDatabase = session.checkpointDatabase }
+            runCycleUnderLock(snapshot).also { confirmedDatabase = session.checkpointDatabase }
         } finally {
             // A canceled or failed cycle cannot leave a candidate for a later cycle to consume.
             session.checkpointDatabase = null
@@ -253,7 +259,7 @@ class SyncCycleRunner @Inject constructor(
         }
     }
 
-    private suspend fun runCycleUnderLock(): SyncOutcome = session.mutex.withLock {
+    private suspend fun runCycleUnderLock(snapshot: SyncProviderConfigSnapshot?): SyncOutcome = session.mutex.withLock {
         val currentDb = databaseSession.databaseFlow.value
             ?: return@withLock SyncOutcome.Error(strings.get(R.string.sync_error_vault_not_unlocked))
         autoLockGuard?.beginLongTask()
@@ -265,9 +271,10 @@ class SyncCycleRunner @Inject constructor(
         val vaultFileName = databaseSession.currentFile?.name ?: "${currentDb.databaseName}.kdbx"
 
         try {
-            val result = providerResolver.useProviderWithTarget(
+            val result = providerResolver.useProviderWithTargetForConfig(
                 defaultFileName = vaultFileName,
-                testOverride = session.testSyncProvider
+                testOverride = session.testSyncProvider,
+                snapshot = snapshot
             ) { provider, providerTarget ->
                 // ISSUE-P2-277 AC①：装配段整体下沉 `Dispatchers.IO`。整改前该段在调用方线程上执行，
                 // 而前台入口（下拉刷新 / 解锁后自动 / 设置页）持 `viewModelScope`（`Main.immediate`）
@@ -287,10 +294,10 @@ class SyncCycleRunner @Inject constructor(
                     holdoffActive = false
                     autoLockGuard?.endLongTask()
                 }
-                val setup = setupWithinLockBudget ?: return@useProviderWithTarget SyncOutcome.Error(
+                val setup = setupWithinLockBudget ?: return@useProviderWithTargetForConfig SyncOutcome.Error(
                     strings.get(R.string.sync_error_snapshot_prepare_timeout)
                 )
-                if (setup.outcome != null) return@useProviderWithTarget setup.outcome
+                if (setup.outcome != null) return@useProviderWithTargetForConfig setup.outcome
                 val ctx = setup.context!!
 
             // ISSUE-P3-168 ①：下面的三方合并可直接以 `currentDb`（**本周期起点的内存树快照**）
@@ -312,7 +319,7 @@ class SyncCycleRunner @Inject constructor(
                         // ISSUE-P1-591：上传的即周期起点快照，基线结算须以它为准
                         localDbSnapshot = ctx.currentDb
                     )
-                    if (baselineOutcome != null) return@useProviderWithTarget baselineOutcome
+                    if (baselineOutcome != null) return@useProviderWithTargetForConfig baselineOutcome
                 }
 
             // 3. 若本地为未落盘的修改态且本地已存在历史缓存基线，尝试快速提交
@@ -332,7 +339,7 @@ class SyncCycleRunner @Inject constructor(
                     ctx.syncCache.isCached(ctx.remotePath)
                 }
                 if (ctx.isDirty && cachedBeforeFastCommit) {
-                    return@useProviderWithTarget tryFastCommitPath(
+                    return@useProviderWithTargetForConfig tryFastCommitPath(
                         syncEngine = ctx.syncEngine,
                         syncCache = ctx.syncCache,
                         remotePath = ctx.remotePath,

@@ -10,6 +10,7 @@ import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.withCredentialRequest
 import com.keepasskey.database.session.SessionWriteReceipt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers

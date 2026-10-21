@@ -3,7 +3,6 @@ package com.keepasskey.app.security
 import android.content.Context
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.files.NewVaultNames
-import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
@@ -61,6 +60,7 @@ class VaultRecoveryCoordinator @Inject constructor(
         val differs: Boolean get() = addedEntries != 0 || removedEntries != 0 || modifiedEntries != 0
     }
 
+    private val verifiedPayloads = java.util.concurrent.ConcurrentHashMap.newKeySet<VaultRecoveryStore.Entry>()
     private val _pending = MutableStateFlow<List<Pending>>(emptyList())
     val pending: StateFlow<List<Pending>> = _pending.asStateFlow()
 
@@ -94,7 +94,9 @@ class VaultRecoveryCoordinator @Inject constructor(
             try {
                 snapshotDb = loadDatabase(snapshotBytes, passwordChars, keyFile)
                 officialDb = readOfficialDatabase(target, passwordChars, keyFile)
-                KdbxResult.Success(buildPreview(target.entry.vaultName, snapshotDb, officialDb))
+                val preview = buildPreview(target.entry.vaultName, snapshotDb, officialDb)
+                verifiedPayloads.add(target.entry)
+                KdbxResult.Success(preview)
             } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式解密（KdbxFile.load 内部无挂起点）
                 debugLog.warn(TAG, "恢复副本解锁失败: ${t.javaClass.simpleName}")
                 failure(KdbxError.RECOVERY_UNLOCK_FAILED)
@@ -120,6 +122,9 @@ class VaultRecoveryCoordinator @Inject constructor(
                 ?: return@withContext failure(KdbxError.RECOVERY_LOCAL_ONLY)
             if (file.exists() && !forceOverwrite) {
                 return@withContext failure(KdbxError.RECOVERY_OVERWRITE_BLOCKED)
+            }
+            if (target.entry.purpose == VaultRecoveryStore.Purpose.CRASH_DRAFT && target.entry !in verifiedPayloads) {
+                return@withContext failure(KdbxError.RECOVERY_UNLOCK_FAILED)
             }
             val bytes = store.readPayload(target.entry)
                 ?: return@withContext failure(KdbxError.RECOVERY_PAYLOAD_CORRUPT)
@@ -189,11 +194,15 @@ class VaultRecoveryCoordinator @Inject constructor(
     ): KdbxDatabase? {
         val file = target.officialFile ?: return null
         if (!file.exists()) return null
+        var bytes: ByteArray? = null
         return try {
-            loadDatabase(file.readBytes(), passwordChars, keyFile)
+            bytes = file.readBytes()
+            loadDatabase(bytes, passwordChars, keyFile)
         } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式解密（无挂起点）
             debugLog.warn(TAG, "正式库读取失败: ${t.javaClass.simpleName}")
             null
+        } finally {
+            bytes?.fill(0)
         }
     }
 
@@ -216,32 +225,10 @@ class VaultRecoveryCoordinator @Inject constructor(
         val off = official.rootGroup.allEntries().associateBy { it.id }
         val added = snap.keys.count { it !in off.keys }
         val removed = off.keys.count { it !in snap.keys }
-        val modified = snap.keys.count { id -> off[id]?.let { !sameFingerprint(snap.getValue(id), it) } == true }
+        val comparator = RecoveryEntryContentComparator()
+        val modified = snap.keys.count { id -> off[id]?.let { !comparator.same(snap.getValue(id), it) } == true }
         return Preview(vaultName, snap.size, off.size, added, removed, modified)
     }
-
-    /** 比较条目实际内容；受保护字段由领域模型按内容等值比较，不解密成普通字符串。 */
-    private fun sameFingerprint(a: KdbxEntry, b: KdbxEntry): Boolean =
-        a.fieldsContentEquals(b) &&
-            a.customFields.size == b.customFields.size &&
-            a.customFields.zip(b.customFields).all { (left, right) ->
-                left.key == right.key &&
-                    left.isProtected == right.isProtected &&
-                    left.value.contentEquals(right.value)
-            } &&
-            a.attachments == b.attachments &&
-            a.history.size == b.history.size &&
-            a.history.zip(b.history).all { (left, right) -> sameFingerprint(left, right) } &&
-            a.tags == b.tags &&
-            a.autoType == b.autoType &&
-            a.backgroundColor == b.backgroundColor &&
-            a.foregroundColor == b.foregroundColor &&
-            a.overrideUrl == b.overrideUrl &&
-            a.qualityCheck == b.qualityCheck &&
-            a.customData == b.customData &&
-            a.parentGroupId == b.parentGroupId &&
-            a.iconId == b.iconId &&
-            a.customIconId == b.customIconId
 
     private fun suggestedName(entry: VaultRecoveryStore.Entry): String {
         val base = entry.vaultName.takeIf { it.isNotBlank() } ?: entry.pathIdentifier.substringAfterLast('/')

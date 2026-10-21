@@ -2,6 +2,10 @@
 # KeePasskey 本地 HTTPS WebDAV 测试服务（仅供本地联调，禁止公网暴露）。
 # 依赖：wsgidav + cheroot + pyopenssl（pip install wsgidav cheroot pyopenssl）。
 # 证书：certs/cert.pem + certs/key.pem（localhost 自签名，SAN 含 localhost / 127.0.0.1）。
+#
+# ISSUE-P3-650：默认只监听 loopback；凭据必须由环境提供（无固定默认口令）。
+# 需要其他设备联调时显式设置 WEBDAV_HOST=0.0.0.0 **并**同时设置 WEBDAV_ALLOW_LAN=1，
+# 否则拒绝启动——避免「一次 export 忘记改回来」就把可写测试目录长期暴露到局域网。
 import os
 import sys
 import time
@@ -13,6 +17,8 @@ from wsgidav import util
 from wsgidav.fs_dav_provider import FilesystemProvider
 from wsgidav.wsgidav_app import WsgiDAVApp
 
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
 PORT = int(os.environ.get("WEBDAV_PORT", "9443"))
 HOST = os.environ.get("WEBDAV_HOST", "127.0.0.1")
 USER = os.environ.get("WEBDAV_USER")
@@ -23,6 +29,12 @@ KEY = os.path.abspath(os.environ.get("WEBDAV_KEY", "certs/key.pem"))
 
 if not USER or not PASSWORD:
     sys.exit("[FATAL] 请通过 WEBDAV_USER 和 WEBDAV_PASSWORD 提供本地联调凭据")
+
+if HOST not in LOOPBACK_HOSTS and os.environ.get("WEBDAV_ALLOW_LAN") != "1":
+    sys.exit(
+        f"[FATAL] WEBDAV_HOST={HOST} 不是回环地址；外部监听需同时设置 WEBDAV_ALLOW_LAN=1，"
+        "并确保凭据为本机随机生成的高熵值"
+    )
 
 if not os.path.isfile(CERT) or not os.path.isfile(KEY):
     sys.exit(f"[FATAL] 缺失证书文件：{CERT} / {KEY}")

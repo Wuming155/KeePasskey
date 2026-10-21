@@ -69,13 +69,14 @@ internal object KdbxCipherKeyResolver {
         firstBlock: ByteArray?,
         officialKey: ByteArray,
         isGzipCompressed: Boolean,
+        observeBuffer: ((ByteArray) -> Unit)? = null,
         deriveLegacyKeys: () -> Pair<ByteArray, ByteArray>
     ): Resolution {
         if (firstBlock == null || firstBlock.size < MIN_PROBE_BLOCK_SIZE) {
             // 块过小无法构成有效探针（正常 KDBX 负载远大于此），按官方派生继续，由后续解析暴露问题
             return Resolution(officialKey, null)
         }
-        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock, isGzipCompressed)) {
+        if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, officialKey, firstBlock, isGzipCompressed, observeBuffer)) {
             return Resolution(officialKey, null)
         }
         // ISSUE-P2-290 AC①：deriveLegacyKeys 调用点纳入同一保护范围——其内部
@@ -88,7 +89,7 @@ internal object KdbxCipherKeyResolver {
             val (cipherKey, hmacKey) = deriveLegacyKeys()
             legacyCipherKey = cipherKey
             legacyHmacKey = hmacKey
-            if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, cipherKey, firstBlock, isGzipCompressed)) {
+            if (isPlausibleInnerHeaderPrefix(cipherEngine, header.encryptionIv, cipherKey, firstBlock, isGzipCompressed, observeBuffer)) {
                 // 旧派生被选中：原数组交由调用方在解密流建立后擦除（见 Resolution 契约）
                 legacyAccepted = true
                 return Resolution(cipherKey, cipherKey)
@@ -117,18 +118,22 @@ internal object KdbxCipherKeyResolver {
         encryptionIv: ByteArray,
         cipherKey: ByteArray,
         firstBlock: ByteArray,
-        isGzipCompressed: Boolean
+        isGzipCompressed: Boolean,
+        observeBuffer: ((ByteArray) -> Unit)?
     ): Boolean {
         val prefix = try {
             val probe = cipherEngine.createDecryptingStream(ByteArrayInputStream(firstBlock), cipherKey, encryptionIv)
-            val collected = WipableByteArrayOutputStream()
+            val collected = WipableByteArrayOutputStream(observeBuffer = observeBuffer)
             try {
                 probe.use { stream ->
                     val buffer = ByteArray(PROBE_READ_BUFFER_SIZE)
+                    observeBuffer?.invoke(buffer)
                     try {
                         while (true) {
                             val count = stream.read(buffer)
                             if (count < 0) break
+                            // 观察点选在读取之后：此刻 buffer 承载的是解出的明文前缀
+                            observeBuffer?.invoke(buffer)
                             collected.write(buffer, 0, count)
                         }
                     } catch (_: java.io.IOException) {
@@ -137,7 +142,7 @@ internal object KdbxCipherKeyResolver {
                         buffer.fill(0)
                     }
                 }
-                collected.toByteArray()
+                collected.toByteArray().also { observeBuffer?.invoke(it) }
             } finally {
                 collected.wipe()
             }
@@ -150,6 +155,7 @@ internal object KdbxCipherKeyResolver {
                     false
                 } else {
                     val magic = prefix.copyOfRange(0, GZIP_MAGIC.size)
+                    observeBuffer?.invoke(magic)
                     try { magic.contentEquals(GZIP_MAGIC) } finally { magic.fill(0) }
                 }
             } else {

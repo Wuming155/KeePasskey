@@ -11,6 +11,7 @@ import com.keepasskey.core.result.KdbxError
 import com.keepasskey.database.session.CredentialRotationCancellationException
 import com.keepasskey.database.session.SessionWriteReceipt
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.withCredentialRequest
 import com.keepasskey.database.session.SessionCredentialRequest
 import com.keepasskey.core.log.AppLog
 import kotlinx.coroutines.CancellationException

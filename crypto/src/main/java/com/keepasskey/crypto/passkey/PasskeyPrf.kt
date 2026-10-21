@@ -56,11 +56,25 @@ object PasskeyPrf {
     private val secureRandom = SecureRandom()
 
     /** 生成一枚全新的 PRF 凭据秘密（32 字节随机 → Base64 文本），以受保护形态驻留 */
-    fun newSecretProtected(): ProtectedString {
+    fun newSecretProtected(): ProtectedString = newSecretProtectedObserved(null)
+
+    /**
+     * 同 [newSecretProtected]，额外把**中间工作数组**（随机原始字节、Base64 编码副本）
+     * 交给 [observeBuffer] 观察。仅测试可见：生产调用方没有持有这些数组的理由，
+     * 观察回调只用于保留引用，不得产生副作用。
+     *
+     * 存在理由：这些缓冲的生命周期只有几行，若没有观察入口，就只能断言「最终交付的
+     * ProtectedString 正确」，无法区分「确实擦除」与「未擦除但已不可达」——后者正是
+     * 等待 GC 的形态，契约不允许（敏感缓冲所有权契约 R3）。
+     */
+    internal fun newSecretProtectedObserved(
+        observeBuffer: ((ByteArray) -> Unit)?
+    ): ProtectedString {
         val secret = ByteArray(SECRET_BYTES)
         secureRandom.nextBytes(secret)
+        observeBuffer?.invoke(secret)
         try {
-            return secretToProtected(secret)
+            return secretToProtected(secret, observeBuffer)
         } finally {
             secret.fill(0)
         }
@@ -72,10 +86,25 @@ object PasskeyPrf {
      * @param prfSecret 该凭据的 PRF 秘密（Base64 文本，受保护驻留）
      * @param evalInput 请求给出的 `eval.first` / `eval.second` 原始字节
      */
-    fun computeValue(prfSecret: ProtectedString, evalInput: ByteArray): ByteArray {
-        val secret = decodeSecret(prfSecret)
+    fun computeValue(prfSecret: ProtectedString, evalInput: ByteArray): ByteArray =
+        computeValueObserved(prfSecret, evalInput, null)
+
+    /**
+     * 同 [computeValue]，额外把**中间工作数组**（受保护文本的 UTF-8 副本、去空白工作区、
+     * Base64 解码结果、域分隔盐）交给 [observeBuffer] 观察。仅测试可见。
+     *
+     * 交付的 HMAC 输出**不**进入观察面：它是本函数的返回值，所有权已转移给调用方
+     * （敏感缓冲所有权契约 R2 的「转移」），在本函数内清零即为违例。
+     */
+    internal fun computeValueObserved(
+        prfSecret: ProtectedString,
+        evalInput: ByteArray,
+        observeBuffer: ((ByteArray) -> Unit)?
+    ): ByteArray {
+        val secret = decodeSecret(prfSecret, observeBuffer)
         try {
             val salt = clientSideProcess(evalInput)
+            observeBuffer?.invoke(salt)
             try {
                 return hmacSha256(secret, salt)
             } finally {
@@ -100,16 +129,21 @@ object PasskeyPrf {
     }
 
     /** 秘密 Base64 文本（受保护驻留）→ 原始字节；调用方负责清零。文本非法一律 fail-closed */
-    private fun decodeSecret(prfSecret: ProtectedString): ByteArray {
+    private fun decodeSecret(
+        prfSecret: ProtectedString,
+        observeBuffer: ((ByteArray) -> Unit)? = null
+    ): ByteArray {
         val textBytes = prfSecret.readUtf8()
+        observeBuffer?.invoke(textBytes)
         var ascii: ByteArray? = null
         try {
-            ascii = stripWhitespace(textBytes)
+            ascii = stripWhitespace(textBytes, observeBuffer)
             val decoded = try {
                 Base64.getDecoder().decode(ascii)
             } catch (e: IllegalArgumentException) {
                 throw IllegalArgumentException("PRF 秘密不是合法 Base64 文本", e)
             }
+            observeBuffer?.invoke(decoded)
             if (decoded.size != SECRET_BYTES) {
                 decoded.fill(0)
                 throw IllegalArgumentException("PRF 秘密长度必须为 $SECRET_BYTES 字节，实际 ${decoded.size}")
@@ -121,29 +155,48 @@ object PasskeyPrf {
         }
     }
 
-    private fun secretToProtected(secret: ByteArray): ProtectedString {
+    private fun secretToProtected(
+        secret: ByteArray,
+        observeBuffer: ((ByteArray) -> Unit)? = null
+    ): ProtectedString {
         val encoded = Base64.getEncoder().encode(secret)
-        val chars = CharArray(encoded.size) { encoded[it].toInt().toChar() }
+        observeBuffer?.invoke(encoded)
+        var chars: CharArray? = null
         try {
+            chars = CharArray(encoded.size) { encoded[it].toInt().toChar() }
             return ProtectedString(chars, isProtected = true)
         } finally {
             encoded.fill(0)
-            chars.fill('0')
+            chars?.fill('0')
         }
     }
 
-    private fun stripWhitespace(bytes: ByteArray): ByteArray {
+    /**
+     * 复制并剔除空白。**所有权**：返回数组归调用方（[decodeSecret] / [computeValue] 的
+     * `finally` 负责清零）；未返回的分支（缩短复制后的原数组、复制抛错时的半成品）在
+     * 本函数 `finally` 就地清零——只让「已交出的那份」逃出清理域。
+     */
+    private fun stripWhitespace(
+        bytes: ByteArray,
+        observeBuffer: ((ByteArray) -> Unit)? = null
+    ): ByteArray {
         val out = ByteArray(bytes.size)
-        var n = 0
-        for (b in bytes) {
-            val v = b.toInt() and 0xFF
-            if (v == ASCII_LF || v == ASCII_CR || v == ASCII_SPACE || v == ASCII_TAB) continue
-            out[n++] = b
+        observeBuffer?.invoke(out)
+        var transferred = false
+        try {
+            var n = 0
+            for (b in bytes) {
+                val v = b.toInt() and 0xFF
+                if (v == ASCII_LF || v == ASCII_CR || v == ASCII_SPACE || v == ASCII_TAB) continue
+                out[n++] = b
+            }
+            if (n == out.size) { transferred = true; return out }
+            val shrunk = out.copyOf(n)
+            observeBuffer?.invoke(shrunk)
+            return shrunk
+        } finally {
+            if (!transferred) out.fill(0)
         }
-        if (n == out.size) return out
-        val trimmed = out.copyOf(n)
-        out.fill(0)
-        return trimmed
     }
 
     private fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {

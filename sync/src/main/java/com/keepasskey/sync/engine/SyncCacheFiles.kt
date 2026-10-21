@@ -120,4 +120,17 @@ internal class SyncCacheFiles(private val cacheDir: File) {
         private const val DELETE_RETRIES = 3
         private const val DELETE_RETRY_GAP_MS = 15L
     }
+
+    /**
+     * 同一缓存键的**进程内互斥**（`ISSUE-P2-636`）。
+     *
+     * 缓存由多份独立文件组成（`.cache` / `.version` / `.basecache` / `.baseversion` / `.meta`），
+     * 每份各自原子替换；但「字节」与「标记」之间**不是**一次原子操作。两个写入者交错时，
+     * `.cache` 可能来自 A 而 `.version` 来自 B——标记与字节交叉污染，`hasLocalChanges`
+     * 随后按错配的摘要判定，可能把脏缓存当干净。按**规范键**串行化这两步即可消除该交错
+     * （跨进程仍依赖各文件的原子替换与 SHA-256 校验，见限界登记）。
+     */
+    fun pathLock(key: String): Any = pathLocks.getOrPut(key) { Any() }
+
+    private val pathLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 }

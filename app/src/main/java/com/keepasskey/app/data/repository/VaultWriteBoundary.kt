@@ -8,6 +8,7 @@ import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.withCredentialRequestScope
 import java.io.File
 
 /**
@@ -62,7 +63,8 @@ internal class VaultWriteBoundary(
     /** 保存成功后置空 TOTP 派生缓存等会话级派生读缓存（默认空实现供纯 JVM 单测）。 */
     private val afterPersist: () -> Unit = {},
     /** 保存失败时的脱敏日志回调（默认空实现；生产注入 DebugLogBuffer）。 */
-    private val logPersistFailure: (KdbxResult.Failure) -> Unit = {}
+    private val logPersistFailure: (KdbxResult.Failure) -> Unit = {},
+    private val crashDrafts: com.keepasskey.app.security.VaultCrashDrafts? = null
 ) {
 
     /**
@@ -89,16 +91,24 @@ internal class VaultWriteBoundary(
      * （漏配对会令挂锁永不恢复）；挂起期间的锁定触发延迟至保存结束补执行。
      */
     suspend fun persist(): KdbxResult<Unit> {
-        abortOnDrift()?.let { return it }
+        val request = databaseSession.captureCredentialRequest()
         autoLockGuard.beginLongTask()
         try {
-            val result = databaseSession.save()
+            val draft = when (val captured = crashDrafts?.capture()) {
+                is KdbxResult.Success -> captured.data
+                is KdbxResult.Failure -> return captured
+                null -> null
+            }
+            abortOnDrift()?.let { return it }
+            // 续用已受理的凭据请求：导入等批量路径会在同一次受理内多次调用本方法，
+            // 每次都新建 request 会命中 `withCredentialRequest` 的嵌套覆盖检查并让整批失败。
+            val result = databaseSession.withCredentialRequestScope(request) { databaseSession.save() }
             afterPersist()
             when (result) {
-                is KdbxResult.Success -> driftGuard.captureAfterPersist(
-                    databaseSession.currentPathIdentifier.orEmpty(),
-                    databaseSession.currentFile
-                )
+                is KdbxResult.Success -> {
+                    draft?.let { crashDrafts?.saved(it) }
+                    driftGuard.captureAfterPersist(databaseSession.currentPathIdentifier.orEmpty(), databaseSession.currentFile)
+                }
                 is KdbxResult.Failure -> logPersistFailure(result)
             }
             return result

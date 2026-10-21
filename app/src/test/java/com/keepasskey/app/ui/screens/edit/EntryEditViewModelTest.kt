@@ -50,6 +50,23 @@ class EntryEditViewModelTest {
     }
 
     @Test
+    fun `重复选择图标保留标题密码脏态且未改动负对照干净`() = runTest {
+        val model = EntryEditViewModel(SavedStateHandle(), FakeVaultRepository())
+        MainDispatcherGuard.track(model)
+        testScheduler.runCurrent()
+        val unchanged = model.uiState.value.customIconId
+        model.onCustomIconSelected(unchanged)
+        assertFalse(model.uiState.value.isDirty)
+        model.onTitleChange("Synthetic edit")
+        model.onCustomIconSelected(unchanged)
+        assertTrue(model.uiState.value.isDirty)
+        model.onPasswordChangeSecure("Fake password".toCharArray())
+        model.onCustomIconSelected("new-icon")
+        model.onCustomIconSelected("new-icon")
+        assertTrue(model.uiState.value.isDirty)
+    }
+
+    @Test
     fun `新建条目保存成功并发出 SaveSuccess 事件`() = runTest {
         val repository = FakeVaultRepository()
         val viewModel = EntryEditViewModel(

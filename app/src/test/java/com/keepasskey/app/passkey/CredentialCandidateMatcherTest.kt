@@ -221,8 +221,8 @@ class CredentialCandidateMatcherTest {
                 callingPackage = "mark.via", packageDimensionAllowed = false
             )
         )
-        assertTrue(
-            "反向（凭据 rpId 比请求更具体）仍按点号标签边界放行：请求 `login.example.com` 可命中 `example.com` 凭据",
+        assertFalse(
+            "显式 RP 必须精确绑定：父域凭据的 rpIdHash 不能用于子域 RP 请求",
             CredentialCandidateMatcher.matchesPasskey(
                 passkeyEntry("https://$domain", rpId = domain),
                 browserFlow = false, targetRpId = "login.$domain",
@@ -255,6 +255,25 @@ class CredentialCandidateMatcherTest {
                 browserFlow = false, targetRpId = "", callingPackage = pkg, packageDimensionAllowed = true
             )
         )
+    }
+
+    @Test
+    fun `已绑定包名也不得覆盖显式错误RP或allowCredentials`() {
+        val entry = passkeyEntry("android://$pkg", rpId = domain)
+        for (browser in listOf(false, true)) {
+            assertFalse(CredentialCandidateMatcher.matchesPasskey(
+                entry, browser, "other.example", pkg, true
+            ))
+            assertFalse(CredentialCandidateMatcher.matchesPasskey(
+                entry, browser, "login.$domain", pkg, true
+            ))
+            assertFalse(CredentialCandidateMatcher.matchesPasskey(
+                entry, browser, domain, pkg, true, setOf("other")
+            ))
+            assertTrue(CredentialCandidateMatcher.matchesPasskey(
+                entry, browser, domain, pkg, true, setOf("cred")
+            ))
+        }
     }
 
     @Test

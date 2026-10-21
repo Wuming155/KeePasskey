@@ -79,6 +79,9 @@ internal fun advanceBaseAndPersist(
     priorLocalVersion: String?,
     bytes: ByteArray
 ) {
-    cache.updateBase(remotePath, priorLocalVersion ?: SyncCache.sha256Hex(bytes), newEtag)
+    val digest = priorLocalVersion ?: SyncCache.sha256Hex(bytes)
+    // ISSUE-P2-636：`updateBase` 会把 `.version` 一并收敛到同一摘要——本地赢 / 远端丢失自愈
+    // 上传的是缓存中已有字节、不经过 `writeCache`，崩溃窗口里落后的标记不会自行刷新。
+    cache.updateBase(remotePath, digest, newEtag)
     cache.writeBaseContent(remotePath, bytes)
 }

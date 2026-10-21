@@ -29,7 +29,7 @@
 |:--:|---|---|---|
 | ① | `.github/workflows/build.yml:15`、`.github/workflows/dependency-scan.yml:8` | 全部 Action 以 commit SHA 钉死；**本次不跨大版本升级**（上游已有新 major，升级涉 Node 运行时与输入契约变更，无法在本批本地验证） | 两个 workflow 各自的头部设计说明（就地留痕，为权威）；Action SHA 的**真实存在性逐条核对**见 [`ci-静态校准记录.md`](ci-静态校准记录.md) §2 |
 | ② | `app/proguard-rules.pro:6` | R8 / ProGuard 规则按「据实最小保留」收窄（无人能给出依据的整包 `-keep { *; }` 降级或删除） | [`proguard-rules.pro`](../../app/proguard-rules.pro) 头部注释 + 逐条 `ISSUE-P3-09（ZT-20）AC2` 行内注释；**收窄前后的逐条差异**以 `git log -p -- app/proguard-rules.pro` 复核（该次收窄出自提交 `9c2a806`「fix(ISSUE-P3-01~16): P3 批次 16 项整体闭环」）；批次归档见 [`03-批次整改归档.md`](../resolved/batches/03-批次整改归档.md) 的 `P3-09` 行 |
-| ③ | `gradle/libs.versions.toml:30` | `material3 = "1.5.0-alpha27"` 的**退出条件**：`material3 1.5.0 stable` 发布后删除该项与 `compose-material3-alpha` 别名，**回归 Compose BOM 托管** | [`libs.versions.toml`](../../gradle/libs.versions.toml) 内该声明的就地注释（必要性 / 风险 / 约束 / 退出条件四项）；引入该 alpha 的提交为 `56a1d33`「feat(TASK-07): compileSdk 37 + AGP 9.2.1/Gradle 9.4.1 + Compose BOM 2026.08.00 + Material 3 Expressive」 |
+| ③ | `gradle/libs.versions.toml:60` | `material3 = "1.5.0-beta01"` 的**退出条件**：`material3 1.5.0 stable` 发布后删除该项与 `compose-material3-alpha` 别名，**回归 Compose BOM 托管**。2026-10-21 复核：1.5.0 仍是预发布线（渠道已由 alpha29 推进到 beta01，同为 1.5.0 线内），退出条件尚未触发；BOM 2026.09.00 映射 material3 1.4.0，低于钉版，双声明仍有效 | [`libs.versions.toml`](../../gradle/libs.versions.toml) 内该声明的就地注释（必要性 / 风险 / 约束 / 退出条件四项）；引入该 alpha 的提交为 `56a1d33`「feat(TASK-07): compileSdk 37 + AGP 9.2.1/Gradle 9.4.1 + Compose BOM 2026.08.00 + Material 3 Expressive」 |
 
 ---
 
@@ -44,7 +44,7 @@ git log -p -- app/proguard-rules.pro
 # ③ Action 钉死值与升级判据
 grep -n '# v' .github/workflows/build.yml .github/workflows/dependency-scan.yml
 # ④ alpha 退出条件
-grep -n 'alpha27\|compose-material3-alpha' gradle/libs.versions.toml
+grep -n 'material3 = \|compose-material3-alpha' gradle/libs.versions.toml
 ```
 
 ---

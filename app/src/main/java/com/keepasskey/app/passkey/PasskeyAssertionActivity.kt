@@ -78,7 +78,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             TAG,
             privilegedBrowserStore.allowlistJson()
         )
-        if (caller.rejected) {
+        if (caller.rejected || caller.providerReq == null) {
             failAndFinish()
             return
         }
@@ -123,8 +123,9 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         }
 
         val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
-        if (passkeyData == null) {
-            AppLog.e(TAG, "条目不含有效的 Passkey 自定义字段")
+        if (passkeyData == null ||
+            (context.allowedCredentialIds.isNotEmpty() && passkeyData.credentialId !in context.allowedCredentialIds)) {
+            AppLog.e(TAG, "条目不含有效的 Passkey 或不在最终请求允许列表内")
             failAndFinish()
             return
         }
@@ -183,6 +184,10 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         passkeyData: PasskeyData,
         entryUrl: String
     ): Boolean {
+        if (!PasskeyRequestRpBinding.matches(context.requestRpId, passkeyData.relyingPartyId)) {
+            AppLog.e(TAG, "请求 RP 与凭据 RP 不一致，拒绝签发断言")
+            return false
+        }
         if (CallingOriginResolver.isBrowserOrigin(context.origin)) {
             val originHost = DomainMatcher.extractDomain(context.origin)
             if (originHost.isEmpty() ||

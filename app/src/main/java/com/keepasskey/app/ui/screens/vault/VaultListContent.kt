@@ -130,7 +130,9 @@ fun VaultListContent(
                     onClearBatch = onClearBatch,
                     onSelectAllBatch = onSelectAllBatch,
                     onBatchMoveClick = { dialogs.showBatchMoveDialog = true },
-                    onBatchDelete = { dialogs.showBatchDeleteConfirm = true } // ISSUE-P2-357 AC①：先确认再删
+                    onBatchDelete = { dialogs.showBatchDeleteConfirm = true }, // ISSUE-P2-357 AC①：先确认再删
+                    // ISSUE-P3-644：批量写按钮的可用性由真实会话只读状态决定
+                    isReadOnly = uiState.isReadOnly
                 )
             } else {
                 VaultListSearchTopBar(
@@ -147,6 +149,8 @@ fun VaultListContent(
                     onKillApp = onKillApp,
                     onScanClick = onScanClick,
                     onSelectEntriesClick = onSelectEntriesBatch,
+                    // ISSUE-P3-644：只读会话隐藏「选择」批量入口（判定收在顶栏组件内）
+                    isReadOnly = uiState.isReadOnly,
                     // ISSUE-P2-544：高级搜索入口（溢出菜单项 → 选项对话框）
                     onAdvancedSearchClick = { dialogs.showSearchAdvancedDialog = true }
                 )
@@ -239,6 +243,8 @@ fun VaultListContent(
                         highlightQuery = uiState.searchQuery, // ISSUE-P3-360 AC④c：命中高亮取**已生效**的过滤词（防抖后），非输入回显
                         icon = uiState.groupIcons[group.id],
                         densitySpec = densitySpec,
+                        // ISSUE-P3-644：行菜单的三个写操作按真实会话只读状态禁用并说明原因
+                        readOnly = uiState.isReadOnly,
                         onClick = { onGroupClick(group.id) },
                         onRename = { dialogs.groupToRename = group },
                         onChangeIcon = { dialogs.groupToChangeIcon = group },

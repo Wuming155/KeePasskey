@@ -84,6 +84,11 @@ public class CredentialSaveClientActivity extends Activity {
 
     /** 运行模式选择 extra：缺省 = 密码保存；[MODE_PASSKEY] = 通行密钥注册 */
     public static final String EXTRA_MODE = "com.keepasskey.test.extra.MODE";
+    public static final String EXTRA_REQUEST_JSON = "cm_request_json";
+    public static final String EXTRA_ORIGIN = "cm_origin";
+    public static final String EXTRA_CLIENT_DATA_JSON = "cm_client_data_json";
+    public static final String STATUS_FILE = "cm-save-client.status";
+    public static final String RESPONSE_FILE = "cm-save-client-response.json";
 
     /** 通行密钥注册模式取值 */
     public static final String MODE_PASSKEY = "passkey";
@@ -211,7 +216,13 @@ public class CredentialSaveClientActivity extends Activity {
                 status("enabledProbeThrew=" + t.getClass().getSimpleName());
             }
 
-            if (MODE_GET_PASSKEY.equals(mode)) {
+            if ("finish".equals(mode)) { finish(); return; }
+            if ("consume-passkey".equals(mode)) {
+                if (preparedHandle == null) { status("get:handle-missing"); return; }
+                credentialManager.getCredential(this, preparedHandle, new CancellationSignal(), getMainExecutor(), getReceiver());
+                return;
+            }
+            if (MODE_GET_PASSKEY.equals(mode) || "prepare-passkey".equals(mode)) {
                 requestGetPasskey(credentialManager);
                 return;
             }
@@ -234,6 +245,8 @@ public class CredentialSaveClientActivity extends Activity {
                     new OutcomeReceiver<CreateCredentialResponse, CreateCredentialException>() {
                         @Override
                         public void onResult(CreateCredentialResponse response) {
+                            writeResponse(response.getData(),
+                                    "androidx.credentials.BUNDLE_KEY_REGISTRATION_RESPONSE_JSON");
                             status("onResult");
                             Log.i(TAG, STATUS_PREFIX + ":onResult");
                         }
@@ -291,53 +304,104 @@ public class CredentialSaveClientActivity extends Activity {
      * （类型字符串仍是公钥类型），于是落到 provider 的 `else` 分支 ⇒ 空响应。
      */
     private CreateCredentialRequest buildPasskeyCreateRequest() {
-        Bundle payload = new Bundle();
-        payload.putString(KEY_SUBTYPE, SUBTYPE_CREATE_PUBLIC_KEY);
-        payload.putString(KEY_REQUEST_JSON, PASSKEY_CREATE_REQUEST_JSON);
-        payload.putByteArray(KEY_CLIENT_DATA_HASH, new byte[CLIENT_DATA_HASH_BYTES]);
-        return new CreateCredentialRequest.Builder(
-                TYPE_PUBLIC_KEY_CREDENTIAL, payload, new Bundle(payload)).build();
+        Bundle payload = publicKeyPayload(SUBTYPE_CREATE_PUBLIC_KEY, PASSKEY_CREATE_REQUEST_JSON);
+        CreateCredentialRequest.Builder builder = new CreateCredentialRequest.Builder(
+                TYPE_PUBLIC_KEY_CREDENTIAL, payload, new Bundle(payload));
+        String origin = getIntent().getStringExtra(EXTRA_ORIGIN);
+        if (origin != null) builder.setOrigin(origin);
+        return builder.build();
     }
 
-    /** 发起一次与真实客户端登录等价的「通行密钥断言获取」请求（完全离线） */
-    private void requestGetPasskey(CredentialManager credentialManager) {
+    private Bundle publicKeyPayload(String subtype, String defaultJson) {
         Bundle payload = new Bundle();
-        payload.putString(KEY_SUBTYPE, SUBTYPE_GET_PUBLIC_KEY);
-        payload.putString(KEY_REQUEST_JSON, PASSKEY_GET_REQUEST_JSON);
-        payload.putByteArray(KEY_CLIENT_DATA_HASH, new byte[CLIENT_DATA_HASH_BYTES]);
+        payload.putString(KEY_SUBTYPE, subtype);
+        String requestJson = getIntent().getStringExtra(EXTRA_REQUEST_JSON);
+        payload.putString(KEY_REQUEST_JSON, requestJson == null ? defaultJson : requestJson);
+        String clientData = getIntent().getStringExtra(EXTRA_CLIENT_DATA_JSON);
+        if (clientData != null) {
+            try {
+                payload.putByteArray(KEY_CLIENT_DATA_HASH, java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(clientData.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            } catch (java.security.NoSuchAlgorithmException error) {
+                throw new IllegalStateException(error);
+            }
+        }
+        return payload;
+    }
 
+    private void requestGetPasskey(CredentialManager credentialManager) {
+        Bundle payload = publicKeyPayload(SUBTYPE_GET_PUBLIC_KEY, PASSKEY_GET_REQUEST_JSON);
         CredentialOption option = new CredentialOption.Builder(
                 TYPE_PUBLIC_KEY_CREDENTIAL, payload, new Bundle(payload)).build();
+        GetCredentialRequest.Builder builder = new GetCredentialRequest.Builder(new Bundle())
+                .addCredentialOption(option);
+        String origin = getIntent().getStringExtra(EXTRA_ORIGIN);
+        if (origin != null) builder.setOrigin(origin);
+        if ("prepare-passkey".equals(mode)) {
+            status("preparing:passkey");
+            credentialManager.prepareGetCredential(builder.build(), new CancellationSignal(), getMainExecutor(),
+                    new OutcomeReceiver<android.credentials.PrepareGetCredentialResponse, GetCredentialException>() {
+                        @Override public void onResult(android.credentials.PrepareGetCredentialResponse response) {
+                            preparedHandle = response.getPendingGetCredentialHandle();
+                            status("prepared:passkey=" + response.hasCredentialResults(TYPE_PUBLIC_KEY_CREDENTIAL));
+                        }
+                        @Override public void onError(GetCredentialException error) {
+                            status("prepare:onError:" + error.getType());
+                        }
+                    });
+        } else {
+            status("requesting:get-passkey");
+            credentialManager.getCredential(this, builder.build(), new CancellationSignal(), getMainExecutor(), getReceiver());
+        }
+    }
 
-        GetCredentialRequest request = new GetCredentialRequest.Builder(new Bundle())
-                .addCredentialOption(option)
-                .build();
+    private static android.credentials.PrepareGetCredentialResponse.PendingGetCredentialHandle preparedHandle;
 
-        status("requesting:get-passkey");
-        credentialManager.getCredential(
-                this,
-                request,
-                new CancellationSignal(),
-                getMainExecutor(),
-                new OutcomeReceiver<GetCredentialResponse, GetCredentialException>() {
+    private OutcomeReceiver<GetCredentialResponse, GetCredentialException> getReceiver() {
+        return new OutcomeReceiver<GetCredentialResponse, GetCredentialException>() {
                     @Override
                     public void onResult(GetCredentialResponse response) {
+                        writeResponse(response.getCredential().getData(),
+                                "androidx.credentials.BUNDLE_KEY_AUTHENTICATION_RESPONSE_JSON");
                         status("get:onResult");
-                        Log.i(TAG, STATUS_PREFIX + ":get:onResult type=" + response.getCredential().getType());
                     }
 
                     @Override
                     public void onError(GetCredentialException error) {
                         status("get:onError:" + error.getType());
-                        Log.w(TAG, STATUS_PREFIX + ":get:onError type=" + error.getType());
                     }
-                });
+                };
+    }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        mode = intent.getStringExtra(EXTRA_MODE);
+        if (mode == null) mode = "password";
+        new java.io.File(getFilesDir(), RESPONSE_FILE).delete();
+        requested = true;
+        requestSave();
+    }
+
+    private void writeResponse(Bundle data, String key) {
+        String response = data.getString(key);
+        if (response != null) writeFile(RESPONSE_FILE, response);
+    }
+
+    private void writeFile(String name, String value) {
+        try (java.io.FileOutputStream output = openFileOutput(name, MODE_PRIVATE)) {
+            output.write(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            output.flush();
+            output.getFD().sync();
+        } catch (java.io.IOException error) {
+            throw new IllegalStateException("synthetic CM receipt write failed", error);
+        }
     }
 
     private void status(String value) {
+        writeFile(STATUS_FILE, value + "\npid=" + android.os.Process.myPid());
         Log.i(TAG, STATUS_PREFIX + ":" + value);
-        if (statusView != null) {
-            statusView.setText(STATUS_PREFIX + ":" + value);
-        }
+        if (statusView != null) statusView.setText(STATUS_PREFIX + ":" + value);
     }
 }

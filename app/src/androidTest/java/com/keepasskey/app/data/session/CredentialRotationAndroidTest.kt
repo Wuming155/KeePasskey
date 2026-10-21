@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.keepasskey.database.session.AtomicFileWriter
 import com.keepasskey.database.session.CredentialRotationCancellationException
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.withCredentialRequest
 import com.keepasskey.database.session.SessionWriteReceipt
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.exception.KdbxInvalidCredentialsException

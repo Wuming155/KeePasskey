@@ -21,6 +21,13 @@ package com.keepasskey.app.passkey
  * 转义表外的 `\x`、串内裸控制字符（< 0x20）、非 `null/true/false` 的裸词、截断输入。
  * 载荷**总字节**上限由调用方在进入本扫描器前判定
  * （[PasskeyCxfReader.MAX_IMPORT_PAYLOAD_BYTES]）。
+ *
+ * ## 工作缓冲的擦除（`ISSUE-P3-647`）
+ *
+ * 每个字符串值经 [ByteSink] 逐步解码；[ByteSink] **扩容时先清零被遗弃的旧代次**再做复制，
+ * `stringNode` 的 `finally` 清当前代次，交给 AST 的独立副本则随树（[ByteJson.wipe]）由
+ * `PasskeyCxfReader.read` 的 `finally` 递归清零。`scan` 自身成功 / 语法失败两条路径都收口，
+ * 不把任何明文字节留给 GC。
  */
 object ByteJsonScanner {
 
@@ -28,8 +35,17 @@ object ByteJsonScanner {
     const val MAX_DEPTH: Int = 32
 
     /** 扫描并解析；输入不是单个合法 JSON 值时返回 null（绝不抛出）。 */
-    fun scan(text: ByteArray): ByteJson? {
-        val scanner = Scanner(text)
+    fun scan(text: ByteArray): ByteJson? = scan(text, null)
+
+    /**
+     * 同上，并把扫描器的**每一个**字符串工作数组（`ByteSink` 的初始缓冲、每次扩容后的新缓冲）
+     * 与交给 AST 的字符串副本在分配时交给 [probe] 保留引用。
+     *
+     * 只供同模块契约测试直接观测清零（`ISSUE-P3-647`）：不引入全局钩子，观察者由调用方显式传入、
+     * 生命周期止于单次扫描。观察者**只许保存引用**，不得回写或清零这些数组。
+     */
+    internal fun scan(text: ByteArray, probe: ByteJsonScanProbe?): ByteJson? {
+        val scanner = Scanner(text, probe)
         val node = scanner.parseDocument() ?: run {
             scanner.wipeTemporaryNodes()
             return null
@@ -46,8 +62,14 @@ object ByteJsonScanner {
      * 递归下降扫描器（一次线性遍历）。
      *
      * 只在**内部**存在：节点类型 [ByteJson] 不含父引用，故调用方拿到的是纯值树。
+     *
+     * [probe] 只用于契约测试直接保留字符串工作数组的引用（见 [scan]）：
+     * 生产路径传 null，不产生额外引用。
      */
-    private class Scanner(private val src: ByteArray) {
+    private class Scanner(
+        private val src: ByteArray,
+        private val probe: ByteJsonScanProbe?
+    ) {
 
         private var pos = 0
         private val allocatedNodes = mutableListOf<ByteJson>()
@@ -152,14 +174,18 @@ object ByteJsonScanner {
          */
         private fun stringNode(): ByteJson.Str? {
             pos++ // '"'
-            val out = ByteSink()
+            val out = ByteSink(probe)
             try {
                 while (true) {
                     if (pos >= src.size) return null
                     val c = src[pos].toInt() and 0xFF
                     pos++
                     when {
-                        c == DQUOTE -> return track(ByteJson.Str(out.toByteArray()))
+                        c == DQUOTE -> {
+                            val bytes = out.toByteArray()
+                            probe?.stringCopies?.add(bytes)
+                            return track(ByteJson.Str(bytes))
+                        }
                         c == BACKSLASH -> if (!appendEscaped(out)) return null
                         c < 0x20 -> return null // 串内裸控制字符：RFC 8259 要求转义，一律拒
                         else -> out.add(c)
@@ -276,116 +302,3 @@ object ByteJsonScanner {
     private val HIGH_SURROGATE_RANGE = 0xD800..0xDBFF
     private val LOW_SURROGATE_RANGE = 0xDC00..0xDFFF
 }
-
-/**
- * [ByteJsonScanner] 的节点树。**值一律是 `ByteArray`**（[ByteJson.Str]），
- * 这样私钥 / PRF 秘密从输入到解码结果全程不落 `String`；
- * 只有键名以 `String` 承载（协议词表，非秘密）。
- *
- * 同一对象内**重复键**取**首个**出现（[ByteJson.Obj.member]），并在 [PasskeyCxfReader] 的 KDoc
- * 里登记为口径——「后写覆盖」会让载荷尾部悄悄改写仪式字段，不是好的默认。
- */
-sealed class ByteJson {
-
-    /** JSON 对象：成员按输入顺序保留，重复键不合并。 */
-    class Obj(val members: List<Pair<String, ByteJson>>) : ByteJson() {
-
-        /** 首个同名成员的值；不存在返回 null。 */
-        fun member(key: String): ByteJson? = members.firstOrNull { it.first == key }?.second
-
-        /** 是否含某键（只判存在，不看值）。 */
-        fun has(key: String): Boolean = members.any { it.first == key }
-
-        /** 键集合（供诊断与「未知成员忽略」计数，不含值）。 */
-        fun keys(): List<String> = members.map { it.first }
-
-        override fun wipe() = members.forEach { it.second.wipe() }
-    }
-
-    /** JSON 数组。 */
-    class Arr(val items: List<ByteJson>) : ByteJson() {
-        override fun wipe() = items.forEach { it.wipe() }
-    }
-
-    /** JSON 字符串值：已解码转义的 UTF-8 字节（可能承载秘密，调用方负责清零）。 */
-    class Str(val bytes: ByteArray) : ByteJson() {
-
-        /** 空串判定（长度 0 与「只有空白」都算空，规范展示字段允许空串）。 */
-        fun isBlankUtf8(): Boolean = bytes.isEmpty() || bytes.all { it.isBlankByte() }
-
-        /** 非敏感值转文本（键名、rpId、用户名等）；私钥 / PRF **禁止**调用本方法。 */
-        fun asUtf8String(): String? = runCatching { bytes.decodeToString() }.getOrNull()
-
-        /**
-         * 就地清零本节点的字节副本（`AGENTS.md` §3 铁律）。
-         *
-         * 只清零**扫描器自己分配的副本**，不动调用方传入的载荷数组——
-         * 后者归扫码链上层按各自的擦除契约处理。
-         */
-        override fun wipe() = bytes.fill(0)
-    }
-
-    /** JSON 数字：整数形态可得时 [longValue] 非空（版本号判定用），否则为 null（含小数 / 溢出）。 */
-    class Num(val longValue: Long?) : ByteJson()
-
-    /** JSON 布尔。 */
-    class Bool(val value: Boolean) : ByteJson()
-
-    /** JSON `null`（与「键缺失」在口径上不同，故独立成型）。 */
-    object NullValue : ByteJson()
-
-    open fun wipe() = Unit
-}
-
-/** 仅服务于扫描器的可增长字节缓冲（避免每字节一次数组拷贝）。 */
-private class ByteSink {
-
-    private var buf = ByteArray(64)
-    private var size = 0
-
-    fun add(b: Int) {
-        ensure(1)
-        buf[size++] = b.toByte()
-    }
-
-    /** 按 UTF-8 写出一个码点（1~4 字节），供 `\uXXXX` 与代理对使用。 */
-    fun appendCodePoint(cp: Int) {
-        when {
-            cp < 0x80 -> add(cp)
-            cp < 0x800 -> {
-                ensure(2)
-                buf[size++] = (0xC0 or (cp shr 6)).toByte()
-                buf[size++] = (0x80 or (cp and 0x3F)).toByte()
-            }
-            cp < 0x10000 -> {
-                ensure(3)
-                buf[size++] = (0xE0 or (cp shr 12)).toByte()
-                buf[size++] = (0x80 or ((cp shr 6) and 0x3F)).toByte()
-                buf[size++] = (0x80 or (cp and 0x3F)).toByte()
-            }
-            else -> {
-                ensure(4)
-                buf[size++] = (0xF0 or (cp shr 18)).toByte()
-                buf[size++] = (0x80 or ((cp shr 12) and 0x3F)).toByte()
-                buf[size++] = (0x80 or ((cp shr 6) and 0x3F)).toByte()
-                buf[size++] = (0x80 or (cp and 0x3F)).toByte()
-            }
-        }
-    }
-
-    fun toByteArray(): ByteArray = buf.copyOf(size)
-
-    fun wipe() {
-        buf.fill(0)
-        size = 0
-    }
-
-    private fun ensure(extra: Int) {
-        if (size + extra <= buf.size) return
-        var cap = buf.size * 2
-        while (cap < size + extra) cap *= 2
-        buf = buf.copyOf(cap)
-    }
-}
-
-private fun Byte.isBlankByte(): Boolean = this == 0x20.toByte() || this == 0x09.toByte()

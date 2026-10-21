@@ -60,6 +60,7 @@ internal class BinaryNode(
      * 默认不限（仅供不经 `KdbxXmlParser` 的直接构造，如设备侧单节点内存行为实测）。
      */
     private val attachmentBudget: AttachmentBudget = AttachmentBudget.unlimited(),
+    private val observeBuffer: ((ByteArray) -> Unit)? = null,
     private val onDone: (KdbxAttachment) -> Unit
 ) : SaxNode() {
 
@@ -166,20 +167,23 @@ internal class BinaryNode(
      * 单节点即可产出 128 MiB 驻留（低端机 192 MiB 堆实测 OOM），且多节点互不累计。
      * 现封顶值由累计预算动态给出，单节点与整库两个维度同时受约束。
      */
-    private fun gunzip(compressed: ByteArray, maxOutputBytes: Long): ByteArray {
+    internal fun gunzip(compressed: ByteArray, maxOutputBytes: Long): ByteArray {
         // 初始容量按 4 倍压缩比预估，并以 4 MiB 封顶，避免小压缩体直接预留过大缓冲
         val initialCap = minOf(
             compressed.size.toLong() * GZIP_SIZE_GROWTH_HINT,
             GZIP_INITIAL_CAP_BYTES,
             maxOutputBytes
         ).toInt()
-        val out = WipableByteArrayOutputStream(initialCap)
+        val out = WipableByteArrayOutputStream(initialCap, observeBuffer)
         val buffer = ByteArray(GZIP_COPY_BUFFER_BYTES)
+        observeBuffer?.invoke(buffer)
         try {
             GZIPInputStream(ByteArrayInputStream(compressed), GZIP_INFLATER_BUFFER_BYTES).use { gzip ->
                 while (true) {
                     val read = gzip.read(buffer)
                     if (read < 0) break
+                    // 观察点选在这里：此刻 buffer 承载的是解压出的明文（分配时还是全零）
+                    observeBuffer?.invoke(buffer)
                     if (out.size().toLong() + read > maxOutputBytes) {
                         throw KdbxCorruptFileException(
                             "内联附件解压后字节数超出本次解析的累计安全预算（本节点可用 ≤ $maxOutputBytes），疑似解压炸弹"

@@ -202,7 +202,7 @@ internal object S3DirectoryList {
 
     /** JAXP 特性按平台能力启用；不支持不是解析失败，实体访问仍由 EntityResolver 阻断。 */
     private fun DocumentBuilderFactory.setFeatureIfSupported(name: String, enabled: Boolean) {
-        runCatching { setFeature(name, enabled) }
+        runCatchingCancellable { setFeature(name, enabled) }
     }
 
     private const val FEATURE_DISALLOW_DOCTYPE = "http://apache.org/xml/features/disallow-doctype-decl"

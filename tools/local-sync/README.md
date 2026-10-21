@@ -4,19 +4,25 @@
 用于验证 WebDAV / S3 兼容存储的真实 HTTPS 链路与「下载 → 三方合并」全流程。
 
 > 均使用 `localhost` 自签名证书（`certs/cert.pem`，SAN 含 `DNS:localhost` / `IP:127.0.0.1`）。
-> 仅限本机联调，禁止公网暴露。
+> **默认只监听 loopback，凭据按次随机**（ISSUE-P3-650）；需要其他设备联调请用 `--bind 0.0.0.0`
+> 显式选择，或更推荐 `adb reverse` 把设备流量转回本机。禁止公网暴露。
 
 ## 组成
 
 | 组件 | 端口 | 说明 |
 |------|------|------|
-| **WebDAV** | `9443` | wsgidav + cheroot（HTTPS，Basic Auth，用户 `tester` / `tester123`） |
-| **MinIO (S3)** | `9000` | MinIO（HTTPS + SigV4，AccessKey `tester` / `tester1234`，桶 `keepasskey-test`） |
+| **WebDAV** | `9443` | wsgidav + cheroot（HTTPS，Basic Auth，凭据由 `WEBDAV_USER` / `WEBDAV_PASSWORD` 提供） |
+| **MinIO (S3)** | `9000` | MinIO（HTTPS + SigV4，凭据由 `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` 提供，桶 `keepasskey-lab`） |
 | MinIO Console | `9001` | Web 管理界面（可选） |
 
-对应测试：`sync/src/test/java/com/keepasskey/sync/LiveSyncServersTest.kt` 与
+源码与脚本中**没有**固定测试口令：`run_lab.py` / `smoke_*.py` / `run_s3_matrix.py` 每次运行
+生成随机凭据，数据目录在 `build/local-sync-lab/<run-id>/` 下且退出即删；不再读写
+`tools/local-sync/minio-data`、`webdav-data` 等历史目录。
+
+对应测试：`sync/src/test/java/com/keepasskey/sync/LiveSyncServersTest.kt`、
+`sync/.../s3/LiveS3DirectoryListTest.kt` 与
 `app/src/test/java/com/keepasskey/app/sync/LiveSyncKdbxSemanticsTest.kt`
-（均由 `run_lab.py` 显式启用；常规 JVM 全量测试不发现 app live 用例，不留下 Assume/skipped 假绿）。
+（均由脚本显式启用；常规 JVM 全量测试不发现 app live 用例，不留下 Assume/skipped 假绿）。
 
 ## 首次准备
 
@@ -38,40 +44,66 @@ openssl pkcs8 -topk8 -nocrypt -in certs/key.pem -out certs/minio/private.key
 ## 一键运行（服务 + 真实集成测试）
 
 ```bash
-python run_lab.py
+python run_lab.py                 # 默认仅本机，随机凭据
+python run_lab.py --bind 0.0.0.0  # 显式外部监听（仍为随机凭据，退出即回收）
+python run_lab.py --keep          # 保留本次运行目录（默认退出即删）
 ```
 
-该脚本会：启动 WebDAV → 启动 MinIO → 创建测试桶 → 执行 `LiveSyncServersTest` → 回收服务。
+该脚本会：启动 WebDAV → 启动 MinIO → 创建测试桶 → 执行 `LiveSyncServersTest` →
+执行 app 侧 KDBX 语义往返 → **只按 PID 回收本次启动的进程**（不做按进程名的批量结束）。
+
+## 验收矩阵（ISSUE-P3-650 / ISSUE-P2-655）
+
+```bash
+python run_s3_matrix.py              # loopback 监听面 + SigV4 端到端（真实 MinIO）
+python run_s3_matrix.py --lan        # 追加显式 0.0.0.0 模式检查
+python run_s3_matrix.py --guardian   # 追加「不得误杀他人 MinIO」的反例
+python run_s3_matrix.py --no-gradle  # 只做监听/认证矩阵
+```
+
+检查项（读数随环境不同，脚本会逐条打印 PASS/FAIL）：
+
+- MinIO API / Console 与 WebDAV 的实际监听地址**只有** loopback（读真实套接字，不看文档）；
+- 本机成功、同网段网卡地址被拒绝（无其他网卡时该项显式标注「跳过、不计为已验收」）；
+- 历史固定凭据 `tester/tester1234` 被服务端拒绝；显式 LAN 模式下匿名请求返回 403；
+- 退出后本次启动的 PID 全部结束，且并行存在的**他人** MinIO 仍存活；
+- `LiveS3DirectoryListTest` 在真实服务上验证：含 `&` 前缀首分页、服务端签发的真实续页 token、
+  错误 secret 被 403 拒绝、token 内 `&` 只作数据。
 
 ## 手动运行
 
 ```bash
-# 单独启动 WebDAV（前台，Ctrl-C 退出）
-python run_webdav.py
+# 单独启动 WebDAV（前台，Ctrl-C 退出；凭据必须由环境提供）
+WEBDAV_USER=<随机用户名> WEBDAV_PASSWORD=<随机高熵口令> python run_webdav.py
 
-# 单独启动 MinIO（需另开终端）
-MINIO_ROOT_USER=tester MINIO_ROOT_PASSWORD=tester1234 \
-  bin/minio.exe server minio-data --address :9000 --console-address :9001
+# 单独启动 MinIO（需另开终端；显式 loopback，随机凭据）
+MINIO_ROOT_USER=<随机> MINIO_ROOT_PASSWORD=<随机高熵口令> \
+  bin/minio.exe server <独立数据目录> --address 127.0.0.1:9000 --console-address 127.0.0.1:9001
 
 # 创建测试桶（mc 对自签名证书需 --insecure，仅测试客户端侧）
-bin/mc.exe --insecure alias set local https://localhost:9000 tester tester1234
-bin/mc.exe --insecure mb local/keepasskey-test
+bin/mc.exe --insecure alias set local https://127.0.0.1:9000 <随机用户名> <随机口令>
+bin/mc.exe --insecure mb local/keepasskey-lab
 ```
 
-然后运行真实集成测试：
+然后运行真实集成测试（凭据仍需由环境/属性注入；脚本已自动完成这一步）：
 
 ```bash
 ./gradlew.bat :sync:testDebugUnitTest \
   --tests "com.keepasskey.sync.LiveSyncServersTest" \
+  --tests "com.keepasskey.sync.s3.LiveS3DirectoryListTest" \
   -DliveSyncTest=true \
-  -DliveCertPath="<本目录>/certs/cert.pem"
+  -DliveCertPath="<本目录>/certs/cert.pem" \
+  -DliveS3Access=<随机用户名> -DliveS3Secret=<随机口令>
 ```
+
+> 为什么用 `-D` 而不是只靠环境变量：Gradle daemon 会被后续客户端复用，它持有的是首次启动时的
+> 环境快照，本轮随机凭据可能因此不可见。`run_s3_matrix.py` 即按此方式传递。
 
 ## 协议自测（不依赖 Gradle / Kotlin）
 
 ```bash
-python smoke_webdav.py   # PROPFIND / PUT / GET 字节精确 / MOVE / DELETE
-python smoke_minio.py    # 建桶 / 上传 / 下载字节精确 / 删除（SigV4）
+python smoke_webdav.py   # PROPFIND / PUT / GET 字节精确 / MOVE / DELETE（独立目录 + 随机凭据）
+python smoke_minio.py    # 建桶 / 上传 / 下载字节精确 / 删除（SigV4，独立目录 + 随机凭据）
 ```
 
 ## 测试覆盖点

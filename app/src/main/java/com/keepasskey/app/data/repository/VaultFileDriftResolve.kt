@@ -81,7 +81,8 @@ internal class VaultFileDriftResolve(
      * 生产恒为 null；仅设备侧生命周期竞态验收注入，用于精确验证「临界区开始后宿主销毁，
      * 落盘仍完成」——与 [mergeCommitGate] 留在区外的既有设计不冲突（那是同一钩子，本钩子在区内）。
      */
-    private val commitEnteredGate: (suspend () -> Unit)? = null
+    private val commitEnteredGate: (suspend () -> Unit)? = null,
+    private val crashDrafts: com.keepasskey.app.security.VaultCrashDrafts? = null
 ) {
 
     /** `ISSUE-P1-631`：磁盘源访问（读字节 / SAF 文档句柄；实现见 [VaultFileDriftSourceAccess]） */
@@ -257,8 +258,11 @@ internal class VaultFileDriftResolve(
         readFingerprint: VaultFileReadPin,
         policy: DriftMergeConflictPolicy?
     ): KdbxResult<Unit> {
-        // ISSUE-P1-631：并发 barrier 验收的受控暂停点（生产恒 null，不引入任何调度）。
-        // 刻意留在 NonCancellable **之外**——取消应能在「尚未开始提交」时正常生效。
+        when (val draft = crashDrafts?.capture()) {
+            is KdbxResult.Failure -> return draft
+            else -> Unit
+        }
+        // 暂停在早期门之前，原始脏树已经持久化。
         mergeCommitGate?.invoke()
         // 内容级复核（区外，**可取消**）：按同通道重读当前字节并比对 SHA-256。
         // 放在区外是有意取舍——重读最大可达读取上限（160 MiB），放进不可取消区会把「用户退出 /
@@ -294,16 +298,17 @@ internal class VaultFileDriftResolve(
                 return KdbxResult.Failure(p.error, strings.get(R.string.ext_mod_merge_failed, strings.get(R.string.err_unknown)), p.code)
             }
         }
-        return commitPreparedMerge(
-            localDb = localDb,
-            replacement = replacement,
-            prepared = prepared,
-            baselineRevision = baselineRevision,
-            pathId = pathId,
-            localFile = localFile,
-            readFingerprint = readFingerprint,
-            policy = policy
-        )
+        try {
+            val draft = when (val captured = crashDrafts?.capturePrepared(localDb, prepared)) {
+                is KdbxResult.Success -> captured.data
+                is KdbxResult.Failure -> return captured
+                null -> null
+            }
+            return commitPreparedMerge(localDb, replacement, prepared, baselineRevision, pathId,
+                localFile, readFingerprint, policy).also { result ->
+                if (result is KdbxResult.Success && draft != null) crashDrafts?.saved(draft)
+            }
+        } finally { prepared.wipe() }
     }
 
     /**

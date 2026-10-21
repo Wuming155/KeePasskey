@@ -215,6 +215,8 @@ class CredentialProviderRequestContractDeviceTest {
         assertNotNull("带 entryId 的断言请求必须可装配", assembled)
         requireNotNull(assembled)
         assertEquals(ENTRY_ID, assembled.entryId)
+        assertEquals("example.com", assembled.requestRpId)
+        assertEquals(setOf("AQIDBA"), assembled.allowedCredentialIds)
         assertEquals(
             "challenge 必须取系统请求 JSON（ISSUE-P2-199：extras 仅作展示缓存），实际=${assembled.challenge}",
             SYSTEM_CHALLENGE,

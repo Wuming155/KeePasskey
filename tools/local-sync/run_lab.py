@@ -1,160 +1,123 @@
 #!/usr/bin/env python3
-"""KeePasskey 本地 HTTPS 同步联调一体化脚本：
-1. 拉起本地 HTTPS WebDAV 服务（wsgidav + 自签名证书）
-2. 拉起本地 HTTPS MinIO(S3) 服务并创建测试桶
-3. 运行 sync 模块的 LiveSyncServersTest 真实集成测试（针对真实服务）
-4. 运行 app 模块的 KDBX 内容比较 / 三方合并语义真实 WebDAV 往返测试
-5. 回收所有本地服务
+"""KeePasskey 本地 HTTPS 同步联调一体化脚本（ISSUE-P3-650 起只管理自身进程）。
 
-用法：python run_lab.py
-前置：pip install wsgidav cheroot pyopenssl；bin/ 下含 minio.exe / mc.exe（首次需联网下载）。
+流程：
+1. 拉起本地 HTTPS WebDAV（wsgidav + 自签名证书）
+2. 拉起本地 HTTPS MinIO(S3)，创建测试桶
+3. 运行 sync 模块 LiveSyncServersTest（真实服务集成测试）
+4. 运行 app 模块 KDBX 语义真实 WebDAV 往返测试
+5. 回收**本次启动的**本地服务（按 PID，绝不按进程名批量 taskkill）
+
+默认只监听 loopback 且每次运行生成随机凭据。需要在同一网段的其他设备上联调时显式加
+`--bind 0.0.0.0`（凭据仍为随机；**不允许**固定弱口令作为外部监听回退），更推荐 `adb reverse`
+把设备流量转回本机，避免真的对外开端口。
+
+用法：
+    python run_lab.py                # 仅本机
+    python run_lab.py --bind 0.0.0.0 # 显式外部监听（随机凭据，退出即回收）
+    python run_lab.py --keep         # 保留本次运行目录（默认退出即删）
+
+前置：pip install wsgidav cheroot pyopenssl；bin/ 下含 minio.exe / mc.exe。
 """
+import argparse
 import os
-import socket
 import subprocess
 import sys
-import time
-import uuid
+
+import lab_services
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(os.path.dirname(HERE))      # .../KeePasskey（仓库根）
+REPO = lab_services.REPO
 GRADLEW = os.path.join(REPO, "gradlew.bat")
-BIN = os.path.join(HERE, "bin")
-MINIO = os.path.join(BIN, "minio.exe")
-MC = os.path.join(BIN, "mc.exe")
-CERTS_DIR = os.path.join(HERE, "certs", "minio")
-DATA_DIR = os.path.join(HERE, "minio-data")
-WEBDAV_PORT = 9443
-S3_PORT = 9000
-CONSOLE_PORT = 9001
-USER = "kp-test-" + uuid.uuid4().hex[:8]
-PASSWORD = uuid.uuid4().hex
-S3_USER = "kp-s3-" + uuid.uuid4().hex[:8]
-S3_PASSWORD = uuid.uuid4().hex
-BUCKET = "keepasskey-test"
-CERT_PATH = os.path.join(HERE, "certs", "cert.pem")
 LIVE_ARTIFACT_DIR = os.path.join(REPO, ".ci-artifacts", "live-sync-kdbx")
 
-PROCS = []
 
+def gradle_live(lab, target_args):
+    """运行带 live 参数的 Gradle 任务。
 
-def wait_port(host, port, timeout=40):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=2):
-                return True
-        except OSError:
-            time.sleep(0.5)
-    return False
-
-
-def _redact(text):
-    """**纵深防御**：若子进程输出意外带出口令，回显前擦除。
-
-    注意：CodeQL 的 `py/clear-text-logging-sensitive-data` **不把** `str.replace` 视为净化器，
-    因此不能依赖本函数来阻断该规则——真正的手段是让口令根本不进入任何 `print` 路径（见 `run`）。
-    本函数只用于「子进程输出」这一条非污点路径的兜底。
+    凭据一律以 `-D` 传入：Gradle daemon 会被后续客户端复用，`System.getenv()` 在构建脚本里
+    读到的是 **daemon 启动时**的环境快照，本轮随机凭据可能因此不可见（首轮实测即因此 7 例
+    403）。命令行属性随每次构建请求下发，不受 daemon 复用影响。
     """
-    for secret in (PASSWORD, S3_PASSWORD):
-        if secret:
-            text = text.replace(secret, "***")
-    return text
+    cmd = [GRADLEW] + target_args + [
+        "-DliveSyncTest=true",
+        f"-DliveCertPath={lab_services.CERT_PATH}",
+        f"-DliveWebdavUrl=https://{lab.host_for_client()}:{lab.webdav_port}",
+        f"-DliveWebdavUser={lab.webdav_user}",
+        f"-DliveWebdavPass={lab.webdav_password}",
+        f"-DliveS3Endpoint=https://{lab.host_for_client()}:{lab.s3_port}",
+        f"-DliveS3Bucket={lab.bucket}",
+        f"-DliveS3Access={lab.s3_user}",
+        f"-DliveS3Secret={lab.s3_password}",
+    ]
+    return subprocess.run(cmd, cwd=REPO).returncode
 
 
-def run(cmd, display):
-    """执行 `cmd`；`display` 是**调用方显式构造、不含任何凭据**的命令摘要，仅用于回显。
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="KeePasskey 本地 HTTPS 同步联调")
+    parser.add_argument("--bind", default=lab_services.LOOPBACK,
+                        help="监听地址（默认 127.0.0.1；显式外部联调用 0.0.0.0）")
+    parser.add_argument("--webdav-port", type=int, default=9443)
+    parser.add_argument("--s3-port", type=int, default=9000)
+    parser.add_argument("--console-port", type=int, default=9001)
+    parser.add_argument("--keep", action="store_true", help="保留本次运行数据目录（默认删除）")
+    args = parser.parse_args(argv)
 
-    刻意不把 `cmd`（可能内嵌同步凭据）传入 `print`：CodeQL 不把字符串替换识别为净化器，
-    「先擦除再回显」仍会被判为明文日志，故改为结构性隔离——
-    机密值只出现在传给 `subprocess` 的实参里，日志只接受调用方提供的安全摘要。
-    """
-    print("  $", display)
-    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True, shell=True)
-    out = (r.stdout or "") + (r.stderr or "")
-    for line in out.splitlines()[-40:]:
-        print("    >", _redact(line))
-    return r.returncode == 0, out
+    lab = lab_services.Lab(
+        bind_host=args.bind,
+        webdav_port=args.webdav_port,
+        s3_port=args.s3_port,
+        console_port=args.console_port,
+    )
+    print(f"[lab] 独立运行目录 {lab.root}（数据不复用既有目录）")
+    if args.bind not in (lab_services.LOOPBACK, "localhost"):
+        print(f"[lab] 注意：显式外部监听 {args.bind}，凭据按次随机且退出即回收进程")
 
-
-def main():
-    py = sys.executable
-    # WebDAV 与两个测试 JVM 共用一次性本地凭据；不回显口令，且不依赖弱口令默认值。
-    os.environ["WEBDAV_HOST"] = "127.0.0.1"
-    os.environ["WEBDAV_USER"] = USER
-    os.environ["WEBDAV_PASSWORD"] = PASSWORD
+    # 凭据只经环境变量进入子进程；不回显值。
+    os.environ["WEBDAV_HOST"] = lab.host_for_client()
+    os.environ["WEBDAV_USER"] = lab.webdav_user
+    os.environ["WEBDAV_PASSWORD"] = lab.webdav_password
     os.environ.setdefault("LIVE_SYNC_TEST", "1")
-    wd = subprocess.Popen([py, os.path.join(HERE, "run_webdav.py")],
-                          cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    PROCS.append(wd)
-    if not wait_port("localhost", WEBDAV_PORT, timeout=30):
-        print("[FATAL] WebDAV 未就绪"); return 1
-    print("[lab] WebDAV HTTPS 就绪 :9443")
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    env = dict(os.environ)
-    env["MINIO_ROOT_USER"] = S3_USER
-    env["MINIO_ROOT_PASSWORD"] = S3_PASSWORD
-    env["MINIO_CERTS_DIR"] = CERTS_DIR
-    mproc = subprocess.Popen(
-        [MINIO, "server", DATA_DIR, "--address", f"127.0.0.1:{S3_PORT}", "--console-address", f"127.0.0.1:{CONSOLE_PORT}"],
-        cwd=HERE, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    PROCS.append(mproc)
-    if not wait_port("localhost", S3_PORT, timeout=40):
-        print("[FATAL] MinIO 未就绪"); return 1
-    print("[lab] MinIO HTTPS 就绪 :9000")
+    try:
+        lab.start_webdav()
+        if not lab_services.wait_port(lab.host_for_client(), lab.webdav_port, timeout=30):
+            print("[FATAL] WebDAV 未就绪")
+            return 1
+        print(f"[lab] WebDAV HTTPS 就绪 {lab.host_for_client()}:{lab.webdav_port}")
 
-    ok, _ = run(
-        f'"{MC}" --insecure alias set local https://localhost:9000 {S3_USER} {S3_PASSWORD}',
-        display=f'"{MC}" --insecure alias set local https://localhost:9000 {S3_USER} ***',
-    )
-    ok2, out = run(
-        f'"{MC}" --insecure mb local/{BUCKET}',
-        display=f'"{MC}" --insecure mb local/{BUCKET}',
-    )
-    if not (ok and (ok2 or "exists" in out)):
-        print("[WARN] 建桶可能失败，S3 测试可能失败")
+        lab.start_minio()
+        if not lab_services.wait_port(lab.host_for_client(), lab.s3_port, timeout=40):
+            print("[FATAL] MinIO 未就绪")
+            return 1
+        print(f"[lab] MinIO HTTPS 就绪 {lab.host_for_client()}:{lab.s3_port}")
 
-    print("[lab] 运行 sync LiveSyncServersTest（针对真实本地服务）...")
-    sync_gradle_cmd = (
-        f'"{GRADLEW}" :sync:testDebugUnitTest '
-        f'--tests "com.keepasskey.sync.LiveSyncServersTest" '
-        f'-DliveSyncTest=true -DliveCertPath="{CERT_PATH}"'
-    )
-    sync_rc = subprocess.run(sync_gradle_cmd, cwd=REPO, shell=True).returncode
-    print(f"[lab] sync Gradle 退出码: {sync_rc}")
-    if sync_rc != 0:
-        return sync_rc
+        if not lab.create_bucket():
+            print("[WARN] 建桶可能失败，S3 测试可能失败")
 
-    os.makedirs(LIVE_ARTIFACT_DIR, exist_ok=True)
-    print("[lab] 运行 app KDBX 语义真实 WebDAV 往返（到期检测 / 合并 / 下载重开）...")
-    app_gradle_cmd = (
-        f'"{GRADLEW}" :app:testDebugUnitTest '
-        f'--tests "com.keepasskey.app.sync.LiveSyncKdbxSemanticsTest" '
-        f'-DliveSyncTest=true -DliveCertPath="{CERT_PATH}" '
-        f'-DliveWebdavUrl="https://127.0.0.1:{WEBDAV_PORT}" '
-        f'-DliveArtifactDir="{LIVE_ARTIFACT_DIR}"'
-    )
-    app_rc = subprocess.run(app_gradle_cmd, cwd=REPO, shell=True).returncode
-    print(f"[lab] app Gradle 退出码: {app_rc}")
-    return app_rc
+        print("[lab] 运行 sync LiveSyncServersTest（针对真实本地服务）...")
+        sync_rc = gradle_live(lab, [
+            ":sync:testDebugUnitTest",
+            "--tests", "com.keepasskey.sync.LiveSyncServersTest",
+            "--tests", "com.keepasskey.sync.s3.LiveS3DirectoryListTest",
+        ])
+        print(f"[lab] sync Gradle 退出码: {sync_rc}")
+        if sync_rc != 0:
+            return sync_rc
+
+        os.makedirs(LIVE_ARTIFACT_DIR, exist_ok=True)
+        print("[lab] 运行 app KDBX 语义真实 WebDAV 往返...")
+        app_rc = gradle_live(lab, [
+            ":app:testDebugUnitTest",
+            "--tests", "com.keepasskey.app.sync.LiveSyncKdbxSemanticsTest",
+            f"-DliveArtifactDir={LIVE_ARTIFACT_DIR}",
+        ])
+        print(f"[lab] app Gradle 退出码: {app_rc}")
+        return app_rc
+    finally:
+        print("[lab] 回收本次启动的本地服务（按 PID）...")
+        lab.cleanup(keep=args.keep)
 
 
 if __name__ == "__main__":
-    rc = 1
-    try:
-        rc = main()
-    finally:
-        print("[lab] 回收本地服务...")
-        for p in PROCS:
-            try:
-                p.terminate()
-                p.wait(timeout=8)
-            except Exception:
-                try:
-                    p.kill()
-                except Exception:
-                    pass
-        # 兜底清理可能残留的 minio 进程
-        subprocess.run(["taskkill", "/F", "/IM", "minio.exe"], capture_output=True, shell=True)
-    sys.exit(rc)
+    sys.exit(main())

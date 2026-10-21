@@ -118,9 +118,19 @@ class ThemePaletteMutualExclusionWiringTest {
         val navGraph = readSource(NAV_GRAPH) +
             readSource(NAV_GRAPH_ROUTES) +
             readSource(NAV_GRAPH_DISPLAY_ROUTES)
+        // ISSUE-P3-653：一步切回必须同时清掉自定义种子色并关闭动态取色——由仓库原子操作
+        // `useBrandPalette()` 承担（只调 setDynamicColorEnabled(false) 会因种子色仍在而落回 CUSTOM）。
         assertTrue(
-            "NavGraph 必须把一步切回接线到关闭动态取色（偏好值已落盘，无须另行选择）",
-            navGraph.contains("onSwitchToBrandPalette = { settingsViewModel.setDynamicColorEnabled(false) }")
+            "NavGraph 必须把一步切回接线到原子品牌调色盘操作（清种子色 + 关动态取色）",
+            navGraph.contains("onSwitchToBrandPalette = settingsViewModel::useBrandPalette") ||
+                navGraph.contains("onSwitchToBrandPalette = { settingsViewModel.useBrandPalette() }")
+        )
+        val repository = readSource(REPOSITORY)
+        assertTrue(
+            "品牌调色盘原子操作必须在同一事务内清除种子色并关闭动态取色",
+            repository.contains("override suspend fun useBrandPalette() = edit {") &&
+                repository.contains("it.remove(KEY_CUSTOM_SEED_COLOR)") &&
+                repository.contains("it[KEY_DYNAMIC_COLOR] = false")
         )
     }
 

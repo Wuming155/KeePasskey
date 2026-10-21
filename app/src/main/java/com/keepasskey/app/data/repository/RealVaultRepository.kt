@@ -77,7 +77,8 @@ class RealVaultRepository @Inject constructor(
         strings = strings,
         autoLockGuard = autoLockGuard,
         afterPersist = { secretReader.invalidateTotpCache() },
-        logPersistFailure = { debugLog.error(TAG, "数据库保存失败: ${it.error.javaClass.simpleName}") }
+        logPersistFailure = { debugLog.error(TAG, "数据库保存失败: ${it.error.javaClass.simpleName}") },
+        crashDrafts = recoveryStore?.let { com.keepasskey.app.security.VaultCrashDrafts(databaseSession, it) }
     )
 
     /** `ISSUE-P2-645`：落盘 / 漂移检查 / 活动库身份的唯一出口（协调器一律经此回灌）。 */
@@ -455,7 +456,8 @@ class RealVaultRepository @Inject constructor(
             context,
             mergeCommitGate = driftMergePhaseGatesForTesting?.beforeCommit,
             mergeStartGate = driftMergePhaseGatesForTesting?.beforeReread,
-            commitEnteredGate = driftMergePhaseGatesForTesting?.commitEntered
+            commitEnteredGate = driftMergePhaseGatesForTesting?.commitEntered,
+            crashDrafts = recoveryStore?.let { com.keepasskey.app.security.VaultCrashDrafts(databaseSession, it) }
         ).resolve(choice)
     }
 

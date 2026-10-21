@@ -69,7 +69,10 @@ class ResumeSyncProbeCoordinatorProductionTest {
         }
 
         fixture.triggerProbe()
-        withTimeout(WAIT_MILLIS) { started.await() }
+        // 探测走真实 Dispatchers.IO（生产协程边界），虚拟时间无法推进它 ⇒ 必须在真实线程上等待。
+        withContext(Dispatchers.Default) {
+            withTimeout(WAIT_MILLIS) { started.await() }
+        }
         fixture.saveS3(objectKey = "vault/another.kdbx")
         finishMetadata.complete(Result.success(RemoteFileMetadata("vault/object.kdbx", "etag-late", 0L, 0L)))
 

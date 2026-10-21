@@ -100,7 +100,9 @@ class LiveSyncServersTest {
         val x509 = tmf.trustManagers[0] as X509TrustManager
         return OkHttpClient.Builder()
             .sslSocketFactory(ssl.socketFactory, x509)
-            .hostnameVerifier { hostname, _ -> hostname == "localhost" }
+            // 仅测试夹具：证书 SAN 同时含 `DNS:localhost` 与 `IP:127.0.0.1`，两者都指向本机
+            // 自签服务。生产客户端仍走系统 CA 链与真实主机名校验（不放宽任何生产校验）。
+            .hostnameVerifier { hostname, _ -> hostname == "localhost" || hostname == "127.0.0.1" }
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

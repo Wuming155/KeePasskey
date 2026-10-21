@@ -130,7 +130,7 @@ open class SyncCache(
         data: ByteArray,
         updateVersion: Boolean = true,
         precomputedDigest: String? = null
-    ): String {
+    ): String = synchronized(files.pathLock(remotePath)) {
         val cacheFile = getFile(remotePath, SUFFIX_CACHE)
         val tmpFile = files.tmpFileFor(cacheFile)
         try {
@@ -143,12 +143,13 @@ open class SyncCache(
             tmpFile.delete()
         }
 
+        // 标记与字节必须落在同一临界区：否则并发 / 崩溃会留下「新字节 + 旧标记」的错配。
         val sha256 = precomputedDigest ?: sha256Hex(data)
         if (updateVersion) {
             val versionFile = getFile(remotePath, SUFFIX_VERSION)
             files.writeStringSafely(versionFile, sha256)
         }
-        return sha256
+        sha256
     }
 
     /**
@@ -320,7 +321,7 @@ open class SyncCache(
     /**
      * 更新基准版本 `<hash>.baseversion` 与元数据 `<hash>.meta`（TASK-37 整改：两文件合并原子写）。
      *
-     * ISSUE-P3-305：实现下沉 [SyncCacheMaintenance.updateBase]（逐行搬运，含崩溃窗口分析）。
+     * ISSUE-P2-636：同时收敛 `<hash>.version`；ISSUE-P3-305：实现下沉 [SyncCacheMaintenance.updateBase]。
      */
     fun updateBase(remotePath: String, baseVersion: String, etag: String? = null) =
         maintenance.updateBase(remotePath, baseVersion, etag)
