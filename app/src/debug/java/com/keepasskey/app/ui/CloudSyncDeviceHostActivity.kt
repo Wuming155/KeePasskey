@@ -65,6 +65,9 @@ class CloudSyncDeviceHostActivity : ComponentActivity() {
                     onProviderChange = { controllerRef.setSyncProvider(it) },
                     onSyncAfterSave = { controllerRef.verifyConnectionThenSync() },
                     onUpdateWebDav = { url, username, password, remotePath ->
+                        // 验收探针：点击是否真的到达按钮（否则「状态没变」会被误读成守卫未生效）
+                        updateCalls.incrementAndGet()
+                        lastSubmittedUrl = url
                         controllerRef.updateWebDavConfig(url, username, password, remotePath)
                     },
                     onUpdateS3 = { endpoint, bucket, region, accessKey, secretKey, objectKey, usePathStyle ->
@@ -123,6 +126,13 @@ class CloudSyncDeviceHostActivity : ComponentActivity() {
     companion object {
         @Volatile
         internal var suppliedSetup: Setup? = null
+
+        /** 验收探针：`onUpdateWebDav` 被调用次数（点击是否落到按钮上）。 */
+        internal val updateCalls = java.util.concurrent.atomic.AtomicInteger(0)
+
+        /** 验收探针：最后一次交给控制器的 URL（用于区分「点了但表单空」与「没点」）。 */
+        @Volatile
+        internal var lastSubmittedUrl: String = ""
 
         /** 供用例复用同一套生产装配，避免用例与宿主各写一份构造。 */
         internal fun buildSetup(

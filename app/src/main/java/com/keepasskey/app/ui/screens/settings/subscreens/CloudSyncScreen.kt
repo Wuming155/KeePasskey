@@ -111,39 +111,33 @@ fun CloudSyncScreen(
 
     var dropdownExpanded by remember { mutableStateOf(false) }
 
-    var webdavUrl by remember(uiState.webdavUrl) {
-        mutableStateOf(uiState.webdavUrl.ifBlank { com.keepasskey.app.sync.WebDavDefaults.NUTSTORE_URL })
-    }
-    var webdavUsername by remember(uiState.webdavUsername) { mutableStateOf(uiState.webdavUsername) }
-    // Wave 15 整改：密码以 CharArray 本地承载（显示用 String 仅存活于 SecurePasswordField 组件内部），
-    // 离开组合时立即擦除
-    var webdavPasswordChars by remember { mutableStateOf(CharArray(0)) }
-    var webdavRemotePath by remember(uiState.webdavRemotePath) {
-        mutableStateOf(uiState.webdavRemotePath.ifBlank { com.keepasskey.app.sync.WebDavDefaults.DEFAULT_REMOTE_PATH })
-    }
+    // 表单草稿：`uiState` 的同步配置字段是**异步**水合出来的（`hydrate()` 在页面组合之后
+    // 从 IO 线程回灌）。若直接把 uiState 当 `remember` 的 key，晚到的回灌会重建本地状态并
+    // 丢弃用户正在输入的草稿——真实表现为「刚敲完端点就变回默认地址，保存提交了旧值」。
+    // 故草稿归本页面，只在字段尚未被用户编辑时接受播种（见 SyncFormDrafts）。
+    val drafts = rememberSyncFormDrafts()
+    drafts.syncFrom(uiState)
+
+    var webdavUrl by drafts.stringField(SyncFormDrafts.KEY_WEBDAV_URL)
+    var webdavUsername by drafts.stringField(SyncFormDrafts.KEY_WEBDAV_USERNAME)
+    var webdavRemotePath by drafts.stringField(SyncFormDrafts.KEY_WEBDAV_REMOTE_PATH)
     var webdavPasswordVisible by remember { mutableStateOf(false) }
     var showBrowseDialog by remember { mutableStateOf(false) }
 
-    var s3Endpoint by remember(uiState.s3Endpoint) { mutableStateOf(uiState.s3Endpoint) }
-    var s3Bucket by remember(uiState.s3Bucket) { mutableStateOf(uiState.s3Bucket) }
-    var s3Region by remember(uiState.s3Region) { mutableStateOf(uiState.s3Region) }
-    // ISSUE-P2-01：AccessKey ID 以 CharArray 本地承载（显示用 String 仅存活于 SecurePasswordField
-    // 组件内部），离开组合时立即擦除——不再从 UiState 的 String 回显
-    var s3AccessKeyChars by remember { mutableStateOf(CharArray(0)) }
+    var s3Endpoint by drafts.stringField(SyncFormDrafts.KEY_S3_ENDPOINT)
+    var s3Bucket by drafts.stringField(SyncFormDrafts.KEY_S3_BUCKET)
+    var s3Region by drafts.stringField(SyncFormDrafts.KEY_S3_REGION)
     var s3AccessKeyVisible by remember { mutableStateOf(false) }
-    var s3SecretKeyChars by remember { mutableStateOf(CharArray(0)) }
-    var s3ObjectKey by remember(uiState.s3ObjectKey) { mutableStateOf(uiState.s3ObjectKey) }
-    var s3UsePathStyle by remember(uiState.s3UsePathStyle) { mutableStateOf(uiState.s3UsePathStyle) }
+    var s3ObjectKey by drafts.stringField(SyncFormDrafts.KEY_S3_OBJECT_KEY)
+    var s3UsePathStyle by drafts.booleanField(SyncFormDrafts.KEY_S3_USE_PATH_STYLE)
     var s3SecretKeyVisible by remember { mutableStateOf(false) }
     var credentialFieldWipeGeneration by remember { mutableStateOf(0) }
 
-    // Wave 15 整改：离场（离开组合）擦除本地密码驻留
+    // Wave 15 整改：离场（离开组合）擦除本地密码驻留。
+    // 秘密草稿由 `drafts` 持有（页面级）：表单 item 被 LazyColumn 回收时不得丢草稿，
+    // 只有离页才擦除——否则「填好密码→滚到下方看状态→滚回来」密码已空，提交必然失败。
     DisposableEffect(Unit) {
-        onDispose {
-            webdavPasswordChars.fill('0')
-            s3AccessKeyChars.fill('0')
-            s3SecretKeyChars.fill('0')
-        }
+        onDispose { drafts.wipeSecrets() }
     }
 
     var showIntervalDialog by remember { mutableStateOf(false) }
@@ -161,11 +155,11 @@ fun CloudSyncScreen(
             url = { webdavUrl },
             username = { webdavUsername },
             remotePath = { webdavRemotePath },
-            password = { webdavPasswordChars },
+            password = { drafts.secret(SyncFormDrafts.KEY_WEBDAV_PASSWORD) },
             update = { u, n, pwd, path -> onUpdateWebDav(u, n, pwd, path) },
             clearPassword = { pwd ->
                 pwd.fill('0')
-                webdavPasswordChars = CharArray(0)
+                drafts.clearSecret(SyncFormDrafts.KEY_WEBDAV_PASSWORD)
             }
         ),
         s3 = SyncFormPersistence.S3FormAccess(
@@ -174,20 +168,25 @@ fun CloudSyncScreen(
             region = { s3Region },
             objectKey = { s3ObjectKey },
             usePathStyle = { s3UsePathStyle },
-            accessKey = { s3AccessKeyChars },
-            secretKey = { s3SecretKeyChars },
+            accessKey = { drafts.secret(SyncFormDrafts.KEY_S3_ACCESS_KEY) },
+            secretKey = { drafts.secret(SyncFormDrafts.KEY_S3_SECRET_KEY) },
             update = { e, b, r, ak, sk, key, pathStyle ->
                 onUpdateS3(e, b, r, ak, sk, key, pathStyle)
             },
             clearSecrets = { ak, sk ->
                 ak.fill('0')
                 sk.fill('0')
-                s3AccessKeyChars = CharArray(0)
-                s3SecretKeyChars = CharArray(0)
+                drafts.clearSecret(SyncFormDrafts.KEY_S3_ACCESS_KEY)
+                drafts.clearSecret(SyncFormDrafts.KEY_S3_SECRET_KEY)
             }
         ),
         onSaved = { saveFeedbackMessage = it },
-        onFieldWiped = { credentialFieldWipeGeneration++ }
+        onFieldWiped = {
+            credentialFieldWipeGeneration++
+            // 保存成功：落盘值已与表单一致（端点还被归一化），解除「已编辑」标记，
+            // 让归一化后的外部值重新接管显示（与旧 `remember(uiState.x)` 行为逐字一致）。
+            drafts.resetEdits()
+        }
     )
     val persistConfig: () -> Boolean = { persistence.persist() }
 
@@ -261,10 +260,12 @@ fun CloudSyncScreen(
                                     onUsernameChange = { webdavUsername = it },
                                     isPasswordVisible = webdavPasswordVisible,
                                     onTogglePasswordVisibility = { webdavPasswordVisible = !webdavPasswordVisible },
-                                    passwordPrefill = webdavPasswordPrefill,
+                                    // LazyColumn 回收后组件重建，需把页面级草稿作为恢复预填回灌，
+                                    // 否则滚回来密码框即空（ISSUE-P2-651）。
+                                    passwordPrefill = drafts.secret(SyncFormDrafts.KEY_WEBDAV_PASSWORD).takeIf { it.isNotEmpty() }
+                                        ?: webdavPasswordPrefill,
                                     onPasswordCharsChange = { chars ->
-                                        webdavPasswordChars.fill('0')
-                                        webdavPasswordChars = chars.copyOf()
+                                        drafts.setSecret(SyncFormDrafts.KEY_WEBDAV_PASSWORD, chars)
                                         onWebDavPasswordEdited()
                                     },
                                     remotePath = webdavRemotePath,
@@ -275,7 +276,7 @@ fun CloudSyncScreen(
                                         onBrowseWebDav(
                                             webdavUrl,
                                             webdavUsername,
-                                            webdavPasswordChars.copyOf(),
+                                            drafts.secret(SyncFormDrafts.KEY_WEBDAV_PASSWORD).copyOf(),
                                             com.keepasskey.app.sync.parentDirectoryPath(webdavRemotePath),
                                             null
                                         )
@@ -293,18 +294,18 @@ fun CloudSyncScreen(
                                     onRegionChange = { s3Region = it },
                                     isAccessKeyVisible = s3AccessKeyVisible,
                                     onToggleAccessKeyVisibility = { s3AccessKeyVisible = !s3AccessKeyVisible },
-                                    accessKeyPrefill = s3AccessKeyPrefill,
+                                    accessKeyPrefill = drafts.secret(SyncFormDrafts.KEY_S3_ACCESS_KEY).takeIf { it.isNotEmpty() }
+                                        ?: s3AccessKeyPrefill,
                                     onAccessKeyCharsChange = { chars ->
-                                        s3AccessKeyChars.fill('0')
-                                        s3AccessKeyChars = chars.copyOf()
+                                        drafts.setSecret(SyncFormDrafts.KEY_S3_ACCESS_KEY, chars)
                                         onS3AccessKeyEdited()
                                     },
                                     isSecretKeyVisible = s3SecretKeyVisible,
                                     onToggleSecretKeyVisibility = { s3SecretKeyVisible = !s3SecretKeyVisible },
-                                    secretKeyPrefill = s3SecretKeyPrefill,
+                                    secretKeyPrefill = drafts.secret(SyncFormDrafts.KEY_S3_SECRET_KEY).takeIf { it.isNotEmpty() }
+                                        ?: s3SecretKeyPrefill,
                                     onSecretKeyCharsChange = { chars ->
-                                        s3SecretKeyChars.fill('0')
-                                        s3SecretKeyChars = chars.copyOf()
+                                        drafts.setSecret(SyncFormDrafts.KEY_S3_SECRET_KEY, chars)
                                         onS3SecretKeyEdited()
                                     },
                                     objectKey = s3ObjectKey,
@@ -318,8 +319,8 @@ fun CloudSyncScreen(
                                             s3Endpoint,
                                             s3Bucket,
                                             s3Region,
-                                            s3AccessKeyChars.copyOf(),
-                                            s3SecretKeyChars.copyOf(),
+                                            drafts.secret(SyncFormDrafts.KEY_S3_ACCESS_KEY).copyOf(),
+                                            drafts.secret(SyncFormDrafts.KEY_S3_SECRET_KEY).copyOf(),
                                             com.keepasskey.app.sync.parentDirectoryPath(s3ObjectKey),
                                             s3UsePathStyle,
                                             null
@@ -336,13 +337,13 @@ fun CloudSyncScreen(
                             browseState = browseState,
                             webdavUrl = webdavUrl,
                             webdavUsername = webdavUsername,
-                            webdavPasswordChars = webdavPasswordChars,
+                            webdavPasswordChars = drafts.secret(SyncFormDrafts.KEY_WEBDAV_PASSWORD),
                             webdavRemotePath = webdavRemotePath,
                             s3Endpoint = s3Endpoint,
                             s3Bucket = s3Bucket,
                             s3Region = s3Region,
-                            s3AccessKeyChars = s3AccessKeyChars,
-                            s3SecretKeyChars = s3SecretKeyChars,
+                            s3AccessKeyChars = drafts.secret(SyncFormDrafts.KEY_S3_ACCESS_KEY),
+                            s3SecretKeyChars = drafts.secret(SyncFormDrafts.KEY_S3_SECRET_KEY),
                             s3ObjectKey = s3ObjectKey,
                             s3UsePathStyle = s3UsePathStyle,
                             onBrowseWebDav = onBrowseWebDav,

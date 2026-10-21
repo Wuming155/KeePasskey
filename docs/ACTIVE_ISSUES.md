@@ -1,4 +1,4 @@
-﻿# KeePasskey 当前未解决问题
+# KeePasskey 当前未解决问题
 
 本文件是当前缺陷、功能缺口和待办的唯一状态源，只保留尚未闭环事项。新条目须记录核实时间与方式；开始处理前重新核对涉及的路径、行为和前提。关闭事项后从本表移除，不在此追加进度或历史流水；完成任务不自动新建永久文档。
 
@@ -61,8 +61,14 @@
 - 影响与触发：WebDAV/S3配置错误后难以重试，输入状态误导用户，须重新键入秘密才能恢复；不应通过停止所有清理来修复。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncScreen.kt:160`；`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt:244`。
 - 已实现（2026-10-21 复核）：表单提交走 `SyncFormPersistence`（取**独立副本**交给控制器，所有权转移）；失败时工作副本清零、表单草稿保留供只改端点重试；成功才清空草稿并提示。另修「保存成功后控制器仍残留上次失败提示」的缺陷（WebDAV / S3 成功分支清 `syncFeedbackMessage`），并把成功提示收敛到页面组件一处。
-- 运行证据：`CloudSyncSaveRetryContractTest` 5/5（HTTP 拒绝→只改 HTTPS 用**同一份草稿**保存成功且落盘口令逐字相等、封印失败不半写、成功清理、全零拒绝）、`SyncSavedConfigFailureAndCancelTest` 5/5、`CloudSyncSaveFlowTest` 5/5。
-- **尚未完成**：**真实 UI 点击级**设备验收未通过——`CloudSyncFormUiDeviceTest` 的「保存并同步 / 保存配置」按钮在无障碍树中未暴露可点击祖先，坐标回退点击也未能触发控制器状态变化，因此「不重输秘密即可重试」只在控制器级与真实 HTTPS 接收方级被证明，未在真实表单点击链路上取证。
+- 设备验收期间另修**三个真实表单缺陷**（`SyncFormDrafts`）：
+  1. 晚到的水合覆盖草稿——`hydrate()` 在页面组合后才从 IO 线程回灌已保存配置，原 `remember(uiState.xxx)` 以字段值为 key，回灌一落地就把用户正在输入的内容整段重建（真实表现为「刚敲完端点就变回默认地址，保存提交旧值」）。改为页面级草稿，仅在字段未被用户编辑时接受播种，保存成功后放权；
+  2. 秘密草稿被列表回收——密码 / AccessKey / SecretKey 原以组合内 `remember` 持有，表单 item 滚出视口即被 `LazyColumn` 回收、`SecurePasswordField` 的 `onDispose` 随即擦除显示态，用户滚回来看密码框已空、提交必然失败。改由页面级草稿持有并在回收重建时回灌，只有离页才擦除；
+  3. 保存成功后草稿未让位——成功路径解除「已编辑」标记并清空秘密草稿，归一化后的落盘值重新接管显示。
+- 运行证据（设备侧，真实 UI 点击 + 真实 HTTPS 接收方）：`CloudSyncFormUiDeviceTest` 4/4（`tools/device/run_p2_651_652_ui.py` 全场景通过，两轮稳定）：
+  - `httpEndpointRejectedSendsNoRequest`：点「保存并同步」提交 http 端点 → 上浮 HTTPS 要求、接收方**零请求**、未置位已验证、未停在同步中、失败后 URL 与密码框仍显示用户输入；
+  - `correctedHttpsRetriesWithSameDraft`：只改 scheme、**不重输秘密**再次保存即落盘成功，且落盘口令与首次输入**逐字相等**、保存配置入口零联网。
+- JVM 证据：`CloudSyncSaveRetryContractTest` 5/5、`SyncSavedConfigFailureAndCancelTest` 5/5、`CloudSyncSaveFlowTest` 5/5；本轮定向回归 27/27（`app:testDebugUnitTest`，0 失败 0 跳过）。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-651/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-652 测试连接忽略配置保存失败，仍验证并同步旧目标
@@ -72,8 +78,11 @@
 - 影响与触发：测试的并非用户当前输入目标，且回调还会同步旧目标；用户可能把旧连接成功当作新表单验证，产生不期望的同步副作用。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/settings/subscreens/CloudSyncScreen.kt:402`；`app/src/main/java/com/keepasskey/app/ui/screens/settings/SettingsSyncController.kt:244`。
 - 已实现（2026-10-21 复核）：测试连接仅在 `persistConfig()` 返回成功后才继续测连/同步；同一成功保存回执（`SyncProviderConfigSnapshot`）贯穿「测连」与「同步」两个网络阶段，中途改存新配置只影响后续轮次，且迟到结论不会把新配置标成已验证（`SettingsSyncSavedFlow`）。
-- 运行证据：`SavedSyncConfigSnapshotFlowTest` 1/1、`SyncSavedConfigFailureAndCancelTest` 5/5（persist=false 零请求、A 测试在途改存 B 仍只触达 A、迟到 A 不误标 B、取消复位忙态）。
-- **尚未完成**：**真实 UI 点击级**设备验收未通过（`CloudSyncFormUiDeviceTest` 的「测试连接 / 保存并同步」按钮点击未触发控制器状态变化），也未在真实 HTTPS 接收方上计数验证「保存失败零请求」。
+- 运行证据（设备侧，真实 UI 点击 + 真实 HTTPS 接收方）：`CloudSyncFormUiDeviceTest` 4/4（`tools/device/run_p2_651_652_ui.py`）：
+  - `inFlightTestKeepsAAndDoesNotVerifyB`：A 的测连 PROPFIND 被接收方挂住 → 在途改存 B → 全程**只触达 A 的端点一次**（method/path/用户名逐项核对），A 的迟到结论不把 B 标成已验证，徽章仍为「未验证」；
+  - `leavingPageWipesDraftAndResetsBusy`：未提交草稿离页后不残留（重进只回显已保存值），在途离页后忙态复位。
+- JVM 证据：`SavedSyncConfigSnapshotFlowTest` 1/1、`SyncSavedConfigFailureAndCancelTest` 5/5（persist=false 零请求、A 测试在途改存 B 仍只触达 A、迟到 A 不误标 B、取消复位忙态）。
+- 验收装置修正：接收方 Basic 凭据原由脚本固定为 `p2-651-user`、用例却写死 `ui-user`，导致 PROPFIND 走 401 分支提前返回、门闩永不置位（in-flight 编排失去判别力）。现由脚本经 `p2_651_user` / `p2_651_password` 参数下发，缺参即失败。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-652/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-655 S3目录参数先拼原文再拆分，含&前缀导致签名不一致

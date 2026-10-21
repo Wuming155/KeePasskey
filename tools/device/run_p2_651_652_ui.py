@@ -343,12 +343,24 @@ def adb(device: str, *args: str, capture: bool = False, check: bool = True):
     return run(["adb", "-s", device, *args], capture=capture, check=check)
 
 
-def run_scenario(device: str, port: int, scenario: str, method: str, artifacts: pathlib.Path) -> ET.Element:
+def run_scenario(
+    device: str,
+    port: int,
+    scenario: str,
+    method: str,
+    artifacts: pathlib.Path,
+    user: str,
+    password: str,
+) -> ET.Element:
     started = time.time()
     command = [
         "adb", "-s", device, "shell", "am", "instrument", "-w", "-r",
         "-e", "class", f"{TEST_CLASS}#{method}",
         "-e", "p2_651_port", str(port),
+        # 凭据必须与接收方一致：接收方对不匹配的用户名直接回 401，测连 PROPFIND 会在
+        # 鉴权分支提前返回（门闩永不置位，in-flight 编排失去判别力）。
+        "-e", "p2_651_user", user,
+        "-e", "p2_651_password", password,
         "-e", "p2_651_run_id", uuid.uuid4().hex[:8],
         f"{TEST_ID}/{RUNNER}",
     ]
@@ -450,7 +462,7 @@ def main() -> int:
                 raise SystemExit(f"[FATAL] 未知场景：{scenario}")
             state.reset()
             try:
-                run_scenario(device, port, scenario, method, artifacts)
+                run_scenario(device, port, scenario, method, artifacts, user, password)
                 print(f"[OK] {scenario}")
             except RuntimeError as failure:
                 failures.append(str(failure))
