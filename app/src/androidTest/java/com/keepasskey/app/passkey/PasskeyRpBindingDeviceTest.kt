@@ -135,4 +135,30 @@ class PasskeyRpBindingDeviceTest {
         )
         assertTrue("夹具必须已登记候选凭据 id", fixture.credentialIds.containsKey("A"))
     }
+
+    /**
+     * 场景 2 的「**正常 RP 的成功回执**」：RP 匹配时走完整签发，并把断言交给**独立 RP 验签器**。
+     *
+     * 只看到本地 `RESULT_OK` 不足以证明 RP 侧会接受（方案 §4 场景 2 明确禁止只看它）。
+     * 这里导出真实 CM 客户端收到的断言与事先登记的公钥/请求清单，
+     * 由 `tools/passkey-interop/verify_assertion.py` 逐项核对 challenge / origin /
+     * rpIdHash / UP / UV / 计数 / 公钥签名——不导入本仓任何签发或解析代码。
+     */
+    @Test
+    fun `RP匹配时完整签发且断言可被独立验签器核对`() {
+        fixture.prepare()
+        val origin = fixture.nativeOrigin()
+        fixture.client(CredentialSaveClientActivity.MODE_GET_PASSKEY, fixture.request())
+        fixture.select("cm-matrix-A")
+        fixture.awaitConfirmation(PasskeyAssertionActivity::class.java)
+        fixture.appButton(com.keepasskey.app.R.string.passkey_confirm_ok)
+        fixture.awaitResult(PasskeyAssertionActivity::class.java, android.app.Activity.RESULT_OK)
+        // 导出真实响应与期望清单（起点计数 17 ⇒ 本次签发后为 18）
+        fixture.exportAssertion("A2", origin, count = 18)
+        assertEquals(
+            "正常 RP 的成功回执必须真实写入计数（不是只看 RESULT_OK）",
+            18,
+            fixture.count(fixture.a)
+        )
+    }
 }

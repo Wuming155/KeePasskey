@@ -140,7 +140,9 @@
   - 请求子域 `sub.example.com` → **不发布**（精确相等口径，不做子域放宽）；
   - `allowCredentials` 不含该凭据 → **不发布**；命中 → 发布；
   - 请求缺 RP → 按已绑定包名回退并发布（PD-77 的唯一回退口）。
-- **尚未完成**：选择器点选与最终签发后的 RP 回执未在本设备用例内驱动（候选层已证「不发布」，签发前 `PasskeyAssertionActivity` 的 origin ⇄ rpId 复校由 `PasskeyRequestRpBindingTest` 覆盖判据）；本机 `cmd credential` 无实现，请求一律由真实客户端 Activity 发起。
+- **场景 2「正常 RP 的成功回执」**（2026-10-21 补）：`PasskeyRpBindingDeviceTest` 增至 **7/7**——RP 匹配时走完整签发（真实 CM 选择器 → 生产确认页 → 结果回传），导出真实断言与事先登记的公钥/请求清单，交 `tools/passkey-interop/verify_assertion.py` **独立验签**：`verified=true`、`signCount=18`、`up=true`、`uv=false`，challenge / origin / rpIdHash / credentialId / userHandle 逐项通过；同时核对正式库计数由 17 递增到 18。证据：`.ci-artifacts/remediation-20261021/p3-642/A2-{expected,response}.json`。
+- **已闭环（2026-10-21 复核）**：方案 §4 场景 1（RP-A 成功 / RP-B 不得选 A / 缺失 RP / allowCredentials / 子域负对照）与场景 2（正常 RP 的成功回执，且非仅看本地 RESULT_OK）均已实测满足，反向对照齐备（失败不会被判成功）。
+- 保留边界（不构成未闭环项）：浏览器与 native 两个**入口形态**未分别构造独立客户端——本设备用例统一经真实 framework CM 的 public-key 请求发起；两者在候选层走同一 `CredentialCandidateMatcher.matchesPasskey`（`browserFlow` 仅影响「缺 RP 时是否回退」，已由缺 RP 用例覆盖）。
 - [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-642/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P3-643 重复选择自定义图标会清掉其它未保存编辑的脏标记
