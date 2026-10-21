@@ -47,8 +47,17 @@ class RemoteBrowseCredentialFallbackWiringTest {
     fun `UI browse 调用点均传 copyOf`() {
         val cloud = readSource(CLOUD_SYNC_SCREEN)
         val section = readSource(REMOTE_BROWSE_SECTION)
-        assertTrue("CloudSyncScreen WebDAV browse 必须 copyOf", cloud.contains("webdavPasswordChars.copyOf()"))
-        assertTrue("CloudSyncScreen S3 browse 必须 copyOf", cloud.contains("s3AccessKeyChars.copyOf()"))
+        // 表单秘密草稿自 ISSUE-P2-651 整改起由页面级 `SyncFormDrafts` 持有
+        // （原为组合内 `remember { CharArray(0) }`），但「交给宿主前必须传防御性副本」
+        // 这条要求不变——宿主会清零入参，直接传引用会抹掉用户正在填的草稿。
+        assertTrue(
+            "CloudSyncScreen WebDAV browse 必须传副本",
+            cloud.contains("drafts.secret(SyncFormDrafts.KEY_WEBDAV_PASSWORD).copyOf()")
+        )
+        assertTrue(
+            "CloudSyncScreen S3 browse 必须传副本",
+            cloud.contains("drafts.secret(SyncFormDrafts.KEY_S3_ACCESS_KEY).copyOf()")
+        )
         assertTrue("RemoteBrowseSection WebDAV navigate 必须 copyOf", section.contains("webdavPasswordChars.copyOf()"))
         assertTrue("RemoteBrowseSection S3 keys 必须 copyOf", section.contains("s3AccessKeyChars.copyOf()"))
     }
