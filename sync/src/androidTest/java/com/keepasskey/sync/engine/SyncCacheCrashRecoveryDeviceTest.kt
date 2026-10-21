@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,7 +55,9 @@ class SyncCacheCrashRecoveryDeviceTest {
         // 1. 先建立一致基线：写入旧字节并把基线前移到它
         val oldPayload = ByteArray(4096) { it.toByte() }
         cache.writeCache(remotePath, oldPayload)
-        cache.updateBase(remotePath, SyncCache.sha256Hex(oldPayload))
+        // 基线前移时一并记录**远端 ETag**：这是「上次与云端一致」的标记，
+        // 崩溃窗口若把它与新字节错配，后续防回滚裁决就会拿错误的 ETag 去比对。
+        cache.updateBase(remotePath, SyncCache.sha256Hex(oldPayload), ETAG_BASELINE)
 
         // 2. 制造「新字节已落盘、`.version` 仍是旧值」的崩溃窗口：
         //    updateVersion=false 正是该窗口的等价形态（真实崩溃发生在 rename 与写 version 之间）。
@@ -69,6 +72,11 @@ class SyncCacheCrashRecoveryDeviceTest {
             versionFile.readText().trim()
         )
         assertTrue("基线必须已建立", baseVersionFile.isFile)
+        assertEquals(
+            "崩溃前 ETag 基线必须已落盘（否则 verify 段无从判断是否被污染）",
+            ETAG_BASELINE,
+            cache.getState(remotePath)?.etag
+        )
 
         // 3. 闸门：宿主据此确认可以杀进程
         gate.writeText(android.os.Process.myPid().toString())
@@ -99,6 +107,16 @@ class SyncCacheCrashRecoveryDeviceTest {
         val leftovers = directory.listFiles { f -> f.name.endsWith(".tmp") }.orEmpty()
         assertEquals("崩溃窗口不得遗留 .tmp 半成品：${leftovers.map { it.name }}", 0, leftovers.size)
 
+        // ③b ETag 标记必须仍是**崩溃前**的基线值，不得被新字节顺带改写。
+        //     这是防回滚裁决的输入：若它与实际内容错配，下一轮会拿错 ETag 去比对远端。
+        val stateAfterCrash = cache.getState(remotePath)
+        assertNotNull("崩溃后 .meta 必须仍可解析（否则 ETag / 回滚状态整体丢失）", stateAfterCrash)
+        assertEquals(
+            "崩溃不得改写 ETag 基线（新字节是「未确认上传」的本地修改，远端仍是旧版本）",
+            ETAG_BASELINE,
+            stateAfterCrash!!.etag
+        )
+
         // ④ 缺失 .version 同样必须判为「有本地修改」
         directory.listFiles { f -> f.name.endsWith(".version") }?.forEach { it.delete() }
         assertTrue(
@@ -107,10 +125,15 @@ class SyncCacheCrashRecoveryDeviceTest {
         )
 
         // ⑤ 负对照：把基线前移到当前字节后必须判为「无本地修改」
-        cache.updateBase(remotePath, SyncCache.sha256Hex(crashedPayload))
+        cache.updateBase(remotePath, SyncCache.sha256Hex(crashedPayload), ETAG_ADVANCED)
         assertFalse(
             "字节与基线一致时必须判为无本地修改（否则会把干净缓存当脏反复上传）",
             cache.hasLocalChanges(remotePath)
+        )
+        assertEquals(
+            "基线前移必须同时更新 ETag，否则下一轮会拿过期 ETag 判断远端变化",
+            ETAG_ADVANCED,
+            cache.getState(remotePath)?.etag
         )
         gate.delete()
     }
@@ -119,5 +142,9 @@ class SyncCacheCrashRecoveryDeviceTest {
         const val ARG_PHASE = "p2636Phase"
         const val PHASE_PREPARE = "prepare"
         const val PHASE_VERIFY = "verify"
+
+        /** 合成 ETag（真实值来自服务端；此处只验证标记的一致性传递，不验证其来源）。 */
+        const val ETAG_BASELINE = "p2-636-baseline"
+        const val ETAG_ADVANCED = "p2-636-advanced"
     }
 }
