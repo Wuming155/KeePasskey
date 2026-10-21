@@ -105,7 +105,13 @@
 - 位置：`app/src/main/java/com/keepasskey/app/passkey/CredentialCandidateMatcher.kt:57`；`app/src/main/java/com/keepasskey/app/passkey/PasskeyAssertionRequest.kt:104`。
 - 已实现（2026-10-21 复核）：`PasskeyRequestRpBinding` 保留请求 `rpId`，候选与最终签发要求归一化后**精确相等**；仅 RP 缺失时才允许按已绑定包名回退。依据 WebAuthn §7.2 对 `rpIdHash` 的校验；`PD-77` 已补协议澄清。
 - 运行证据：`CredentialCandidateMatcherTest`（含父域/子域负对照）、`PasskeyRequestRpBindingTest`。
-- **尚未完成**：真实 native / browser 入口、`allowCredentials` 过滤、缺 RP 回退与 RP 结果回执的设备级正反对照。
+- 设备侧真实入口验收（2026-10-21）：`PasskeyRpBindingDeviceTest` **6/6** 通过（隔离 AVD，API 36）——经**真实 framework Credential Manager** 的 `prepareGetCredential` 发起 **public-key** 请求，由**生产** `KeePasskeyCredentialProviderService` 应答，读 `hasCredentialResults(TYPE_PUBLIC_KEY_CREDENTIAL)` 作为「系统是否发布公钥候选」的直接读数：
+  - 请求 RP 与凭据 RP 精确相等 → 发布（`prepared:passkey=true`）；
+  - 请求 RP 不匹配（`other.example`）→ **不发布**；
+  - 请求子域 `sub.example.com` → **不发布**（精确相等口径，不做子域放宽）；
+  - `allowCredentials` 不含该凭据 → **不发布**；命中 → 发布；
+  - 请求缺 RP → 按已绑定包名回退并发布（PD-77 的唯一回退口）。
+- **尚未完成**：选择器点选与最终签发后的 RP 回执未在本设备用例内驱动（候选层已证「不发布」，签发前 `PasskeyAssertionActivity` 的 origin ⇄ rpId 复校由 `PasskeyRequestRpBindingTest` 覆盖判据）；本机 `cmd credential` 无实现，请求一律由真实客户端 Activity 发起。
 - [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-642/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P3-643 重复选择自定义图标会清掉其它未保存编辑的脏标记

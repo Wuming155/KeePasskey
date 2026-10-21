@@ -97,6 +97,15 @@ public class CredentialSaveClientActivity extends Activity {
     public static final String MODE_GET_PASSKEY = "get-passkey";
 
     /**
+     * 「只准备、不点选」的公钥断言模式：调用 `prepareGetCredential` 后仅回报
+     * `prepared:passkey=<bool>`，不进入选择器。
+     *
+     * `ISSUE-P3-642` 用它做 RP 绑定的正反对照——系统是否**发布**公钥候选，
+     * 正是「别域凭据会不会被摆到用户面前」的直接读数。
+     */
+    public static final String MODE_GET_PASSKEY_PREPARE = "prepare-passkey";
+
+    /**
      * 「载荷残缺的公钥创建请求」模式。
      *
      * 刻意为复现 2026-09-21 真机踩到的形态：类型字符串是公钥类型，但载荷缺
@@ -222,7 +231,7 @@ public class CredentialSaveClientActivity extends Activity {
                 credentialManager.getCredential(this, preparedHandle, new CancellationSignal(), getMainExecutor(), getReceiver());
                 return;
             }
-            if (MODE_GET_PASSKEY.equals(mode) || "prepare-passkey".equals(mode)) {
+            if (MODE_GET_PASSKEY.equals(mode) || MODE_GET_PASSKEY_PREPARE.equals(mode)) {
                 requestGetPasskey(credentialManager);
                 return;
             }
@@ -337,7 +346,7 @@ public class CredentialSaveClientActivity extends Activity {
                 .addCredentialOption(option);
         String origin = getIntent().getStringExtra(EXTRA_ORIGIN);
         if (origin != null) builder.setOrigin(origin);
-        if ("prepare-passkey".equals(mode)) {
+        if (MODE_GET_PASSKEY_PREPARE.equals(mode)) {
             status("preparing:passkey");
             credentialManager.prepareGetCredential(builder.build(), new CancellationSignal(), getMainExecutor(),
                     new OutcomeReceiver<android.credentials.PrepareGetCredentialResponse, GetCredentialException>() {
