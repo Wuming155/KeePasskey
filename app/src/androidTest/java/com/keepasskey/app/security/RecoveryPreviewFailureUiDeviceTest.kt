@@ -295,6 +295,62 @@ class RecoveryPreviewFailureUiDeviceTest {
         }
     }
 
+    @Test
+    fun `密码单独变化与历史同长度异内容都必须判为已修改`() = runBlocking {
+        val suffix = UUID.randomUUID().toString().take(8)
+        val vaultId = "p2-638-pwd-$suffix"
+        val official = File(context.cacheDir, "$vaultId-official.kdbx").also { createdFiles += it }
+        // 原缺陷的另外两个盲区：只比 title/url/notes/tags 与附件/历史**数量**，
+        // 因此「密码单独变化」与「历史条数不变但内容不同」都会显示「修改 0」。
+        val officialBytes = buildVaultBytes(
+            entryCount = 1,
+            entryPassword = "p2-638-original-secret",
+            historyCount = 1,
+            historyPassword = "p2-638-history-original"
+        )
+        official.writeBytes(officialBytes)
+        val payload = buildVaultBytes(
+            entryCount = 1,
+            // 标题/URL/标签/附件与历史条数全部不变，只有密码与历史内容变了
+            entryPassword = "p2-638-CHANGED-secret",
+            historyCount = 1,
+            historyPassword = "p2-638-history-CHANGED!"
+        )
+        try {
+            assertTrue("恢复副本写入失败", store.write(vaultId, "P2-638 Pwd", official.absolutePath, payload))
+            createdVaultIds += vaultId
+
+            enableAccessibilityRetrieval()
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                var viewModel: RecoveryViewModel? = null
+                scenario.onActivity { activity ->
+                    viewModel = ViewModelProvider(activity).get(RecoveryViewModel::class.java)
+                    requireNotNull(viewModel).refresh()
+                }
+                val vm = requireNotNull(viewModel)
+                val pending = vm.uiState.value.pending.single { it.entry.vaultId == vaultId }
+
+                vm.select(RecoveryViewModel.keyOf(pending))
+                vm.preview(pending, password.copyOf())
+                waitUntil(20_000) { vm.uiState.value.previewText != null || !vm.uiState.value.busy }
+
+                val state = vm.uiState.value
+                assertNotNull("必须能正常预览；状态=$state", state.preview)
+                assertEquals(
+                    "密码与历史内容都变了、数量不变，必须判为已修改 1 条（原缺陷在此显示修改 0）",
+                    1,
+                    state.preview!!.modifiedEntries
+                )
+                assertTrue(
+                    "产品 UI 必须呈现「修改 1」；页面=${accessibilityText()}",
+                    waitForText(context.getString(R.string.recovery_preview_summary, 1, 1, 0, 0, 1), 10_000)
+                )
+            }
+        } finally {
+            payload.fill(0)
+        }
+    }
+
     // ------------------------------------------------------------ 装置
 
     private fun enableAccessibilityRetrieval() {
@@ -305,18 +361,36 @@ class RecoveryPreviewFailureUiDeviceTest {
         automation.serviceInfo = info
     }
 
-    /** 造一份真实 KDBX 字节（可选带附件），供副本 / 正式库两侧使用。 */
-    private fun buildVaultBytes(entryCount: Int, attachmentBytes: ByteArray? = null): ByteArray {
+    /** 造一份真实 KDBX 字节（可选带附件 / 改密码 / 改历史），供副本 / 正式库两侧使用。 */
+    private fun buildVaultBytes(
+        entryCount: Int,
+        attachmentBytes: ByteArray? = null,
+        entryPassword: String = "p2-638-secret",
+        historyCount: Int = 0,
+        historyPassword: String = "p2-638-history"
+    ): ByteArray {
         val entries = (1..entryCount).map { index ->
             KdbxEntry(
                 id = KdbxUuid.fromHexString("6386380000000000000000000000000$index"),
                 fields = mapOf(
                     KdbxConstants.Fields.TITLE to ProtectedString("P2-638 entry $index", isProtected = false),
-                    KdbxConstants.Fields.PASSWORD to ProtectedString("p2-638-secret-$index", isProtected = true)
+                    KdbxConstants.Fields.PASSWORD to ProtectedString("$entryPassword-$index", isProtected = true)
                 ),
                 attachments = attachmentBytes?.let {
                     listOf(KdbxAttachment("p2-638.bin", data = it.copyOf()))
-                }.orEmpty()
+                }.orEmpty(),
+                // 历史条目：同长度不同内容时也必须判为修改（历史容量上限场景）
+                history = (1..historyCount).map { revision ->
+                    KdbxEntry(
+                        id = KdbxUuid.fromHexString("6386380000000000000000000000000$index"),
+                        fields = mapOf(
+                            KdbxConstants.Fields.TITLE to
+                                ProtectedString("P2-638 entry $index", isProtected = false),
+                            KdbxConstants.Fields.PASSWORD to
+                                ProtectedString("$historyPassword-$revision", isProtected = true)
+                        )
+                    )
+                }
             )
         }
         val db = KdbxDatabase(
