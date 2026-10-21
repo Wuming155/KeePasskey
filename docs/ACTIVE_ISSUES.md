@@ -31,7 +31,13 @@
 - 位置：`sync/src/main/java/com/keepasskey/sync/engine/SyncCache.kt:126`；`sync/src/main/java/com/keepasskey/sync/engine/SyncCacheMaintenance.kt:29`。
 - 已实现（2026-10-21 复核）：`hasLocalChanges` 以 `.cache` 实际字节摘要对照 `.baseversion`；本轮另修「基线前移仍取旧 `.version`」的真实缺陷（`SyncEngineOpenBranches.openCachedBranch` 与 `SyncCacheMaintenance.updateBase` 改为同源摘要，三份标记背靠背原子提交）。运行证据：`SyncCacheCrashRecoveryTest` 10 例（cache 已替换/version 落后、version 缺失、baseversion 缺失、rename 前失败、并发 6 路、崩溃后本地赢上传与远端并发 C），0 失败。
 - 已实现（2026-10-21 追加修复）：并发写同一路径时 `.cache` 与 `.version` 分属不同写入者，会出现「标记与字节交叉污染」——`SyncCache.writeCache` 与 `SyncCacheMaintenance.updateBase` 现按**规范键进程内互斥**（`SyncCacheFiles.pathLock`），字节与标记落在同一临界区。`SyncCacheCrashRecoveryTest` 连跑 5 次 0 失败（修复前 3 次中 1 次偶发红，证明该竞争真实存在）。
-- **尚未完成**：**进程级**崩溃（force-stop / 杀进程）窗口未做——现有矩阵是确定性写序注入与并发交错，不是真实进程死亡；跨进程并发仍依赖各文件的原子替换与 SHA-256 校验（限界口径）。下次同步的 ETag / 回滚状态一致性也未在设备上取读数。
+- **进程级真实死亡验收**（2026-10-21）：`SyncCacheCrashRecoveryDeviceTest` + `tools/device/run_p2_636_crash.py`（隔离 AVD，两阶段：prepare 段制造崩溃窗口 → 宿主 `am force-stop` 核实旧 PID 消失 → verify 段在**新进程**核对）。两轮稳定通过，`tests=1 failures=0`：
+  - 崩溃窗口（`.cache` 已换新字节、`.version` 仍为旧值）后新进程 `hasLocalChanges` 为 **true**；
+  - `.cache` 可整份读回且**逐字节等于**崩溃前写入内容，目录内**无 `.tmp` 残留**；
+  - 删除 `.version` 后仍判为 **true**（原缺陷正是此分支直接 false）；
+  - 基线前移后负对照为 **false**（不把所有情况都判脏）。
+  证据：`.ci-artifacts/remediation-20261021/p2-636/p2636-*-{prepare,verify}.{xml,instrumentation.txt}`。
+- **尚未完成**：真实远端上的 ETag / 回滚状态一致性读数未在本设备用例内取（本用例核对崩溃后**本地判据**；ETag 与回滚裁决由 `SyncCacheMaintenance` 的既有 JVM 矩阵覆盖）；跨进程并发写仍依赖各文件的原子替换与 SHA-256 校验（已登记为工程限界）。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-636/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-638 恢复副本差异比较忽略密码和实际附件内容
