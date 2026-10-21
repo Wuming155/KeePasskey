@@ -47,7 +47,11 @@
 - 影响与触发：恢复/覆盖/丢弃前的决策依据失真，尤其密码单独变化、历史已达容量上限或禁用历史的库；不意味着系统自动删除副本。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/security/VaultRecoveryCoordinator.kt:211`。
 - 已实现（2026-10-21 复核）：内容比较抽到 `RecoveryEntryContentComparator`（字段内容等值，不解密成字符串；自定义字段、附件**逐字节**流式比较、历史、条目元数据）。附件比较不再依赖 32 位 `contentHash`（不同字节可能同哈希），并对超预算与读取失败 fail-closed。运行证据：`RecoveryEntryContentComparatorTest` 6 例 + `RecoveryPreviewContentTest` 4 例（生产 `VaultRecoveryCoordinator.preview` 路径：密码 / OTP / Passkey / 受保护自定义字段单独变化、同数量异哈希附件、等长历史异内容、无变化负对照、正式库不可读、错误凭据），全部 0 失败。
-- **尚未完成**：设备侧大附件预算与「正式库解析失败」的真实 UI 展示未单独取证据；本轮为 JVM 生产路径。
+- 设备侧产品 UI 验收（2026-10-21）：`RecoveryPreviewFailureUiDeviceTest` **3/3** 通过（隔离 AVD，真实 `MainActivity` + 真实 `RecoveryViewModel` + 真实 `VaultRecoveryCoordinator`，不替换 `previewOperation`）：
+  - **正式库不可读**（把正式库写成垃圾字节）：预览返回 `officialEntryCount = null`，UI 呈现 `recovery_preview_no_official`——**绝不**给出「修改 0」这种误导读数；
+  - **附件字节不同、长度相同**（仅最后一字节差 1）：必须判为「修改 1 条」，且 UI 摘要逐字等于 `副本 1 项；正式库 1 项；新增 0 / 删除 0 / 修改 1`——这正是原缺陷的盲区（只比数量/名称/长度/32 位哈希都看不出）；
+  - **同一份字节的负对照**：必须成功预览且新增/删除/修改全为 0（证明不会因附件参与比较就一律报脏）。
+- **尚未完成**：**超预算**分支的设备侧取证未做——`VaultRecoveryCoordinator.buildPreview` 内部直接构造比较器（默认 256MB 预算），设备上要真正触发需造 >256MB 附件，不可接受；且 `preview` 的 `catch (Throwable)` 会把该异常折成 `RECOVERY_UNLOCK_FAILED`，UI 上与「凭据不匹配」不可区分。该分支目前仅由 JVM `RecoveryEntryContentComparatorTest` 的「附件读取失败长度虚报和预算不足不得判相同」覆盖。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-638/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-641 CM Passkey与创建保存入口未消费已登记的库代次上下文
