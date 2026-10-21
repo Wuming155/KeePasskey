@@ -73,7 +73,11 @@
   - fixture 造条目时把 `userHandle` 塞成明文标签，与 WebAuthn「base64url 字节串」契约不符（独立验签器直接报 `Only base64 data is allowed`）；改为按契约存 base64url。生产创建路径本就取 RP 下发的 `user.id`（base64url 文本），无此问题。
   - 系统选择器呈现的是 **userName** 而非条目标题，且候选行文字分散在多个子节点、子树匹配会同时命中多层祖先（`awaitActiveNode` 要求恰好一个匹配，永远等不到）；改为「子树文本 + 取最深节点」。
   - 跨用例复用同一系统 CM 时，上一用例遗留的选择器 sheet 会让新请求排队（连跑必红、单跑必绿）；`prepare()` 先退场并等待 sheet 消失。
-- **尚未完成**：认证过程中人为换库（用户在验证窗口内切库）与系统进程重建后旧 token 重放两个时序分支未在本矩阵驱动——前者由 `CredentialSessionGateDeviceTest` 的门控用例覆盖判据，后者按「注册表缺失即拒绝」实现但未单独跑真实 CM 链路。
+- **旧 token 跨进程重放**（2026-10-21）：`CredentialSessionGateDeviceTest` 两阶段 + `tools/device/run_p2_641_token_replay.py`（真实 `am force-stop` → 新进程核对），两轮稳定通过：
+  - prepare 段：建库、登记票据，并断言**同进程内旧 token 可用**（否则证明的不是「跨进程失效」）；
+  - verify 段（新进程，断言 PID 已变）：requestId 仍是合法 URI 形态（排除「解析失败」这一假原因）、登记表查不到旧 requestId、旧 token `bind` 返回 **false**；反向对照——同进程内新登记的 token **可用**，证明拒绝来自登记表随进程消失而非其他原因。
+  证据：`.ci-artifacts/remediation-20261021/p2-641-token-replay/p2641-*-verify.{xml,instrumentation.txt}`。
+- **尚未完成**：验收矩阵中的「认证过程中人为换库」（用户在系统验证窗口内切库）未在真实 CM 链路驱动——该时序需要精确控制系统窗口内的库切换，本环境无可控入口；其判据由 `CredentialSessionGateDeviceTest` 的换库拒绝用例与 JVM `CredentialSessionGateTest` 覆盖，但**不是**同一形态。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-641/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-651 同步配置保存失败后输入显示与已擦除凭据副本不一致
@@ -115,8 +119,11 @@
 - 位置：`sync/src/main/java/com/keepasskey/sync/s3/S3DirectoryList.kt:48`；`sync/src/main/java/com/keepasskey/sync/s3/S3RequestSigner.kt:110`。
 - 已实现（2026-10-17）：`S3DirectoryList` 与 `S3RequestSigner` 改为**结构化键值表**——`S3RequestSigner.canonicalQueryString` 对键与值分别按 SigV4 编码、按键（同键按值）排序，wire URL 与签名 canonical query 消费**同一份输出**；不再存在「先拼串再拆」这一步。JVM：`S3QueryCanonicalizeTest` 6 例 + `S3DirectoryListMetadataTest` 7 例（`&` / `=` / `%` / `+` / 空格 / Unicode / 重复键；含「含 `&` 前缀不得改变参数个数」与「wire query 与 canonical 逐字一致」断言），0 失败。
 - 已实现（2026-10-21 补充）：① **独立 AWS 官方向量** `S3OfficialSigV4VectorTest` 4 例（botocore `get-vanilla-query-order-key-case` 的 canonical request / hash / string-to-sign / 签名 `b97d918c…df2500` 逐字节一致；差异项由向量原文显式给出）+ 官方 SDK 生成的 6 条整条 Authorization 对拍；② **真实 MinIO 端到端**（`LiveS3DirectoryListTest` 4 例）：含 `&` 前缀首分页被服务端验签接受、服务端签发的真实续页 token 取到第二页、空目录、坏密钥映射 `AuthenticationError`。隔离服务矩阵见 `tools/local-sync/run_s3_matrix.py` 11/11。
-- **尚未完成**：本仓 signer 固定 `s3` 且附加 `x-amz-content-sha256`，与部分官方向量头部集合不同（已按向量原文适配比较，未硬凑整签名）；**未**对 AWS 真实 S3 服务做端到端（无凭据）。
-- 关闭条件（方案 §4 / §5）：原触发（含 `&` 前缀）与正常 / 失败对照在**隔离 S3 服务**上复现通过，且独立签名向量一致；仅 JVM 层对照不足以结案。
+- **已闭环（2026-10-21 复核）**：方案 §4 的两条关闭条件均已满足，并按 §5「原触发 + 正常/失败对照满足后才关闭」执行：
+  - **独立 AWS 签名向量一致**：`S3OfficialSigV4VectorTest` 4 例（botocore 官方向量 canonical request / hash / string-to-sign / 签名逐字节一致）+ 官方 SDK 6 条整条 Authorization 对拍；
+  - **隔离 S3 服务的目录 / 分页回执**：`tools/local-sync/run_s3_matrix.py` 本轮重跑 **11/11 通过**（含 `[PASS] SigV4 真实服务端到端（含 & 前缀 / 真实续页 / 坏密钥） gradle rc=0`），服务端真实验签接受含 `&` 前缀的首分页、真实续页 token 取到第二页、坏密钥不被伪装成空目录。
+  - 本仓 signer 固定 `s3` 且附加 `x-amz-content-sha256`，与部分官方向量头部集合不同——已按向量原文适配比较，**未硬凑整签名**；该差异不影响上述两条判据。
+- 保留边界（不构成未闭环项）：**未**对 AWS 真实 S3 服务做端到端（本环境无 AWS 凭据）；该条不在方案 §4 的关闭条件内，属额外声明。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-655/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P3-642 原生Passkey候选在请求RP不匹配时仍走包名回退
