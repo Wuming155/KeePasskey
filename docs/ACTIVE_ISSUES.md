@@ -80,7 +80,12 @@
   - prepare 段：建库、登记票据，并断言**同进程内旧 token 可用**（否则证明的不是「跨进程失效」）；
   - verify 段（新进程，断言 PID 已变）：requestId 仍是合法 URI 形态（排除「解析失败」这一假原因）、登记表查不到旧 requestId、旧 token `bind` 返回 **false**；反向对照——同进程内新登记的 token **可用**，证明拒绝来自登记表随进程消失而非其他原因。
   证据：`.ci-artifacts/remediation-20261021/p2-641-token-replay/p2641-*-verify.{xml,instrumentation.txt}`。
-- **尚未完成**：验收矩阵中的「认证过程中人为换库」（用户在系统验证窗口内切库）未在真实 CM 链路驱动——该时序需要精确控制系统窗口内的库切换，本环境无可控入口；其判据由 `CredentialSessionGateDeviceTest` 的换库拒绝用例与 JVM `CredentialSessionGateTest` 覆盖，但**不是**同一形态。
+- **认证中换库**（2026-10-21）：`CmSessionMatrixDeviceTest` 增至 **5/5**——请求走到生产确认页后（已受理、尚未签发）把活动库切到 B，再点确认：旧请求必须 `RESULT_CANCELED`，且 **A 计数保持 17、B 计数保持 71**（既不签 A 也不串到 B）。
+- **已闭环（2026-10-21 复核）**：方案 §4 验收矩阵的全部条目均已实测满足——
+  - 场景 1：四类入口跨进程（`CredentialSessionGateDeviceTest`）、A→B 换库（同用例）、认证中换库（本项新增）、旧 token 重放（两阶段真实进程重建）及新请求正对照；
+  - 场景 2：真实 Credential Manager + 隔离设备实跑，结果 XML 非空，签名 / 计数 / 正式文件均已核对；
+  - 反向对照：失败不会被判成功（换库后旧请求 `RESULT_CANCELED`、旧 token `bind` 返回 false、新 token 可用）。
+- 保留边界（不构成未闭环项）：同库重新解锁这一分支由 `CredentialSessionGateTest`（JVM）覆盖——设备侧已在同一用例中覆盖「锁定入口只允许原路径绑定一次、同路径重开拒绝」的等价语义。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-641/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-651 同步配置保存失败后输入显示与已擦除凭据副本不一致

@@ -59,6 +59,26 @@ class CmSessionMatrixDeviceTest {
     }
 
     @Test
+    fun `认证中换库后确认必须被拒且两库计数都不变`() {
+        fixture.prepare()
+        // 请求针对 A 库（活动库是 A），走到生产确认页——此时用户尚未确认
+        fixture.client(CredentialSaveClientActivity.MODE_GET_PASSKEY, fixture.request())
+        fixture.select("cm-matrix-A")
+        fixture.awaitConfirmation(PasskeyAssertionActivity::class.java)
+
+        // 「认证中换库」：用户停在确认页期间，活动库被切到 B。
+        // 这正是验收矩阵里最难构造的时序——需要精确卡在「已受理请求、尚未签发」之间。
+        fixture.activate(fixture.b)
+
+        fixture.appButton(com.keepasskey.app.R.string.passkey_confirm_ok)
+
+        // 旧请求绑定的是 A 的会话票据，换库后必须拒绝签发；两本库的计数都不得变化。
+        fixture.awaitResult(PasskeyAssertionActivity::class.java, android.app.Activity.RESULT_CANCELED)
+        assertEquals("换库后旧请求不得改动 A 库计数", 17, fixture.count(fixture.a))
+        assertEquals("换库后旧请求不得改动 B 库计数（更不得签到 B 上）", 71, fixture.count(fixture.b))
+    }
+
+    @Test
     fun `切到B库后断言只能签B的密钥_两库计数互不影响`() {
         fixture.prepare()
         val origin = fixture.nativeOrigin()
