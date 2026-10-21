@@ -51,7 +51,17 @@
 - 影响与触发：旧A入口在活动库变B后可能对B同UUID条目计数/签名或把创建数据写入B，造成账户/库上下文混淆。需用户选择与验证；未证明任意应用、静默或跨RP泄漏。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt:370`；`app/src/main/java/com/keepasskey/app/passkey/PasskeyAssertionActivity.kt:102`。
 - 已实现（2026-10-20）：四类 CM 入口消费已登记的随机请求上下文，绑定库路径和会话票据；实际改树、落盘及成功回传均复核原票据。锁定时无票据的创建入口仅允许解锁登记的原路径后绑定一次；传统 Autofill 保留独立令牌语义。运行证据（2026-10-21 复核）：JVM 会话门控 2 例、`CredentialSessionGateDeviceTest` 1/1、`CredentialProviderRequestContractDeviceTest` 5/5（真实签名 CallingAppInfo 与 Provider request）。
-- **尚未完成**：**真实 framework Credential Manager 四入口**跨进程回调、认证中换库、A/B 相同 UUID 不同密钥/计数、旧 token 进程重建，以及独立 RP verifier 对 challenge/origin/rpIdHash/UP/UV/计数/公钥签名的逐项验签全矩阵——这些未逐项跑完，故本项保持开放。
+- 真实 framework CM 矩阵（2026-10-21）：`CmSessionMatrixDeviceTest` **4/4** 通过（隔离 AVD，API 36），经**真实系统 Credential Manager** 选择器与**生产** `PasskeyAssertionActivity` 完成签发：
+  - A 库断言：系统呈现 `cm-matrix-A` 候选 → 生产确认页 → 结果回传，**A 计数 17→18、B 计数保持 71**；
+  - 切到 B 库后断言：**B 计数 71→72、A 计数保持 17**（两库同 UUID 但互不串账）；
+  - A/B 使用**不同 credentialId 与不同公钥**（同 UUID 也可判别签的是哪本库）；
+  - A 库活动时，仅给 B 凭据 id 的 `allowCredentials` 请求**不出候选**。
+- 独立 RP 对拍（`tools/passkey-interop/verify_assertion.py`，不导入本仓签发/解析代码）：A1 / B1 断言双双 `verified=true`（`signCount` 18 / 72、UP=true、UV=false、rpIdHash、origin、challenge、credentialId、userHandle 逐项通过），且 `forbiddenPublicKeyBase64`（另一库公钥）**验签必须失败**——即另一本库的私钥无法伪造该断言。证据：`.ci-artifacts/remediation-20261021/p2-641/{A1,B1}-{expected,response}.json`。
+- 验收期间修正的装置缺陷（非产品缺陷）：
+  - fixture 造条目时把 `userHandle` 塞成明文标签，与 WebAuthn「base64url 字节串」契约不符（独立验签器直接报 `Only base64 data is allowed`）；改为按契约存 base64url。生产创建路径本就取 RP 下发的 `user.id`（base64url 文本），无此问题。
+  - 系统选择器呈现的是 **userName** 而非条目标题，且候选行文字分散在多个子节点、子树匹配会同时命中多层祖先（`awaitActiveNode` 要求恰好一个匹配，永远等不到）；改为「子树文本 + 取最深节点」。
+  - 跨用例复用同一系统 CM 时，上一用例遗留的选择器 sheet 会让新请求排队（连跑必红、单跑必绿）；`prepare()` 先退场并等待 sheet 消失。
+- **尚未完成**：认证过程中人为换库（用户在验证窗口内切库）与系统进程重建后旧 token 重放两个时序分支未在本矩阵驱动——前者由 `CredentialSessionGateDeviceTest` 的门控用例覆盖判据，后者按「注册表缺失即拒绝」实现但未单独跑真实 CM 链路。
 - [独立整改方案](architecture/问题整改方案/P2/ISSUE-P2-641/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。
 
 ### ISSUE-P2-651 同步配置保存失败后输入显示与已擦除凭据副本不一致

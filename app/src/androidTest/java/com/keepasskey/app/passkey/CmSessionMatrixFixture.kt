@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import com.keepasskey.app.R
 import com.keepasskey.app.autofill.DeviceAutofillProbe
@@ -70,6 +71,15 @@ internal class CmSessionMatrixFixture : AutoCloseable {
     }
 
     fun prepare() = runBlocking {
+        // 跨用例复用同一系统 CM：上一个用例遗留的客户端 Activity / 选择器窗口必须先退场，
+        // 否则新请求会排在旧窗口后面（连跑时表现为「status=requesting」永不推进、
+        // 或「系统必须呈现目标候选」直接超时，而单跑每个用例都通过）。
+        //
+        // 不能用 `am force-stop`：测试客户端 Activity 与测试包同进程，停掉它等于杀掉
+        // instrumentation 自身。改为结束该 Activity 并等系统选择器窗口退场。
+        runCatching { client("finish") }
+        awaitSystemSheetGone()
+        SystemClock.sleep(PREPARE_SETTLE)
         probe.requireAutomation()
         probe.prepare()
         settingsStore.save(originalSettings.copy(credentialProviderEnabled = true, passkeySupportEnabled = true,
@@ -83,12 +93,34 @@ internal class CmSessionMatrixFixture : AutoCloseable {
         activate(a)
     }
 
+    /** 等系统 CM 选择器窗口退场（跨用例时不留下悬挂的 sheet）。 */
+    private fun awaitSystemSheetGone() {
+        val deadline = SystemClock.uptimeMillis() + PREPARE_SETTLE * 4
+        while (SystemClock.uptimeMillis() < deadline) {
+            val root = runCatching {
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+                    .uiAutomation.rootInActiveWindow
+            }.getOrNull()
+            val showing = root != null && root.packageName?.toString() == CM_PACKAGE
+            if (!showing) return
+            instrumentation.uiAutomation.executeShellCommand("input keyevent 4").close()
+            SystemClock.sleep(POLL)
+        }
+    }
+
     private suspend fun seed(file: File, label: String, count: Int) {
         val isolated = DatabaseSession()
         try {
             assertTrue(isolated.create(file, label, password, useArgon2 = false).isSuccess)
-            val key = PasskeyCryptoEngine.generateEs256KeyPair(RP, "cm-matrix-$label", "CM Matrix $label")
-                .copy(signCount = count)
+            // `userHandle` 按 WebAuthn 契约存 **base64url 字节串**（生产创建路径取 RP 下发的
+            // `user.id`，同样是 base64url 文本）。此前直接塞明文标签，断言输出与独立验签器
+            // 的解码契约不符（报 `Only base64 data is allowed`）。
+            val key = PasskeyCryptoEngine.generateEs256KeyPair(
+                relyingPartyId = RP,
+                userName = "cm-matrix-$label",
+                userHandle = base64Url("CM Matrix $label".toByteArray()),
+                userDisplayName = "CM Matrix $label"
+            ).copy(signCount = count)
             publicKeys[label] = key.publicKeyBase64
             credentialIds[label] = key.credentialId
             isolated.saveEntry(KdbxEntry(id = UUID, fields = mapOf(
@@ -136,12 +168,57 @@ internal class CmSessionMatrixFixture : AutoCloseable {
         return status()
     }
 
+    /**
+     * 在真实系统选择器里点选候选。
+     *
+     * 系统呈现的是**用户名**（`userName`），不是条目标题——曾按标题匹配导致
+     * 「系统必须呈现目标候选」整轮超时，而候选其实已经显示。
+     *
+     * 候选行的文字分散在多个子节点里（`textOf` 只取单节点），故按**子树文本**定位；
+     * 且不能直接用 `awaitActiveNode`——它要求谓词**恰好命中一个**节点，
+     * 而子树匹配会同时命中候选行及其多层祖先（实测永远等不到）。
+     */
     fun select(label: String) {
-        val row = probe.awaitActiveNode("真实 CM 候选 $label", TIMEOUT) {
-            it.packageName?.toString() != context.packageName && probe.textOf(it).contains(label)
-        }
+        val row = awaitDeepest(label)
         assertNotNull("系统必须呈现目标候选；${probe.snapshot()}", row)
-        assertTrue(probe.click(requireNotNull(row)))
+        assertTrue("候选必须可点选；${probe.snapshot()}", probe.click(requireNotNull(row)))
+        SystemClock.sleep(SELECT_SETTLE)
+        // 点选后系统可能把候选折叠为「已选中」态：再点一次可点击容器推进到下一步
+        awaitDeepest(label)?.let { probe.click(it) }
+    }
+
+    /** 轮询活动窗口，返回子树含 [label] 的**最深**节点（最贴近候选行的那个）。 */
+    private fun awaitDeepest(label: String): AccessibilityNodeInfo? {
+        val deadline = SystemClock.uptimeMillis() + TIMEOUT
+        while (SystemClock.uptimeMillis() < deadline) {
+            val root = runCatching {
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+                    .uiAutomation.rootInActiveWindow
+            }.getOrNull()
+            val hits = mutableListOf<Pair<AccessibilityNodeInfo, Int>>()
+            fun walk(node: AccessibilityNodeInfo?, depth: Int) {
+                if (node == null) return
+                if (node.packageName?.toString() == CM_PACKAGE && subtreeText(node).contains(label)) {
+                    hits += node to depth
+                }
+                for (index in 0 until node.childCount) walk(node.getChild(index), depth + 1)
+            }
+            walk(root, 0)
+            if (hits.isNotEmpty()) return hits.maxBy { it.second }.first
+            SystemClock.sleep(POLL)
+        }
+        return null
+    }
+
+    /** 节点子树内全部文本拼接（用于跨子节点匹配候选行内容）。 */
+    private fun subtreeText(node: AccessibilityNodeInfo?): String = buildString {
+        fun walk(current: AccessibilityNodeInfo?, depth: Int) {
+            if (current == null || depth > 6) return
+            current.text?.toString()?.takeIf { it.isNotBlank() }?.let { append(it).append(' ') }
+            current.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { append(it).append(' ') }
+            for (index in 0 until current.childCount) walk(current.getChild(index), depth + 1)
+        }
+        walk(node, 0)
     }
 
     fun confirmSystemIfPresent() {
@@ -161,12 +238,21 @@ internal class CmSessionMatrixFixture : AutoCloseable {
     }
 
     fun awaitConfirmation(type: Class<out Activity>) {
-        confirmSystemIfPresent()
         val label = context.getString(R.string.passkey_confirm_ok)
-        assertNotNull(probe.awaitActiveNode("生产验证确认页", TIMEOUT) {
-            it.packageName?.toString() == context.packageName && probe.textOf(it) == label
-        })
-        assertTrue("必须真实进入 ${type.simpleName}", arrivals.any { type.isInstance(it) })
+        // 系统在点选后可能先弹一次「Continue」确认，也可能直接进生产窗口；
+        // 两种时序都要接住，且要持续处理（曾只等 1.5s，确认弹窗晚到即整轮超时）。
+        val deadline = SystemClock.uptimeMillis() + TIMEOUT
+        while (SystemClock.uptimeMillis() < deadline) {
+            confirmSystemIfPresent()
+            val node = probe.awaitActiveNode("生产验证确认页", POLL) {
+                it.packageName?.toString() == context.packageName && probe.textOf(it) == label
+            }
+            if (node != null) {
+                assertTrue("必须真实进入 ${type.simpleName}；${probe.snapshot()}", arrivals.any { type.isInstance(it) })
+                return
+            }
+        }
+        fail("生产验证确认页始终未出现；${probe.snapshot()}")
     }
 
     fun awaitResult(type: Class<out Activity>, code: Int) {
@@ -186,11 +272,15 @@ internal class CmSessionMatrixFixture : AutoCloseable {
         val manifest = JSONObject().put("credentialId", credentialIds.getValue(key)).put("challenge", CHALLENGE)
             .put("origin", origin).put("rpId", RP).put("publicKeyBase64", publicKeys.getValue(key))
             .put("forbiddenPublicKeyBase64", publicKeys.getValue(other)).put("signCount", count).put("uv", false)
+            // 存储值本就是 base64url 字节串（见 `seed`），直接透传即可
             .put("userHandle", data.userHandle)
         clientData?.let { manifest.put("clientDataJSON", it) }
         File(evidence, "$label-expected.json").writeText(manifest.toString())
         println("CM_MATRIX_EVIDENCE=$label")
     }
+
+    private fun base64Url(value: ByteArray): String =
+        java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 
     fun nativeOrigin(): String {
         val info = clientContext.packageManager.getPackageInfo(clientContext.packageName,
@@ -234,6 +324,9 @@ internal class CmSessionMatrixFixture : AutoCloseable {
         const val CHALLENGE = "Y20tbWF0cml4LWNoYWxsZW5nZS0yMDI2"
         const val TIMEOUT = 20_000L
         const val POLL = 100L
+        const val SELECT_SETTLE = 500L
+        const val CM_PACKAGE = "com.android.credentialmanager"
+        const val PREPARE_SETTLE = 1_500L
         val UUID: KdbxUuid = KdbxUuid.fromHexString("64164200000000000000000000000001")
     }
 }
