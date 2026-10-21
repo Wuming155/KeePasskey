@@ -90,6 +90,15 @@ object KdbxError {
     /** 恢复副本解锁失败（凭据不匹配或缺密钥文件）。 */
     const val RECOVERY_UNLOCK_FAILED = "kdbx.recovery.unlock_failed"
 
+    /**
+     * 恢复预览在**附件逐字节比较**阶段超出预算（或附件读取失败 / 长度虚报）。
+     *
+     * `ISSUE-P2-638`：与 [RECOVERY_UNLOCK_FAILED] 分开——两者此前共用同一文案
+     * 「凭据不匹配或缺密钥文件」，而预算耗尽的真实原因是「附件太大，无法逐字节确认差异」，
+     * 用户按提示去换凭据只会徒劳。
+     */
+    const val RECOVERY_PREVIEW_BUDGET_EXCEEDED = "kdbx.recovery.preview_budget_exceeded"
+
     /** 该库非本地文件（SAF `content://`），不支持原地恢复，只能另存。 */
     const val RECOVERY_LOCAL_ONLY = "kdbx.recovery.local_only"
 

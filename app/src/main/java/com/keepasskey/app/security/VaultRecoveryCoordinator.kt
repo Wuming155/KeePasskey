@@ -39,6 +39,15 @@ class VaultRecoveryCoordinator @Inject constructor(
     private val debugLog: DebugLogBuffer
 ) {
 
+    /**
+     * 附件逐字节比较的**总预算**（两侧合计）。
+     *
+     * 生产恒为 256 MiB；仅设备用例以极小值覆盖「预算耗尽 ⇒ fail-closed」分支
+     * （`ISSUE-P2-638`：在真机上造 >256 MiB 附件不可接受）。
+     * 不设默认以外的 Dagger 绑定：生产装配与原来逐字相同。
+     */
+    internal var attachmentBudgetBytes: Long = RECOVERY_ATTACHMENT_BUDGET_BYTES
+
     /** 待处置副本 + 其正式库的当前状态（供 UI 提示「正式库已外改」）。 */
     data class Pending(
         val entry: VaultRecoveryStore.Entry,
@@ -97,6 +106,11 @@ class VaultRecoveryCoordinator @Inject constructor(
                 val preview = buildPreview(target.entry.vaultName, snapshotDb, officialDb)
                 verifiedPayloads.add(target.entry)
                 KdbxResult.Success(preview)
+            } catch (unavailable: RecoveryEntryContentComparator.AttachmentComparisonUnavailable) {
+                // `ISSUE-P2-638`：附件无法逐字节确认差异（预算耗尽 / 读取失败 / 长度虚报）。
+                // 与「凭据不匹配」分型上报——否则用户会照着「换凭据」的提示徒劳重试。
+                debugLog.warn(TAG, "恢复附件比较无法完成: ${unavailable.javaClass.simpleName}")
+                failure(KdbxError.RECOVERY_PREVIEW_BUDGET_EXCEEDED)
             } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式解密（KdbxFile.load 内部无挂起点）
                 debugLog.warn(TAG, "恢复副本解锁失败: ${t.javaClass.simpleName}")
                 failure(KdbxError.RECOVERY_UNLOCK_FAILED)
@@ -225,7 +239,7 @@ class VaultRecoveryCoordinator @Inject constructor(
         val off = official.rootGroup.allEntries().associateBy { it.id }
         val added = snap.keys.count { it !in off.keys }
         val removed = off.keys.count { it !in snap.keys }
-        val comparator = RecoveryEntryContentComparator()
+        val comparator = RecoveryEntryContentComparator(attachmentBudgetBytes)
         val modified = snap.keys.count { id -> off[id]?.let { !comparator.same(snap.getValue(id), it) } == true }
         return Preview(vaultName, snap.size, off.size, added, removed, modified)
     }

@@ -1020,6 +1020,7 @@
     <string name="err_passkey_entry_not_found">未找到该通行密钥条目（可能已被删除）</string>
     <string name="err_recovery_payload_corrupt">恢复副本缺失或已损坏，未自动采纳</string>
     <string name="err_recovery_unlock_failed">恢复副本解锁失败（凭据不匹配或缺密钥文件）</string>
+    <string name="err_recovery_preview_budget_exceeded">附件过大，无法逐字节比较差异；请先另存副本再人工核对</string>
     <string name="err_recovery_local_only">该库非本地文件，无法原地恢复，请改用另存</string>
     <string name="err_recovery_overwrite_blocked">正式库已存在，请先比较差异再确认覆盖</string>
     <string name="err_recovery_write_failed">恢复副本写入失败</string>

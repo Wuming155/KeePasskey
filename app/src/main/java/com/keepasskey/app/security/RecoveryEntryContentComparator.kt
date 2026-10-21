@@ -6,10 +6,26 @@ import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
 
+/**
+ * 恢复预览中附件逐字节比较的生产预算（两侧合计 256 MiB）。
+ *
+ * 顶层常量而非类内 `private companion`：协调器要用同一值初始化自己的可调预算，
+ * 两处各写一份迟早漂移。
+ */
+internal const val RECOVERY_ATTACHMENT_BUDGET_BYTES: Long = 256L * 1024 * 1024
+
 internal class RecoveryEntryContentComparator(
-    private val maxAttachmentBytes: Long = DEFAULT_ATTACHMENT_BUDGET
+    private val maxAttachmentBytes: Long = RECOVERY_ATTACHMENT_BUDGET_BYTES
 ) {
     private var remainingAttachmentBytes = maxAttachmentBytes
+
+    /**
+     * 附件逐字节比较无法完成（预算耗尽 / 读取失败 / 长度虚报）。
+     *
+     * 独立异常类型而非裸 `IOException`：调用方据此与「凭据不匹配」分型上报，
+     * 用户才不会拿着「换凭据」的提示去徒劳重试（`ISSUE-P2-638`）。
+     */
+    class AttachmentComparisonUnavailable(message: String, cause: Throwable? = null) : IOException(message, cause)
 
     fun same(left: KdbxEntry, right: KdbxEntry): Boolean =
         left.fieldsContentEquals(right) &&
@@ -37,7 +53,7 @@ internal class RecoveryEntryContentComparator(
     private fun sameAttachmentBytes(left: KdbxAttachment, right: KdbxAttachment): Boolean {
         val size = left.size
         if (size < 0 || size > remainingAttachmentBytes / SIDES) {
-            throw IOException("恢复附件比较超出预算")
+            throw AttachmentComparisonUnavailable("恢复附件比较超出预算")
         }
         remainingAttachmentBytes -= size * SIDES
         val a = ByteArray(BUFFER_BYTES)
@@ -53,10 +69,17 @@ internal class RecoveryEntryContentComparator(
                         for (index in 0 until count) if (a[index] != b[index]) return false
                         remaining -= count
                     }
-                    if (first.read() != -1 || second.read() != -1) throw IOException("恢复附件长度不符")
+                    if (first.read() != -1 || second.read() != -1) {
+                        throw AttachmentComparisonUnavailable("恢复附件长度不符")
+                    }
                 }
             }
             return true
+        } catch (unavailable: AttachmentComparisonUnavailable) {
+            throw unavailable
+        } catch (failure: IOException) {
+            // 读取失败与「预算不足」同属「无法确认差异」，统一为可识别类型
+            throw AttachmentComparisonUnavailable("恢复附件读取失败", failure)
         } finally {
             a.fill(0)
             b.fill(0)
@@ -79,6 +102,5 @@ internal class RecoveryEntryContentComparator(
     private companion object {
         const val BUFFER_BYTES = 8192
         const val SIDES = 2
-        const val DEFAULT_ATTACHMENT_BUDGET = 256L * 1024 * 1024
     }
 }

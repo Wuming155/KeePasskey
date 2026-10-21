@@ -6,6 +6,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.lifecycle.ViewModelProvider
+import dagger.hilt.android.EntryPointAccessors
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.MainActivity
@@ -26,7 +27,9 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,10 +51,9 @@ import org.junit.runner.RunWith
  *
  * ## 边界
  *
- * 预算用例不真的造 256MB 附件（设备上不可接受）：改为构造**长度虚报**的附件源，
- * 使 `RecoveryEntryContentComparator` 在预算检查处 fail-closed（与超预算同一分支）。
- * 该形态由 JVM `RecoveryEntryContentComparatorTest` 的「附件读取失败长度虚报和预算不足」
- * 用例同口径覆盖，本用例证明的是它在**真实 KDBX 落盘 + 产品 UI** 上同样成立。
+ * 预算用例不造 256 MiB 附件（设备上不可接受）：协调器暴露了 `attachmentBudgetBytes`
+ * （生产恒为 256 MiB），用例把它调到极小值，从而在**真实 KDBX + 真实产品 UI** 上
+ * 触发与「大附件超预算」完全相同的分支。
  */
 @RunWith(AndroidJUnit4::class)
 class RecoveryPreviewFailureUiDeviceTest {
@@ -228,6 +230,67 @@ class RecoveryPreviewFailureUiDeviceTest {
         } finally {
             officialAttachment.fill(0)
             snapshotAttachment.fill(0)
+            payload.fill(0)
+        }
+    }
+
+    @Test
+    fun `附件超出预算时UI必须呈现预算文案而非凭据不匹配`() = runBlocking {
+        val suffix = UUID.randomUUID().toString().take(8)
+        val vaultId = "p2-638-budget-$suffix"
+        val official = File(context.cacheDir, "$vaultId-official.kdbx").also { createdFiles += it }
+        // 正式库与副本各带一个附件；两侧字节相同，故「若无预算检查会判为无修改」。
+        val attachment = ByteArray(8192) { (it % 251).toByte() }
+        val vaultBytes = buildVaultBytes(entryCount = 1, attachmentBytes = attachment)
+        official.writeBytes(vaultBytes)
+        val payload = vaultBytes.copyOf()
+
+        // 生产预算是 256 MiB；这里调到 1 KiB，使「两侧 8 KiB 附件」必然超限——
+        // 与真实大附件走**完全同一条** fail-closed 分支，且不必在设备上造 256 MiB。
+        val coordinator = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            com.keepasskey.app.di.AutofillDeviceGraph::class.java
+        ).vaultRecoveryCoordinator()
+        val originalBudget = coordinator.attachmentBudgetBytes
+        coordinator.attachmentBudgetBytes = 1024L
+        try {
+            assertTrue("恢复副本写入失败", store.write(vaultId, "P2-638 Budget", official.absolutePath, payload))
+            createdVaultIds += vaultId
+
+            enableAccessibilityRetrieval()
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                var viewModel: RecoveryViewModel? = null
+                scenario.onActivity { activity ->
+                    viewModel = ViewModelProvider(activity).get(RecoveryViewModel::class.java)
+                    requireNotNull(viewModel).refresh()
+                }
+                val vm = requireNotNull(viewModel)
+                val pending = vm.uiState.value.pending.single { it.entry.vaultId == vaultId }
+
+                vm.select(RecoveryViewModel.keyOf(pending))
+                vm.preview(pending, password.copyOf())
+                waitUntil(20_000) { vm.uiState.value.previewText != null || !vm.uiState.value.busy }
+
+                val state = vm.uiState.value
+                assertNull("超预算时不得给出差异读数（否则会把未知当成「无修改」）", state.preview)
+                assertEquals(
+                    "超预算必须呈现**预算**文案；呈现「凭据不匹配」会让用户徒劳地反复换凭据",
+                    context.getString(R.string.err_recovery_preview_budget_exceeded),
+                    state.previewText
+                )
+                assertNotEquals(
+                    "超预算不得复用「凭据不匹配」文案",
+                    context.getString(R.string.err_recovery_unlock_failed),
+                    state.previewText
+                )
+                assertTrue(
+                    "产品 UI 必须真的显示该预算文案；页面=${accessibilityText()}",
+                    waitForText(state.previewText!!, 10_000)
+                )
+            }
+        } finally {
+            coordinator.attachmentBudgetBytes = originalBudget
+            attachment.fill(0)
             payload.fill(0)
         }
     }

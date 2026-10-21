@@ -31,4 +31,12 @@ interface AutofillDeviceGraph {
      * 而不只是「返回时弹了确认框」。取的是编辑页 ViewModel 注入的同一实例。
      */
     fun unsavedEditRegistry(): com.keepasskey.app.security.UnsavedEditRegistry
+
+    /**
+     * `ISSUE-P2-638`：恢复编排（生产 `@Singleton`）。
+     *
+     * 设备用例需要把 `attachmentBudgetBytes` 调到极小值，以便在真机上触发「附件超预算
+     * ⇒ 无法逐字节确认差异」这条分支（造 >256 MiB 附件不可接受）。
+     */
+    fun vaultRecoveryCoordinator(): com.keepasskey.app.security.VaultRecoveryCoordinator
 }

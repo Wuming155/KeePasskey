@@ -72,6 +72,8 @@ object KdbxErrorTexts {
         // ISSUE-P1-592：自动锁定失败后的独立恢复副本处置
         KdbxError.RECOVERY_PAYLOAD_CORRUPT to R.string.err_recovery_payload_corrupt,
         KdbxError.RECOVERY_UNLOCK_FAILED to R.string.err_recovery_unlock_failed,
+        // ISSUE-P2-638：附件逐字节比较无法完成（预算耗尽 / 读取失败），与凭据不匹配分型
+        KdbxError.RECOVERY_PREVIEW_BUDGET_EXCEEDED to R.string.err_recovery_preview_budget_exceeded,
         KdbxError.RECOVERY_LOCAL_ONLY to R.string.err_recovery_local_only,
         KdbxError.RECOVERY_OVERWRITE_BLOCKED to R.string.err_recovery_overwrite_blocked,
         KdbxError.RECOVERY_WRITE_FAILED to R.string.err_recovery_write_failed,
