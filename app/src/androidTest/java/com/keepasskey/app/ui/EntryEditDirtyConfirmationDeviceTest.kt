@@ -68,6 +68,13 @@ class EntryEditDirtyConfirmationDeviceTest {
             AutofillDeviceGraph::class.java
         ).databaseSession()
 
+    /** 编辑页 ViewModel 注入的同一 `@Singleton` 登记表（跨组件联动断言用）。 */
+    private val unsavedEdits: com.keepasskey.app.security.UnsavedEditRegistry
+        get() = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            AutofillDeviceGraph::class.java
+        ).unsavedEditRegistry()
+
     private var file: File? = null
 
     @After
@@ -99,7 +106,16 @@ class EntryEditDirtyConfirmationDeviceTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         ).use {
             assertTrue("编辑页必须载入既有条目", waitForText(ENTRY_TITLE))
+            // 编辑页 ViewModel 必须已把脏态提供者登记进全局表（锁定路径依赖它判定「是否丢弃」）
+            assertTrue(
+                "编辑页载入后未改动时，全局登记表不应报「有未保存编辑」",
+                !unsavedEdits.hasUnsavedEdits()
+            )
             setTitleText(EDITED_TITLE)
+            assertTrue(
+                "改动标题后全局登记表必须报「有未保存编辑」（ISSUE-P2-355 AC③ 的联动前提）",
+                unsavedEdits.hasUnsavedEdits()
+            )
 
             // 连续两次选择「当前」图标：走生产的 ViewModel 入口（图标选择器选中时调用的同一方法）。
             // 整改前第二次会把 isDirty 覆盖为 false（ISSUE-P3-643 的复现序列）。
@@ -126,6 +142,12 @@ class EntryEditDirtyConfirmationDeviceTest {
             clickText(text(R.string.btn_continue_edit))
             assertTrue("继续编辑后仍应在编辑页", waitForText(EDITED_TITLE))
         }
+
+        // 编辑页销毁后必须注销脏态提供者：否则陈旧脏态会让锁定路径永久认为「有未保存编辑」
+        assertTrue(
+            "编辑页销毁后全局登记表不得残留陈旧脏态（onCleared 未注销即此条为红）",
+            !unsavedEdits.hasUnsavedEdits()
+        )
 
         // 正式文件不得被这次未保存的编辑改动
         val persisted = readVault(requireNotNull(file))
@@ -231,19 +253,27 @@ class EntryEditDirtyConfirmationDeviceTest {
     private fun setTitleText(value: String) {
         // 标题框当前值即既有条目标题：按「可编辑 + 文本等于原值」定位，不依赖 hintText
         // （Compose 的 label 是独立文本节点，不是节点的 hintText）
-        val field = waitForNode { node -> node.isEditable && node.text?.toString() == ENTRY_TITLE }
-            ?: error("找不到标题输入框（页面=${accessibilityText()}）")
         val args = android.os.Bundle().apply {
             putCharSequence(
                 AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
                 value
             )
         }
-        assertTrue(
-            "标题输入必须成功（页面=${accessibilityText()}）",
-            field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val deadline = android.os.SystemClock.uptimeMillis() + UI_TIMEOUT_MS
+        var applied = false
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val field = findNode(automation.rootInActiveWindow) { node ->
+                node.isEditable && node.text?.toString()?.let { it == ENTRY_TITLE || it == value } == true
+            }
+            if (field != null) {
+                applied = applied || field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            }
+            if (waitForText(value, timeoutMs = POLL_INTERVAL_MS * 4)) return
+            android.os.SystemClock.sleep(POLL_INTERVAL_MS)
+        }
+        error(
+            "标题必须写入编辑态（ACTION_SET_TEXT applied=$applied）；页面=${accessibilityText()}"
         )
-        assertTrue("标题必须写入编辑态", waitForText(value))
     }
 
     private fun clickText(label: String) {

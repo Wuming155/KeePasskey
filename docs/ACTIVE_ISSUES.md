@@ -115,5 +115,10 @@
 - 影响与触发：离页不弹丢弃确认，未保存修改容易丢失；未保存编辑登记也会错误认为没有草稿。 触发序列及反证详见方案。
 - 位置：`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditViewModel.kt:307`；`app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditScreen.kt:204`。
 - 已实现（2026-10-21 复核）：重复选择图标保留既有表单脏标记；只有「此前未脏且图标未变」才保持 clean。运行证据：`EntryEditViewModelTest`（重复选图标保留标题/密码脏态、连续同图标、未改动负对照）与 `EntryEditDirtyConfirmationConsistencyTest`。
-- **尚未完成**：`UnsavedEditRegistry` 与返回确认对话框的设备级联动未单独跑。
+- 设备侧联动验收（2026-10-21）：`EntryEditDirtyConfirmationDeviceTest` 2/2 通过（隔离 AVD，真实生产 `EntryEditScreen` + 生产 `EntryEditViewModel`），补齐 `UnsavedEditRegistry` 与返回确认的联动：
+  - 载入未改动时全局登记表**不报**「有未保存编辑」；改标题后**报**「有未保存编辑」（登记与脏态上报生效）；
+  - 连续两次选当前图标后返回仍弹丢弃确认、「继续编辑」不离页且未保存标题**不落盘**；
+  - 编辑页销毁后全局登记表**不残留**陈旧脏态（`onCleared` 注销配对生效）。
+  为此在 `AutofillDeviceGraph` 增加 `unsavedEditRegistry()` 入口（只暴露既有 `@Singleton`，无测试专用行为）。
+- 同时修正该设备用例的既有装置缺陷：`setTitleText` 的 `ACTION_SET_TEXT` 会返回 true 但文本未落入编辑态（Compose 语义节点被外部状态重播种），原实现一次性写入即断言，导致用例此前**一直为红**。改为「写入后回读校验、不一致即重试」，超时导出页面树。
 - [独立整改方案](architecture/问题整改方案/P3/ISSUE-P3-643/整改方案.md)：目标、模块、步骤、失败处理、验收与回退。

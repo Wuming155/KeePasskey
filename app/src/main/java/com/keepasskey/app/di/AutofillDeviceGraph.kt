@@ -23,4 +23,12 @@ import dagger.hilt.components.SingletonComponent
 interface AutofillDeviceGraph {
     fun vaultRepository(): VaultRepository
     fun databaseSession(): DatabaseSession
+
+    /**
+     * `ISSUE-P3-643`：全局脏表单登记表（生产 `@Singleton`）。
+     *
+     * 设备用例需要断言「编辑页 ViewModel 已登记 / 销毁后已注销」这一**跨组件联动**，
+     * 而不只是「返回时弹了确认框」。取的是编辑页 ViewModel 注入的同一实例。
+     */
+    fun unsavedEditRegistry(): com.keepasskey.app.security.UnsavedEditRegistry
 }
