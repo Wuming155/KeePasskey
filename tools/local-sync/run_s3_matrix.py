@@ -175,6 +175,8 @@ def run_sigv4_gradle(lab):
         os.path.join(lab_services.REPO, "gradlew.bat"),
         ":sync:testDebugUnitTest",
         "--tests", "com.keepasskey.sync.s3.LiveS3DirectoryListTest",
+        # ISSUE-P2-636：真实服务端 ETag 经崩溃窗口后的一致性（同一隔离服务）
+        "--tests", "com.keepasskey.sync.engine.LiveS3EtagCrashWindowTest",
         "-DliveSyncTest=true",
         f"-DliveCertPath={lab_services.CERT_PATH}",
         f"-DliveS3Endpoint=https://{lab.host_for_client()}:{lab.s3_port}",
