@@ -53,7 +53,7 @@ jobs:
       # Gradle 守护进程（含 --no-daemon 的单次守护进程）必须运行在 JDK 21；
       # 本仓库全部已获证据的构建/测试均产自 JDK 21（本机 daemon 日志 javaVersion=21）。
       - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
@@ -135,6 +135,6 @@ jobs:
       # 扫描失败时仍需把已产出结果送到 Security 页；本步骤自身失败也不再被吞掉
       - name: Upload SARIF to Code Scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: build/reports/dependency-check/dependency-check-report.sarif
