@@ -1,6 +1,5 @@
 package com.keepasskey.app.security
 
-import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.database.file.KdbxDatabase
@@ -137,7 +136,6 @@ class SecurityTest {
     @Test
     fun `测试会话自动锁定熔断与内存清空`() = runTest {
         val session = DatabaseSession()
-        val settingsRepository = FakeSettingsRepository()
 
         // 初始状态
         assertEquals(DatabaseSession.SessionState.CLOSED, session.state.value)

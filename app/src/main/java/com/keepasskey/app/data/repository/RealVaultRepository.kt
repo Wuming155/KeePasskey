@@ -475,12 +475,6 @@ class RealVaultRepository @Inject constructor(
         /** TASK-34：条目收藏标记的 customData 键（随 KDBX 条目持久化与同步） */
         const val FAVORITE_CUSTOM_DATA_KEY = "KeePasskey.Favorite"
 
-        /**
-         * 本地占位默认库展示名（潜在建库文件名，写入磁盘路径属持久化数据，
-         * 故保持中文常量不本地化，见 refreshDatabases 注释）
-         */
-        const val DEFAULT_VAULT_DISPLAY_NAME = "默认密码库.kdbx"
-
         /** KDBX 标准 PwIcon ID（官方 KeePass PwEnums.cs 裁决） */
         const val ICON_KEY = 0
         const val ICON_FOLDER = 48

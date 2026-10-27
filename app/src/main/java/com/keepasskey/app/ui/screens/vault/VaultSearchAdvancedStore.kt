@@ -32,9 +32,6 @@ internal class VaultSearchAdvancedStore(
         flow.value = options
     }
 
-    /** ISSUE-P3-439 AC①：字段范围勾选上行 */
-    fun setFields(fields: Set<SearchField>) = update { it.copy(fields = fields) }
-
     /** ISSUE-P3-439 AC①：单个字段勾选/取消的切换上行（搜索面板 FilterChip 的回调形态） */
     fun toggleField(field: SearchField) = update { options ->
         options.copy(

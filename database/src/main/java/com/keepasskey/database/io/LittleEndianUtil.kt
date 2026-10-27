@@ -43,11 +43,6 @@ object LittleEndianUtil {
         return ((b0 and 0xFF) or ((b1 and 0xFF) shl 8)).toShort()
     }
 
-    fun readLong(inputStream: InputStream): Long {
-        val bytes = readBytes(inputStream, 8)
-        return bytesToLong(bytes)
-    }
-
     /**
      * 从输入流读取指定长度字节。
      * 长度值来源于文件内容，在认证通过前不可信：负数（如 0xFFFFFFFF 的符号扩展）

@@ -293,8 +293,7 @@ internal fun BasicCredentialsCardPreview() {
                 uiState = previewUiState,
                 entry = previewEntry,
                 onToggleCustomFieldVisibility = { _ -> },
-                onCopyCustomField = { _, _ -> },
-                onShowMessage = { _ -> }
+                onCopyCustomField = { _, _ -> }
             )
             AttachmentsCard(
                 entry = com.keepasskey.app.ui.preview.PreviewEntryLogin.copy(

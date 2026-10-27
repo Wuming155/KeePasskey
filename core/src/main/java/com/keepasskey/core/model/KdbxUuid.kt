@@ -1,8 +1,6 @@
 package com.keepasskey.core.model
 
-import java.nio.ByteBuffer
 import java.security.SecureRandom
-import java.util.UUID
 
 /**
  * KDBX 标准 16 字节 UUID 实体，不可变值对象。
@@ -63,13 +61,6 @@ class KdbxUuid(
             val bytes = ByteArray(UUID_SIZE)
             secureRandom.nextBytes(bytes)
             return KdbxUuid(bytes)
-        }
-
-        fun fromJavaUuid(uuid: UUID): KdbxUuid {
-            val bb = ByteBuffer.wrap(ByteArray(UUID_SIZE))
-            bb.putLong(uuid.mostSignificantBits)
-            bb.putLong(uuid.leastSignificantBits)
-            return KdbxUuid(bb.array())
         }
 
         fun fromHexString(hex: String): KdbxUuid {

@@ -22,7 +22,6 @@ object TotpKeyUriParser {
     /** ISSUE-P3-383：Steam Guard 算法标识（`steam://` 与 `algorithm=STEAM` 共用） */
     const val ALGORITHM_STEAM = "STEAM"
     private const val STEAM_DIGITS = 5
-    private const val TYPE_STEAM = "steam"
 
     /** RFC 6238 / 官方实现共同接受的验证码位数区间（钳制上下界，ISSUE-P3-273 复用）。 */
     private const val DIGITS_MIN = 6
@@ -37,27 +36,10 @@ object TotpKeyUriParser {
     private const val KEY_COUNTER = "counter"
     private const val TYPE_HOTP = "hotp"
 
-    private const val ASCII_CASE_OFFSET = 32
-
-    private const val BYTE_SPACE = 0x20
-    private const val BYTE_TAB = 0x09
-    private const val BYTE_LF = 0x0A
-    private const val BYTE_VT = 0x0B
-    private const val BYTE_FF = 0x0C
-    private const val BYTE_CR = 0x0D
     private const val BYTE_EQUALS = 0x3D
-    private const val BYTE_PERCENT = 0x25
     private const val BYTE_AMPERSAND = 0x26
     private const val BYTE_QUESTION = 0x3F
     private const val BYTE_SLASH = 0x2F
-    private const val BYTE_COLON = 0x3A
-
-    private const val CHAR_LOWER_A = 0x61
-    private const val CHAR_LOWER_Z = 0x7A
-    private const val CHAR_UPPER_A = 0x41
-    private const val CHAR_UPPER_Z = 0x5A
-    private const val CHAR_TWO = 0x32
-    private const val CHAR_SEVEN = 0x37
 
     private val OTPAUTH_PREFIX: ByteArray = "otpauth://".toByteArray(StandardCharsets.US_ASCII)
     private val STEAM_PREFIX: ByteArray = "steam://".toByteArray(StandardCharsets.US_ASCII)
@@ -346,8 +328,6 @@ object TotpKeyUriParser {
 
     private fun percentDecode(raw: ByteArray): ByteArray = TotpUriTextCodec.percentDecode(raw)
 
-    private fun hexValue(value: Int): Int = TotpUriTextCodec.hexValue(value)
-
     private fun parsePlainBase32(
         candidate: ByteArray,
         defaultPeriodSeconds: Int,
@@ -383,14 +363,10 @@ object TotpKeyUriParser {
 
     private fun trimAsciiWhitespace(bytes: ByteArray): ByteArray = TotpUriTextCodec.trimAsciiWhitespace(bytes)
 
-    private fun isAsciiWhitespace(value: Int): Boolean = TotpUriTextCodec.isAsciiWhitespace(value)
-
     private fun indexOfByte(bytes: ByteArray, target: Int, from: Int = 0): Int =
         TotpUriTextCodec.indexOfByte(bytes, target, from)
 
     private fun startsWithIgnoreCase(bytes: ByteArray, prefix: ByteArray): Boolean =
         TotpUriTextCodec.startsWithIgnoreCase(bytes, prefix)
-
-    private fun toUpperAscii(b: Byte): Int = TotpUriTextCodec.toUpperAscii(b)
 }
 

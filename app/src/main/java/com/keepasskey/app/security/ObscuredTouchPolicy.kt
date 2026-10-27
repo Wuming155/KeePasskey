@@ -1,7 +1,5 @@
 package com.keepasskey.app.security
 
-import android.view.View
-
 /**
  * 遮挡触摸判定工具（ISSUE-P2-09 / ZT-14）。
  *
@@ -28,11 +26,4 @@ object ObscuredTouchPolicy {
 
     /** 是否应丢弃该触摸（敏感视图的安全语义：遮挡即丢弃） */
     fun shouldDropTouch(eventFlags: Int): Boolean = isObscured(eventFlags)
-}
-
-/**
- * 为 View 开启遮挡触摸过滤（View 级兜底；窗口级设置在 FlagSecureGuard 中统一施加）。
- */
-fun View.hardenAgainstObscuredTouches() {
-    filterTouchesWhenObscured = true
 }

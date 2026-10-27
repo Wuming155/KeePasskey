@@ -305,7 +305,7 @@ class WebDavSyncProviderTest {
         val req1 = server.takeRequest() // PUT
         server.takeRequest()            // PROPFIND 探测
         val req3 = server.takeRequest() // MOVE 1
-        val req4 = server.takeRequest() // MOVE 2
+        server.takeRequest()            // MOVE 2
         val req5 = server.takeRequest() // DELETE
         assertEquals("DELETE", req5.method)
         assertTrue(req1.path?.startsWith("/vault.") == true)

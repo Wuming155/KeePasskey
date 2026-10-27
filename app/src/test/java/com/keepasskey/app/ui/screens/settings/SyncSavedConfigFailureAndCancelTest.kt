@@ -416,7 +416,6 @@ class SyncSavedConfigFailureAndCancelTest {
             private val username: String,
             private val password: CharArray
         ) : SyncProvider {
-            private val key = endpoint + "|" + username
 
             override suspend fun testConnection(): Result<Unit> {
                 requests += Request("test", endpoint, username, String(password))

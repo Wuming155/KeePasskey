@@ -339,7 +339,7 @@ internal class BiometricUnlockCoordinator(
             val legacyKeyFileInPayload = payload.keyFileData != null
             // ISSUE-P3-437 AC①：进入 unlockActiveDatabase 管线即处于 KDF 派生段
             uiState.update { it.copy(loadStage = UnlockStage.DERIVING_KEYS) }
-            when (val unlockResult = vaultRepository.unlockActiveDatabase(
+            when (vaultRepository.unlockActiveDatabase(
                 payload.passwordChars,
                 // ①存量载荷自带 → ②/③会话驻留或记忆现读（字节归 [KeyFileSessionCoordinator]
                 //   所有，清零由其既有路径承担）→ ④null（密码-only 库 / 或落 Failure 分支）

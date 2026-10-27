@@ -266,8 +266,7 @@ fun EntryDetailContent(
                         uiState = uiState,
                         entry = entry,
                         onToggleCustomFieldVisibility = onToggleCustomFieldVisibility,
-                        onCopyCustomField = onCopyCustomField,
-                        onShowMessage = onShowMessage
+                        onCopyCustomField = onCopyCustomField
                     )
                 }
 

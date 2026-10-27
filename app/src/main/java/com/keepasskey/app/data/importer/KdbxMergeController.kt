@@ -333,8 +333,17 @@ class KdbxMergeController @Inject constructor(
         }
     }
 
+    /**
+     * 构造合并失败状态。
+     *
+     * [generation] 为发起本次合并的代数：仅当它仍是当前代数时才清除待并入 Uri
+     * （`pendingUri` 是**共享**的可变状态，陈旧一代的失败不得清掉新任务的待并入源）。
+     * **UI 状态本身由调用方在写入前统一校验代数**（`launchMerge` 的 `gen == generation` 门），
+     * 故此处即便代数已陈旧也照常返回失败状态——返回值只负责「这次合并为什么失败」，
+     * 是否落地由调用方裁决。
+     */
     private fun failMerge(generation: Int, errorType: String): ImportUiState {
-        pendingUri = null
+        if (generation == this.generation) pendingUri = null
         val reason = when {
             errorType.contains("IOException", ignoreCase = true) -> ImportFailureReason.IO
             errorType.contains("limit", ignoreCase = true) -> ImportFailureReason.LIMIT_EXCEEDED

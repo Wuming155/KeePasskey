@@ -162,20 +162,6 @@ class KeystoreManager @Inject constructor(
     }
 
     /**
-     * 执行实际数据加密
-     */
-    fun encryptData(cipher: Cipher, plaintext: ByteArray): ByteArray {
-        return cipher.doFinal(plaintext)
-    }
-
-    /**
-     * 执行实际数据解密
-     */
-    fun decryptData(cipher: Cipher, ciphertext: ByteArray): ByteArray {
-        return cipher.doFinal(ciphertext)
-    }
-
-    /**
      * 删除指定的密钥别名
      */
     @Synchronized

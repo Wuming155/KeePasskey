@@ -344,11 +344,6 @@ internal class VaultEntryMapper(
 
         /** 附件大小折算基数（1 KiB） */
         private const val BYTES_PER_KIB = 1024L
-
-        /** TOTP 配置缺省参数（RFC 6238 默认值） */
-        private const val DEFAULT_TOTP_PERIOD_SECONDS = 30
-        private const val DEFAULT_TOTP_DIGITS = 6
-        private const val DEFAULT_TOTP_ALGORITHM = "SHA1"
     }
 }
 

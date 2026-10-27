@@ -59,27 +59,6 @@ internal object SystemSettingsNavigation {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     /**
-     * 旧版无障碍自动填充服务的系统详情页（`ISSUE-P2-405`）。
-     *
-     * `android.settings.ACCESSIBILITY_DETAILS_SETTINGS` + `android.settings.extra.COMPONENT_NAME`
-     * （API 30+ 公开 action / extra 字面量；本仓 compileSdk SDK stub 未暴露同名 Kotlin
-     * 常量，故以命名常量承载字符串字面量，与「内部键无公开常量」的先例同口径）。
-     * 可把用户直接带到本应用无障碍服务开关；ROM 不响应该 action 时回落 [accessibilityIntent]。
-     * **详情页仅作增强路径**：即使 `resolveActivity` 返回 null，调用方仍应走通用无障碍页（见 [openLegacyAccessibilitySettings]）。
-     */
-    fun accessibilityDetailsIntent(context: Context): Intent? {
-        val details = Intent(ACTION_ACCESSIBILITY_DETAILS_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(
-                EXTRA_COMPONENT_NAME,
-                ComponentName(context, LegacyAutofillAccessibilityService::class.java)
-            )
-        }
-        return details.takeIf { it.resolveActivity(context.packageManager) != null }
-            ?: accessibilityIntent(context)
-    }
-
-    /**
      * 打开旧版无障碍通道的系统设置落点（`ISSUE-P2-405`，用户目标行为）。
      *
      * **点开关 → 立刻跳系统无障碍权限页**：

@@ -5,7 +5,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 解析器注册表（ISSUE-P3-19 交付物 1.2）：按 [ImportSource] 或文件扩展名分发。
+ * 解析器注册表（ISSUE-P3-19 交付物 1.2）：按 [ImportSource] 分发。
  *
  * **扩展方式（与并行子批的零冲突契约）**：本表不硬编码任何具体解析器类名，完全依赖 Hilt 的
  * `@IntoSet` 多绑定集合 `Set<EntryImporter>`。本批次通过 [ImporterModule] 贡献
@@ -31,13 +31,6 @@ class ImporterRegistry @Inject constructor(
     fun supportedExtensions(): Set<String> =
         bySource.values.flatMap { it.supportedExtensions }.map { it.lowercase() }.toSet()
 
-    /** 按文件扩展名反查解析器；扩展名缺失或不识别返回 null。 */
-    fun findForFileName(fileName: String): EntryImporter? {
-        val extension = fileName.substringAfterLast(EXTENSION_SEPARATOR, "").lowercase()
-        if (extension.isEmpty()) return null
-        return bySource.values.firstOrNull { extension in it.supportedExtensions }
-    }
-
     /**
      * 构建索引：同一 [ImportSource] 被绑定多次属装配缺陷，此时**保留排序后的首个**并落警告
      * （不抛异常——DI 构造期抛异常会让整个 App 起不来，代价远高于收益；但绝不静默）。
@@ -53,6 +46,5 @@ class ImporterRegistry @Inject constructor(
 
     private companion object {
         const val TAG = "ImporterRegistry"
-        const val EXTENSION_SEPARATOR = '.'
     }
 }

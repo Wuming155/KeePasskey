@@ -471,12 +471,6 @@ class KeePasskeyAutofillService : AutofillService() {
          */
         internal const val SAVE_REQUEST_TIMEOUT_MS = 5_000L
         internal const val MAX_DATASET_COUNT = 8
-        internal const val REQUEST_CODE_UNLOCK = 2001
-        /** TASK-11：已解锁分支二次确认数据集的 PendingIntent requestCode 基址 */
-        internal const val REQUEST_CODE_CONFIRM_BASE = 2100
-
-        /** ISSUE-P3-40：手动选择器入口数据集的 requestCode（与确认基址段无重叠） */
-        internal const val REQUEST_CODE_PICKER = 2200
 
         /** ISSUE-P1-224 / P2-603：保存请求 requestCode 基址——改由进程级单调分配器逐请求分配。 */
         internal const val REQUEST_CODE_SAVE = 3100

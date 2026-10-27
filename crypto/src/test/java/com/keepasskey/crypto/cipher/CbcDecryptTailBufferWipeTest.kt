@@ -60,11 +60,6 @@ class CbcDecryptTailBufferWipeTest {
         return cipher
     }
 
-    private fun encryptTransform(): CbcBlockTransform {
-        val cipher = jceCipher(javax.crypto.Cipher.ENCRYPT_MODE)
-        return { _, _, data -> cipher.update(data) ?: ByteArray(0) }
-    }
-
     private fun decryptTransform(): CbcBlockTransform {
         val cipher = jceCipher(javax.crypto.Cipher.DECRYPT_MODE)
         return { _, _, data -> cipher.update(data) ?: ByteArray(0) }

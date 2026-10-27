@@ -109,11 +109,6 @@ class VaultFileDriftConcurrencyBarrierTest {
         vaultFile.writeBytes(bytes)
     }
 
-    private fun passwordOf(file: File, id: KdbxUuid): String =
-        KdbxFile.load(FileInputStream(file), masterPassword)
-            .rootGroup.allEntries().first { it.id == id }
-            .fields.getValue(BARRIER_PWD_FIELD).readString()
-
     /** 闸门：到达即置信号 1，随后等待放行信号 2 */
     private class Gate {
         val reached = CompletableDeferred<Unit>()

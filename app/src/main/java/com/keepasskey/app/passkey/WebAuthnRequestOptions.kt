@@ -145,9 +145,6 @@ internal class WebAuthnRequest private constructor(private val root: Map<String,
          */
         fun base64UrlDecode(text: String): ByteArray? = decode(text, urlSafe = true)
 
-        /** 标准 Base64 解码（容忍无 padding）；非法输入返回 null */
-        fun base64Decode(text: String): ByteArray? = decode(text, urlSafe = false)
-
         private fun decode(text: String, urlSafe: Boolean): ByteArray? {
             if (text.isBlank()) return null
             val normalized = text.trim().let { value ->

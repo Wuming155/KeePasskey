@@ -21,11 +21,4 @@ data class KdbxTimes(
             usageCount = usageCount + 1
         )
     }
-
-    fun withLocationChanged(now: Instant = Instant.now()): KdbxTimes {
-        return copy(
-            lastModificationTime = now,
-            locationChanged = now
-        )
-    }
 }

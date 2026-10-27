@@ -123,9 +123,6 @@ object PasskeyCryptoEngine {
         PasskeyData.ALGORITHM_RS256
     )
 
-    /** [algorithmId] 是否为本认证器可生成的算法 */
-    fun isAlgorithmSupported(algorithmId: Int): Boolean = algorithmId in SUPPORTED_ALGORITHMS
-
     /**
      * 依 RP 的 `pubKeyCredParams` 协商出注册所用算法。
      *

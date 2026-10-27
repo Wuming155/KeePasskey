@@ -103,16 +103,4 @@ object ResumeSyncProbePolicy {
             else -> ProbeOutcome.Unchanged
         }
     }
-
-    /** 距上次探测的间隔（毫秒）；从未探测返回 Long.MAX_VALUE */
-    fun elapsedSince(lastProbeAtMillis: Long?, nowMillis: Long = System.currentTimeMillis()): Long {
-        val last = lastProbeAtMillis ?: return Long.MAX_VALUE
-        if (last <= 0L) return Long.MAX_VALUE
-        return nowMillis - last
-    }
-
-    /** 探测节流是否已到期 */
-    fun throttleElapsed(lastProbeAtMillis: Long?, nowMillis: Long = System.currentTimeMillis()): Boolean {
-        return elapsedSince(lastProbeAtMillis, nowMillis) >= MIN_PROBE_INTERVAL_MILLIS
-    }
 }

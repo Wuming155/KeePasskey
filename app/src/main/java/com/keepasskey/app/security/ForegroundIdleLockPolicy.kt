@@ -18,9 +18,6 @@ import java.time.Instant
  */
 object ForegroundIdleLockPolicy {
 
-    /** 默认闲置超时（秒）——与后台 60s 默认错开，前台阅读态给更宽裕窗口 */
-    const val DEFAULT_IDLE_TIMEOUT_SECONDS = 300
-
     /** 合法超时域：0 = 立即锁，-1 = 永不，其余 > 0 秒 */
     const val NEVER = -1
     const val IMMEDIATE = 0

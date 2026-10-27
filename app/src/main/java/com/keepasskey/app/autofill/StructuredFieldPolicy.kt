@@ -140,10 +140,6 @@ object StructuredFieldPolicy {
         return (listOf(hint) + zh).distinct()
     }
 
-    /** 角色 → 模板英文/中文别名（展示与编辑面提示用） */
-    fun templateAliasNamesFor(role: StructuredFieldRole): List<String> =
-        TEMPLATE_ZH_FIELD_NAMES[role].orEmpty()
-
     /**
      * AC① 识别（hint / autocomplete 两源 ⇒ 可填充；label 源见 [labelRoleOf]）。
      *

@@ -42,7 +42,6 @@ import com.keepasskey.app.R
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
-import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.theme.passwordFieldStyle
 
@@ -54,10 +53,7 @@ internal fun CustomFieldsCard(
     uiState: EntryDetailUiState,
     entry: UiVaultEntry,
     onToggleCustomFieldVisibility: (String) -> Unit,
-    onCopyCustomField: (String, String) -> Unit,
-    // ISSUE-P2-353 AC② 后本卡片不再自行发消息（复制反馈统一由协调器经同一通道上浮）；
-    // 参数保留以维持既有调用方 / 预览签名不变，勿据此再加本地成功提示
-    onShowMessage: (UiMessage) -> Unit
+    onCopyCustomField: (String, String) -> Unit
 ) {
     BentoCard(
         modifier = Modifier.fillMaxWidth(),
@@ -348,8 +344,7 @@ internal fun CustomFieldsCardPreview() {
                 uiState = previewUiState,
                 entry = previewEntry,
                 onToggleCustomFieldVisibility = { _ -> },
-                onCopyCustomField = { _, _ -> },
-                onShowMessage = { _ -> }
+                onCopyCustomField = { _, _ -> }
             )
             AttachmentsCard(
                 entry = previewEntry.copy(
