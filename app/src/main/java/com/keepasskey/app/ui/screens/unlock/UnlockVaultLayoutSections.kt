@@ -36,18 +36,7 @@ import com.keepasskey.app.ui.components.SecurePasswordField
 import com.keepasskey.app.ui.model.resolveText
 import com.keepasskey.app.ui.theme.CapsuleShape
 
-/**
- * 解锁页「整合分组卡片」布局段落（§436，2026-10-03 用户提交的 HTML 原型
- * `unlock-redesign` 落地——方案 B：数据库行 + 主密码行整合进同一张分组卡）。
- *
- * 本文件只承接**布局重组**，零业务逻辑：全部回调与状态语义与改动前一致，
- * `UnlockUiState` / `UnlockViewModel` 未动。取色一律走 MaterialTheme 语义令牌
- * （动态取色 / OLED 盘自动跟随），不复刻原型 HTML 的固定深绿色值。
- *
- * 结构拆分原因：`UnlockContentSections.kt` 已在 tier2（400~500）棘轮预算内，
- * 迁出 `UnlockStandardUnlockContent` / `UnlockPasswordSupportingText` 后该文件降档，
- * 本文件新组件全部远低于 400 行（`tools/doc/count_line_tiers.py` 口径）。
- */
+/** 解锁页分组卡布局，取色使用 MaterialTheme 语义令牌。 */
 
 /**
  * 分组卡首行：当前数据库概要（icon 块 + 名称 / 状态 + 「切换」尾标）。
@@ -189,7 +178,6 @@ internal fun UnlockVaultGroupCard(
  * 任意两行同时成立即压在同一行上（真机实证：生物识别失败文案「生物识别验证未通过或已取消」
  * 与「已自动载入记住的密钥文件: usr.dat」叠成一行乱码；「主密码错误…」+「剩余 N 次尝试」
  * 同样命中——后者是开启了失败节流时**每次输错都会出现**的常态组合）。
- * 此槽的叠放风险由 `tools/doc/check_box_slot_children.py` 机检（含框架槽与「多发射助手函数」）。
  */
 @Composable
 internal fun UnlockPasswordSupportingText(

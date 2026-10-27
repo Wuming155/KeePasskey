@@ -22,7 +22,6 @@ import javax.inject.Singleton
  * 改主密码 / 同步失败五处全是中文，唯独走 Compose `stringResource(LocalContext)` 的
  * 「主密码错误」一条是英文——两条通道口径不一致正是本次事故的识别特征）。
  * 必须经 [localizedResourcesFor] 按 [AppLocaleTracker.snapshot] 派生后再 `getString`。
- * 机检规则 D（`tools/audit/check_user_visible_cjk.py`）锁死本条，改动前先看该脚本读数。
  *
  * 单元测试环境不走 Hilt，直接构造 SettingsViewModel 时注入假实现。
  */

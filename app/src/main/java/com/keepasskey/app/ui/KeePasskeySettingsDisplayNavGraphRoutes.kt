@@ -12,14 +12,7 @@ import com.keepasskey.app.ui.screens.settings.subscreens.InterfaceSettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.ListDisplaySettingsScreen
 import com.keepasskey.app.ui.screens.settings.subscreens.ThemeSettingsScreen
 
-/**
- * 「外观与显示」域二级设置页的逐条注册体（自 `KeePasskeySettingsNavGraphRoutes.kt` 拆出，**纯结构性搬迁**）。
- *
- * 拆出缘由：原文件承载全部二级页注册体，新增「界面偏好」页后越过 `tier2(400~500)` 棘轮预算
- * （`tools/doc/count_line_tiers.py`，只紧不松）。三项同属「应用长什么样」——
- * 主题（配色 / 语言 / 遮掩）、列表与导航（列表字段与搜索行为）、界面偏好（字段字体与动效），
- * 故按域整组外迁；函数体、回调接线与注释**逐字保留**，仅换文件。
- */
+/** 外观与显示域的二级设置路由。 */
 
 /** 11. 二级设置页面：外观与主题 (显示密度与敏感信息遮掩；ISSUE-P3-467 列表/导航偏好已拆至 settingsListDisplayRoute) */
 internal fun NavGraphBuilder.settingsThemeRoute(navController: NavHostController) {

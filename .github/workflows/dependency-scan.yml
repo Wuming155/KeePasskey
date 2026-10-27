@@ -1,38 +1,13 @@
-# TASK-20（P3）：OWASP Dependency-Check 供应链依赖漏洞巡检。
-#
-# ISSUE-P3-09（ZT-20）AC4 整改要点：
-# 1. **本流水线已具备真实失败阻断能力**：init 脚本 failBuildOnCVSS=7.0（CVSS ≥ HIGH 即失败）
-#    且 failOnError=true（扫描无法完成同样失败，fail-closed）；workflow 侧不再有任何
-#    continue-on-error 吞掉失败。
-# 2. 全部 Action 以 **commit SHA 钉死**（保留 `# vX.Y.Z` 注释）；本次只做 SHA 钉死，
-#    不跨大版本升级（上游已有新 major，升级需另行验证，见 docs/records/退役依据承接-ISSUE-P3-09.md）。
-# 3. 除本巡检外，构建/测试/Lint 门禁与 Rust 供应链闸门见 .github/workflows/build.yml。
-#
-# 触发策略（ISSUE-P2-54 整改：PR / push 路径纳入依赖扫描；ISSUE-P3-316 治理为定时巡检）：
-# - `schedule`：每周一全量扫描一次——与下方 NVD 周粒度缓存 key 天然对齐（每周首跑恢复上周库
-#   增量更新），保证依赖未变时新 CVE 仍会被巡检出来；扫描完整性优先于耗时；
-# - `workflow_dispatch`：改依赖 / 发布前随时在 Actions 页手动 Run workflow。
-# - 原 push(main)+PR 每 push 全量触发已于 ISSUE-P3-316 移除（5 天 127 次 run，依赖树未变亦全量扫描）；
-# - `workflow_dispatch`：随时可到 Actions 页手动 Run workflow；
-# - 报告以 artifact 归档并按 CVSS 阈值阻断；SARIF 上传 GitHub Code Scanning
-#   （Security 页可视化）；误报经**逐条人工核实**后登记 suppression 白名单
-#   （.github/owasp-dependency-suppressions.xml；**此处不复述条目数**——本注释曾断言该清单没有条目，
-#   与文件实际内容（多条已核实豁免）不符，属典型的「声明漂移」，故改为只声明**纪律**）：
-#   每条 `<suppress>` 必须附 `<notes>`（核实人 / 核实方式 / 归属）且不得使用通配豁免；
-#   该纪律由 `SupplyChainSuppressionPolicyTest` 守卫（在 `:app:test` 内执行）。
-# - NVD API Key 可选：配置仓库 Secret `NVD_API_KEY`（https://nvd.nist.gov/developers/vulnerabilities）
-#   可显著提升 NVD 数据同步速率；未配置时插件走官方托管镜像 datafeed（见 init 脚本 nvd{}）。
 name: dependency-scan
 
 on:
-  # ISSUE-P3-316：改为每周定时巡检 + 手动触发（原 push(main)+PR 每 push 全量触发已移除，见头注释）
   schedule:
-    - cron: "0 3 * * 1" # 每周一 UTC 03:00（北京 11:00）全量扫描
+    - cron: "0 3 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
-  security-events: write # 上传 SARIF 至 Code Scanning
+  security-events: write
 
 concurrency:
   group: dependency-scan-${{ github.workflow }}-${{ github.ref }}
@@ -40,101 +15,37 @@ concurrency:
 
 jobs:
   owasp-dependency-check:
-    name: OWASP Dependency-Check
     runs-on: ubuntu-latest
-    # ISSUE-P2-315：run #344–#351（2026-09-24）实证 60 分钟在 NVD 数据源慢日不够
-    # （全量重下超时被强杀、供应链结论缺位），提高至 90；NVD 库持久化由下方 cache 步骤承担。
     timeout-minutes: 90
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # JDK 21（而非 17）：gradle/gradle-daemon-jvm.properties 声明 toolchainVersion=21，
-      # Gradle 守护进程（含 --no-daemon 的单次守护进程）必须运行在 JDK 21；
-      # 本仓库全部已获证据的构建/测试均产自 JDK 21（本机 daemon 日志 javaVersion=21）。
-      - name: Set up JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "21"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-
-      # =====================================================================================
-      # ISSUE-P2-315：NVD 数据库周粒度缓存。
-      # 插件把 NVD H2 库默认落 ${GRADLE_USER_HOME}/dependency-check-data/<ver>
-      # （dependency-check-gradle 插件 DataExtension.groovy 实证），而 setup-gradle 的
-      # 缓存只覆盖 caches / wrapper 子目录，不含该目录 ⇒ 原状每次推送全量重下 NVD，
-      # 数据源慢日撞 job 超时被强杀（run #344–#351 全 cancelled，供应链结论持续缺位）。
-      # 周粒度 key（ISO 周）+ 前缀 restore-keys：同周内共享全量库，跨周命中上周库后
-      # 由插件按 validForHours（默认 4h）增量更新，不再全量重下。
-      # =====================================================================================
-      - name: 计算周粒度缓存键（ISO 周，UTC）
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Compute weekly cache key
         run: echo "NVD_CACHE_WEEK=$(date -u +%G-%V)" >> "$GITHUB_ENV"
-
-      - name: 缓存 NVD 数据库（dependency-check-data）
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/dependency-check-data
           key: dependency-check-nvd-${{ env.NVD_CACHE_WEEK }}
-          restore-keys: |
-            dependency-check-nvd-
-
-      # 本步骤失败即整条流水线失败（CVSS ≥ 7.0 或扫描内部错误），不再被 continue-on-error 掩盖
-      - name: Run OWASP Dependency-Check (aggregate)
+          restore-keys: dependency-check-nvd-
+      - name: Scan production dependencies
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: |
-          set -euo pipefail
-          # NVD_API_KEY 只经**环境变量**这一个通道传入（唯一事实源 =
-          # .github/dependency-check.init.gradle.kts 的 nvd{} 块，其只调 System.getenv）。
-          # 历史残留（ISSUE-P3-508）：此处曾额外拼 `-Dorg.owasp.dependencycheck.nvd.api.key=...`；
-          # 该属性名在 13.0.0 已确证不被消费（插件 jar 全量字符串扫描零命中），是彻底的死接线，
-          # 且把 secret 放上命令行（进程表 / 命令回显面，日志掩码不覆盖本地复现场景）。
-          # ⇒ 删除而非修复：env 通道恒先兜住，且不得再把 NVD_API_KEY 放上命令行。
-          ./gradlew --no-daemon dependencyCheckAggregate \
-            -I .github/dependency-check.init.gradle.kts \
-            --console=plain
-
-      # =====================================================================================
-      # ISSUE-P3-32：CVSS 阈值**硬断言**（fail-closed）。
-      #
-      # 为什么必须有这一步：init 脚本里的 `failBuildOnCVSS = 7.0f` 在 dependencyCheckAggregate
-      # 任务上**不会**让构建失败——本仓 CI 已实测证伪：
-      #   · 运行 34335443660（dependency-scan，conclusion=success）日志中，六个工程各自都打印了
-      #     "One or more dependencies were identified with known vulnerabilities in <project>:"
-      #     之后仍是 "BUILD SUCCESSFUL in 37m"；
-      #   · 该次运行归档的报告 JSON 含 188 条漏洞实例，其中 **138 条 CVSS ≥ 7.0**（51 条 ≥ 9.0）。
-      # 即"文档声称真实阻断、实际静默放行"。故补此步对报告本身做断言：
-      #   · 有分数 → 分数 ≥ 7.0 即失败；无分数但有 severity → CRITICAL/HIGH 即失败；
-      #   · 报告缺失或不可解析 → 同样失败（无报告 = 无结论 ≠ 通过）。
-      # 豁免的唯一通道是 .github/owasp-dependency-suppressions.xml（插件在报告生成阶段剔除），
-      # **不得**通过调低阈值或删除本步骤来变绿。
-      # =====================================================================================
-      # `if: always()`：即使上游 aggregate 步骤失败（如 NVD 数据源 503 → 未产出报告），
-      # 本步仍必须执行并给出**明确判定**——「报告缺失 = 无结论 ≠ 通过」按 fail-closed 失败。
-      # 否则 GitHub Actions 会默认跳过本步，使断言自身「无判定」，与「不得静默通过」的初衷相悖
-      # （CI 侧实测留痕：运行 34477320673，aggregate 因 NVD 503 失败 → 本步被 skip）。
-      - name: CVSS 阈值硬断言（fail-closed）
+        run: ./gradlew --no-daemon dependencyCheckAggregate -I .github/dependency-check.init.gradle.kts --console=plain
+      # 聚合任务的退出码不足以判定漏洞阈值；报告缺失也必须失败。
+      - name: Verify CVSS threshold
         if: always()
-        run: |
-          python3 .github/check_dependency_cvss.py \
-            build/reports/dependency-check/dependency-check-report.json
-
-      # 无报告 = 扫描未产出结论，按 if-no-files-found: error 显式暴露，而非静默放过
-      - name: Upload report artifact
+        run: python3 .github/check_dependency_cvss.py build/reports/dependency-check/dependency-check-report.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-check-report
-          path: |
-            **/build/reports/dependency-check/dependency-check-report.*
+          path: '**/build/reports/dependency-check/dependency-check-report.*'
           if-no-files-found: error
-
-      # 扫描失败时仍需把已产出结果送到 Security 页；本步骤自身失败也不再被吞掉
-      - name: Upload SARIF to Code Scanning
+      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: always()
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: build/reports/dependency-check/dependency-check-report.sarif

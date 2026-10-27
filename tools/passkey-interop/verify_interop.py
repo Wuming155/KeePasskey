@@ -123,7 +123,7 @@ EXIT_ENV_MISSING = 2  # 环境缺失，不得当绿
 # 本处对**运行期实际版本**做区间断言（消费面校验，防「pin 被改 / 预装版本 already satisfied /
 # 上游撤回重发」等漂移静默放行）。越界或无法解析版本即 fail-closed 计入 `_failures`。
 #
-# 留痕版本（本机对拍实测，与 docs/records/通行密钥互操作对拍记录_2026-09-19.md §1 一致）：
+# 版本边界基于既有独立实现对拍；升级时须重新运行：
 #   pykeepass 4.2.0 / cryptography 50.0.0 / keepassxc-cli 2.7.12
 # 下界 = 留痕版本；上界取「下一主版本（排他）」——主版本漂移属未验证面，静默放行即失去闸门意义。
 # `keepassxc-cli` 无法精确 pip pin（apt 提供，版本随 Ubuntu 基础镜像漂移）：下界取 **2.7.6** =

@@ -1,35 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""单元测试结果聚合计数（**固定尺子**）。
+"""汇总各模块 test<Variant>UnitTest 结果，排除截图与设备报告。
 
-为什么要有这个脚本（§190 实测教训）：全量 `test` 之后仓里 `*/build/test-results/**/*.xml`
-**不止**单元测试一种——`app/build/test-results/updateDebugScreenshotTest/` 之下还有
-截图包装用例的 XML，且它是**上一批遗留的旧文件**（`--rerun-tasks` 不会重跑它、也不会删它）。
-把它一并扫进来会凭空多出 1 份 XML / 2 条用例，于是「2203 → 2207」这种**跨批不可比**的数字
-就这么进了文档。同类失真此前已由 §165 §7（测量点早于写盘）、§175（一次性脚本漏报 10 条）、
-§178（字符串里的括号毁配平）各立过一次规矩。
-
-判据（四条，改动须同步本文件）：
-1. **只统计目录名匹配 `test<Variant>UnitTest` 的 XML**（AGP 的 JVM 单测输出目录形态）；
-   截图测试（`updateDebugScreenshotTest` / `*ScreenshotTest`）、instrumented 结果一律排除；
-2. 一个 `testsuite` 元素 = 一个测试类；`tests` / `failures` / `errors` / `skipped` 逐份相加；
-3. **额外报告**被排除的 XML 清单——排除项必须可见，否则「少了一类」会静默变成「数字对不上」；
-4. **零 XML / 零 `testsuite` 元素 = exit 2（不得当绿）**（`ISSUE-P3-514`）：
-   「`failures=0 errors=0`」在**没跑**与**跑了且全绿**两种情形下输出一致，靠人读输出行区分
-   等于把判据外包给读者。与 `preserve_test_failures.py:27` 的 exit-2 立据同型
-   （「无法判别『没红』还是『没跑』」），故此处也必须 fail-closed。
-
-退出码：
-- `0` = 有证据且零 failures / errors（真绿）；
-- `1` = 有 failures / errors；
-- `2` = 无证据（未找到任何模块目录 / 零 XML / 零 `testsuite` 元素）。
-
-用法：
-    python tools/doc/count_test_results.py            # 汇总
-    python tools/doc/count_test_results.py --excluded # 只看被排除的目录
-    python tools/doc/count_test_results.py --selftest # 口径反校（内嵌正/反样本，含零证据态）
-
-输入只读本仓自产 `build/test-results/**`（非外部输入），故用标准库解析器即可。
+运行前须完成 gradlew test；本工具不判断报告的新鲜度。
+退出码：0 为有结果且无失败，1 为有失败，2 为没有 testsuite 结果。
+可用 --excluded 查看排除项，--selftest 验证聚合判据。
 """
 import os
 import re

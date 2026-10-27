@@ -50,7 +50,7 @@ import com.keepasskey.app.ui.theme.passwordFieldStyle
  * ISSUE-P3-457：[supportingText] 槽的内容由 Material3 落在 `Box(Modifier.layoutId(SupportingId))`
  * 之内（`TextFieldImpl.kt`）——**Box 的同层兄弟互相叠放**，故该槽只接受**单个**节点；
  * 需要多行辅助 / 错误 / 提示文案时，调用方须自行包一层 `Column`（真机事故：解锁页四行文案
- * 平铺直出，两行同时成立即压成一行乱码）。机检见 `tools/doc/check_box_slot_children.py`。
+ * 平铺直出，两行同时成立即压成一行乱码）。
  *
  * 2026-10-03 解锁页分组卡改版（§436）新增两个**向后兼容**的呈现开关：
  * - [label] 放宽为可空（`null` = 不渲染浮动标签，语义交由 [placeholder] / 无障碍语义承载）；

@@ -116,7 +116,7 @@ ISSUE-P3-23 要求使用**真实 KeePass 2.61.1 / KeePassXC 生成的 Argon2d / 
 python tools/kdbx-corpus/generate_corpus.py --ingest <file.kdbx> --source keepassxc
 ```
 
-脚本的能力边界、退出码与安全纪律见 [`tools/kdbx-corpus/README.md`](../../../../tools/kdbx-corpus/README.md)。
+脚本的能力边界、退出码与安全纪律见 [`tools/kdbx-corpus/README.md`](../../../../../tools/kdbx-corpus/README.md)。
 **注意**：脚本产出的是**语料与元数据**，不是互操作证据——「验证通过」仍只能由设备侧用例跑出来。
 
 ---

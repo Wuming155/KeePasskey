@@ -20,7 +20,7 @@ import org.junit.Test
 
 /**
  * `ISSUE-P2-307` / §309：守卫「装新不卸」口径的**运行期回归锁**（与
- * [MainDispatcherPollutionGuardTest] 的静态判据互补）。
+ * MainDispatcherGuard 的作用域清理配套）。
  *
  * ## 复现的最小条件（条目 AC①）
  *

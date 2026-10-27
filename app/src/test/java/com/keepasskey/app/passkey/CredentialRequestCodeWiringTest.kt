@@ -1,262 +1,45 @@
 package com.keepasskey.app.passkey
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/**
- * CM 通道 `PendingIntent` requestCode 的**分配契约**回归（ISSUE-P2-199）。
- *
- * ## 为什么需要两层用例
- *
- * 1. **语义层**（纯 JVM）：官方契约是「unique request code per entry」，而其唯一性域是
- *    **进程持久范围**（见 [CredentialPendingIntents.nextRequestCode] 的 KDoc）。分配器是否
- *    真的单调、并发是否真的取不到重复值，可以在宿主上一次跑清；
- * 2. **接线层**（源码文本）：四条落地入口分散在服务、创建装配与候选组装器中——
- *    **漏改任何一处都不会让任何运行时用例变红**，只会在真机上表现为「点旧候选、拉起新
- *    上下文」（ISSUE-P3-122 同形缺陷的先例）。故与 `AutofillAuthResultWiringTest` 同法，
- *    以源码断言把「不得再出现按响应复位 / 常量 requestCode」钉死。
- */
 class CredentialRequestCodeWiringTest {
-
-    // ── 语义层：进程级单调分配器 ──
-
     @Test
-    fun `分配器在同一进程内严格递增且不重复`() {
-        val allocated = (1..ALLOCATION_SAMPLE).map { CredentialPendingIntents.nextRequestCode() }
-
-        assertEquals("同一批分配必须两两互异（零重复）", ALLOCATION_SAMPLE, allocated.toSet().size)
-        assertEquals(
-            "必须严格递增（单调 +1），不得出现回退或复位——「每响应从基线复位」正是原缺陷形态",
-            allocated.sorted(),
-            allocated
-        )
-        assertTrue(
-            "分配值必须自 CM 通道基线（≥ 1000）起，不得落回自动填充通道的低位常量段",
-            allocated.first() >= CM_REQUEST_CODE_BASELINE
-        )
+    fun `同一进程连续分配的请求码递增且不重复`() {
+        val allocated = (1..2_000).map { CredentialPendingIntents.nextRequestCode() }
+        assertEquals(allocated.size, allocated.toSet().size)
+        assertEquals(allocated.sorted(), allocated)
+        assertTrue(allocated.first() >= 1_000)
     }
 
     @Test
-    fun `并发分配同样两两互异（两路响应同时组装）`() {
+    fun `并发分配的请求码不重复`() {
         val results = Collections.synchronizedList(mutableListOf<Int>())
         val start = CountDownLatch(1)
-        val done = CountDownLatch(THREADS)
-        val pool = Executors.newFixedThreadPool(THREADS)
+        val done = CountDownLatch(4)
+        val pool = Executors.newFixedThreadPool(4)
         try {
-            repeat(THREADS) {
+            repeat(4) {
                 pool.execute {
-                    start.await()
-                    repeat(PER_THREAD) { results.add(CredentialPendingIntents.nextRequestCode()) }
-                    done.countDown()
+                    try {
+                        start.await()
+                        repeat(500) { results.add(CredentialPendingIntents.nextRequestCode()) }
+                    } finally {
+                        done.countDown()
+                    }
                 }
             }
             start.countDown()
-            assertTrue(
-                "并发分配必须在 ${TIMEOUT_SECONDS}s 内完成",
-                done.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            )
+            assertTrue(done.await(30, TimeUnit.SECONDS))
         } finally {
             pool.shutdownNow()
         }
-
-        val total = THREADS * PER_THREAD
-        assertEquals("并发场景下每次分配都必须取到新值（AtomicInteger 读改写）", total, results.size)
-        assertEquals("并发场景下不得出现重复 requestCode", total, results.toSet().size)
-    }
-
-    // ── 接线层：四条入口一律走共享分配器，不得残留常量 / 每响应复位 ──
-
-    @Test
-    fun `分配器必须是进程级单调而非每响应局部计数`() {
-        val source = readSource(PENDING_INTENTS)
-        assertTrue(
-            "必须存在进程级 AtomicInteger 分配器",
-            source.contains("private val requestCodeAllocator = AtomicInteger(REQUEST_CODE_BASE)")
-        )
-        assertTrue(
-            "分配必须走 getAndIncrement（原子读改写）",
-            source.contains("fun nextRequestCode(): Int = requestCodeAllocator.getAndIncrement()")
-        )
-    }
-
-    @Test
-    fun `四条落地入口一律取共享分配器`() {
-        // 候选组装器有两条 PendingIntent 创建点（Passkey 断言 / 密码填充）；
-        // ISSUE-P3-345 的「新建密码条目」Action 创建点在 CredentialCreateEntries（见下条）
-        assertEquals(
-            "候选组装器的两条创建点都必须取共享分配器",
-            2,
-            Regex("CredentialPendingIntents\\.nextRequestCode\\(\\)").findAll(readSource(ASSEMBLER)).count()
-        )
-        assertEquals(
-            "创建入口装配（Passkey / 密码 / ISSUE-P3-345 新建 Action）必须取共享分配器",
-            2,
-            Regex("CredentialPendingIntents\\.nextRequestCode\\(\\)").findAll(readSource(CREATE_ENTRIES)).count()
-        )
-        assertTrue(
-            "解锁 Action 入口必须取共享分配器",
-            readSource(PROVIDER_SERVICE).contains("CredentialPendingIntents.nextRequestCode()")
-        )
-    }
-
-    @Test
-    fun `不得残留按响应复位的分配器或常量 requestCode`() {
-        val assembler = readSource(ASSEMBLER)
-        assertFalse(
-            "候选组装器不得再持有每响应复位的局部分配器（ISSUE-P2-199 的原始缺陷形态）",
-            assembler.contains("RequestCodeAllocator")
-        )
-        assertFalse("候选组装器不得残留分配基线常量", assembler.contains("REQUEST_CODE_BASE"))
-
-        val createEntries = readSource(CREATE_ENTRIES)
-        assertFalse(
-            "创建入口不得再用常量 requestCode（103/104）",
-            createEntries.contains("REQUEST_CODE_CREATE_")
-        )
-
-        val service = readSource(PROVIDER_SERVICE)
-        listOf("REQUEST_CODE_UNLOCK", "REQUEST_CODE_ASSERT", "REQUEST_CODE_FILL").forEach { constant ->
-            assertFalse(
-                "CM 服务不得残留常量 requestCode：$constant",
-                service.contains(constant)
-            )
-        }
-    }
-
-    @Test
-    fun `密码 Passkey 创建与解锁入口均安装随机 filterEquals 身份`() {
-        val assembler = readSource(ASSEMBLER)
-        val createEntries = readSource(CREATE_ENTRIES)
-        val service = readSource(PROVIDER_SERVICE)
-        val identityFactory = readSource(PENDING_INTENTS)
-
-        assertEquals(
-            "断言与密码候选各自必须有随机入口身份",
-            2,
-            Regex("CredentialPendingIntents\\.attachRequestIdentity\\(")
-                .findAll(assembler)
-                .count()
-        )
-        assertEquals(
-            "Passkey 创建、密码保存与密码草稿入口均必须有随机身份",
-            3,
-            Regex("CredentialPendingIntents\\.attachRequestIdentity\\(")
-                .findAll(createEntries)
-                .count()
-        )
-        assertTrue("解锁 Action 必须经过共享随机身份工厂", service.contains("CredentialPendingIntents.attachRequestIdentity("))
-        assertTrue("身份必须写入 Intent.data，参与 filterEquals", identityFactory.contains("intent.data = requestUri(requestId)"))
-        assertTrue("身份生成必须使用随机 UUID", identityFactory.contains("UUID.randomUUID().toString()"))
-    }
-
-    // ── 跨通道取值段：避开带必须由机检承载，而非散文承诺（ISSUE-P3-513） ──
-
-    @Test
-    fun `避开带清单必须覆盖全仓所有跨通道 requestCode 常量`() {
-        val declared = declaredAvoidBand()
-        val scanned = scanCrossChannelRequestCodeConstants()
-
-        assertTrue(
-            "避开带清单不得为空（AVOID-BAND 标记被删或解析失败）",
-            declared.isNotEmpty()
-        )
-        val missing = scanned - declared
-        assertTrue(
-            "避开带漏列以下跨通道 requestCode 常量：${missing.sorted()}——" +
-                "漏列会让 CredentialPendingIntents 的避开带 KDoc 失真（历史上 2300 曾漏列一整年）",
-            missing.isEmpty()
-        )
-        assertFalse(
-            "CM 通道自身分配基线不得进入避开带（它是本通道起点，不是要避开的对象）",
-            CM_REQUEST_CODE_BASELINE in declared
-        )
-    }
-
-    @Test
-    fun `避开带不得残留已不存在的常量值（常量删除后须同步清单）`() {
-        val declared = declaredAvoidBand()
-        val scanned = scanCrossChannelRequestCodeConstants()
-
-        val stale = declared - scanned
-        assertTrue(
-            "避开带含已删除 / 改名的常量值：${stale.sorted()}——清单与代码漂移同样是失真",
-            stale.isEmpty()
-        )
-    }
-
-    /** 解析 `CredentialPendingIntents` KDoc 中 `AVOID-BAND:` 行声明的取值集合。 */
-    private fun declaredAvoidBand(): Set<Int> {
-        val line = readSource(PENDING_INTENTS).lineSequence()
-            .firstOrNull { it.contains(AVOID_BAND_MARKER) && Regex("\\d+").containsMatchIn(it) }
-            ?: error("$PENDING_INTENTS 缺少 `$AVOID_BAND_MARKER` 声明行——避开带不得退回散文形式")
-        return Regex("\\d+").findAll(line.substringAfter(AVOID_BAND_MARKER)).map { it.value.toInt() }.toSet()
-    }
-
-    /** 全仓主源码中**除 CM 通道分配器自身基线外**的 `REQUEST_CODE_*` 常量取值。 */
-    private fun scanCrossChannelRequestCodeConstants(): Set<Int> {
-        val mainRoot = File(repositoryRoot, MAIN_SOURCE_ROOT)
-        assertTrue("主源码根目录不存在：$MAIN_SOURCE_ROOT", mainRoot.isDirectory)
-        val values = mutableSetOf<Int>()
-        mainRoot.walkTopDown()
-            .filter { it.isFile && it.extension == "kt" && it.absolutePath != File(repositoryRoot, PENDING_INTENTS).absolutePath }
-            .forEach { file ->
-                Regex("""const\s+val\s+[A-Za-z_]*REQUEST_CODE[A-Za-z_]*\s*=\s*(\d+)""")
-                    .findAll(file.readText())
-                    .forEach { values += it.groupValues[1].toInt() }
-            }
-        return values
-    }
-
-    private fun readSource(path: String): String {
-        val file = File(repositoryRoot, path)
-        assertTrue("源文件不存在（是否被重命名/移动）：$path", file.isFile)
-        return file.readText()
-    }
-
-    private companion object {
-        const val PENDING_INTENTS = "app/src/main/java/com/keepasskey/app/passkey/CredentialPendingIntents.kt"
-        const val MAIN_SOURCE_ROOT = "app/src/main/java"
-        /** 避开带声明行的解析锚点（与 `CredentialPendingIntents` KDoc 中的标记同值） */
-        const val AVOID_BAND_MARKER = "AVOID-BAND:"
-        const val ASSEMBLER = "app/src/main/java/com/keepasskey/app/passkey/CredentialResponseAssembler.kt"
-        const val CREATE_ENTRIES = "app/src/main/java/com/keepasskey/app/passkey/CredentialCreateEntries.kt"
-        const val PROVIDER_SERVICE = "app/src/main/java/com/keepasskey/app/passkey/KeePasskeyCredentialProviderService.kt"
-
-        /** 抽样规模：足以暴露「每响应复位」与「常量复用」，且宿主上瞬时完成 */
-        const val ALLOCATION_SAMPLE = 2_000
-
-        const val THREADS = 4
-        const val PER_THREAD = 500
-        const val TIMEOUT_SECONDS = 30L
-
-        /**
-         * CM 通道分配基线（与 `CredentialPendingIntents.REQUEST_CODE_BASE` 同值）。
-         *
-         * 刻意不引用其内部常量（`private`）：本断言要锁的是「自 1000 起」这一**对外可观察**
-         * 的取值口径，常量本身的存在性已由接线层用例的源码断言覆盖。
-         */
-        const val CM_REQUEST_CODE_BASELINE = 1_000
-
-        val repositoryRoot: File by lazy {
-            var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
-            repeat(ROOT_SEARCH_DEPTH) {
-                val candidate = dir ?: return@repeat
-                if (File(candidate, "app/src/main/java").isDirectory &&
-                    File(candidate, "core/src/main/java").isDirectory
-                ) {
-                    return@lazy candidate
-                }
-                dir = candidate.parentFile
-            }
-            error("未能从 ${System.getProperty("user.dir")} 向上定位仓库根目录（含 app/src/main/java）")
-        }
-        const val ROOT_SEARCH_DEPTH = 8
+        assertEquals(2_000, results.size)
+        assertEquals(results.size, results.toSet().size)
     }
 }

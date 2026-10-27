@@ -19,8 +19,7 @@ package com.keepasskey.core.result
  *
  * ## 契约
  *
- * - 取值一律为 **ASCII 前缀 `kdbx.` + 点分路径**，便于 app 层按前缀识别并防回潮
- *   （`tools/audit/check_user_visible_cjk.py` 规则 A 会拦住任何中文字面量）。
+ * - 取值一律为 **ASCII 前缀 `kdbx.` + 点分路径**，便于 app 层按前缀识别。
  * - **不得**把错误码直接上浮 UI：它是机器标识，不是文案。
  * - 新增错误码时**必须**同时在 app 层 `KdbxErrorTexts` 补映射（zh/en 成对）；
  *   映射缺失时 app 层回落 `unknown`，属可观测的降级而非崩溃。
