@@ -92,9 +92,9 @@ class DatabaseSession(
     /** Atomic target snapshot and Meta commit entry points. */
     val writeIntents = DatabaseSessionWriteIntents(mutex, core, persistence)
 
-    private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore, ::publishProgress) {
-        // ISSUE-P2-77：换库前置释放（由本次调用持有互斥锁，故不能走 lock()——会重入死锁）
-        releaseSessionStateForReplacement()
+    private val opener = SessionOpener(core, credentials, fileWriter, mutex, binaryStore, ::publishProgress) { liveCandidate ->
+        // ENG-20261027-02 / ISSUE-P2-77：换库/重载释放旧会话（由本次调用持有互斥锁，故不能走 lock()——会重入死锁）
+        releaseSessionStateForReplacement(liveCandidate)
     }
 
     // ISSUE-P1-07：会话终止观察者集合——锁定/关闭时同步通知各派生敏态数据的持有方清理
@@ -145,27 +145,27 @@ class DatabaseSession(
     fun isCredentialTicketCurrent(ticket: SessionCredentialTicket): Boolean = core.credentialTicket === ticket
 
     /**
-     * ISSUE-P2-77：换库前置释放——语义与 [lock] 的清理部分**对齐**
-     * （擦除旧库明文树与二进制池、清空凭据缓存、置 `LOCKED`、通知锁观察者驱逐派生数据），
-     * 但不取互斥锁（由 [SessionOpener] 在其临界区内调用，避免重入死锁）。
+     * ENG-20261027-02 / ISSUE-P2-77：换库 / 重载释放旧会话（不取互斥锁，避免重入死锁）。
      *
-     * 触发点：`SessionOpener.openStream` 在解析之前调用，新建空库在排他提交成功之后调用，
-     * 使「切换 / 新建密码库」与「锁库」在数据生命周期上取得一致——旧库的
-     * `ProtectedString` 密文、`cacheDir/sync` 快照与明文附件缓存不再滞留至 GC。
+     * 仅在候选数据库成功解析并准备替换活动库时调用（禁止在解析前释放）。
      *
-     * **顺序硬约束**：打开必须在 `KdbxFile.load` 之前执行；新建空库不解析附件，可提交后释放，否则
-     * `FileBinaryStore.onSessionLocked()` 会删除刚为新库落盘的附件（静默数据损坏）。
+     * 契约：
+     * 1. 旧库明文树与 KDF secret 擦除；
+     * 2. [liveCandidate] 作为存活侧传入 [clearSensitiveData]，按身份集合判定释放仅属于旧库的事务 spill key，
+     *    绝不误删 [liveCandidate] 已落盘的候选附件；
+     * 3. 通知锁观察者驱逐派生数据（如 `cacheDir/sync` 快照、剪贴板、自动填充记忆），但**排除**
+     *    [binaryStore]（其清理已由上述按键事务定点完成，不得调用全局 clear 误清候选附件）。
      */
-    private fun releaseSessionStateForReplacement() {
+    private fun releaseSessionStateForReplacement(liveCandidate: KdbxDatabase? = null) {
+        val oldDb = core.database.value
         core.invalidateSessionTicket()
         core.readOnlyMode = false
         credentials.clear()
         // ISSUE-P1-631：旧库基线随会话更换作废（先清零密文快照再置空）
         core.clearPersistedBaseline()
-        core.database.value?.clearSensitiveData()
+        oldDb?.clearSensitiveData(liveCandidate)
         core.database.value = null
-        core.state.value = SessionState.LOCKED
-        lockRegistry.notifySessionLocked()
+        lockRegistry.notifySessionLocked(except = binaryStore as? SessionLockObserver)
     }
 
     /**

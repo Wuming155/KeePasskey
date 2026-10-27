@@ -61,33 +61,20 @@ data class KdbxDatabase(
     val customDataTimes: Map<String, Instant> = emptyMap()
 ) {
     /**
-     * 擦除库内全部敏感驻留：明文条目树 + 外层头部 KDF secret `K` + **内层二进制池**
-     * （`ISSUE-P3-258` / 契约 Step 4 起，池内 ≤ 落盘阈值的附件明文一并就地清零，
-     * 不再仅随引用丢弃等待 GC——限界 §1.6 的解除）+ **Meta 级自定义图标池**
-     * （`ISSUE-P3-471` 起，`customIcons` 的 PNG 字节与二进制池同点、同判据清零）。
+     * 擦除库内敏感驻留（明文条目树、外层 KDF secret、附件二进制池与自定义图标池）。
      *
-     * ISSUE-P2-60（审计 RUST-06）：`header.kdfParameters`（Argon2）的 `secretKey`
-     * 原先全仓无清零点，会话锁定 / 关闭后仍以普通 `ByteArray` 滞留至 GC。
-     * 本方法即其**统一收口**——`DatabaseSession.lock()` / `close()` / 换库前置释放
-     * 与子库只读投影均经此处触发，擦除时机契约见 `KdfParameters.clearSensitive` KDoc
-     * （仅限会话终止路径：此后 `database = null`，不可能再以该头部发起保存派生）。
-     *
-     * **池擦除的存活侧 = ∅（准入①复核结论，见 `ISSUE-P3-258`）**：本方法的全部生产调用点
-     * 均满足「无跨越本调用存活的池别名」——
-     * ① 会话终止三事件（lock / close / 换库前置）里仍在场的 `lastSyncedDb` / `pendingLocalDb`
-     *    别名与本库为**同一实例（或 `copy` 共享同一池列表的实例）**，随本事件在同一临界区内
-     *    先后置空，属被本擦除**终结**的别名而非存活侧；异实例别名（`pendingRemoteDb`）持有
-     *    **不相交**的独立解析池，不经本方法擦除（其收口在 `eraseDiscardedDatabase`）；
-     * ② 丢弃路径（`wipeDiscarded` / 缓存快照比较的 `finally` / 子库投影）的前置条件即
-     *    「无任何存活别名」（各调用点 KDoc 已声明）。
-     * 可能存在存活别名的收口点**不得**调用本方法，必须走 [clearBinaryPool] 的身份集合判定
-     * （`SyncConflictController.eraseDiscardedDatabase` 即此形态）。
+     * 契约：
+     * - 根树条目与外层 KDF secret 恒独占销毁，不跨库共享；
+     * - 附件池与图标池按 [liveDatabase] 存活判定保护：
+     *   若传入存活侧数据库（换库/重载时的新候选库），经 [clearBinaryPool] 与 [clearCustomIconPool]
+     *   仅定点释放不被存活侧引用的内存项与事务 spill key；
+     *   未传入（null，会话锁定/关闭路径）则全量清空。
      */
-    fun clearSensitiveData() {
+    fun clearSensitiveData(liveDatabase: KdbxDatabase? = null) {
         rootGroup.clearSensitiveData()
         header.kdfParameters.clearSensitive()
-        clearBinaryPool(emptyList())
-        clearCustomIconPool(emptyList())
+        clearBinaryPool(liveDatabase)
+        clearCustomIconPool(liveDatabase?.customIcons ?: emptyList())
     }
 
     /**

@@ -10,13 +10,20 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 /**
  * ISSUE-P2-636：缓存 `.cache` 与 `.version` 分离提交在崩溃 / 冷启动后的状态收敛矩阵。
@@ -270,16 +277,22 @@ class SyncCacheCrashRecoveryTest {
     @Test
     fun `并发写同一路径后字节与标记始终同源`() = runTest {
         val dir = cacheDir()
-        val payloads = (0 until 6).map { idx -> "payload-$idx".toByteArray() }
+        val payloads = (0 until 8).map { idx -> "payload-$idx".toByteArray() }
+        val startGate = CountDownLatch(1)
 
         val outcomes = payloads.map { payload ->
-            async(Dispatchers.IO) { runCatching { SyncCache(dir).writeCache(remotePath, payload) } }
-        }.awaitAll()
+            async(Dispatchers.IO) {
+                startGate.await()
+                runCatching { SyncCache(dir).writeCache(remotePath, payload) }
+            }
+        }
+        startGate.countDown()
+        val results = outcomes.awaitAll()
 
-        // Windows 上两个并发 rename 覆盖同一目标可返回 AccessDenied（平台限制，不是本仓缺陷）：
-        // 本用例断言的是**不变量**而非「全部成功」——失败必须干净退出，成功必须字节与标记同源。
+        // 统一进程协调锁生效下，即便多个不同 SyncCache 实例在不同协程并发争抢同一路径，
+        // 交付阶段亦被严格串行化，最终 .version 必须与落盘 .cache 字节 100% 相同。
         val finalBytes = requireNotNull(SyncCache(dir).readCache(remotePath)) {
-            "至少一次写必须成功（失败集合=${outcomes.map { it.exceptionOrNull() }}）"
+            "至少一次写必须成功（失败集合=${results.map { it.exceptionOrNull() }}）"
         }
         val finalDigest = sha(finalBytes)
         assertEquals(
@@ -289,11 +302,256 @@ class SyncCacheCrashRecoveryTest {
         )
         assertTrue("最终内容必须是某个完整载荷（不得混合）", payloads.any { it.contentEquals(finalBytes) })
         assertEquals(
-            "失败的交付不得残留 tmp（失败=${outcomes.count { it.isFailure }}）",
+            "失败的交付不得残留 tmp（失败=${results.count { it.isFailure }}）",
             emptyList<String>(),
             dir.listFiles().orEmpty().map { it.name }.filter { it.endsWith(".tmp") }
         )
         assertTrue("并发写后基线未前移，必须判为有本地修改", SyncCache(dir).hasLocalChanges(remotePath))
+    }
+
+    private fun waitUntilBlocked(thread: Thread, timeoutMs: Long = 5000) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (thread.state != Thread.State.BLOCKED) {
+            if (System.currentTimeMillis() > deadline) {
+                error("线程 ${thread.name} 未在 ${timeoutMs}ms 内进入 BLOCKED 状态，当前状态=${thread.state}")
+            }
+            Thread.yield()
+        }
+    }
+
+    @Test
+    fun `确定性门闩验证跨实例写入互斥与等待`() {
+        val dir = cacheDir()
+        val cacheA = SyncCache(dir)
+        val cacheB = SyncCache(dir)
+        val payloadA = "payload-A".toByteArray()
+        val payloadB = "payload-B".toByteArray()
+
+        assertSame(cacheA.pathLock(remotePath), cacheB.pathLock(remotePath))
+
+        val aAcquired = CountDownLatch(1)
+        val releaseA = CountDownLatch(1)
+        val bCompleted = CountDownLatch(1)
+        val bFinished = AtomicBoolean(false)
+
+        val threadA = thread(name = "test-holder-A") {
+            try {
+                synchronized(cacheA.pathLock(remotePath)) {
+                    cacheA.writeCache(remotePath, payloadA)
+                    aAcquired.countDown()
+                    releaseA.await(5, TimeUnit.SECONDS)
+                }
+            } finally {
+                aAcquired.countDown()
+            }
+        }
+
+        val threadB = thread(name = "test-writer-B") {
+            try {
+                aAcquired.await(5, TimeUnit.SECONDS)
+                cacheB.writeCache(remotePath, payloadB)
+                bFinished.set(true)
+            } finally {
+                bCompleted.countDown()
+            }
+        }
+
+        try {
+            assertTrue("A 必须成功持锁", aAcquired.await(5, TimeUnit.SECONDS))
+            waitUntilBlocked(threadB)
+            assertFalse("持有 A 锁期间，跨实例 B 的写入必须阻塞等待", bFinished.get())
+        } finally {
+            releaseA.countDown()
+            threadA.join(5000)
+            threadB.join(5000)
+        }
+
+        assertTrue("释放 A 锁后，B 必须成功完成写入", bCompleted.await(5, TimeUnit.SECONDS))
+        val finalBytes = cacheB.readCache(remotePath)
+        assertArrayEquals(payloadB, finalBytes)
+        assertEquals(sha(payloadB), versionFile(dir).readText().trim())
+    }
+
+    @Test
+    fun `目录别名不同实例必须共享进程协调锁`() {
+        val dir = cacheDir()
+        val aliasDir = File(dir.absolutePath + File.separator + ".")
+        val cacheA = SyncCache(dir)
+        val cacheB = SyncCache(aliasDir)
+
+        assertSame(cacheA.pathLock(remotePath), cacheB.pathLock(remotePath))
+
+        val aAcquired = CountDownLatch(1)
+        val releaseA = CountDownLatch(1)
+        val bFinished = AtomicBoolean(false)
+        val bCompleted = CountDownLatch(1)
+
+        val threadA = thread(name = "test-alias-A") {
+            try {
+                synchronized(cacheA.pathLock(remotePath)) {
+                    aAcquired.countDown()
+                    releaseA.await(5, TimeUnit.SECONDS)
+                }
+            } finally {
+                aAcquired.countDown()
+            }
+        }
+
+        val threadB = thread(name = "test-alias-B") {
+            try {
+                aAcquired.await(5, TimeUnit.SECONDS)
+                cacheB.writeCache(remotePath, "alias-payload".toByteArray())
+                bFinished.set(true)
+            } finally {
+                bCompleted.countDown()
+            }
+        }
+
+        try {
+            assertTrue(aAcquired.await(5, TimeUnit.SECONDS))
+            waitUntilBlocked(threadB)
+            assertFalse("目录别名实例在他人持锁期间必须阻塞", bFinished.get())
+        } finally {
+            releaseA.countDown()
+            threadA.join(5000)
+            threadB.join(5000)
+        }
+
+        assertTrue("释放锁后别名实例写入完成", bCompleted.await(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun `不同vaultScope实例拥有独立协调锁且互不阻塞`() {
+        val dir = cacheDir()
+        val cache1 = SyncCache(dir, vaultScope = "scope-1")
+        val cache2 = SyncCache(dir, vaultScope = "scope-2")
+
+        assertNotEquals(cache1.pathLock(remotePath), cache2.pathLock(remotePath))
+
+        val lock1Held = CountDownLatch(1)
+        val release1 = CountDownLatch(1)
+        val write2Done = CountDownLatch(1)
+        val write2Succeeded = AtomicBoolean(false)
+
+        val thread1 = thread(name = "test-scope-1") {
+            try {
+                synchronized(cache1.pathLock(remotePath)) {
+                    lock1Held.countDown()
+                    release1.await(5, TimeUnit.SECONDS)
+                }
+            } finally {
+                lock1Held.countDown()
+            }
+        }
+
+        val thread2 = thread(name = "test-scope-2") {
+            try {
+                lock1Held.await(5, TimeUnit.SECONDS)
+                cache2.writeCache(remotePath, "scope-2-data".toByteArray())
+                write2Succeeded.set(true)
+            } finally {
+                write2Done.countDown()
+            }
+        }
+
+        try {
+            assertTrue(lock1Held.await(5, TimeUnit.SECONDS))
+            assertTrue("不同 vaultScope 写入不受 scope-1 持锁阻塞", write2Done.await(5, TimeUnit.SECONDS))
+            assertTrue(write2Succeeded.get())
+        } finally {
+            release1.countDown()
+            thread1.join(5000)
+            thread2.join(5000)
+        }
+    }
+
+    @Test
+    fun `流式写入与接收回执提交与普通写入共享同一进程协调锁`() = runTest {
+        val dir = cacheDir()
+        val cache = SyncCache(dir)
+        val lock = cache.pathLock(remotePath)
+
+        val lockHeld = CountDownLatch(1)
+        val releaseLock = CountDownLatch(1)
+        val streamFinished = AtomicBoolean(false)
+        val streamDone = CountDownLatch(1)
+        val streamBytes = "stream-payload-xyz".toByteArray()
+
+        val threadHolder = thread(name = "test-stream-holder") {
+            try {
+                synchronized(lock) {
+                    lockHeld.countDown()
+                    releaseLock.await(5, TimeUnit.SECONDS)
+                }
+            } finally {
+                lockHeld.countDown()
+            }
+        }
+
+        val threadStream = thread(name = "test-stream-writer") {
+            try {
+                lockHeld.await(5, TimeUnit.SECONDS)
+                cache.writeCacheStreaming(remotePath, ByteArrayInputStream(streamBytes), streamBytes.size.toLong())
+                streamFinished.set(true)
+            } finally {
+                streamDone.countDown()
+            }
+        }
+
+        try {
+            assertTrue(lockHeld.await(5, TimeUnit.SECONDS))
+            waitUntilBlocked(threadStream)
+            assertFalse("持锁期间流写交付必须处于 BLOCKED 状态", streamFinished.get())
+        } finally {
+            releaseLock.countDown()
+            threadHolder.join(5000)
+            threadStream.join(5000)
+        }
+
+        assertTrue("锁释放后流写交付完成", streamDone.await(5, TimeUnit.SECONDS))
+        assertEquals(sha(streamBytes), versionFile(dir).readText().trim())
+
+        val receiptBytes = "remote-received-abc".toByteArray()
+        val receipt = cache.receiveRemote(remotePath) { out -> out.write(receiptBytes) }
+
+        val lockHeld2 = CountDownLatch(1)
+        val releaseLock2 = CountDownLatch(1)
+        val commitFinished = AtomicBoolean(false)
+        val commitDone = CountDownLatch(1)
+
+        val threadHolder2 = thread(name = "test-receipt-holder") {
+            try {
+                synchronized(lock) {
+                    lockHeld2.countDown()
+                    releaseLock2.await(5, TimeUnit.SECONDS)
+                }
+            } finally {
+                lockHeld2.countDown()
+            }
+        }
+
+        val threadCommit = thread(name = "test-receipt-committer") {
+            try {
+                lockHeld2.await(5, TimeUnit.SECONDS)
+                receipt.commit()
+                commitFinished.set(true)
+            } finally {
+                commitDone.countDown()
+            }
+        }
+
+        try {
+            assertTrue(lockHeld2.await(5, TimeUnit.SECONDS))
+            waitUntilBlocked(threadCommit)
+            assertFalse("持锁期间回执提交必须处于 BLOCKED 状态", commitFinished.get())
+        } finally {
+            releaseLock2.countDown()
+            threadHolder2.join(5000)
+            threadCommit.join(5000)
+        }
+
+        assertTrue("锁释放后回执提交完成", commitDone.await(5, TimeUnit.SECONDS))
+        assertEquals(sha(receiptBytes), versionFile(dir).readText().trim())
     }
 
     // ------------------------------------------------------------------

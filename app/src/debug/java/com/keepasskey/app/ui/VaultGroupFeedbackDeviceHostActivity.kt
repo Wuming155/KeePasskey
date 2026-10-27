@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -79,14 +80,23 @@ class VaultGroupFeedbackDeviceHostActivity : ComponentActivity() {
 
     @Composable
     private fun BatchReadOnlyPreview() {
-        Scaffold(modifier = Modifier.fillMaxSize()) { _ ->
-            VaultListBatchModeTopBar(
-                selectedCount = 2,
-                onClearBatch = {},
-                onSelectAllBatch = {},
-                onBatchMoveClick = {},
-                onBatchDelete = {},
-                isReadOnly = true
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                VaultListBatchModeTopBar(
+                    selectedCount = 2,
+                    onClearBatch = {},
+                    onSelectAllBatch = {},
+                    onBatchMoveClick = {},
+                    onBatchDelete = {},
+                    isReadOnly = true
+                )
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
             )
         }
     }

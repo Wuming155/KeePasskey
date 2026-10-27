@@ -15,7 +15,9 @@ import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -195,6 +197,188 @@ class SessionRecoveryDeviceTest {
             vaultFile.delete()
             File(vaultFile.absolutePath + ".bak").delete()
             password.fill('\u0000')
+        }
+    }
+
+    @Test
+    fun 外部修改漂移时熄屏与后台超时熔断不改写正式库并保全恢复副本() = runBlocking {
+        val suffix = System.nanoTime().toString()
+        val vaultFile = File(context.filesDir, "p1-drift-device-$suffix.kdbx")
+        val externalFile = File(context.filesDir, "p1-drift-ext-$suffix.kdbx")
+        val bgExternalFile = File(context.filesDir, "p1-bg-ext-$suffix.kdbx")
+        val password = "{{SECRET_b3k6y96e}}".toCharArray()
+        val app = context.applicationContext as MainApplication
+        val graph = EntryPointAccessors.fromApplication(context, AutofillDeviceGraph::class.java)
+        val session = graph.databaseSession()
+        val holder = graph.baselineHolder()
+        val coordinator = graph.driftCoordinator()
+        val settings = RealSettingsRepository(context)
+        val oldSettings = settings.getSettings().first()
+        val vaultId = vaultFile.absolutePath
+        val recoveryStore = VaultRecoveryStore(context, DebugLogBuffer())
+        var externalBytes: ByteArray? = null
+        var bgExternalBytes: ByteArray? = null
+
+        try {
+            assertTrue(
+                "设备侧正式库创建失败",
+                session.create(vaultFile, "P1-Drift Device", password, useArgon2 = false).isSuccess
+            )
+            holder.capture(VaultFileBaseline.fromFile(vaultFile))
+
+            session.saveEntry(
+                KdbxEntry(
+                    fields = mapOf(
+                        KdbxConstants.Fields.TITLE to ProtectedString("DeviceUnsavedLocalEntry", isProtected = false),
+                        KdbxConstants.Fields.PASSWORD to ProtectedString("DeviceLocalSecret2026", isProtected = true)
+                    )
+                )
+            )
+            assertEquals(DatabaseSession.SessionState.DIRTY, session.state.value)
+
+            val externalSession = DatabaseSession()
+            try {
+                assertTrue(
+                    "外部合成库创建失败",
+                    externalSession.create(externalFile, "ExternalDeviceVault", password, useArgon2 = false).isSuccess
+                )
+                externalSession.saveEntry(
+                    KdbxEntry(
+                        fields = mapOf(
+                            KdbxConstants.Fields.TITLE to ProtectedString("ExternalDeviceEntryOnly", isProtected = false),
+                            KdbxConstants.Fields.PASSWORD to ProtectedString("ExternalSecret789", isProtected = true)
+                        )
+                    )
+                )
+                externalBytes = externalSession.exportToBytes().getOrThrow()
+            } finally {
+                externalSession.close()
+            }
+
+            vaultFile.writeBytes(externalBytes!!)
+            vaultFile.setLastModified(holder.current()!!.lastModifiedMillis + 5000L)
+            assertTrue("漂移协调器必须检出外部变化", coordinator.checkDrift(vaultId, vaultFile))
+
+            // 路径 A：生产 AutoLockManager 系统熄屏广播事件管道
+            settings.setLockWhenScreenOff(true)
+            settings.setAutoLockBackground(false)
+            settings.setAutoLockTimeoutSeconds(-1)
+            settings.setAutoLockForegroundEnabled(false)
+
+            app.autoLockManager.initialize()
+            setScreenInteractive(true)
+            setScreenInteractive(false)
+            withTimeout(10_000) { session.state.first { it == DatabaseSession.SessionState.LOCKED } }
+
+            assertEquals("正式 ACTION_SCREEN_OFF 经由生产广播管道必须锁定会话", DatabaseSession.SessionState.LOCKED, session.state.value)
+            assertArrayEquals("外部修改时熄屏锁定不得改写正式库", externalBytes, vaultFile.readBytes())
+
+            val reopenedDb = KdbxFile.load(ByteArrayInputStream(vaultFile.readBytes()), password)
+            try {
+                val formalTitles = reopenedDb.rootGroup.allEntries().map { it.title }
+                assertTrue("正式库必须包含外部条目", formalTitles.contains("ExternalDeviceEntryOnly"))
+                assertFalse("正式库绝对不得包含未落盘本地条目", formalTitles.contains("DeviceUnsavedLocalEntry"))
+            } finally {
+                reopenedDb.clearSensitiveData()
+            }
+
+            val recoveryEntries = recoveryStore.list().filter { it.vaultId == vaultId }
+            assertTrue("恢复副本必须已提交", recoveryEntries.isNotEmpty())
+            val recoveryPayload = recoveryStore.readPayload(recoveryEntries.last())
+            assertNotNull(recoveryPayload)
+            val restoredDb = KdbxFile.load(ByteArrayInputStream(recoveryPayload!!), password)
+            try {
+                val restoredTitles = restoredDb.rootGroup.allEntries().map { it.title }
+                assertTrue("恢复副本必须包含未落盘本地条目", restoredTitles.contains("DeviceUnsavedLocalEntry"))
+            } finally {
+                restoredDb.clearSensitiveData()
+                recoveryPayload.fill(0)
+            }
+
+            // 路径 B：生产 AutoLockManager 退后台即时锁定生命周期管道
+            setScreenInteractive(true)
+            assertTrue(session.open(vaultFile, password).isSuccess)
+            app.autoLockManager.onUnlockSuccess()
+            holder.capture(VaultFileBaseline.fromFile(vaultFile))
+
+            session.saveEntry(
+                KdbxEntry(
+                    fields = mapOf(
+                        KdbxConstants.Fields.TITLE to ProtectedString("BgUnsavedEntry", false)
+                    )
+                )
+            )
+            assertEquals(DatabaseSession.SessionState.DIRTY, session.state.value)
+
+            val bgExternalSession = DatabaseSession()
+            try {
+                assertTrue(
+                    "后台外部合成库创建失败",
+                    bgExternalSession.create(bgExternalFile, "BgExternalVault", password, useArgon2 = false).isSuccess
+                )
+                bgExternalSession.saveEntry(
+                    KdbxEntry(
+                        fields = mapOf(
+                            KdbxConstants.Fields.TITLE to ProtectedString("BgExternalEntryOnly", false)
+                        )
+                    )
+                )
+                bgExternalBytes = bgExternalSession.exportToBytes().getOrThrow()
+            } finally {
+                bgExternalSession.close()
+            }
+
+            vaultFile.writeBytes(bgExternalBytes!!)
+            vaultFile.setLastModified(holder.current()!!.lastModifiedMillis + 5000L)
+            assertTrue(coordinator.checkDrift(vaultId, vaultFile))
+
+            settings.setLockWhenScreenOff(false)
+            settings.setAutoLockBackground(true)
+            settings.setAutoLockTimeoutSeconds(0)
+
+            app.autoLockManager.onStop(androidx.lifecycle.ProcessLifecycleOwner.get())
+            withTimeout(10_000) { session.state.first { it == DatabaseSession.SessionState.LOCKED } }
+
+            assertEquals("退后台生命周期调度后必须锁定生产会话", DatabaseSession.SessionState.LOCKED, session.state.value)
+            assertArrayEquals("后台锁定不得覆盖外部文件", bgExternalBytes, vaultFile.readBytes())
+
+            val bgReopenedDb = KdbxFile.load(ByteArrayInputStream(vaultFile.readBytes()), password)
+            try {
+                val formalTitles = bgReopenedDb.rootGroup.allEntries().map { it.title }
+                assertTrue("正式库必须包含后台外部版本条目", formalTitles.contains("BgExternalEntryOnly"))
+                assertFalse("正式库绝对不得包含未落盘本地后台条目", formalTitles.contains("BgUnsavedEntry"))
+            } finally {
+                bgReopenedDb.clearSensitiveData()
+            }
+
+            val bgRecoveryEntry = recoveryStore.list().firstOrNull { it.vaultId == vaultId }
+            assertNotNull("后台路径对应库的恢复副本必须存在", bgRecoveryEntry)
+            val bgPayload = recoveryStore.readPayload(bgRecoveryEntry!!)
+            assertNotNull(bgPayload)
+            val bgRestoredDb = KdbxFile.load(ByteArrayInputStream(bgPayload!!), password)
+            try {
+                val restoredTitles = bgRestoredDb.rootGroup.allEntries().map { it.title }
+                assertTrue("恢复副本必须包含本次后台未落盘条目", restoredTitles.contains("BgUnsavedEntry"))
+            } finally {
+                bgRestoredDb.clearSensitiveData()
+                bgPayload.fill(0)
+            }
+        } finally {
+            setScreenInteractive(true)
+            password.fill('\u0000')
+            externalBytes?.fill(0)
+            bgExternalBytes?.fill(0)
+            settings.setLockWhenScreenOff(oldSettings.lockWhenScreenOff)
+            settings.setAutoLockBackground(oldSettings.autoLockBackground)
+            settings.setAutoLockTimeoutSeconds(oldSettings.autoLockTimeoutSeconds)
+            settings.setAutoLockForegroundEnabled(oldSettings.autoLockForegroundEnabled)
+            settings.setAutoLockForegroundTimeoutSeconds(oldSettings.autoLockForegroundTimeoutSeconds)
+            session.close()
+            recoveryStore.deleteByVaultId(vaultId)
+            vaultFile.delete()
+            externalFile.delete()
+            bgExternalFile.delete()
+            File(vaultFile.absolutePath + ".bak").delete()
         }
     }
 

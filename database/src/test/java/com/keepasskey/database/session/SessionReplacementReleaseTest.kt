@@ -12,9 +12,13 @@ import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -22,12 +26,10 @@ import java.io.DataInputStream
 import java.io.InputStream
 
 /**
- * ISSUE-P2-77 回归：切换 / 新建密码库必须先释放旧会话（擦除旧库树 + 通知锁观察者驱逐派生数据），
- * **再**装载新库。
- *
- * 顺序是本项的**硬约束**：`FileBinaryStore`（生产侧的 `BinaryStore` 实现）同时是
- * `SessionLockObserver`，其 `onSessionLocked()` 会清空 `cacheDir/attachments`；若释放发生在
- * 新库附件落盘**之后**，刚写下的新库附件会被一并删除（静默数据损坏）。
+ * ENG-20261027-02 / ISSUE-P2-77 回归：
+ * 换库/重载必须在候选读取、凭据验证与附件事务成功后才替换旧会话；
+ * 失败（损坏、外部换密、读取异常、取消）保持旧树/脏态/凭据与附件。
+ * 旧库附件定点清理，防误删新候选附件。
  */
 class SessionReplacementReleaseTest {
 
@@ -67,9 +69,25 @@ class SessionReplacementReleaseTest {
             entries.values.forEach { it.fill(0) }
             entries.clear()
         }
+
+        override fun delete(key: String) {
+            events += "delete:$key"
+            entries[key]?.fill(0)
+            entries.remove(key)
+        }
     }
 
-    private val password = "SessionReplace#2026".toCharArray()
+    private lateinit var password: CharArray
+
+    @Before
+    fun setUp() {
+        password = "SessionReplace#2026".toCharArray()
+    }
+
+    @After
+    fun tearDown() {
+        password.fill('0')
+    }
 
     /** 生成一个含 >1 MiB 附件（解析期必然落盘）的单条目库字节。 */
     private fun dbBytes(title: String, attachmentSize: Int): ByteArray {
@@ -83,7 +101,11 @@ class SessionReplacementReleaseTest {
             header = KdbxHeader.createDefault(useArgon2 = false),
             rootGroup = KdbxGroup(name = "Root", entries = listOf(entry))
         )
-        return ByteArrayOutputStream().also { KdbxFile.save(it, db, password) }.toByteArray()
+        return try {
+            ByteArrayOutputStream().also { KdbxFile.save(it, db, password) }.toByteArray()
+        } finally {
+            db.clearSensitiveData()
+        }
     }
 
     private fun readOrNull(value: ProtectedString): String? =
@@ -94,43 +116,188 @@ class SessionReplacementReleaseTest {
         }
 
     @Test
-    fun `换库先释放旧会话再落盘新库附件`() = runBlocking {
+    fun `换库候选解析成功后才释放旧会话并定点清理旧附件`() = runBlocking {
         val store = RecordingBinaryStore()
         val session = DatabaseSession(store)
-        // 对齐生产装配（DatabaseModule）：附件缓存同时注册为会话终止观察者
         session.addLockObserver(store)
+        try {
+            val first = session.openStream(
+                pathIdentifier = "one.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(dbBytes("one", ATTACHMENT_SIZE)) },
+                passwordChars = password
+            )
+            assertTrue(first.isSuccess)
+            assertEquals(listOf("store"), store.events)
+            assertTrue(store.sizeOf("k0") > 0)
 
-        // 首次打开：换库前置释放（clear，此时无旧库）→ 新库附件落盘（store）
-        val first = session.openStream(
-            pathIdentifier = "one.kdbx",
-            inputStreamProvider = { ByteArrayInputStream(dbBytes("one", ATTACHMENT_SIZE)) },
-            passwordChars = password
-        )
-        assertTrue(first.isSuccess)
-        assertEquals(listOf("clear", "store"), store.events)
+            val oldDb = session.databaseFlow.first()!!
 
-        val oldDb = session.databaseFlow.first()!!
+            store.events.clear()
+            val second = session.openStream(
+                pathIdentifier = "two.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(dbBytes("two", ATTACHMENT_SIZE)) },
+                passwordChars = password
+            )
+            assertTrue(second.isSuccess)
 
-        // 换库：必须"先 clear 后 store"
-        store.events.clear()
-        val second = session.openStream(
-            pathIdentifier = "two.kdbx",
-            inputStreamProvider = { ByteArrayInputStream(dbBytes("two", ATTACHMENT_SIZE)) },
-            passwordChars = password
-        )
-        assertTrue(second.isSuccess)
+            assertEquals(
+                "换库必须先候选落盘再定点删除旧库附件，不得在解析前释放旧库更不得全局 clear",
+                listOf("store", "delete:k0"),
+                store.events
+            )
+            assertTrue("换库后新库附件仍应在 store 中存活", store.sizeOf("k1") > 0)
+            assertEquals("旧库附件已定点删除", 0L, store.sizeOf("k0"))
 
-        assertEquals(
-            "换库必须先释放旧会话（clear）再落盘新库附件（store），否则新库附件被别人清空",
-            listOf("clear", "store"),
-            store.events
-        )
-        assertTrue("换库后新库附件仍应在 store 中存活", store.sizeOf("k1") > 0)
+            val oldPassword = oldDb.rootGroup.allEntries().first()
+                .fields[KdbxConstants.Fields.PASSWORD]!!
+            assertNull("换库必须擦除旧库的受保护字段", readOrNull(oldPassword))
+        } finally {
+            session.close()
+        }
+    }
 
-        // 旧库树已擦除（受保护字段不可再读）
-        val oldPassword = oldDb.rootGroup.allEntries().first()
-            .fields[KdbxConstants.Fields.PASSWORD]!!
-        assertNull("换库必须擦除旧库的受保护字段", readOrNull(oldPassword))
+    @Test
+    fun `换库损坏文件失败时保留原会话明文树脏态凭据与附件`() = runBlocking {
+        val store = RecordingBinaryStore()
+        val session = DatabaseSession(store)
+        session.addLockObserver(store)
+        try {
+            val first = session.openStream(
+                pathIdentifier = "one.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(dbBytes("one", ATTACHMENT_SIZE)) },
+                passwordChars = password
+            )
+            assertTrue(first.isSuccess)
+            val oldDb = session.databaseFlow.first()!!
+            val oldPassword = oldDb.rootGroup.allEntries().first()
+                .fields[KdbxConstants.Fields.PASSWORD]!!
+
+            session.updateDatabaseMeta { it.copy(databaseName = "DirtyName") }
+            assertEquals(DatabaseSession.SessionState.DIRTY, session.state.value)
+
+            store.events.clear()
+            val corruptBytes = byteArrayOf(0x03, 0xd9.toByte(), 0xa2.toByte(), 0x9a.toByte(), 0, 0, 0, 0)
+            val second = session.openStream(
+                pathIdentifier = "corrupt.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(corruptBytes) },
+                passwordChars = password
+            )
+            assertTrue("损坏文件打开必须失败", second.isFailure)
+
+            assertEquals("会话状态必须保持 DIRTY", DatabaseSession.SessionState.DIRTY, session.state.value)
+            assertEquals("内存修改必须保留", "DirtyName", session.databaseFlow.first()?.databaseName)
+            assertEquals("旧树受保护字段必须可读", "one-Pass#2026", readOrNull(oldPassword))
+            assertTrue("旧库附件必须仍在 store 中存活", store.sizeOf("k0") > 0)
+            session.useCredentials { pwd, _ ->
+                assertNotNull("凭据保留", pwd)
+                assertArrayEquals(password, pwd)
+            }
+        } finally {
+            session.close()
+        }
+    }
+
+    @Test
+    fun `换库外部换密失败时保留原会话与凭据`() = runBlocking {
+        val store = RecordingBinaryStore()
+        val session = DatabaseSession(store)
+        session.addLockObserver(store)
+        val wrongPassword = "WrongPassword#2026".toCharArray()
+        try {
+            val first = session.openStream(
+                pathIdentifier = "one.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(dbBytes("one", ATTACHMENT_SIZE)) },
+                passwordChars = password
+            )
+            assertTrue(first.isSuccess)
+            val oldDb = session.databaseFlow.first()!!
+
+            val second = session.openStream(
+                pathIdentifier = "two.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(dbBytes("two", ATTACHMENT_SIZE)) },
+                passwordChars = wrongPassword
+            )
+            assertTrue("换密/错密打开必须失败", second.isFailure)
+
+            assertEquals(DatabaseSession.SessionState.OPENED, session.state.value)
+            assertTrue("会话树必须保持原库", session.databaseFlow.first() === oldDb)
+            assertTrue("原库附件必须存活", store.sizeOf("k0") > 0)
+            session.useCredentials { pwd, _ ->
+                assertNotNull("凭据保留", pwd)
+                assertArrayEquals(password, pwd)
+            }
+        } finally {
+            wrongPassword.fill('0')
+            session.close()
+        }
+    }
+
+    @Test
+    fun `换库流读取异常时保留原会话`() = runBlocking {
+        val store = RecordingBinaryStore()
+        val session = DatabaseSession(store)
+        session.addLockObserver(store)
+        try {
+            val first = session.openStream(
+                pathIdentifier = "one.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(dbBytes("one", ATTACHMENT_SIZE)) },
+                passwordChars = password
+            )
+            assertTrue(first.isSuccess)
+            val oldDb = session.databaseFlow.first()!!
+
+            val failingStreamProvider: suspend () -> InputStream = {
+                object : InputStream() {
+                    override fun read(): Int = throw java.io.IOException("simulated read failure")
+                }
+            }
+            val second = session.openStream(
+                pathIdentifier = "io_error.kdbx",
+                inputStreamProvider = failingStreamProvider,
+                passwordChars = password
+            )
+            assertTrue(second.isFailure)
+
+            assertEquals(DatabaseSession.SessionState.OPENED, session.state.value)
+            assertTrue(session.databaseFlow.first() === oldDb)
+            assertTrue(store.sizeOf("k0") > 0)
+        } finally {
+            session.close()
+        }
+    }
+
+    @Test
+    fun `换库取消时保留原会话并传播取消异常`() = runBlocking {
+        val store = RecordingBinaryStore()
+        val session = DatabaseSession(store)
+        session.addLockObserver(store)
+        try {
+            val first = session.openStream(
+                pathIdentifier = "one.kdbx",
+                inputStreamProvider = { ByteArrayInputStream(dbBytes("one", ATTACHMENT_SIZE)) },
+                passwordChars = password
+            )
+            assertTrue(first.isSuccess)
+            val oldDb = session.databaseFlow.first()!!
+
+            val cancellingStreamProvider: suspend () -> InputStream = {
+                throw kotlinx.coroutines.CancellationException("simulated user cancellation")
+            }
+            val error = runCatching {
+                session.openStream(
+                    pathIdentifier = "cancel.kdbx",
+                    inputStreamProvider = cancellingStreamProvider,
+                    passwordChars = password
+                )
+            }.exceptionOrNull()
+
+            assertTrue("取消必须原样抛出", error is kotlinx.coroutines.CancellationException)
+            assertEquals(DatabaseSession.SessionState.OPENED, session.state.value)
+            assertTrue(session.databaseFlow.first() === oldDb)
+            assertTrue(store.sizeOf("k0") > 0)
+        } finally {
+            session.close()
+        }
     }
 
     private companion object {

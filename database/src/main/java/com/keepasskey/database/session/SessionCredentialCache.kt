@@ -45,11 +45,11 @@ internal class SessionCredentialCache {
     /** 当前密钥文件引用（供序列化复用，不克隆——与拆分前传递同一引用一致）。 */
     fun currentKeyFile(): ByteArray? = keyFileCache
 
-    /** 主密码克隆快照（对应拆分前 `passwordCache?.clone()`，同样不持锁）。 */
-    fun passwordSnapshot(): CharArray? = passwordCache?.clone()
+    /** 主密码克隆快照（持 credentialLock，防并发清零竞态）。 */
+    fun passwordSnapshot(): CharArray? = synchronized(credentialLock) { passwordCache?.clone() }
 
-    /** 密钥文件克隆快照（对应拆分前 `keyFileCache?.clone()`，同样不持锁）。 */
-    fun keyFileSnapshot(): ByteArray? = keyFileCache?.clone()
+    /** 密钥文件克隆快照（持 credentialLock，防并发清零竞态）。 */
+    fun keyFileSnapshot(): ByteArray? = synchronized(credentialLock) { keyFileCache?.clone() }
 
     /** 缓存主密码：先清空全部旧缓存再克隆写入（对应拆分前 `cachePassword`）。 */
     fun cachePassword(passwordChars: CharArray?) = synchronized(credentialLock) {

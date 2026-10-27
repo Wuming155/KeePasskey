@@ -5,7 +5,8 @@
     picker_（数据库选择器）、conflict_（冲突解决）、unlock_（解锁）、
     auth_（验证码页）、cat_（条目分类标签）、time_/detail_（相对时间词）。
 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:locale="zh">
 
     <!-- ========== 密码库选择器 (DatabasePickerScreen / DatabasePickerUiState) ========== -->
     <string name="picker_open_vault_title">打开已有 KDBX 密码库</string>

@@ -4,7 +4,8 @@
     仅收录进入 SyncOutcome.Error / 异常消息 / 凭据流程失败反馈的用户可见文案；
     debugLog / Log.x 开发者日志文案不抽取，保留在各源文件内。
 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:locale="zh">
 
     <!-- ===== 同步编排层 (SyncCoordinator) 错误反馈 ===== -->
     <string name="sync_error_no_open_vault_file">当前无打开的密码库文件</string>

@@ -4,9 +4,13 @@ import android.content.Intent
 import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.keepasskey.app.R
 import com.keepasskey.app.di.AutofillDeviceGraph
 import com.keepasskey.app.di.DriftDeviceGraph
 import com.keepasskey.app.security.ExternalModificationChoice
+import com.keepasskey.app.ui.AppLaunchLanguageSeed
+import com.keepasskey.app.ui.localeFor
+import com.keepasskey.app.ui.localizedResourcesFor
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
@@ -262,9 +266,11 @@ class VaultFileDriftSafDeviceTest {
                         val duplicateTitle = reparsed.rootGroup.allEntries()
                             .first { it.fields.getValue(KdbxConstants.Fields.PASSWORD).readString() == "C" }
                             .fields.getValue(KdbxConstants.Fields.TITLE).readString()
+                        val expectedSuffix = localizedResourcesFor(context, localeFor(AppLaunchLanguageSeed.read()))
+                            .getString(R.string.ext_mod_merge_duplicate_suffix)
                         assertTrue(
-                            "磁盘侧副本标题须带后缀（实测=$duplicateTitle）",
-                            duplicateTitle.contains("磁盘冲突副本")
+                            "磁盘侧副本标题须带后缀（实测=$duplicateTitle，预期后缀=$expectedSuffix）",
+                            duplicateTitle.contains(expectedSuffix)
                         )
                     }
                 }

@@ -39,4 +39,7 @@ interface AutofillDeviceGraph {
      * ⇒ 无法逐字节确认差异」这条分支（造 >256 MiB 附件不可接受）。
      */
     fun vaultRecoveryCoordinator(): com.keepasskey.app.security.VaultRecoveryCoordinator
+
+    fun baselineHolder(): com.keepasskey.app.security.VaultFileBaselineHolder
+    fun driftCoordinator(): com.keepasskey.app.security.VaultFileDriftCoordinator
 }

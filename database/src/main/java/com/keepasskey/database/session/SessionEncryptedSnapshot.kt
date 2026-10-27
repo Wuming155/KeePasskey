@@ -54,7 +54,7 @@ internal class SessionEncryptedSnapshots(
     ): KdbxResult<SessionEncryptedSnapshot> = mutex.withLock {
         val ticket = core.credentialTicket ?: return@withLock unavailable()
         val path = core.activePathIdentifier ?: return@withLock unavailable()
-        if (core.database.value !== expected || ticket !== prepared.ticket) return@withLock unavailable()
+        if (core.database.value !== expected || ticket !== prepared.ticket || prepared.isWiped) return@withLock unavailable()
         KdbxResult.Success(SessionEncryptedSnapshot(path, expected.databaseName, ticket, prepared.bytes.copyOf()))
     }
 
@@ -69,5 +69,12 @@ class PreparedSerializedSave internal constructor(
     internal val prunedRoot: com.keepasskey.core.model.KdbxGroup,
     internal val ticket: SessionCredentialTicket? = null
 ) {
-    fun wipe() = bytes.fill(0)
+    @Volatile
+    private var wiped = false
+    val isWiped: Boolean get() = wiped
+
+    fun wipe() {
+        wiped = true
+        bytes.fill(0)
+    }
 }

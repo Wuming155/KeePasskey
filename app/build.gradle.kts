@@ -279,6 +279,8 @@ android {
         // 改为**不压缩**存放后读取退化为直接搬运（实测约 0.03 s）。代价是 APK 增大约 0.25 MB
         // （本包原本即 95 MB 级）。该开关只影响打包方式，不改变资源内容与访问路径。
         noCompress += "dat"
+        // ENG-20261027-05：限定保留的语言资源，剔除依赖库中的冗余语言
+        localeFilters += listOf("zh", "en")
     }
 
     buildTypes {
@@ -319,6 +321,13 @@ android {
         compose = true
         // ISSUE-P1-10 (ZT-10)：供 MainApplication 以 BuildConfig.DEBUG 置位 AppLog 调试开关
         buildConfig = true
+    }
+
+    bundle {
+        language {
+            // ENG-20261027-05 / ISSUE-P3-359：应用内支持动态语言切换（ZH / EN），禁用语言拆分避免 AAB 运行期缺资源
+            enableSplit = false
+        }
     }
 
     // Compose Preview 截图测试（AGP 实验特性）。

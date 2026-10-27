@@ -1,6 +1,7 @@
 package com.keepasskey.database.session
 
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
@@ -196,6 +197,251 @@ class SessionCredentialTicketTest {
             password.fill('0')
             creator.close()
             opener.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `预备后换密再提交因票据失效被拒绝且不覆盖正式文件`() = runBlocking {
+        val directory = createTempDirectory("prepared-rotation-").toFile()
+        val file = File(directory, "vault.kdbx")
+        val oldPwd = "Old#Pass#2026".toCharArray()
+        val newPwd = "New#Pass#2026".toCharArray()
+        val session = DatabaseSession()
+        val opener = DatabaseSession()
+        var prepared: PreparedSerializedSave? = null
+        try {
+            assertTrue(session.create(file, "Vault", oldPwd, useArgon2 = false) is KdbxResult.Success)
+            val initialTree = session.databaseFlow.value!!
+
+            val prepResult = session.prepareSerializedSave(initialTree)
+            assertTrue(prepResult is KdbxResult.Success)
+            val prepData = (prepResult as KdbxResult.Success).data
+            prepared = prepData
+            val prepBytes = prepData.bytes
+            assertFalse(prepBytes.all { it == 0.toByte() })
+            assertFalse(prepData.isWiped)
+
+            assertTrue(session.changeCredentials(newPwd).isSuccess)
+            val treeAfterRotation = session.databaseFlow.value!!
+            val bytesAfterRotation = file.readBytes()
+
+            val commitResult = session.commitPreparedSave(
+                expectedAtCycleStart = initialTree,
+                candidate = initialTree,
+                prepared = prepData
+            )
+
+            assertTrue(commitResult is KdbxResult.Failure)
+            assertEquals(KdbxError.SAVE_SESSION_CHANGED, (commitResult as KdbxResult.Failure).code)
+
+            assertSame("换密被拒绝后活动树必须保持轮换后的实例", treeAfterRotation, session.databaseFlow.value)
+            assertArrayEquals("拒绝提交旧预备后正式文件必须保持轮换后的内容", bytesAfterRotation, file.readBytes())
+            assertTrue("预备密文字节必须被全零擦除", prepBytes.all { it == 0.toByte() })
+            assertTrue(prepData.isWiped)
+
+            assertTrue(opener.open(file, newPwd) is KdbxResult.Success)
+            opener.close()
+            assertTrue(opener.open(file, oldPwd) is KdbxResult.Failure)
+        } finally {
+            prepared?.wipe()
+            oldPwd.fill('0')
+            newPwd.fill('0')
+            session.close()
+            opener.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `预备后密钥改绑再提交因票据失效被拒绝且不覆盖正式文件`() = runBlocking {
+        val directory = createTempDirectory("prepared-rebind-").toFile()
+        val file = File(directory, "rebind.kdbx")
+        val password = "Pass#Rebind#2026".toCharArray()
+        val keyFileData = ByteArray(64) { (it + 1).toByte() }
+        val session = DatabaseSession()
+        val opener = DatabaseSession()
+        var prepared: PreparedSerializedSave? = null
+        try {
+            assertTrue(session.create(file, "RebindVault", password, useArgon2 = false) is KdbxResult.Success)
+            val initialTree = session.databaseFlow.value!!
+
+            val prepResult = session.prepareSerializedSave(initialTree)
+            assertTrue(prepResult is KdbxResult.Success)
+            val prepData = (prepResult as KdbxResult.Success).data
+            prepared = prepData
+            val prepBytes = prepData.bytes
+
+            assertTrue(session.changeCredentials(password, keyFileData).isSuccess)
+            val treeAfterRotation = session.databaseFlow.value!!
+            val bytesAfterRotation = file.readBytes()
+
+            val commitResult = session.commitPreparedSave(
+                expectedAtCycleStart = initialTree,
+                candidate = initialTree,
+                prepared = prepData
+            )
+
+            assertTrue(commitResult is KdbxResult.Failure)
+            assertEquals(KdbxError.SAVE_SESSION_CHANGED, (commitResult as KdbxResult.Failure).code)
+
+            assertSame("改绑被拒绝后活动树必须保持改绑后的实例", treeAfterRotation, session.databaseFlow.value)
+            assertArrayEquals("拒绝提交旧预备后正式文件必须保持改绑后的内容", bytesAfterRotation, file.readBytes())
+            assertTrue("预备密文字节必须被全零擦除", prepBytes.all { it == 0.toByte() })
+            assertTrue(prepData.isWiped)
+
+            assertTrue(opener.open(file, password, keyFileData) is KdbxResult.Success)
+            opener.close()
+            assertTrue(opener.open(file, password, null) is KdbxResult.Failure)
+        } finally {
+            prepared?.wipe()
+            password.fill('0')
+            keyFileData.fill(0)
+            session.close()
+            opener.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `预备后仅换密钥文件改绑再提交因票据失效被拒绝且不覆盖正式文件`() = runBlocking {
+        val directory = createTempDirectory("prepared-keyfile-only-").toFile()
+        val file = File(directory, "keyonly.kdbx")
+        val password = "Pass#KeyOnly#2026".toCharArray()
+        val oldKey = ByteArray(64) { (it + 1).toByte() }
+        val newKey = ByteArray(64) { (it + 9).toByte() }
+        val session = DatabaseSession()
+        val opener = DatabaseSession()
+        var prepared: PreparedSerializedSave? = null
+        try {
+            assertTrue(
+                session.create(file, "KeyOnlyVault", password, useArgon2 = false, keyFileData = oldKey) is KdbxResult.Success
+            )
+            val initialTree = session.databaseFlow.value!!
+
+            val prepResult = session.prepareSerializedSave(initialTree)
+            assertTrue(prepResult is KdbxResult.Success)
+            val prepData = (prepResult as KdbxResult.Success).data
+            prepared = prepData
+            val prepBytes = prepData.bytes
+
+            assertTrue(session.changeKeyFileOnly(newKey).isSuccess)
+            val treeAfterRotation = session.databaseFlow.value!!
+            val bytesAfterRotation = file.readBytes()
+
+            val commitResult = session.commitPreparedSave(
+                expectedAtCycleStart = initialTree,
+                candidate = initialTree,
+                prepared = prepData
+            )
+
+            assertTrue(commitResult is KdbxResult.Failure)
+            assertEquals(KdbxError.SAVE_SESSION_CHANGED, (commitResult as KdbxResult.Failure).code)
+
+            assertSame("仅换密钥文件被拒绝后活动树必须保持原实例", treeAfterRotation, session.databaseFlow.value)
+            assertArrayEquals("拒绝提交旧预备后正式文件必须保持新密钥文件内容", bytesAfterRotation, file.readBytes())
+            assertTrue("预备密文字节必须被全零擦除", prepBytes.all { it == 0.toByte() })
+            assertTrue(prepData.isWiped)
+
+            assertTrue(opener.open(file, password, newKey) is KdbxResult.Success)
+            opener.close()
+            assertTrue(opener.open(file, password, oldKey) is KdbxResult.Failure)
+        } finally {
+            prepared?.wipe()
+            password.fill('0')
+            oldKey.fill(0)
+            newKey.fill(0)
+            session.close()
+            opener.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `预备后会话锁定清零再提交被拒绝且不写正式文件`() = runBlocking {
+        val directory = createTempDirectory("prepared-lock-").toFile()
+        val file = File(directory, "locked.kdbx")
+        val password = "Pass#Lock#2026".toCharArray()
+        val session = DatabaseSession()
+        var prepared: PreparedSerializedSave? = null
+        try {
+            assertTrue(session.create(file, "LockVault", password, useArgon2 = false) is KdbxResult.Success)
+            val tree = session.databaseFlow.value!!
+            val prepResult = session.prepareSerializedSave(tree)
+            assertTrue(prepResult is KdbxResult.Success)
+            val prepData = (prepResult as KdbxResult.Success).data
+            prepared = prepData
+            val prepBytes = prepData.bytes
+
+            val bytesBefore = file.readBytes()
+            session.lock()
+
+            val commitResult = session.commitPreparedSave(
+                expectedAtCycleStart = tree,
+                candidate = tree,
+                prepared = prepData
+            )
+
+            assertTrue(commitResult is KdbxResult.Failure)
+            assertArrayEquals("锁定后拒绝提交不得修改文件", bytesBefore, file.readBytes())
+            assertTrue("预备密文字节必须被全零擦除", prepBytes.all { it == 0.toByte() })
+            assertTrue(prepData.isWiped)
+        } finally {
+            prepared?.wipe()
+            password.fill('0')
+            session.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `预备后切换打开另一数据库再提交被拒绝且不污染新库`() = runBlocking {
+        val directory = createTempDirectory("prepared-switch-").toFile()
+        val fileA = File(directory, "vaultA.kdbx")
+        val fileB = File(directory, "vaultB.kdbx")
+        val pwdA = "Pass#VaultA#2026".toCharArray()
+        val pwdB = "Pass#VaultB#2026".toCharArray()
+        val session = DatabaseSession()
+        val creatorB = DatabaseSession()
+        val openerB = DatabaseSession()
+        var preparedA: PreparedSerializedSave? = null
+        try {
+            assertTrue(session.create(fileA, "VaultA", pwdA, useArgon2 = false) is KdbxResult.Success)
+            assertTrue(creatorB.create(fileB, "VaultB", pwdB, useArgon2 = false) is KdbxResult.Success)
+            creatorB.close()
+
+            val treeA = session.databaseFlow.value!!
+            val prepResultA = session.prepareSerializedSave(treeA)
+            assertTrue(prepResultA is KdbxResult.Success)
+            val prepDataA = (prepResultA as KdbxResult.Success).data
+            preparedA = prepDataA
+            val prepBytesA = prepDataA.bytes
+
+            assertTrue(session.open(fileB, pwdB) is KdbxResult.Success)
+            val treeB = session.databaseFlow.value!!
+            val bytesB = fileB.readBytes()
+
+            val commitResult = session.commitPreparedSave(
+                expectedAtCycleStart = treeB,
+                candidate = treeB,
+                prepared = prepDataA
+            )
+
+            assertTrue(commitResult is KdbxResult.Failure)
+            assertEquals(KdbxError.SAVE_SESSION_CHANGED, (commitResult as KdbxResult.Failure).code)
+            assertSame("换库拒绝旧提交后活动树保持库B实例", treeB, session.databaseFlow.value)
+            assertArrayEquals("新库B文件字节未被修改", bytesB, fileB.readBytes())
+            assertTrue("旧预备密文字节必须被全零擦除", prepBytesA.all { it == 0.toByte() })
+            assertTrue(prepDataA.isWiped)
+
+            assertTrue("新库B必须保持可用", openerB.open(fileB, pwdB) is KdbxResult.Success)
+        } finally {
+            preparedA?.wipe()
+            pwdA.fill('0')
+            pwdB.fill('0')
+            session.close()
+            creatorB.close()
+            openerB.close()
             directory.deleteRecursively()
         }
     }

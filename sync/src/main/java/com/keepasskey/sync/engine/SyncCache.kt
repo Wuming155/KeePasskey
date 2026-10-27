@@ -1,5 +1,6 @@
 package com.keepasskey.sync.engine
 
+import androidx.annotation.VisibleForTesting
 import java.io.EOFException
 import java.io.File
 import java.io.FileInputStream
@@ -57,7 +58,7 @@ open class SyncCache(
 ) {
 
     /** 文件层原语（唯一临时名 / fsync / 原子替换 / 权限收敛 / 有界重试删除） */
-    private val files = SyncCacheFiles(cacheDir)
+    private val files = SyncCacheFiles(cacheDir, vaultScope)
 
     /** 元数据 / 基准快照 / 清理面（ISSUE-P3-305 下沉；键派生共用 [scopedKey] 单一实现） */
     private val maintenance = SyncCacheMaintenance(files, cacheDir, ::scopedKey)
@@ -189,6 +190,7 @@ open class SyncCache(
             throw t
         }
         return ReceivedRemote(
+            remotePath = remotePath,
             digest = digest.digest().toHexString(),
             byteCount = tmpFile.length(),
             tmpFile = tmpFile,
@@ -202,6 +204,7 @@ open class SyncCache(
      * 交付 / 弃置二选一且各自幂等。
      */
     inner class ReceivedRemote internal constructor(
+        private val remotePath: String,
         /** 全量内容的 SHA-256 十六进制小写摘要（可直接供回滚裁决 / `.version` / 基线前移） */
         val digest: String,
         /** 实际接收的字节数 */
@@ -221,12 +224,17 @@ open class SyncCache(
         /**
          * 防回滚裁决通过后原子交付：tmp → rename 覆盖 `<hash>.cache` + 写 `<hash>.version`
          * （摘要即版本内容，与 [writeCache] 的落盘序列一致）。幂等：重复调用为 no-op。
+         *
+         * 交付与版本标记写入共用进程协调锁，防止不同缓存实例交错提交；
+         * 两文件之间的进程死亡窗口仍由实际字节摘要判定恢复。
          */
         fun commit() {
             if (settled) return
             settled = true
-            files.moveAtomically(tmpFile, targetFile)
-            files.writeStringSafely(versionFile, digest)
+            synchronized(files.pathLock(remotePath)) {
+                files.moveAtomically(tmpFile, targetFile)
+                files.writeStringSafely(versionFile, digest)
+            }
         }
 
         /** 弃置半成品（重放拒绝 / 冲突路径用后即弃）。幂等：交付后或重复调用均为 no-op。 */
@@ -268,15 +276,17 @@ open class SyncCache(
                 fos.fd.sync()
             }
             files.restrictToOwnerOnly(tmpFile, isDirectory = false)
-            files.moveAtomically(tmpFile, cacheFile)
+            val sha256 = digest.digest().toHexString()
+            // ENG-20261027-04：流写交付阶段与 ReceivedRemote.commit 共享同一进程协调锁边界
+            synchronized(files.pathLock(remotePath)) {
+                files.moveAtomically(tmpFile, cacheFile)
+                files.writeStringSafely(getFile(remotePath, SUFFIX_VERSION), sha256)
+            }
+            return sha256
         } finally {
             // ISSUE-P3-463：写中断（流不足 / IO 异常）与交付失败的退出路径都必须自清 tmp
             tmpFile.delete()
         }
-
-        val sha256 = digest.digest().toHexString()
-        files.writeStringSafely(getFile(remotePath, SUFFIX_VERSION), sha256)
-        return sha256
     }
 
     /** 以流式打开缓存内容（不存在返回 null，ISSUE-P2-24；ISSUE-P3-483 关闭纪律见 `BinaryStore.openStream`）。 */
@@ -338,7 +348,9 @@ open class SyncCache(
      *
      * ISSUE-P3-305：实现下沉 [SyncCacheMaintenance.clear]（逐行搬运，F-23 例外不变量随实现一并迁移）。
      */
-    fun clear(remotePath: String) = maintenance.clear(remotePath)
+    fun clear(remotePath: String) = synchronized(files.pathLock(remotePath)) {
+        maintenance.clear(remotePath)
+    }
 
     /**
      * 销毁全部远端路径的缓存（ISSUE-P1-07）。
@@ -347,6 +359,14 @@ open class SyncCache(
      * （防回滚状态文件保留）与「删除失败即返回 false」契约不变。
      */
     fun clearAll(): Boolean = maintenance.clearAll()
+
+    /**
+     * 同一缓存键的**进程内协调锁**（ENG-20261027-04）。
+     *
+     * 供测试或同包协作类直接访问由 [SyncCacheLockCoordinator] 管理的共享锁。
+     */
+    @VisibleForTesting
+    internal fun pathLock(remotePath: String): Any = files.pathLock(remotePath)
 
     /**
      * 删除单个缓存子项（ISSUE-P2-82）：委托文件层原语 [SyncCacheFiles.deleteChild]。

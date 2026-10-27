@@ -42,13 +42,13 @@ internal class SessionOpener(
      */
     private val progress: (Float?) -> Unit = {},
     /**
-     * ISSUE-P2-77：换库前置释放（由 `DatabaseSession` 注入，语义与 `lock()` 的清理部分对齐）。
+     * ENG-20261027-02 / ISSUE-P2-77：换库/重载释放旧会话（由 `DatabaseSession` 注入）。
      *
-     * **顺序硬约束**：打开时必须在 `KdbxFile.load` **之前**调用；新建空库在排他提交成功后调用——否则
-     * `FileBinaryStore.onSessionLocked()` 会把刚为新库落盘的附件一并删除（静默数据损坏）。
-     * 由调用方在 [mutex] 临界区内同步执行（不取锁，避免 `lock()` 的互斥重入）。
+     * 仅在候选数据库成功解析并准备替换活动库时调用（禁止在解析前释放）。
+     * [liveCandidate] 作为存活侧传入，使旧库附件清理只回收不再被候选引用的 spill key，
+     * 并排除全局 clearAll 误清候选附件。
      */
-    private val releaseCurrentSession: () -> Unit = {}
+    private val releaseCurrentSession: (liveCandidate: KdbxDatabase?) -> Unit = {}
 ) {
 
     /**
@@ -181,7 +181,7 @@ internal class SessionOpener(
                     )
                     candidate = db
                     createdBytes = writeNew(db)
-                    releaseCurrentSession()
+                    releaseCurrentSession(candidate)
                     core.activeFile = associatedFile
                     core.activePathIdentifier = pathIdentifier
                     core.saveWriter = saveWriter
@@ -267,17 +267,19 @@ internal class SessionOpener(
         trackedSaveWriter: (suspend (ByteArray, SessionWriteReceipt) -> Unit)? = null
     ): KdbxResult<Unit> = mutex.withLock {
         withContext(Dispatchers.Default) {
-            // ISSUE-P2-77：换库前置释放（顺序硬约束见 [releaseCurrentSession] KDoc）——
-            // 必须在 `KdbxFile.load` 之前执行，否则新库附件会被 `FileBinaryStore.onSessionLocked()` 删除。
-            releaseCurrentSession()
             // ISSUE-P3-368：进入打开链先清陈旧进度（null = 不确定段），避免上一次进度残留首帧
             progress(null)
             val spillTransaction = KdbxFile.beginAttachmentSpillTransaction(binaryStore)
             var candidate: KdbxDatabase? = null
+            var ownedPassword: CharArray? = null
+            var ownedKeyFile: ByteArray? = null
             // ISSUE-P1-631：解析旁路捕获的字节镜像（打开 / 重载成功即登记为持久化基线）
             var baselineCapture: PersistedBaselineCapturingInputStream? = null
             try {
                 val candidateTicket = SessionCredentialTicket(pathIdentifier)
+                // ENG-20261027-02：分配独立候选凭据副本供解析与采用；解析失败时旧会话凭据未受触碰，副本在 finally 清零
+                ownedPassword = passwordChars?.copyOf()
+                ownedKeyFile = keyFileData?.copyOf()
                 // 文件总长已知（本地 File）⇒ 载荷段确定进度；SAF 等未知长度流传 null 退分段不确定
                 val totalBytes = associatedFile?.length()?.takeIf { it > 0 }
                 val db = inputStreamProvider().use { fis ->
@@ -286,19 +288,22 @@ internal class SessionOpener(
                     // 不重读文件、不重加密；超出留存上限只放弃捕获，不影响本次解析
                     val capturing = PersistedBaselineCapturingInputStream(fis, MAX_PERSISTED_BASELINE_BYTES)
                     baselineCapture = capturing
-                    spillTransaction.load(capturing, passwordChars, keyFileData, totalBytes, progress)
+                    spillTransaction.load(capturing, ownedPassword, ownedKeyFile, totalBytes, progress)
                         .also { candidate = it }
                 }
                 candidate = db
 
+                // ENG-20261027-02：候选读取、凭据验证与附件事务均成功后，才在临界区内释放旧会话并替换为活动会话
+                releaseCurrentSession(candidate)
                 core.activeFile = associatedFile
                 core.activePathIdentifier = pathIdentifier
                 core.saveWriter = saveWriter
                 core.trackedSaveWriter = trackedSaveWriter
                 core.credentialWriteUncertain.value = false
                 core.readOnlyMode = readOnly
-                credentials.cachePassword(passwordChars)
-                credentials.cacheKeyFile(keyFileData)
+                credentials.adoptOwnedCredentials(ownedPassword, ownedKeyFile)
+                ownedPassword = null
+                ownedKeyFile = null
 
                 core.database.value = db
                 core.adoptCredentialTicket(candidateTicket)
@@ -322,14 +327,18 @@ internal class SessionOpener(
                 }
                 suppressCleanupFailure(t) { candidate?.clearSensitiveData() }
                 suppressCleanupFailure(t) { spillTransaction.purge() }
-                suppressCleanupFailure(t) { credentials.clear() }
-                core.invalidateSessionTicket()
-                core.activeFile = null
-                core.activePathIdentifier = null
-                core.saveWriter = null
-                core.trackedSaveWriter = null
-                core.readOnlyMode = false
-                core.state.value = DatabaseSession.SessionState.LOCKED
+                // ENG-20261027-02：若已有活动会话（例如重载或换库失败），保持原树、脏态、文件通道与凭据不变；
+                // 仅在无活动会话（初次打开失败）时将状态置为 LOCKED 并清理引用。
+                if (core.database.value == null) {
+                    suppressCleanupFailure(t) { credentials.clear() }
+                    core.invalidateSessionTicket()
+                    core.activeFile = null
+                    core.activePathIdentifier = null
+                    core.saveWriter = null
+                    core.trackedSaveWriter = null
+                    core.readOnlyMode = false
+                    core.state.value = DatabaseSession.SessionState.LOCKED
+                }
                 if (t is CancellationException) throw t
                 // ISSUE-P3-368：失败清进度（UI 随 isLoading 回落隐藏，不留半程残值）
                 progress(null)
@@ -341,6 +350,9 @@ internal class SessionOpener(
                     KdbxError.UNLOCK_FAILED
                 }
                 KdbxResult.Failure(t, code = code)
+            } finally {
+                ownedPassword?.fill('0')
+                ownedKeyFile?.fill(0)
             }
         }
     }

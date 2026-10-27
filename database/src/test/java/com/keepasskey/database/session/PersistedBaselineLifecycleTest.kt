@@ -25,7 +25,7 @@ import java.io.IOException
  * 与 [PersistedBaselineCaptureTest] 的分工：该件覆盖「打开登记 / 保存前移 / 保存失败不前移 /
  * 换密前移 / 锁定清除 / 修订正反对照 / 捕获超限 / 打开失败不登记」；
  * 本件补齐：**关闭清除、换库归属与旧基线作废、Meta 提交仅在 writer 确认后前移（确认 /
- * 未确认 / 不确定三分支）、换密后旧口令不可解析、打开失败不残留、缓冲就地清零与重复清除**。
+ * 未确认 / 不确定三分支）、换密后旧口令不可解析、候选失败保留原基线、缓冲就地清零与重复清除**。
  *
  * 擦除断言经 `persistedBaselineInternalBytesForTesting`（内部缓冲**引用**）——克隆给到的是
  * 副本，无法观测内部缓冲的覆写；本件只对引用做只读观察。
@@ -241,23 +241,38 @@ class PersistedBaselineLifecycleTest {
     }
 
     @Test
-    fun `打开失败后旧基线不残留且不登记新基线`() = runBlocking {
+    fun `候选打开失败保留原会话基线且不登记候选基线`() = runBlocking {
         val pwd = "Lifecycle#2026".toCharArray()
         val session = DatabaseSession()
-        assertTrue(open(session, "first.kdbx", vaultBytes(pwd), pwd))
-        assertTrue("前置：首个库必须已登记基线", session.persistedBaselineSnapshot() != null)
-
-        val garbage = ByteArray(128) { 0x5A }
-        val failed = session.openStream(
-            pathIdentifier = "second.kdbx",
-            inputStreamProvider = { ByteArrayInputStream(garbage) },
-            saveWriter = {},
-            passwordChars = pwd,
-            keyFileData = keyFile
-        )
-        assertTrue("非 KDBX 输入必须如实失败", failed.isFailure)
-        assertNull("打开失败后不得登记任何基线（也不得残留上一个库的基线）", session.persistedBaselineSnapshot())
-        session.close()
+        try {
+            assertTrue(open(session, "first.kdbx", vaultBytes(pwd), pwd))
+            val originalTree = session.databaseFlow.value
+            val before = session.persistedBaselineSnapshot() ?: error("原会话必须已有基线")
+            try {
+                val failed = session.openStream(
+                    pathIdentifier = "second.kdbx",
+                    inputStreamProvider = { ByteArrayInputStream(ByteArray(128) { 0x5A }) },
+                    saveWriter = {},
+                    passwordChars = pwd,
+                    keyFileData = keyFile
+                )
+                assertTrue("非 KDBX 输入必须如实失败", failed.isFailure)
+                assertTrue("候选失败不得替换原树", originalTree === session.databaseFlow.value)
+                assertEquals("first.kdbx", session.currentPathIdentifier)
+                val after = session.persistedBaselineSnapshot() ?: error("原会话基线必须保留")
+                try {
+                    assertEquals("失败不得前移基线修订", before.revision, after.revision)
+                    assertArrayEquals("失败不得改写基线密文", before.bytes, after.bytes)
+                } finally {
+                    after.wipe()
+                }
+            } finally {
+                before.wipe()
+            }
+        } finally {
+            session.close()
+            pwd.fill('\u0000')
+        }
     }
 
     @Test

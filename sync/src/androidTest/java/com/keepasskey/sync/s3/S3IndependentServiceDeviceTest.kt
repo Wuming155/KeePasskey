@@ -25,14 +25,16 @@ class S3IndependentServiceDeviceTest {
 
     private lateinit var provider: S3SyncProvider
     private lateinit var endpoint: String
+    private lateinit var accessKey: String
 
     @Before
     fun setUp() {
         val arguments = InstrumentationRegistry.getArguments()
         endpoint = arguments.getString(ARG_ENDPOINT).orEmpty()
         assumeTrue("Provide -Pandroid.testInstrumentationRunnerArguments.$ARG_ENDPOINT", !endpoint.isNullOrBlank())
+        accessKey = arguments.getString(ARG_ACCESS_KEY) ?: ACCESS_KEY
         provider = newProvider(
-            access = arguments.getString(ARG_ACCESS_KEY) ?: ACCESS_KEY,
+            access = accessKey,
             secret = arguments.getString(ARG_SECRET_KEY) ?: SECRET_KEY
         )
     }
@@ -77,13 +79,9 @@ class S3IndependentServiceDeviceTest {
 
     @Test
     fun `独立S3服务拒绝错误的SigV4密钥`() = runBlocking {
-        val wrongCredentials = S3SyncProvider(
-            endpoint = endpoint,
-            bucketName = BUCKET,
-            region = REGION,
-            accessKeyId = ACCESS_KEY.toCharArray(),
-            secretAccessKey = "wrong-secret-for-device-test".toCharArray(),
-            usePathStyle = true
+        val wrongCredentials = newProvider(
+            access = accessKey,
+            secret = "wrong-secret-for-device-test"
         )
         try {
             val result = wrongCredentials.testConnection()

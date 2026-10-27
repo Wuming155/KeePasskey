@@ -1,9 +1,11 @@
 package com.keepasskey.app.security
 
+import android.content.Context
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,13 +19,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 自动锁定核心判定与会话熔断执行器（纯 Kotlin，无 Android 框架依赖）。
+ * 自动锁定核心判定与会话熔断执行器。
  *
  * ISSUE-P0-01 (ZT-01)：从 [AutoLockManager] 拆分的可单测内核。进程存在
  * AutofillUnlockActivity / CredentialUnlockActivity 两条不经 MainActivity 的独立冷启动入口，
  * 熄屏熔断与后台超时判定必须覆盖全进程所有入口；将判定与熔断逻辑同 Android 注册管道
- * （ProcessLifecycleOwner / 熄屏广播接收器）解耦后，本类仅依赖会话与设置仓库，
- * 可在 JVM 单测中直接驱动「熄屏 → 会话锁定」全链路（无需启动任何 Activity）。
+ * （ProcessLifecycleOwner / 熄屏广播接收器）解耦后，可在 JVM 单测中直接驱动全链路。
+ *
+ * ENG-20261027-01：自动锁定前消费统一漂移判据（[VaultFileDriftGuard]）；遇外部修改漂移时
+ * 将本地脏树保全到独立加密恢复副本，杜绝静默覆盖外部版本。通过可选 Context 支持 SAF 真实元数据探针，
+ * 在纯 JVM 单测中 Context 缺省为 null，本地 File 通道直接通过 [VaultFileDriftCoordinator] 验证。
  */
 @Singleton
 class AutoLockSessionGuard @Inject constructor(
@@ -35,8 +40,17 @@ class AutoLockSessionGuard @Inject constructor(
     // ISSUE-P3-366 AC②：长任务挂锁闸（Hilt 注入进程级单例，与各挂点共享；缺省新实例供 JVM 单测隔离）
     private val holdoff: AutoLockHoldoff = AutoLockHoldoff(),
     // ISSUE-P1-592：补存失败后的保全策略（Hilt 绑定 SessionRecoveryCoordinator；缺省替身供 JVM 单测）
-    private val recovery: SessionRecoveryPolicy = SessionRecoveryPolicy.Disabled
+    private val recovery: SessionRecoveryPolicy = SessionRecoveryPolicy.Disabled,
+    // ENG-20261027-01：统一外部修改漂移协调器（Hilt 注入进程级单例；缺省 null 兼容纯 JVM 单测）
+    private val driftCoordinator: VaultFileDriftCoordinator? = null,
+    @ApplicationContext private val context: Context? = null
 ) {
+
+    private val driftGuard = VaultFileDriftGuard(driftCoordinator, context)
+
+    /** 只读检测当前活动会话对应文件是否发生外部漂移（复用统一判据，不唤起三选提示）。 */
+    internal fun isDrifted(): Boolean =
+        driftGuard.isDrifted(databaseSession.currentPathIdentifier.orEmpty(), databaseSession.currentFile)
 
     private val _isLocked = MutableStateFlow(false)
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
@@ -142,17 +156,26 @@ class AutoLockSessionGuard @Inject constructor(
         return outcome
     }
 
-    /** 锁定前的补存与保全（`ISSUE-P1-592` 步骤 1）：把 DIRTY 分支的结局收敛为 [LockOutcome]。 */
+    /** 锁定前的补存与保全：DIRTY 分支遇外部修改漂移时保全本地脏树到独立加密恢复副本，不覆盖正式文件。 */
     private suspend fun preserveDirtySessionBeforeLock(): LockOutcome {
         if (databaseSession.state.value != DatabaseSession.SessionState.DIRTY) {
             return LockOutcome.NoPendingChanges
         }
+        if (isDrifted()) {
+            debugLog.warn(TAG, "锁库前检测到外部文件漂移，中止写入正式文件，转入独立加密恢复副本")
+            return recovery.onSaveFailedBeforeLock()
+        }
         val saveResult = databaseSession.save()
         return when (saveResult) {
-            is KdbxResult.Success -> LockOutcome.Saved
+            is KdbxResult.Success -> {
+                driftGuard.captureAfterPersist(
+                    databaseSession.currentPathIdentifier.orEmpty(),
+                    databaseSession.currentFile
+                )
+                LockOutcome.Saved
+            }
             is KdbxResult.Failure -> {
                 debugLog.error(TAG, "锁库前补存失败: ${saveResult.error.javaClass.simpleName}")
-                // 补存失败：交由保全策略写独立加密恢复副本或登记数据丢失告警
                 recovery.onSaveFailedBeforeLock()
             }
         }

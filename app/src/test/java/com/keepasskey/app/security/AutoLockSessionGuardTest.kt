@@ -5,8 +5,10 @@ import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -14,7 +16,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.nio.file.Files
 
 /**
  * ISSUE-P0-01 (ZT-01) 自动锁定守护单测。
@@ -256,6 +260,223 @@ class AutoLockSessionGuardTest {
 
         assertEquals(LockOutcome.PreservationFailed(alertPersisted = false), outcome)
         assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+    }
+
+    // ===== ENG-20261027-01：自动锁定前消费统一漂移判据，保全本地脏树到独立加密恢复副本 =====
+
+    @Test
+    fun `外部修改漂移时锁库不覆盖正式文件且保全本地脏树到独立加密恢复副本`() = runBlocking {
+        val (session, file) = unlockViaUnlockEntry()
+        val holder = VaultFileBaselineHolder(session)
+        holder.capture(VaultFileBaseline.fromFile(file))
+        val coordinator = VaultFileDriftCoordinator(holder, session)
+
+        session.saveEntry(
+            KdbxEntry(
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString("LocalUnsavedEntry", false),
+                    KdbxConstants.Fields.PASSWORD to ProtectedString("LocalSecret123", true)
+                )
+            )
+        )
+        assertEquals(DatabaseSession.SessionState.DIRTY, session.state.value)
+
+        val otherSession = DatabaseSession()
+        val externalFile = File(tempFolder.root, "external_src.kdbx")
+        var externalBytes: ByteArray? = null
+        try {
+            assertTrue(otherSession.create(externalFile, "ExternalVault", ENTRY_PASSWORD, useArgon2 = false).isSuccess)
+            otherSession.saveEntry(
+                KdbxEntry(
+                    fields = mapOf(
+                        KdbxConstants.Fields.TITLE to ProtectedString("ExternalOnlyEntry", false),
+                        KdbxConstants.Fields.PASSWORD to ProtectedString("ExternalSecret456", true)
+                    )
+                )
+            )
+            externalBytes = otherSession.exportToBytes().getOrThrow()
+        } finally {
+            otherSession.close()
+        }
+
+        try {
+            Files.write(file.toPath(), externalBytes!!)
+            val bumpedTime = holder.current()!!.lastModifiedMillis + 5000L
+            file.setLastModified(bumpedTime)
+
+            assertTrue("统一漂移判据必须检出外部文件已被修改", coordinator.checkDrift(file.absolutePath, file))
+
+            val recoveryStore = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+                baseDirOverride = tempFolder.newFolder("recovery")
+            }
+            val alertStore = RecoveryAlertStore(null)
+            val recovery = SessionRecoveryCoordinator(session, recoveryStore, alertStore, DebugLogBuffer())
+            val settings = FakeSettingsRepository().apply { setLockWhenScreenOff(true) }
+            val guard = AutoLockSessionGuard(
+                databaseSession = session,
+                settingsRepository = settings,
+                debugLog = DebugLogBuffer(),
+                recovery = recovery,
+                driftCoordinator = coordinator
+            )
+
+            val outcome = guard.triggerLock("外部漂移熔断测试")
+
+            assertEquals(LockOutcome.RecoveryCommitted, outcome)
+            assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+            assertTrue(guard.isLocked.value)
+
+            assertArrayEquals("正式文件必须严格保持外部版本，禁止静默覆盖", externalBytes, file.readBytes())
+
+            val reopened = DatabaseSession()
+            try {
+                assertTrue(reopened.open(file, ENTRY_PASSWORD).isSuccess)
+                val formalEntries = reopened.databaseFlow.value?.rootGroup?.allEntries().orEmpty()
+                assertTrue("正式库必须包含外部条目", formalEntries.any { it.title == "ExternalOnlyEntry" })
+                assertFalse("正式库绝对不得包含未落盘本地条目", formalEntries.any { it.title == "LocalUnsavedEntry" })
+            } finally {
+                reopened.close()
+            }
+
+            val recoveryEntry = recoveryStore.list().single()
+            assertEquals(file.absolutePath, recoveryEntry.vaultId)
+            val recoveryBytes = recoveryStore.readPayload(recoveryEntry)
+            assertNotNull("恢复副本密文载荷必须存在", recoveryBytes)
+            try {
+                val restored = KdbxFile.load(ByteArrayInputStream(recoveryBytes!!), ENTRY_PASSWORD)
+                val restoredTitles = restored.rootGroup.allEntries().map { it.title }
+                assertTrue("独立加密恢复副本必须完整保全本地脏树条目", restoredTitles.contains("LocalUnsavedEntry"))
+                restored.clearSensitiveData()
+            } finally {
+                recoveryBytes!!.fill(0)
+            }
+        } finally {
+            externalBytes?.fill(0)
+        }
+    }
+
+    @Test
+    fun `外部修改漂移时禁用恢复策略仍不覆盖正式文件并继续锁定`() = runBlocking {
+        val (session, file) = unlockViaUnlockEntry()
+        val holder = VaultFileBaselineHolder(session)
+        holder.capture(VaultFileBaseline.fromFile(file))
+        val coordinator = VaultFileDriftCoordinator(holder, session)
+
+        makeDirty(session)
+
+        val externalBytes = ByteArray(file.length().toInt() + 128) { 0x5a }
+        try {
+            Files.write(file.toPath(), externalBytes)
+            file.setLastModified(holder.current()!!.lastModifiedMillis + 5000L)
+
+            val settings = FakeSettingsRepository().apply { setLockWhenScreenOff(true) }
+            val guard = AutoLockSessionGuard(
+                databaseSession = session,
+                settingsRepository = settings,
+                debugLog = DebugLogBuffer(),
+                recovery = SessionRecoveryPolicy.Disabled,
+                driftCoordinator = coordinator
+            )
+
+            val outcome = guard.triggerLock("漂移无恢复策略测试")
+
+            assertEquals(LockOutcome.PreservationFailed(alertPersisted = false), outcome)
+            assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+            assertArrayEquals("无论保全策略成败，正式文件绝对不得被覆盖", externalBytes, file.readBytes())
+        } finally {
+            externalBytes.fill(0)
+        }
+    }
+
+    @Test
+    fun `写边界与自动锁定守卫共享同一coordinator时漂移判定同源且保全恢复副本`() = runBlocking {
+        val (session, file) = unlockViaUnlockEntry()
+        val holder = VaultFileBaselineHolder(session)
+        holder.capture(VaultFileBaseline.fromFile(file))
+        val coordinator = VaultFileDriftCoordinator(holder, session)
+        val driftGuard = VaultFileDriftGuard(coordinator, null)
+
+        val recoveryStore = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+            baseDirOverride = tempFolder.newFolder("recovery_boundary")
+        }
+        val recovery = SessionRecoveryCoordinator(session, recoveryStore, RecoveryAlertStore(null), DebugLogBuffer())
+        val settings = FakeSettingsRepository().apply { setLockWhenScreenOff(true) }
+        val guard = AutoLockSessionGuard(
+            databaseSession = session,
+            settingsRepository = settings,
+            debugLog = DebugLogBuffer(),
+            recovery = recovery,
+            driftCoordinator = coordinator
+        )
+
+        assertFalse("写边界初始化必须就绪", driftGuard.isDrifted(file.absolutePath, file))
+
+        makeDirty(session)
+
+        val otherSession = DatabaseSession()
+        val externalFile = File(tempFolder.root, "external_boundary.kdbx")
+        var externalBytes: ByteArray? = null
+        try {
+            assertTrue(otherSession.create(externalFile, "ExternalVault", ENTRY_PASSWORD, useArgon2 = false).isSuccess)
+            otherSession.saveEntry(KdbxEntry(fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("ExtBoundaryEntry", false))))
+            externalBytes = otherSession.exportToBytes().getOrThrow()
+        } finally {
+            otherSession.close()
+        }
+
+        try {
+            Files.write(file.toPath(), externalBytes!!)
+            file.setLastModified(holder.current()!!.lastModifiedMillis + 5000L)
+
+            assertTrue("装配后 guard 与 driftGuard 漂移判定同源", guard.isDrifted())
+            assertTrue("driftGuard 自身判定也为漂移", driftGuard.isDrifted(file.absolutePath, file))
+
+            guard.lockOnScreenOff()
+
+            assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+            assertArrayEquals("正式文件不得被覆盖", externalBytes, file.readBytes())
+            val recoveryEntry = recoveryStore.list().single()
+            assertEquals(file.absolutePath, recoveryEntry.vaultId)
+        } finally {
+            externalBytes?.fill(0)
+        }
+    }
+
+    @Test
+    fun `未发生漂移时锁库成功落盘正式文件且不写入恢复副本`() = runBlocking {
+        val (session, file) = unlockViaUnlockEntry()
+        val holder = VaultFileBaselineHolder(session)
+        holder.capture(VaultFileBaseline.fromFile(file))
+        val coordinator = VaultFileDriftCoordinator(holder, session)
+
+        makeDirty(session)
+        assertFalse("未修改时不应判漂移", coordinator.checkDrift(file.absolutePath, file))
+
+        val recoveryStore = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+            baseDirOverride = tempFolder.newFolder("recovery_clean")
+        }
+        val recovery = SessionRecoveryCoordinator(session, recoveryStore, RecoveryAlertStore(null), DebugLogBuffer())
+        val guard = AutoLockSessionGuard(
+            databaseSession = session,
+            settingsRepository = FakeSettingsRepository().apply { setLockWhenScreenOff(true) },
+            debugLog = DebugLogBuffer(),
+            recovery = recovery,
+            driftCoordinator = coordinator
+        )
+
+        val outcome = guard.triggerLock("无漂移保存测试")
+
+        assertEquals(LockOutcome.Saved, outcome)
+        assertTrue("正常补存不得写恢复副本", recoveryStore.list().isEmpty())
+        assertEquals(DatabaseSession.SessionState.LOCKED, session.state.value)
+
+        val reopen = DatabaseSession()
+        try {
+            assertTrue(reopen.open(file, ENTRY_PASSWORD).isSuccess)
+            assertEquals("Banking", reopen.databaseFlow.value?.rootGroup?.allEntries()?.single()?.title)
+        } finally {
+            reopen.close()
+        }
     }
 
     // ===== ISSUE-P2-355 AC③：锁定丢弃未保存编辑的一次性告知 =====

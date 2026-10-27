@@ -22,10 +22,11 @@ internal class SessionLockRegistry {
         sessionLockObservers.remove(observer)
     }
 
-    /** 通知全部观察者会话已终止。 */
-    fun notifySessionLocked() {
+    /** 通知观察者会话已终止（换库替换时可传入 [except] 排除按键事务独立管理的附件存储）。 */
+    fun notifySessionLocked(except: SessionLockObserver? = null) {
         val snapshot = synchronized(observerLock) { sessionLockObservers.toList() }
         for (observer in snapshot) {
+            if (except != null && observer === except) continue
             try {
                 observer.onSessionLocked()
             } catch (_: Throwable) {

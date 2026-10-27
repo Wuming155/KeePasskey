@@ -15,7 +15,10 @@ import java.io.File
  * 可漂移）；本类退化为对它的薄委托，并保留缓存域专有逻辑（规范键定位、通配清理、
  * 有界重试删除）。**行为与权限口径零变更**。
  */
-internal class SyncCacheFiles(private val cacheDir: File) {
+internal class SyncCacheFiles(
+    private val cacheDir: File,
+    private val vaultScope: String = ""
+) {
 
     /** 按规范键（`SHA-256(remotePath)`）定位缓存目录内的文件 */
     fun fileFor(remotePath: String, suffix: String): File {
@@ -122,15 +125,8 @@ internal class SyncCacheFiles(private val cacheDir: File) {
     }
 
     /**
-     * 同一缓存键的**进程内互斥**（`ISSUE-P2-636`）。
-     *
-     * 缓存由多份独立文件组成（`.cache` / `.version` / `.basecache` / `.baseversion` / `.meta`），
-     * 每份各自原子替换；但「字节」与「标记」之间**不是**一次原子操作。两个写入者交错时，
-     * `.cache` 可能来自 A 而 `.version` 来自 B——标记与字节交叉污染，`hasLocalChanges`
-     * 随后按错配的摘要判定，可能把脏缓存当干净。按**规范键**串行化这两步即可消除该交错
-     * （跨进程仍依赖各文件的原子替换与 SHA-256 校验，见限界登记）。
+     * 同一缓存键的**进程内协调锁**（`ENG-20261027-04`）。
      */
-    fun pathLock(key: String): Any = pathLocks.getOrPut(key) { Any() }
-
-    private val pathLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    fun pathLock(key: String): Any =
+        SyncCacheLockCoordinator.lockFor(cacheDir, vaultScope, key)
 }

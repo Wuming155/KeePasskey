@@ -168,88 +168,93 @@ internal class SessionPersistence(
     }
 
     /**
-     * `ISSUE-P1-631`（生命周期收口）：**可取消预备段**——修剪候选根并把候选树序列化为密文
-     * （含保存侧 KDF 派生 / Argon2 重算，真机秒级 CPU），**不取会话互斥锁、不发布任何树、
-     * 不触碰基线与状态**；取消 / 失败 ⇒ 密文缓冲清零后如实失败，会话无痕。
-     *
-     * 与 [saveLocked] 的职责切分：本段只做「计算」，把「Argon2 + 序列化」从原
-     * `adoptAndSaveIfUnchanged` 的不可取消临界区内移出——数秒级 CPU 不得因防取消而
-     * 全部包进 `NonCancellable`（生命周期整改裁决）；原子性由 [commitPreparedSave] 的
-     * 「同一锁内复检 → 校验实例身份 → 发布 → 写盘 → 基线」保证：预备与提交之间会话若发生
-     * 任何确认变更（树实例替换 / 基线修订前移 / 只读化 / 凭据丢失），提交一律 fail-closed，
-     * 预备产物整份作废清零——序列化的是**调用方持有的候选树**而非活动树，活动树在预备段内只读，
-     * 候选树在预备与提交之间不可达于任何其它写路径（由调用方所有权保证）。
-     *
-     * 前置校验与 [saveLocked] 同清单（凭据写入不确定 / 只读 / 无写回通道 / 凭据丢失）；
-     * 提交段会**复检**同一清单（防预备与提交之间凭据被自动锁定清掉）。
+     * 可取消预备段：在会话锁内取得独占凭据快照与当前票据，锁外执行序列化。
+     * 产物绑定会话票据，取消或失败时清零敏感缓冲。
      */
     suspend fun prepareSerializedSave(
         candidate: KdbxDatabase
     ): KdbxResult<PreparedSerializedSave> {
-        val ticket = core.credentialTicket
-        if (core.credentialWriteUncertain.value) {
-            return KdbxResult.Failure(
-                IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),
-                code = KdbxError.SAVE_WRITE_UNCERTAIN
+        val snapshot = mutex.withLock {
+            try {
+                requireCurrentSessionRequest(core.credentialTicket)
+            } catch (changed: com.keepasskey.database.exception.KdbxSessionChangedException) {
+                return KdbxResult.Failure(changed, code = KdbxError.SAVE_SESSION_CHANGED)
+            }
+            if (core.credentialWriteUncertain.value) {
+                return KdbxResult.Failure(
+                    IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),
+                    code = KdbxError.SAVE_WRITE_UNCERTAIN
+                )
+            }
+            if (core.readOnlyMode) {
+                return KdbxResult.Failure(
+                    IllegalStateException("数据库以只读模式打开"),
+                    code = KdbxError.SAVE_READ_ONLY
+                )
+            }
+            if (core.saveWriter == null) {
+                return KdbxResult.Failure(
+                    IllegalStateException("无活动数据库保存通道"),
+                    code = KdbxError.SAVE_NO_WRITER
+                )
+            }
+            val ticket = core.credentialTicket ?: return KdbxResult.Failure(
+                IllegalStateException("活动会话票据已失效"),
+                code = KdbxError.SAVE_SESSION_CHANGED
             )
+            var pwdSnapshot: CharArray? = null
+            var keySnapshot: ByteArray? = null
+            try {
+                pwdSnapshot = credentials.passwordSnapshot()
+                keySnapshot = credentials.keyFileSnapshot()
+                if (pwdSnapshot == null && keySnapshot == null) {
+                    return KdbxResult.Failure(
+                        IllegalStateException("主密码已被清理"),
+                        code = KdbxError.SAVE_CREDENTIALS_LOST
+                    )
+                }
+                val snap = PreparationCredentialsSnapshot(ticket, pwdSnapshot, keySnapshot)
+                pwdSnapshot = null
+                keySnapshot = null
+                snap
+            } finally {
+                pwdSnapshot?.fill('0')
+                keySnapshot?.fill(0)
+            }
         }
-        if (core.readOnlyMode) {
-            return KdbxResult.Failure(
-                IllegalStateException("数据库以只读模式打开"),
-                code = KdbxError.SAVE_READ_ONLY
+
+        var serialized: ByteArray? = null
+        var preparedSave: PreparedSerializedSave? = null
+        try {
+            val prunedRoot = HistoryManager.pruneGroupHistoryByAge(
+                candidate.rootGroup,
+                candidate.maintenanceHistoryDays
             )
-        }
-        if (core.saveWriter == null) {
-            return KdbxResult.Failure(
-                IllegalStateException("无活动数据库保存通道"),
-                code = KdbxError.SAVE_NO_WRITER
+            val bytes = serializeToBytes(
+                candidate.copy(rootGroup = prunedRoot),
+                snapshot.password,
+                snapshot.keyFile,
+                null
             )
+            serialized = bytes
+            val prepared = PreparedSerializedSave(bytes, prunedRoot, snapshot.ticket)
+            preparedSave = prepared
+            return KdbxResult.Success(prepared)
+        } catch (t: Throwable) {
+            serialized?.fill(0)
+            if (t is CancellationException) throw t
+            return KdbxResult.Failure(t, code = KdbxError.SAVE_FAILED)
+        } finally {
+            snapshot.wipe()
+            if (preparedSave == null) {
+                serialized?.fill(0)
+            }
         }
-        val pwd = credentials.currentPassword()
-        if (pwd == null && credentials.currentKeyFile() == null) {
-            return KdbxResult.Failure(
-                IllegalStateException("主密码已被清理"),
-                code = KdbxError.SAVE_CREDENTIALS_LOST
-            )
-        }
-        // 修剪计算是候选树上的纯函数（不发布、不擦除——擦除仍按 P0-531 在提交段「先发布后擦」）
-        val prunedRoot = HistoryManager.pruneGroupHistoryByAge(
-            candidate.rootGroup,
-            candidate.maintenanceHistoryDays
-        )
-        val bytes = serializeToBytes(
-            candidate.copy(rootGroup = prunedRoot),
-            pwd,
-            credentials.currentKeyFile(),
-            null
-        )
-        return KdbxResult.Success(PreparedSerializedSave(bytes, prunedRoot, ticket))
     }
 
     /**
-     * `ISSUE-P1-631`（生命周期收口）：**最小提交临界区**——调用方（漂移处置）已把本调用包在
-     * 其 `NonCancellable` 段内，本段不再叠加，避免双层语义。在同一会话互斥锁内完成
-     * 「复检凭据 / 只读 / 写回通道 → 校验实例身份与持久化基线修订 → 采用候选（直接发布
-     * 修剪后树）→ 写预备密文 → 前移持久化基线 → 终态」。
-     *
-     * 为什么校验与写盘必须同锁（自原 `adoptAndSaveIfUnchanged` 的 KDoc 移入）：两者各自取锁
-     * 会释放会话锁——窗口内的换库 / 关闭会让写盘把**后来会话**的内容写到**后来会话**的目标上，
-     * 而调用方据返回值判定「本次合并已保存」，合并产物却被静默丢弃、漂移提示也被清掉。
-     *
-     * 与原 `adoptAndSaveIfUnchanged` 的**唯一**差异：序列化（Argon2 / 密文生成）已在
-     * [prepareSerializedSave] 可取消段完成，本段写的是**预备密文**——临界区内只剩
-     * 校验 / 发布 / 写 IO / 基线登记（真机实测毫秒级）。语义等价性论证：
-     * - 原「采用候选 → saveLocked 内修剪 → 发布修剪树 → 修剪下线擦除」在此并为**单步采用
-     *   修剪候选**（`adoptDatabaseIfUnchangedLocked(expected, prunedCandidate)`）——修剪只
-     *   影响条目 history 快照，且被修剪掉的快照实例必然同时可达于旧活动树（本地侧历史与
-     *   活动树共享实例；磁盘侧独有实例由合并产物的 `eraseDiscardedDatabase` 回收），
-     *   故单步「旧树 → 修剪候选」的身份擦除是原两步擦除（旧树→候选、候选→修剪）的并集超集，
-     *   不会漏擦；图标池 / 二进制池修剪不触及，判据与原实现一致。
-     * - 预备密文与提交段发布的树来自**同一候选**（预备段序列化的就是
-     *   `candidate.copy(rootGroup = prunedRoot)`），磁盘内容与会话树不出现口径分叉。
-     *
-     * 预备与提交之间会话发生任何确认变更（树实例替换 / 基线修订前移 / 只读化 / 凭据丢失）
-     * ⇒ fail-closed（`SAVE_SESSION_CHANGED` 等类型化失败），预备产物由外层 finally 清零。
+     * 提交预备保存：在会话锁内强制核对凭据代次与基线，核对通过后原子采纳并写盘。
+     * 若在预备与提交之间会话票据已改变或失效，fail-closed 拒绝且不触碰活动树与磁盘。
      */
     suspend fun commitPreparedSave(
         expectedAtCycleStart: KdbxDatabase,
@@ -258,6 +263,11 @@ internal class SessionPersistence(
         expectedPersistedBaselineRevision: Long? = null
     ): KdbxResult<Unit> = mutex.withLock {
         try {
+            try {
+                requireCurrentSessionRequest(core.credentialTicket)
+            } catch (changed: com.keepasskey.database.exception.KdbxSessionChangedException) {
+                return@withLock KdbxResult.Failure(changed, code = KdbxError.SAVE_SESSION_CHANGED)
+            }
             if (core.credentialWriteUncertain.value) {
                 return@withLock KdbxResult.Failure(
                     IllegalStateException("凭据写入结果不确定，须先核实或恢复文件"),
@@ -284,10 +294,16 @@ internal class SessionPersistence(
                     code = KdbxError.SAVE_NO_WRITER
                 )
             }
+            val currentTicket = core.credentialTicket
+            if (currentTicket == null || prepared.ticket == null || currentTicket !== prepared.ticket || prepared.isWiped) {
+                return@withLock KdbxResult.Failure(
+                    IllegalStateException("预备密文凭据代次已失效"),
+                    code = KdbxError.SAVE_SESSION_CHANGED
+                )
+            }
             val mutated = requireNotNull(mutations) {
                 "commitPreparedSave 需要 SessionContentMutations（构造器注入），不得在无 mutations 的实例上调用"
             }
-            // 修剪在预备段已计算；采用即发布「修剪后的候选」，擦除判据见上 KDoc
             val prunedCandidate = candidate.copy(rootGroup = prepared.prunedRoot)
             if (!mutated.adoptDatabaseIfUnchangedLocked(
                     expectedAtCycleStart,
@@ -302,14 +318,11 @@ internal class SessionPersistence(
             }
             progress(null)
             writer(prepared.bytes)
-            // ISSUE-P1-631：写盘确认成功 ⇒ 登记本版本为持久化基线（与 saveLocked 同口径；
-            // 失败 / 取消路径不前移基线）
             core.retainPersistedBaselineBestEffort(prepared.bytes, core.activePathIdentifier)
             progress(KdbxProgress.DONE)
             core.state.value = DatabaseSession.SessionState.OPENED
             KdbxResult.Success(Unit)
         } finally {
-            // P3-551 同型：预备密文即整库密文，成功 / 失败 / 取消任何路径都必须清零
             prepared.wipe()
         }
     }
@@ -428,6 +441,17 @@ internal class SessionPersistence(
     private class RotationRequestContext(val request: SessionCredentialRequest) :
         AbstractCoroutineContextElement(Key) {
         companion object Key : CoroutineContext.Key<RotationRequestContext>
+    }
+
+    private class PreparationCredentialsSnapshot(
+        val ticket: SessionCredentialTicket,
+        val password: CharArray?,
+        val keyFile: ByteArray?
+    ) {
+        fun wipe() {
+            password?.fill('0')
+            keyFile?.fill(0)
+        }
     }
 
     /**

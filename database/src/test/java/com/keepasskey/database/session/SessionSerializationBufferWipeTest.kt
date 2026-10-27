@@ -3,17 +3,20 @@ package com.keepasskey.database.session
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
 import com.keepasskey.database.file.KdbxHeader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.IOException
 
 /**
@@ -107,21 +110,103 @@ class SessionSerializationBufferWipeTest {
     }
 
     @Test
-    fun `三处序列化缓冲清零必须位于 finally 内`() {
-        val source = readSource(SESSION_PERSISTENCE_PATH) + "\n" +
-            readSource(DATABASE_META_COMMITTER_PATH) + "\n" +
-            readSource("database/src/main/java/com/keepasskey/database/session/SessionCredentialRotation.kt")
-        val occurrences = Regex("serialized\\??\\.fill\\(0\\)").findAll(source).toList()
-        assertTrue(
-            "保存 / Meta 事务 / 换密三处 serialized.fill(0) 都必须存在，实测 ${occurrences.size} 处",
-            occurrences.size == 3
-        )
-        occurrences.forEach { match ->
-            val prefix = source.substring(maxOf(0, match.range.first - 400), match.range.first)
-            assertTrue(
-                "清零必须写在 `finally` 内（异常路径才收得到），上下文：…${prefix.takeLast(80)}",
-                prefix.contains("finally")
-            )
+    fun `Meta提交写盘抛异常时序列化缓冲必须已清零`() = runBlocking {
+        val pwd = "Pass#2026".toCharArray()
+        var captured: ByteArray? = null
+        val session = openedSession(pwd) { bytes ->
+            captured = bytes
+            throw IOException("disk full")
+        }
+        try {
+            val db = session.databaseFlow.value!!
+            val result = session.writeIntents.commitDatabaseMeta(db) { it.copy(databaseDescription = "new-meta") }
+            assertTrue(result.isFailure)
+            val buffer = captured
+            assertNotNull("写盘必须被触发一次", buffer)
+            assertAllZero("Meta 提交写盘异常后整库密文缓冲必须清零", buffer!!)
+        } finally {
+            pwd.fill('0')
+            session.close()
+        }
+    }
+
+    @Test
+    fun `预备提交写盘抛异常时预备密文必须已清零`() = runBlocking {
+        val pwd = "Pass#2026".toCharArray()
+        var captured: ByteArray? = null
+        val session = openedSession(pwd) { bytes ->
+            captured = bytes
+            throw IOException("disk full")
+        }
+        val tree = session.databaseFlow.value!!
+        var prepared: PreparedSerializedSave? = null
+        try {
+            val prepResult = session.prepareSerializedSave(tree)
+            assertTrue(prepResult is KdbxResult.Success)
+            val prepData = (prepResult as KdbxResult.Success).data
+            prepared = prepData
+            val prepBytes = prepData.bytes
+            assertFalse(prepBytes.all { it == 0.toByte() })
+
+            val thrown = runCatching {
+                session.commitPreparedSave(
+                    expectedAtCycleStart = tree,
+                    candidate = tree,
+                    prepared = prepData
+                )
+            }.exceptionOrNull()
+            assertNotNull("写盘异常必须抛出", thrown)
+            assertTrue(thrown is IOException)
+
+            val buffer = captured
+            assertNotNull("写盘必须被触发一次", buffer)
+            assertSame("写入者看到的缓冲即预备密文本体", prepBytes, buffer)
+            assertAllZero("预备提交写盘异常后整库密文缓冲必须清零", buffer!!)
+            assertTrue(prepData.isWiped)
+        } finally {
+            prepared?.wipe()
+            pwd.fill('0')
+            session.close()
+        }
+    }
+
+    @Test
+    fun `预备提交写盘收到取消时预备密文必须已清零`() = runBlocking {
+        val pwd = "Pass#2026".toCharArray()
+        var captured: ByteArray? = null
+        val session = openedSession(pwd) { bytes ->
+            captured = bytes
+            throw CancellationException("cancelled during write")
+        }
+        val tree = session.databaseFlow.value!!
+        var prepared: PreparedSerializedSave? = null
+        try {
+            val prepResult = session.prepareSerializedSave(tree)
+            assertTrue(prepResult is KdbxResult.Success)
+            val prepData = (prepResult as KdbxResult.Success).data
+            prepared = prepData
+            val prepBytes = prepData.bytes
+            assertFalse(prepBytes.all { it == 0.toByte() })
+
+            val thrown = runCatching {
+                session.commitPreparedSave(
+                    expectedAtCycleStart = tree,
+                    candidate = tree,
+                    prepared = prepData
+                )
+            }.exceptionOrNull()
+            assertNotNull("取消必须传播", thrown)
+            assertTrue(thrown is CancellationException)
+
+            val buffer = captured
+            assertNotNull("写盘必须被触发一次", buffer)
+            assertSame("写入者看到的缓冲即预备密文本体", prepBytes, buffer)
+            assertAllZero("预备提交写盘取消后整库密文缓冲必须清零", buffer!!)
+            assertTrue(prepData.isWiped)
+        } finally {
+            prepared?.wipe()
+            pwd.fill('0')
+            session.close()
         }
     }
 
@@ -131,34 +216,5 @@ class SessionSerializationBufferWipeTest {
             "$message（首个非零字节下标=$firstNonZero，长度=${bytes.size}）",
             firstNonZero < 0
         )
-    }
-
-    private fun readSource(path: String): String {
-        val file = File(repositoryRoot, path)
-        assertTrue("源码文件不存在（是否被重命名或移动）：$path", file.isFile)
-        return file.readText()
-    }
-
-    private companion object {
-        const val SESSION_PERSISTENCE_PATH =
-            "database/src/main/java/com/keepasskey/database/session/SessionPersistence.kt"
-        const val DATABASE_META_COMMITTER_PATH =
-            "database/src/main/java/com/keepasskey/database/session/DatabaseMetaCommitter.kt"
-        const val ROOT_SEARCH_DEPTH = 6
-
-        /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
-        val repositoryRoot: File by lazy {
-            var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
-            repeat(ROOT_SEARCH_DEPTH) {
-                val candidate = dir ?: return@repeat
-                if (File(candidate, "app/src/main/java").isDirectory &&
-                    File(candidate, "core/src/main/java").isDirectory
-                ) {
-                    return@lazy candidate
-                }
-                dir = candidate.parentFile
-            }
-            error("未能定位仓库根（自 ${System.getProperty("user.dir")} 向上 ${ROOT_SEARCH_DEPTH} 层）")
-        }
     }
 }

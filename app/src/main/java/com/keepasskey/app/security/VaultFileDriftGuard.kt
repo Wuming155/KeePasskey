@@ -56,7 +56,8 @@ internal class VaultFileDriftGuard(
         coordinator?.refreshBaselineAfterPersist(baseline)
     }
 
-    private fun isDrifted(pathIdentifier: String, localFile: File?): Boolean =
+    /** ENG-20261027-01：暴露只读漂移检测，供统一写边界与自动锁定守卫复用统一判据（不唤起三选提示）。 */
+    internal fun isDrifted(pathIdentifier: String, localFile: File?): Boolean =
         if (localFile != null) {
             coordinator?.checkDrift(pathIdentifier = pathIdentifier, localFile = localFile) == true
         } else {

@@ -276,6 +276,8 @@
 
     <!-- Icon Picker -->
     <string name="icon_picker_title">Select Icon</string>
+    <string name="icon_picker_selected">Selected</string>
+    <string name="icon_picker_not_selected">Not selected</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -1007,6 +1009,7 @@
     <string name="err_passkey_entry_not_found">Passkey entry not found (it may have been deleted)</string>
     <string name="err_recovery_payload_corrupt">Recovery copy is missing or corrupted; not adopted automatically</string>
     <string name="err_recovery_unlock_failed">Failed to unlock the recovery copy (wrong credentials or missing key file)</string>
+    <string name="err_recovery_preview_budget_exceeded">Attachment too large to compare differences byte-by-byte; please save a copy first and check manually</string>
     <string name="err_recovery_local_only">This vault is not a local file; in-place restore is unsupported — use Save as instead</string>
     <string name="err_recovery_overwrite_blocked">The official vault already exists; compare differences and confirm before overwriting</string>
     <string name="err_recovery_write_failed">Failed to write the recovery copy</string>
@@ -1507,6 +1510,7 @@
     <string name="import_error_malformed">The file is malformed or corrupted</string>
     <string name="import_error_io">Failed to read the selected file</string>
     <string name="import_error_persist">Failed to write the imported entries into the vault</string>
+    <string name="import_error_session_changed">The vault session has changed; import stopped. Select the target vault again and retry.</string>
 
     <!-- ===== ISSUE-P3-19: import result report and warning categories ===== -->
     <!-- Hard constraint: the report shows COUNTS and MACHINE-READABLE locators only
@@ -1523,6 +1527,8 @@
     <string name="import_report_counts">%1$d added, %2$d updated, %3$d skipped, %4$d failed</string>
     <string name="import_report_source_skipped">%1$d more item(s) in the source were not processed (for example non-login types)</string>
     <string name="import_report_recycled">%1$d of them were moved to the recycle bin</string>
+    <string name="import_report_recycle_incomplete">%1$d of them were saved, but not yet moved to the recycle bin; please verify in the original vault.</string>
+    <string name="import_report_session_changed">The vault session has changed; import stopped, %1$d item(s) not processed. Previously saved changes remain in the original vault.</string>
     <string name="import_report_empty">Nothing was imported: the source has no mappable login items</string>
     <string name="import_report_warnings_title">Warnings (%1$d)</string>
     <!-- %1$s=locator %2$s=category text -->

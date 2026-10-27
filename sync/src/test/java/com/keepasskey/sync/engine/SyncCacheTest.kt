@@ -4,9 +4,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assume
 import org.junit.Rule
@@ -16,6 +18,10 @@ import java.io.File
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 /**
  * SyncCache 单元测试（TASK-40 补强之一 + TASK-37 回归锁）：
@@ -404,5 +410,71 @@ class SyncCacheTest {
             emptyList<String>(),
             tmpLeftovers
         )
+    }
+
+    // ===== ENG-20261027-04：clear 之后跨实例协调锁身份稳定性与互斥行为验证 =====
+
+    @Test
+    fun `clear 之后不同实例间仍共享协调锁并保持互斥`() {
+        val dir = tmpFolder.newFolder("lock-coord-after-clear")
+        val cacheA = SyncCache(dir)
+        val cacheB = SyncCache(dir)
+        val cacheC = SyncCache(dir)
+        val remotePath = "remote/vault.kdbx"
+        val payloadC = "data-C".toByteArray()
+
+        cacheA.writeCache(remotePath, "seed-data".toByteArray())
+        cacheA.clear(remotePath)
+
+        assertSame(
+            "clear 后 B 与 C 仍映射到相同的协调锁",
+            cacheB.pathLock(remotePath),
+            cacheC.pathLock(remotePath)
+        )
+
+        val bAcquired = CountDownLatch(1)
+        val releaseB = CountDownLatch(1)
+        val cCompleted = CountDownLatch(1)
+        val cFinished = AtomicBoolean(false)
+
+        val threadB = thread(name = "after-clear-holder-B") {
+            try {
+                synchronized(cacheB.pathLock(remotePath)) {
+                    bAcquired.countDown()
+                    releaseB.await(5, TimeUnit.SECONDS)
+                }
+            } finally {
+                bAcquired.countDown()
+            }
+        }
+
+        val threadC = thread(name = "after-clear-writer-C") {
+            try {
+                bAcquired.await(5, TimeUnit.SECONDS)
+                cacheC.writeCache(remotePath, payloadC)
+                cFinished.set(true)
+            } finally {
+                cCompleted.countDown()
+            }
+        }
+
+        try {
+            assertTrue(bAcquired.await(5, TimeUnit.SECONDS))
+            val deadline = System.currentTimeMillis() + 5000
+            while (threadC.state != Thread.State.BLOCKED) {
+                if (System.currentTimeMillis() > deadline) {
+                    error("线程 C 未能在超时内进入 BLOCKED 状态，实际=${threadC.state}")
+                }
+                Thread.yield()
+            }
+            assertFalse("B 持锁期间 C 必须阻塞等待", cFinished.get())
+        } finally {
+            releaseB.countDown()
+            threadB.join(5000)
+            threadC.join(5000)
+        }
+
+        assertTrue("释放锁后 C 写入完成", cCompleted.await(5, TimeUnit.SECONDS))
+        assertArrayEquals(payloadC, cacheC.readCache(remotePath))
     }
 }
