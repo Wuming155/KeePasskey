@@ -30,6 +30,10 @@ data class EntryTextDisplay(
  *
  * 引用检索只需要扁平的条目集合，故以合成根分组承载 [loadEntries] 的结果——
  * 与真实根分组 `allEntries()` 的检索语义等价（引擎只经 `root.allEntries()` 检索）。
+ *
+ * `ENG-20261028-11`：[loadEntries] 由调用方以**租约作用域读口**实现（
+ * `VaultRepository.withAllKdbxEntries { }` 形态），使「取快照 → 引用解析」处在同一个读租约内；
+ * 本类自身不登记租约（它只消费调用方给的快照，无法决定快照的使用期）。
  */
 class EntryReferenceDisplayResolver(
     private val loadEntries: suspend () -> List<KdbxEntry>,

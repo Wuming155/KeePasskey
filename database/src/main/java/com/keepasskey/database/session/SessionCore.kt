@@ -12,7 +12,14 @@ import java.io.File
  * 字段与拆分前的 `_state` / `_database` / `activeFile` / `activePathIdentifier` /
  * `saveWriter` / `readOnlyMode` 一一对应，语义不变。
  */
-internal class SessionCore {
+internal class SessionCore(
+    /**
+     * `ENG-20261028-18`：实例级密文复制策略（生产默认标准克隆）。
+     * 允许测试在受控的会话实例上注入合成 OutOfMemoryError 或复制故障，
+     * 验证异常安全与作废收口，避免跨测试全局 mutable hook。
+     */
+    private val baselineCloner: (ByteArray) -> ByteArray = { it.clone() }
+) {
 
     /** 仅在会话 mutex 内更新；受理方只读已发布的不可变票据。 */
     @Volatile
@@ -61,9 +68,13 @@ internal class SessionCore {
      * `ISSUE-P1-631`：最后确认持久化版本的整库密文快照（漂移合并的真实共同基线）。
      *
      * 写入点全部位于会话 Mutex 内的**确认写盘**收尾（打开 / 重载 / 新建 / 保存 /
-     * Meta 提交 / 凭据轮换）或会话终止路径；读取经 [DatabaseSession.persistedBaselineSnapshot]。
-     * 快照是整库密文的独立副本——与序列化缓冲同属会话派生敏态数据，会话终止（换库前置释放 /
-     * 锁定 / 关闭）时必须**先清零再置空**，不得留给 GC。
+     * Meta 提交 / 凭据轮换）或会话终止路径；登记失败时由
+     * [invalidatePersistedBaselineAfterFailedRetain] 作废旧值（`ENG-20261028-18`）。
+     * 读取经 [DatabaseSession.persistedBaselineSnapshot]。
+     *
+     * 快照属会话派生敏态数据，会话终止（换库前置释放 / 锁定 / 关闭）时必须**先清零再置空**，
+     * 不得留给 GC。形态有两种登记入口：[retainPersistedBaseline] 交付**独立副本**，
+     * [retainPersistedBaselineOwned] 则**接管调用方缓冲本体**（少一次整库拷贝，见其 KDoc）。
      */
     private var persistedBaseline: ByteArray? = null
 
@@ -80,15 +91,51 @@ internal class SessionCore {
      * 检出（宁可误中止，不可静默以过期基线提交）。
      *
      * **异常安全（先克隆后替换）**：克隆在**触碰旧值之前**完成——若克隆失败（如 OOM），
-     * 旧基线保持**原值与原修订**（状态仍是自洽的既有登记），绝不会留下「已被清零、但修订未
-     * 前移」的半损坏状态（那会让下游读到全零字节却误认为仍是有效基线）。
+     * 旧基线保持**原值与原修订**，本方法如实抛出；调用方（`retainPersistedBaselineBestEffort`）
+     * 随后必须作废旧基线，绝不留下「已成功写盘却仍指向旧版本」的可信基线。
      */
     fun retainPersistedBaseline(bytes: ByteArray?, pathIdentifier: String?) {
-        val replacement = bytes?.clone()
+        val replacement = bytes?.let(baselineCloner)
         persistedBaseline?.fill(0)
         persistedBaseline = replacement
         persistedBaselinePathValue = pathIdentifier
         persistedBaselineRevisionValue += 1
+    }
+
+    /**
+     * `ENG-20261028-18`：**所有权移交式**登记——会话接管 [bytes] 本体的所有权，调用方此后
+     * **不得再读写或清零**该数组。
+     *
+     * 与 [retainPersistedBaseline] 的克隆形态相比，本入口不再产生第二份整库密文副本：
+     * 保存链写盘成功后，那份缓冲的唯一用途就是充当基线，克隆它只换来一次整库分配与拷贝
+     * （大库为百 MiB 量级）。移交后缓冲的清零点仍是「替换登记 / 清除 / 会话终止」，
+     * 与克隆形态逐字相同，所有权契约不变。
+     *
+     * 本方法**不做分配**（引用赋值 + 旧缓冲就地清零），因此不会像克隆形态那样因内存不足抛出；
+     * [bytes] 为 null 时与 [retainPersistedBaseline] 同义（作废旧基线）。
+     */
+    fun retainPersistedBaselineOwned(bytes: ByteArray?, pathIdentifier: String?) {
+        if (bytes === persistedBaseline) {
+            persistedBaselineRevisionValue += 1
+            return
+        }
+        val previous = persistedBaseline
+        persistedBaseline = bytes
+        persistedBaselinePathValue = pathIdentifier
+        persistedBaselineRevisionValue += 1
+        previous?.fill(0)
+    }
+
+    /**
+     * `ENG-20261028-18`：持久化基线**登记失败**后的收口——作废旧基线并前移修订。
+     *
+     * 为什么必须作废而不是保留旧值：调用点在「写盘已确认成功」之后，此刻旧基线对应的是
+     * **上一个**持久化版本；留着它，漂移 / 同步合并就会把过期内容当共同底版（正是本条缺陷
+     * 登记的「旧基线冒充最新持久化版本」）。作废后下游按「无可信基线」走保守并集语义，
+     * 且修订前移会令在途校验 fail-closed。清除本身不分配，故本方法是登记的失败终点。
+     */
+    fun invalidatePersistedBaselineAfterFailedRetain() {
+        clearPersistedBaseline()
     }
 
     /** 会话终止 / 换库前置释放：先清零快照再置空（修订同样前移，令在途校验失效） */

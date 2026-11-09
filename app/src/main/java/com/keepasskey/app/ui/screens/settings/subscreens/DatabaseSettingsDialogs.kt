@@ -34,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.importer.ImportSource
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * 密码库设置页的功能对话框（原 DatabaseSettingsScreen 内联对话框整体搬移）。
@@ -59,6 +60,7 @@ internal fun DatabaseTemplatesDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_templates_dialog_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = stringResource(R.string.dbset_templates_dialog_desc),
@@ -112,6 +114,7 @@ internal fun ExportDatabaseDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_export_dialog_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = stringResource(R.string.dbset_export_dialog_warning),
@@ -200,6 +203,7 @@ internal fun ImportSourceDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_import_dialog_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 options.forEach { (source, labelRes) ->
                     val label = stringResource(labelRes)

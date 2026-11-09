@@ -14,6 +14,7 @@ import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.ProtectedString
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +61,13 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     @Inject
     lateinit var privilegedBrowserStore: com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 
+    /**
+     * ENG-20261028-05：通道开关在签发边界的复核来源。公钥断言同时受 CM 通道总开关与
+     * 「通行密钥支持」开关约束（判定表见 [CredentialDeliveryChannelGate]）。
+     */
+    @Inject
+    lateinit var settingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore
+
     /** 防止验证回调 / 取消回调 / 重复 finish 交错产生多重签发或重复收尾 */
     private var settled = false
 
@@ -67,6 +75,12 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         super.onCreate(savedInstanceState)
 
         if (!credentialSessionGate.bind(intent, CredentialEntryRequestType.PASSKEY_ASSERTION)) {
+            failAndFinish()
+            return
+        }
+        // ENG-20261028-05：通道开关前置复核（代价最低）——候选呈现后用户可能已关闭通道，
+        // 此时既不该解析请求也不该拉起验证弹窗。签发前另有同判据复核（见 [signAndReturn]）。
+        if (rejectsClosedChannel()) {
             failAndFinish()
             return
         }
@@ -103,6 +117,21 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         }
     }
 
+    /**
+     * ENG-20261028-05：公钥通道的开关复核。
+     *
+     * 公钥交付同时受 CM 通道总开关与「通行密钥支持」开关约束（判定表见
+     * [CredentialDeliveryChannelGate]）：总开关关闭时即使通行密钥开关仍开启也不得签发。
+     */
+    private fun rejectsClosedChannel(): Boolean {
+        val closed = !CredentialDeliveryChannelGate.allowsPasskeyDelivery(
+            credentialProviderEnabled = settingsStore.isCredentialProviderEnabled(),
+            passkeySupportEnabled = settingsStore.isPasskeySupportEnabled()
+        )
+        if (closed) AppLog.w(TAG, "凭据管理器通道或通行密钥支持已在设置中关闭，拒绝签发 Passkey 断言")
+        return closed
+    }
+
     /** 库状态 / 条目 / Passkey 字段核对，通过后进入 origin 绑定门控与用户验证 */
     private suspend fun performAssertion(context: PasskeyAssertionContext) {
         if (vaultRepository.isLocked()) {
@@ -111,36 +140,80 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             return
         }
 
-        // ISSUE-P2-341：断言执行侧同样只认「可用条目」——候选列出了却不给签是困惑，
-        // 但反过来"删掉了还能签"是越出用户意图；本行保证两侧口径一致。
-        val allEntries = vaultRepository.getUsableKdbxEntries()
-        val entry = allEntries.firstOrNull { it.id.toHexString() == context.entryId }
-        if (entry == null) {
-            // ISSUE-P1-10：日志不得携带 entryId 等敏感标识
-            AppLog.e(TAG, "未找到目标条目")
-            failAndFinish()
-            return
-        }
+        // `ENG-20261028-11`：读租约**只覆盖「取条目 → 读字段 → 复制私钥」这一段**（见
+        // [copyPasskeySecretsUnderLease]）。私钥 / PRF 在租约内被复制成本流程独占的
+        // `ProtectedString` 后立即撤租——用户验证可挂起任意久，持租约会把全进程的下线实例
+        // 回收一起拖住；签名与计数器写入都只依赖该独占副本，不再读库内实例。
+        val owned = copyPasskeySecretsUnderLease(context) ?: return
+        requestAssertionUserVerification(context, owned)
+    }
 
-        val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
-        if (passkeyData == null ||
-            (context.allowedCredentialIds.isNotEmpty() && passkeyData.credentialId !in context.allowedCredentialIds)) {
-            AppLog.e(TAG, "条目不含有效的 Passkey 或不在最终请求允许列表内")
-            failAndFinish()
-            return
-        }
+    /**
+     * 在一条读租约内完成「取条目 → 校验 → 复制私钥 / PRF 独占副本」，块结束即释放租约。
+     *
+     * 返回 `null` 表示本次断言已按既有口径收尾（失败 / 拒绝），调用方直接返回即可。
+     * 之所以不把租约延到用户验证之后：验证可挂起任意久，持租约会把全进程的下线实例回收
+     * 一起拖住；私钥已复制为独占副本，此后的签名不再依赖库内实例。
+     */
+    private suspend fun copyPasskeySecretsUnderLease(context: PasskeyAssertionContext): PasskeyData? {
+        val lease = vaultRepository.acquireEntriesReadLease()
+        try {
+            // ISSUE-P2-341：断言执行侧同样只认「可用条目」——候选列出了却不给签是困惑，
+            // 但反过来"删掉了还能签"是越出用户意图；本行保证两侧口径一致。
+            val allEntries = vaultRepository.getUsableKdbxEntries()
+            val entry = allEntries.firstOrNull { it.id.toHexString() == context.entryId }
+            if (entry == null) {
+                // ISSUE-P1-10：日志不得携带 entryId 等敏感标识
+                AppLog.e(TAG, "未找到目标条目")
+                failAndFinish()
+                return null
+            }
 
-        // F4 整改：origin 缺失一律拒绝签发（fail-closed），不得以 RP ID 冒充 web origin
-        if (context.origin.isBlank()) {
-            AppLog.e(TAG, "缺少调用来源 origin，拒绝签发断言")
-            failAndFinish()
-            return
+            val passkeyData = PasskeyData.fromCustomFields(entry.customFields)
+            if (passkeyData == null ||
+                (context.allowedCredentialIds.isNotEmpty() &&
+                    passkeyData.credentialId !in context.allowedCredentialIds)
+            ) {
+                AppLog.e(TAG, "条目不含有效的 Passkey 或不在最终请求允许列表内")
+                failAndFinish()
+                return null
+            }
+
+            // F4 整改：origin 缺失一律拒绝签发（fail-closed），不得以 RP ID 冒充 web origin
+            if (context.origin.isBlank()) {
+                AppLog.e(TAG, "缺少调用来源 origin，拒绝签发断言")
+                failAndFinish()
+                return null
+            }
+            if (!authorizeAssertion(context, passkeyData, entry.url)) {
+                return null
+            }
+            // 私钥 / PRF 秘密复制为独占副本：此后即使库内实例被回收，签名仍可用本副本完成
+            return passkeyData.withOwnedSecrets()
+        } finally {
+            lease.close()
         }
-        if (!passesOriginBinding(context, passkeyData, entry.url)) {
-            rejectUntrustedCaller(context)
-            return
+    }
+
+    /**
+     * 把私钥与 PRF 秘密复制为**本流程独占**的 `ProtectedString`（按字节通道读出即封存，不留明文中间量）。
+     *
+     * 用途：用户验证可挂起任意久，签名时不能再依赖库内实例（租约已在复制后释放）。
+     * 本副本只由本流程持有，签名结束 / 拒签时经 [releaseOwnedSecrets] 显式擦除。
+     */
+    private fun PasskeyData.withOwnedSecrets(): PasskeyData = copy(
+        privateKey = usePrivateKeyBytes { bytes -> ProtectedString(bytes = bytes) },
+        prfSecret = prfSecret?.let { secret -> secret.useUtf8 { bytes -> ProtectedString(bytes = bytes) } },
+        prfNoUvSecret = prfNoUvSecret?.let { secret ->
+            secret.useUtf8 { bytes -> ProtectedString(bytes = bytes) }
         }
-        requestAssertionUserVerification(context, passkeyData)
+    )
+
+    /** 擦除 [withOwnedSecrets] 复制的独占副本（不影响库内条目实例）。 */
+    private fun releaseOwnedSecrets(data: PasskeyData) {
+        data.privateKey.clear()
+        data.prfSecret?.clear()
+        data.prfNoUvSecret?.clear()
     }
 
     /**
@@ -176,44 +249,128 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     }
 
     /**
-     * H1 整改：签名前二次校验 origin 与凭据 RP-ID / 绑定包名的关系。
-     * 包名维度还须通过调用方**签名绑定**门控（ISSUE-P2-83）。
+     * 签发前的**授权裁决 + 拒绝呈现**（`ENG-20261028-06`）。
+     *
+     * 返回 `true` 表示授权成立、可以继续用户验证与签发；返回 `false` 表示本次断言已按
+     * 对应原因在受保护窗口内呈现并收尾（或静默收尾），调用方直接返回即可。
+     *
+     * ## 判定顺序（先结构、后授权）
+     *
+     * 1. **请求 RP 与凭据 RP**：请求自报的 RP 与凭据不符 ⇒ 拒绝（与调用方身份无关）；
+     * 2. **归属复校**：浏览器走 origin ⇄ 凭据 RP；原生要求条目 `android://<包名>` 等于系统背书的
+     *    调用包名。失败即拒绝——此时连「哪把密钥归谁」都不成立，给授权入口只会误导；
+     * 3. **调用方签名授权**（原生）：包名相同**不**等于已授权，签名绑定是唯一参照，
+     *    与请求是否声明 RP 无关（请求 JSON 由调用方自报）。三类结果：
+     *    - `ALLOWED`：继续；
+     *    - `CALLER_UNBOUND`：呈现原因 + **登记此应用签名**的就地补救；
+     *    - `CALLER_BINDING_REJECTED`：呈现原因，**不提供**任何重绑入口。
+     *
+     * 第 1、2 步拒绝沿用 `ISSUE-P2-530` 的收尾口径（[rejectUntrustedCaller]：调用方确为
+     * 未入名单的浏览器时给出就地补救，其余静默）。第 3 步才使用 `ENG-20261028-06` 的新原因。
+     * 浏览器缺 RP 不进入第 3 步：WebAuthn 缺省 `rpId` 即 origin 的有效域，归属由第 2 步锚定。
      */
-    private fun passesOriginBinding(
+    private fun authorizeAssertion(
         context: PasskeyAssertionContext,
         passkeyData: PasskeyData,
         entryUrl: String
     ): Boolean {
-        if (!PasskeyRequestRpBinding.matches(context.requestRpId, passkeyData.relyingPartyId)) {
+        val browserFlow = CallingOriginResolver.isBrowserOrigin(context.origin)
+        val certDigests = context.providerReq?.callingAppInfo
+            ?.let { CallingOriginResolver.certDigests(it) }
+            ?: CallerCertDigests.EMPTY
+        // 第 1 步：请求 RP 与凭据 RP 的精确对照（两条通道同一口径）
+        if (PasskeyRequestRpBinding.evaluate(context.requestRpId, passkeyData.relyingPartyId) ==
+            RequestRpBinding.MISMATCHED
+        ) {
             AppLog.e(TAG, "请求 RP 与凭据 RP 不一致，拒绝签发断言")
+            // 沿用 ISSUE-P2-530 的收尾口径：调用方确为未入名单的浏览器时给出就地补救，
+            // 其余情形（原生应用 / 已启用浏览器 / 真不匹配）保持静默
+            rejectUntrustedCaller(context)
             return false
         }
-        if (CallingOriginResolver.isBrowserOrigin(context.origin)) {
+        // 第 2 步：归属复校
+        if (browserFlow) {
             val originHost = DomainMatcher.extractDomain(context.origin)
             if (originHost.isEmpty() ||
                 !DomainMatcher.isDomainMatch(passkeyData.relyingPartyId, originHost)
             ) {
                 AppLog.e(TAG, "origin 与凭据 RP-ID 不匹配，拒绝签发断言")
+                rejectUntrustedCaller(context)
                 return false
             }
             return true
         }
         val boundPackage = DomainMatcher.extractAndroidBoundPackage(entryUrl)
-        val packageDimensionAllowed = CredentialManagerPackageBindingGate.allowsPackageDimension(
+        if (context.expectedPackage.isBlank() ||
+            boundPackage != context.expectedPackage.trim().lowercase()
+        ) {
+            AppLog.e(TAG, "调用包名与凭据绑定包名不一致，拒绝签发断言")
+            // 同上：非白名单浏览器（origin 已退化为 apk-key-hash、条目为 Web 绑定时）
+            // 仍要拿到「加入特权名单」的就地补救（ISSUE-P2-530）
+            rejectUntrustedCaller(context)
+            return false
+        }
+        // 第 3 步：原生调用的签名授权（web 调用已在第 2 步以 origin 锚定并返回）
+        val callerBinding = CredentialManagerPackageBindingGate.decide(
             callingPackage = context.expectedPackage,
-            certDigests = context.providerReq?.callingAppInfo
-                ?.let { CallingOriginResolver.certDigests(it) }
-                ?: CallerCertDigests.EMPTY,
+            certDigests = certDigests,
             isTrusted = callerTrustStore::isTrusted,
             hasAnyBinding = callerTrustStore::hasAnyBindingFor
         )
-        if (context.expectedPackage.isBlank() || !packageDimensionAllowed ||
-            boundPackage != context.expectedPackage.trim().lowercase()
-        ) {
-            AppLog.e(TAG, "调用包名与凭据绑定包名不一致或签名未绑定，拒绝签发断言")
-            return false
+        val verdict = PasskeyRpAuthorization.evaluate(
+            requestRpId = context.requestRpId,
+            credentialRpId = passkeyData.relyingPartyId,
+            browserFlow = false,
+            callerBinding = callerBinding
+        )
+        // ISSUE-P1-10：只记裁决类别，不记 rpId / 包名 / 凭据标识
+        return when (verdict) {
+            PasskeyRpVerdict.ALLOWED -> true
+            PasskeyRpVerdict.RP_MISMATCH -> {
+                // 理论上已在第 1 步拦下；保留 fail-closed 分支，避免未来调整顺序时静默放行
+                AppLog.e(TAG, "签发授权裁决未通过（${verdict.name}），拒绝签发断言")
+                failAndFinish()
+                false
+            }
+            PasskeyRpVerdict.CALLER_UNBOUND,
+            PasskeyRpVerdict.CALLER_BINDING_REJECTED -> {
+                AppLog.w(TAG, "签发授权裁决未通过（${verdict.name}）")
+                rejectCallerSignature(context, certDigests, verdict)
+                false
+            }
         }
-        return true
+    }
+
+    /**
+     * 原生调用方的签名裁决拒绝（`ENG-20261028-06`）。
+     *
+     * [PasskeyRpVerdict.CALLER_UNBOUND] 给出「登记此应用签名」的就地补救
+     * （[CallerSignatureRemedyBuilder]，资格与 fail-closed 前提在构建器内）；
+     * [PasskeyRpVerdict.CALLER_BINDING_REJECTED] **不构造**补救——已登记而签名不符时
+     * 就地重绑等于让顶替者自证身份，故只呈现原因。
+     */
+    private fun rejectCallerSignature(
+        context: PasskeyAssertionContext,
+        certDigests: CallerCertDigests,
+        verdict: PasskeyRpVerdict
+    ) {
+        val reason = when (verdict) {
+            PasskeyRpVerdict.CALLER_UNBOUND -> CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND
+            else -> CredentialRejectionReason.CALLER_SIGNATURE_MISMATCH
+        }
+        val remedy = if (verdict.authorizeCallerInWindow) {
+            CallerSignatureRemedyBuilder.build(
+                context = this,
+                store = callerTrustStore,
+                reason = reason,
+                callerPackage = CallingOriginResolver.systemAttestedPackageName(context.providerReq?.callingAppInfo),
+                certDigests = certDigests,
+                scope = lifecycleScope
+            )
+        } else {
+            null
+        }
+        rejectAndFinish(reason, remedy, R.string.cred_reject_get_title)
     }
 
     /**
@@ -235,7 +392,11 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             cancelText = getString(R.string.passkey_confirm_cancel),
             requireBiometric = context.requireBiometric,
             onVerified = { verification ->
-                if (settled) return@requestCredentialUserVerification
+                if (settled) {
+                    // 本流程已收尾：租约外复制的私钥 / PRF 副本不能再留在内存里等 GC
+                    releaseOwnedSecrets(passkeyData)
+                    return@requestCredentialUserVerification
+                }
                 settled = true
                 signAndReturn(
                     entryId = context.entryId,
@@ -249,9 +410,14 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 )
             },
             onRejected = {
-                if (settled) return@requestCredentialUserVerification
+                if (settled) {
+                    releaseOwnedSecrets(passkeyData)
+                    return@requestCredentialUserVerification
+                }
                 settled = true
                 AppLog.w(TAG, "用户验证未通过，拒绝签发 Passkey 断言")
+                // 私钥 / PRF 独占副本随本次拒签一并擦除（库内实例不受影响）
+                releaseOwnedSecrets(passkeyData)
                 failAndFinish()
             }
         )
@@ -275,6 +441,12 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
     ) {
         lifecycleScope.launch {
             try {
+                // ENG-20261028-05：用户验证挂起期间通道仍可能被关闭——签名与计数器落盘前复核，
+                // 关闭即拒签（也不推进签名计数器，避免为一次不交付的断言留下副作用）。
+                if (rejectsClosedChannel()) {
+                    failAndFinish()
+                    return@launch
+                }
                 // fail-closed 兜底：凡不可签发的验证结果（理论不可达）一律拒绝产出断言
                 val flags = PasskeyAuthFlags.forAssertion(
                     verification = verification,
@@ -326,20 +498,38 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                     )
                 }
 
+                // ENG-20261028-05：签名与计数器落库都是挂起点，通道可能在期间被关闭——**交付前**
+                // 再按本次值判定一次并紧贴 setResult（其后只剩票据窄锁）。计数器已经提交，
+                // 但断言不交给已关闭的通道：RP 侧至多看到一次计数跳跃，不会拿到本应被拒的签名。
+                if (rejectsClosedChannel()) {
+                    failAndFinish()
+                    return@launch
+                }
+
                 // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP
                 // ISSUE-P3-298 ⑥：回传成功 = 用户真实选用了本条目，记录上次使用时刻
                 val resultIntent = Intent()
                 val response = GetCredentialResponse(PublicKeyCredential(assertionJson))
                 PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
-                if (!credentialSessionGate.complete {
+                // ENG-20261028-05：交付在**票据窄锁内**完成；通道开关在锁内最后再判一次，
+                // 覆盖「等待窄锁期间用户关闭通道」这一挂起窗口（块内只允许同步代码，故判定与
+                // setResult 之间不存在新的挂起点）。不交付时按取消收尾，绝不回传 RESULT_OK。
+                var delivered = false
+                val accepted = credentialSessionGate.complete {
+                    if (rejectsClosedChannel()) return@complete
+                    delivered = true
                     credentialLastUsedStore.record(entryId)
                     setResult(RESULT_OK, resultIntent)
                     finish()
-                }) failAndFinish()
+                }
+                if (!accepted || !delivered) failAndFinish()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 认证执行失败", t)
                 failAndFinish()
+            } finally {
+                // 签名已完成（或失败）：本流程独占的私钥 / PRF 副本到此退出
+                releaseOwnedSecrets(passkeyData)
             }
         }
     }

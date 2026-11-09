@@ -15,7 +15,9 @@ import javax.xml.parsers.DocumentBuilderFactory
 /**
  * WebDAV PROPFIND (multistatus) 响应解析与 HTTP 日期解析（RFC 4918）。
  *
- * 集中承载 DOM 解析、XXE 纵深防御与「解析失败回退空元数据」语义；
+ * 集中承载 DOM 解析、XXE 纵深防御与「解析失败即失败」语义：两种通道必须分开——
+ * - **解析失败**（空白 / XML 损坏或截断 / 根元素不是 multistatus）→ [parse] 返回 null；
+ * - **属性缺失**（报文合法但没有对应 DAV 属性节点）→ 返回成功，由各字段哨兵值表达。
  * 日志 tag 与原实现保持一致（"WebDavSyncProvider"）。
  */
 internal object WebDavPropfindParser {
@@ -50,9 +52,18 @@ internal object WebDavPropfindParser {
         val isDirectory: Boolean
     )
 
-    fun parse(xml: String): ParsedPropfind {
+    /**
+     * 解析 Depth:0 元数据响应。
+     *
+     * @return 报文不是可采信的 multistatus 时返回 **null**——空白体、XML 损坏/截断、
+     *   被网关替换成 HTML 错误页等形态都必须由调用方按失败处理，**不得折成「属性缺失」**：
+     *   折空会让上层把「远端元数据不可知」当成「远端没有 ETag」，进而沿无锁路径覆盖他端写入。
+     *   报文合法但缺属性仍是成功（各字段走空串 / -1 / 0 哨兵，调用方可回退可信 HTTP 头）。
+     */
+    fun parse(xml: String): ParsedPropfind? {
         if (xml.isBlank()) {
-            return ParsedPropfind("", -1L, 0L, false)
+            AppLog.w(TAG, "PROPFIND 响应为空，按解析失败处理（不折成空元数据）")
+            return null
         }
         return try {
             // L2 整改：与 KdbxXmlParser 同级的 XXE 纵深防御——防御恶意/被劫持的 WebDAV 服务端
@@ -62,6 +73,10 @@ internal object WebDavPropfindParser {
             val builder = newHardenedBuilder()
             val doc = builder.parse(xml.byteInputStream())
             val root = doc.documentElement
+            if (root == null || !isMultistatusRoot(root)) {
+                AppLog.w(TAG, "PROPFIND 响应根元素不是 multistatus，按解析失败处理（不折成空元数据）")
+                return null
+            }
 
             val etagNodes = findNodes(root, "getetag")
             val etag = etagNodes.firstOrNull()?.textContent?.trim().orEmpty().cleanEtag()
@@ -81,14 +96,14 @@ internal object WebDavPropfindParser {
 
             ParsedPropfind(etag, contentLength, lastModifiedMillis, isDirectory)
         } catch (e: Throwable) {
-            // P3-17 整改：解析失败至少落日志，不再静默吞掉（回退空元数据语义保留，
-            // 由调用方按「缺失」回退 HTTP 头哨兵处理）。
             // ISSUE-P0-09：捕获面扩到 Throwable——超深 XML 的 StackOverflowError 等属于
             // Error 而非 Exception，仅捕 Exception 时 Error 穿透 provider 的 runCatching
             // （会包成 Result.failure）经引擎 getOrThrow 原样重抛、杀死进程；远端（或
-            // 系统 CA 级 MITM）可单方面构造该响应，必须在解析边界就地遏制为「回退空元数据」
-            AppLog.w(TAG, "PROPFIND 响应 XML 解析失败，回退空元数据", e)
-            ParsedPropfind("", -1L, 0L, false)
+            // 系统 CA 级 MITM）可单方面构造该响应，必须在解析边界就地遏制。
+            // ENG-20261028-32：遏制后返回 null（解析失败），不再回退空元数据——后者会让
+            // 「远端元数据不可知」伪装成「远端没有 ETag」。
+            AppLog.w(TAG, "PROPFIND 响应 XML 解析失败（按失败处理，不折成空元数据）", e)
+            null
         }
     }
 
@@ -107,8 +122,7 @@ internal object WebDavPropfindParser {
             val builder = newHardenedBuilder()
             val doc = builder.parse(xml.byteInputStream())
             val root = doc.documentElement
-            val rootName = root.localName ?: root.nodeName.substringAfter(':')
-            if (!rootName.equals("multistatus", ignoreCase = true)) return null
+            if (root == null || !isMultistatusRoot(root)) return null
 
             val responses = findNodes(root, "response")
             // multistatus 合法但零 response：视为真空目录（服务端明确列举无子项）
@@ -138,6 +152,15 @@ internal object WebDavPropfindParser {
             AppLog.w(TAG, "PROPFIND 目录列举响应解析失败（保守降级为失败，不伪装空目录）", e)
             null
         }
+    }
+
+    /**
+     * 根元素是否为 `DAV:multistatus`（按 localName 忽略大小写，兼容任意命名空间前缀与无前缀形态）。
+     * 非 multistatus 的 207/200 报文（典型如被网关替换的 HTML 错误页）一律不作为元数据采信。
+     */
+    private fun isMultistatusRoot(root: Node): Boolean {
+        val rootName = root.localName ?: root.nodeName.substringAfter(':')
+        return rootName.equals("multistatus", ignoreCase = true)
     }
 
     /**

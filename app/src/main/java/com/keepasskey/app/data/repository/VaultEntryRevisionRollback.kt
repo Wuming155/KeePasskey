@@ -38,16 +38,18 @@ internal class VaultEntryRevisionRollback(
 
     /** 回滚 [entryId] 到 [revisionHandle] 指向的历史快照（句柄语义见 [EntryRevisionHandle]）。 */
     suspend fun rollback(entryId: String, revisionHandle: String): KdbxResult<Unit> =
-        withContext(Dispatchers.Default) {
-            val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@withContext unavailable(entryId)
-            val db = databaseSession.databaseFlow.first() ?: return@withContext unavailable(entryId)
-            val entry = db.rootGroup.findEntry(targetUuid) ?: return@withContext unavailable(entryId)
-            val located = EntryRevisionHandle.resolve(entry.history, revisionHandle)
-                ?: return@withContext unavailable(entryId)
+        databaseSession.withWriteAcceptance {
+            withContext(Dispatchers.Default) {
+                val targetUuid = parseKdbxUuidOrNull(entryId) ?: return@withContext unavailable(entryId)
+                val db = databaseSession.databaseFlow.first() ?: return@withContext unavailable(entryId)
+                val entry = db.rootGroup.findEntry(targetUuid) ?: return@withContext unavailable(entryId)
+                val located = EntryRevisionHandle.resolve(entry.history, revisionHandle)
+                    ?: return@withContext unavailable(entryId)
 
-            val restored = restoreFrom(db, entry, located)
-            databaseSession.saveEntry(restored)
-            persistSession()
+                val restored = restoreFrom(db, entry, located)
+                databaseSession.saveEntry(restored)
+                persistSession()
+            }
         }
 
     /**

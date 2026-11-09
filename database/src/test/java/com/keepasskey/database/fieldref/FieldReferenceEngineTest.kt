@@ -254,6 +254,87 @@ class FieldReferenceEngineTest {
         assertFalse(resolved.contains("deep_secret"))
     }
 
+    // ===== ENG-20261028-13：口令检索面（`SearchIn=P`）不物化全库口令索引 =====
+
+    @Test
+    fun `口令检索命中目标后不再读取其后条目的口令`() {
+        // 可观察契约（非源码结构断言）：旧实现按口令建 `TreeMap<String, KdbxEntry>`，构建时会对
+        // **全库**条目调用 `readString()`——于是一处已清零（不可读）的口令就让整次解析抛
+        // IllegalStateException，且全库口令明文以不可擦除的 String 键驻留到索引释放。
+        // 现实现改为逐条 Char 区域比较、用毕清零、命中即停：命中之后的条目根本不被读取，
+        // 因此同一输入必须照常解析成功。
+        val hit = entry(title = "Hit", username = "octocat", password = "gh_secret")
+        val erased = entry(title = "Erased", username = "ghost", password = "stale_secret")
+        erased.password!!.clear()
+
+        assertEquals(
+            "口令检索只解密到首个命中为止，不得遍历全库口令",
+            "octocat",
+            FieldReferenceEngine.resolve(
+                "{REF:U@P:gh_secret}", rootWith(hit, erased), FieldReferenceEngine.RefField.PASSWORD
+            )
+        )
+    }
+
+    @Test
+    fun `口令检索面大小写不敏感且同值取文档序首个`() {
+        val first = entry(title = "First", username = "user-first", password = "shared_secret")
+        val second = entry(title = "Second", username = "user-second", password = "shared_secret")
+        val root = rootWith(first, second)
+
+        for (searchText in listOf("SHARED_SECRET", "Shared_Secret", "shared_secret")) {
+            assertEquals(
+                "口令检索的等值口径须与公开字段索引同为逐字符大小写折叠（$searchText）",
+                "user-first",
+                FieldReferenceEngine.resolve(
+                    "{REF:U@P:$searchText}", root, FieldReferenceEngine.RefField.PASSWORD
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `口令检索面未命中保守回退原文且递归继续展开`() {
+        val secret = entry(title = "Secret", password = "final_secret")
+        // 取值目标（Relay）的 UserName 自身仍是引用：链式继续展开（与 Char 通道同语义）
+        val relay = entry(title = "Relay", username = "{REF:P@T:Secret}", password = "relay_secret")
+        val root = rootWith(secret, relay)
+
+        assertEquals(
+            "按口令命中 Relay 后取其 UserName，须随引用链展开至链终端",
+            "final_secret",
+            FieldReferenceEngine.resolve("{REF:U@P:relay_secret}", root, FieldReferenceEngine.RefField.PASSWORD)
+        )
+        assertEquals(
+            "未命中的口令检索保持原文（保守不吞）",
+            "{REF:U@P:nope}",
+            FieldReferenceEngine.resolve("{REF:U@P:nope}", root, FieldReferenceEngine.RefField.PASSWORD)
+        )
+    }
+
+    @Test
+    fun `空口令条目与空检索文本按首个空口令条目命中`() {
+        // 无口令字段（password == null）的条目在扫描中被跳过，不得因缺字段失败；
+        // 空口令（长度 0）是合法检索目标，与旧 TreeMap 键为 "" 的行为逐字一致。
+        val noPass = entry(title = "NoPass", username = "u-no-pass", password = null)
+        val emptyPass = entry(title = "EmptyPass", username = "u-empty", password = "")
+
+        assertEquals(
+            "空检索文本命中首个空口令条目",
+            "u-empty",
+            FieldReferenceEngine.resolve(
+                "{REF:U@P:}", rootWith(noPass, emptyPass), FieldReferenceEngine.RefField.PASSWORD
+            )
+        )
+        assertEquals(
+            "检索文本非空时不得命中空口令条目",
+            "{REF:U@P:gh_secret}",
+            FieldReferenceEngine.resolve(
+                "{REF:U@P:gh_secret}", rootWith(noPass, emptyPass), FieldReferenceEngine.RefField.PASSWORD
+            )
+        )
+    }
+
     // ===== ISSUE-P1-25 AC①：口令面引用检测（复制通道敏感分流依据） =====
 
     @Test

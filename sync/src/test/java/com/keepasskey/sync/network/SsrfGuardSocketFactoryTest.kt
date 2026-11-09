@@ -7,9 +7,11 @@ import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.TimeUnit
@@ -120,6 +122,83 @@ class SsrfGuardSocketFactoryTest {
     }
 
     @Test
+    fun `云元数据目标即便尝试登记也在建连前被拒`() {
+        val metadata4 = InetAddress.getByName(METADATA_IPV4)
+        // 16 字节映射形态：保留形态才走得到 16 字节判据（getByAddress 会归一为 4 字节）
+        val metadataMapped16 = Inet6Address.getByAddress(null, mappedIpv6(169, 254, 169, 254), -1)
+        val approvals = SsrfAddressApprovals().apply { approveAll(listOf(metadata4, metadataMapped16)) }
+
+        assertFalse("云元数据地址不得进入连接期豁免表", approvals.isApproved(metadata4))
+        listOf(metadata4, metadataMapped16).forEach { target ->
+            val failure = runCatching {
+                SsrfGuardSocketFactory(approvals).createSocket()
+                    .connect(InetSocketAddress(target, METADATA_PORT), CONNECT_TIMEOUT_MS)
+            }.exceptionOrNull()
+            assertTrue(
+                "元数据红线先于豁免批准（${target.address.size} 字节形态），实际=$failure",
+                failure is IOException && failure.message.orEmpty().contains("SSRF 防护")
+            )
+        }
+    }
+
+    @Test
+    fun `豁免登记按内嵌 IPv4 跨映射形态生效`() {
+        val approvals = SsrfAddressApprovals()
+        // 以 16 字节映射形态登记回环，4 字节目标（连接期常见归一形态）必须命中
+        approvals.approveAll(listOf(Inet6Address.getByAddress(null, mappedIpv6(127, 0, 0, 1), -1)))
+        assertTrue(
+            "同一目标的映射拼写与 4 字节形态必须共享豁免键（InetAddress.equals 不跨形态相等）",
+            approvals.isApproved(InetAddress.getByName("127.0.0.1"))
+        )
+    }
+
+    @Test
+    fun `虚拟主机豁免只覆盖实际请求主机 重定向到端点主机仍被拒`() {
+        // ENG-20261028-22：virtual-host 下获得授权的是 `bucket.端点主机`，端点主机本身并非
+        // 实际请求主机；重定向跳回端点主机（或任何其它地址）不得继承豁免
+        val endpointHost = "minio.nas.local"
+        val requestHost = "vault.minio.nas.local"
+        val redirectTarget = MockWebServer().apply {
+            start(LOOPBACK, 0)
+            enqueue(MockResponse().setBody("must-not-be-reached"))
+        }
+        val entry = MockWebServer().apply { start(LOOPBACK, 0) }
+        try {
+            entry.enqueue(
+                MockResponse().setResponseCode(302)
+                    .setHeader("Location", "http://$endpointHost:${redirectTarget.port}/")
+            )
+            val loopbackDns = object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> = listOf(LOOPBACK)
+            }
+            val approvals = SsrfAddressApprovals()
+            val client = OkHttpClient.Builder()
+                .connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
+                .dns(SsrfGuardDns(loopbackDns, setOf(requestHost), approvals))
+                .socketFactory(SsrfGuardSocketFactory(approvals))
+                .connectTimeout(CONNECT_TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS)
+                .build()
+
+            val failure = runCatching {
+                client.newCall(Request.Builder().url("http://$requestHost:${entry.port}/").build())
+                    .execute().use { it.body.string() }
+            }.exceptionOrNull()
+            val guarded = generateSequence(failure) { it.cause }
+                .any { it.message.orEmpty().contains("SSRF 防护") }
+
+            assertTrue(
+                "重定向到端点主机必须被拒（豁免只授实际请求主机 $requestHost），实际=$failure",
+                guarded
+            )
+            assertEquals("对照组：请求必须已抵达获批的实际请求主机", 1, entry.requestCount)
+            assertEquals("被拒的重定向目标不得收到任何请求", 0, redirectTarget.requestCount)
+        } finally {
+            entry.shutdown()
+            redirectTarget.shutdown()
+        }
+    }
+
+    @Test
     fun `工厂客户端同时装配 Dns 层与连接期层`() {
         val client = SyncHttpClientFactory.createSyncClient()
 
@@ -165,7 +244,20 @@ class SsrfGuardSocketFactoryTest {
         /** 云元数据端点（AC② 点名的字面量；本层在建连前拒绝，故不会真的发出探测） */
         const val METADATA_IPV4 = "169.254.169.254"
 
+        /** 元数据探测端口（守卫在建连前拒绝，端口只用于构造目标地址） */
+        const val METADATA_PORT = 80
+
         const val BODY = "guarded-ok"
         const val CONNECT_TIMEOUT_MS = 500
+
+        /** 构造 16 字节 IPv4-mapped 地址（`::ffff:a.b.c.d`） */
+        fun mappedIpv6(a: Int, b: Int, c: Int, d: Int): ByteArray = ByteArray(16).apply {
+            this[10] = 0xFF.toByte()
+            this[11] = 0xFF.toByte()
+            this[12] = a.toByte()
+            this[13] = b.toByte()
+            this[14] = c.toByte()
+            this[15] = d.toByte()
+        }
     }
 }

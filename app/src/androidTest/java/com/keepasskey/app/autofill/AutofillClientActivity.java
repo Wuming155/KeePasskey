@@ -6,6 +6,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import java.util.Arrays;
 import java.util.UUID;
 import android.text.InputType;
@@ -63,6 +66,11 @@ public class AutofillClientActivity extends Activity {
     public static final String EXTRA_EXPECTED_USERNAME = "ac3.expectedUsername";
     public static final String EXTRA_EXPECTED_PASSWORD = "ac3.expectedPassword";
     public static final String ACTION_FINISH_RUN = "com.keepasskey.test.autofill.FINISH_RUN";
+
+    /** ENG03 剪贴板平台行为测试协议（独立 UID 客户端写入与粘贴） */
+    public static final String ACTION_SET_CLIPBOARD = "com.keepasskey.test.autofill.SET_CLIPBOARD";
+    public static final String EXTRA_CLIPBOARD_TEXT = "ac3.clipboardText";
+    public static final String ACTION_PASTE_CLIPBOARD = "com.keepasskey.test.autofill.PASTE_CLIPBOARD";
 
     private String runId;
     private final String instanceId = UUID.randomUUID().toString();
@@ -171,6 +179,7 @@ public class AutofillClientActivity extends Activity {
         root.addView(statusView);
 
         setContentView(root);
+        handleClipboardIntent(getIntent());
     }
 
     @Override
@@ -199,8 +208,45 @@ public class AutofillClientActivity extends Activity {
                 && runId != null && runId.equals(intent.getStringExtra(EXTRA_RUN_ID))) {
             closeRun();
             finishAndRemoveTask();
+            return;
         }
+        handleClipboardIntent(intent);
         // 同身份重复启动不重发；新身份由测试前置冷停后新建实例，禁止以 onResume 无限重发。
+    }
+
+    private void handleClipboardIntent(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        if (ACTION_SET_CLIPBOARD.equals(action)) {
+            final CharSequence text = intent.getCharSequenceExtra(EXTRA_CLIPBOARD_TEXT);
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null && text != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("external-client", text));
+                Log.i(TAG, "external clipboard set: " + text);
+            }
+        } else if (ACTION_PASTE_CLIPBOARD.equals(action)) {
+            if (usernameField != null) {
+                usernameField.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        usernameField.requestFocus();
+                        usernameField.getText().clear();
+                        boolean pasted = usernameField.onTextContextMenuItem(android.R.id.paste);
+                        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (cm != null && cm.hasPrimaryClip() && cm.getPrimaryClip().getItemCount() > 0) {
+                            CharSequence clipText = cm.getPrimaryClip().getItemAt(0).getText();
+                            if (clipText != null && usernameField.getText().length() == 0) {
+                                usernameField.setText(clipText);
+                            }
+                        }
+                        if (statusView != null) {
+                            statusView.setText(describeState());
+                        }
+                        Log.i(TAG, "external clipboard paste into usernameField: " + pasted + ", text=" + usernameField.getText());
+                    }
+                });
+            }
+        }
     }
 
     @Override
@@ -248,7 +294,8 @@ public class AutofillClientActivity extends Activity {
                 + " usernameFilled=" + (usernameField.getText().length() > 0)
                 + " passwordFilled=" + (passwordField.getText().length() > 0)
                 + " usernameMatchesSeed=" + matchesSeed(usernameField.getText(), expectedUsername)
-                + " passwordMatchesSeed=" + matchesSeed(passwordField.getText(), expectedPassword);
+                + " passwordMatchesSeed=" + matchesSeed(passwordField.getText(), expectedPassword)
+                + " usernameText=" + usernameField.getText().toString();
     }
 
     /** 按字符比对，避免将输入框内口令转换为 String 或写入日志。 */

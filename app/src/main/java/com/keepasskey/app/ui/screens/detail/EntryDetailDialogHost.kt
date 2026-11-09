@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiEntryRevision
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -195,7 +196,10 @@ private fun EntryDetailDeleteEntryConfirm(
     AlertDialog(
         onDismissRequest = { onExit(EntryDetailConfirmIntent.DISMISS) },
         title = { Text(stringResource(R.string.detail_delete_entry_title)) },
-        text = { Text(stringResource(R.string.detail_delete_entry_message)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.detail_delete_entry_message))
+        },
         confirmButton = {
             TextButton(onClick = { onExit(EntryDetailConfirmIntent.CONFIRM) }) {
                 Text(
@@ -226,7 +230,10 @@ private fun EntryDetailRollbackConfirm(
     AlertDialog(
         onDismissRequest = { onExit(EntryDetailConfirmIntent.DISMISS) },
         title = { Text(stringResource(R.string.detail_history_rollback)) },
-        text = { Text(stringResource(R.string.detail_history_rollback_confirm)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.detail_history_rollback_confirm))
+        },
         confirmButton = {
             Button(
                 onClick = { onExit(EntryDetailConfirmIntent.CONFIRM) },
@@ -260,6 +267,7 @@ internal fun EntryDetailPlaintextExportConfirmDialog(
         onDismissRequest = onCancel,
         title = { Text(stringResource(R.string.detail_attachment_export_warn_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Text(
                 text = stringResource(R.string.detail_attachment_export_warn_message),
                 style = MaterialTheme.typography.bodyMedium,

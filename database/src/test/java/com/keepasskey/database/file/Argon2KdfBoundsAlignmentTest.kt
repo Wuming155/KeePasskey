@@ -10,21 +10,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ISSUE-P2-59（审计 RUST-05）AC①/③ 的**跨模块上界锁**：原生 Argon2 派生入口的**逐项上界**
- * 必须与 KDBX 参数解码侧（[KdbxKdfParameterCodec.validateArgon2Bounds]）同值。
+ * ISSUE-P2-59（审计 RUST-05）AC①/③ 与 ENG-20261028-16 的**跨层接受域对拍**：
+ * 派生入口的逐项边界须与 KDBX 参数解码侧（[KdbxKdfParameterCodec.validateArgon2Bounds]）
+ * 给出相同结论。
  *
- * 为什么需要本用例：`crypto` 模块不可反向依赖 `database`（模块依赖单向），
- * 故 [Argon2KdfEngine.isWithinKdfBounds] 只能以「同值声明」镜像上界；若无跨模块锁，
- * 任一侧调整上界都会导致「解码放行但派生入口拒绝」（或反之）的静默语义分裂。
+ * ENG-20261028-16：基础边界已收敛到 crypto 的 `Argon2KdfLimits`（database 单向依赖 crypto），
+ * 两侧不再各留同值副本；本用例保留为**行为对拍**——共享常量仍可能被任一侧的额外裁决绕过，
+ * 逐点比较实际接受结果才能发现「解码放行但派生入口拒绝」（或反之）的语义分裂。
  *
- * **口径边界（本用例显式区分，不作等价断言）**：解码侧裁决 = 逐项上界 **且** `I×M` 联合预算
- * **且** 动态堆门槛（`memoryInBytes ≤ maxMemory()/2`）；派生入口镜像的只是**逐项上界**
- * （AC① 枚举的三项）。故：
+ * **口径边界（本用例显式区分，不作等价断言）**：解码侧裁决 = 逐项边界 **且** `I×M` 联合预算
+ * **且** 动态堆门槛（`memoryInBytes ≤ maxMemory()/2`）；派生入口只裁决**逐项边界与每通道下界**
+ * （ENG-20261028-08 起，越界即拒绝派生）。故：
  * - 逐项**越界**值：两侧必须一致拒绝（不依赖堆，可严格断言）；
  * - 逐项**界内**值：派生入口恒放行；解码侧是否放行取决于堆门槛（本用例按实际堆容量
  *   分支断言，不做环境依赖的硬编码预期）。
  */
-class Argon2KdfBoundsMirrorTest {
+class Argon2KdfBoundsAlignmentTest {
 
     private val gib4 = 4L * 1024 * 1024 * 1024
     private val maxIterations = 1L shl 24
@@ -102,9 +103,9 @@ class Argon2KdfBoundsMirrorTest {
 
     @Test
     fun `逐项界内但超堆门槛_派生入口仍放行_解码侧按堆裁决`() {
-        // 4 GiB：逐项上界内（AC① 镜像放行），但解码侧动态堆门槛几乎必然拒绝——
+        // 4 GiB：逐项上界内（接受域放行），但解码侧动态堆门槛几乎必然拒绝——
         // 该差异是**有意**的：解码侧裁决的是「本进程能否安全派生」，
-        // 派生入口镜像的是「参数是否落在规范上界内」；原生内核的内存由 Rust 侧
+        // 派生入口裁决的是「参数是否落在规范上界内」；原生内核的内存由 Rust 侧
         // try_reserve 失败即返回 None（fail-closed），不依赖 JVM 堆。
         assertTrue("4 GiB 应落在逐项上界内", Argon2KdfEngine.isWithinKdfBounds(gib4, 2, 2))
         assertEquals(
@@ -127,9 +128,15 @@ class Argon2KdfBoundsMirrorTest {
                 "$m / $i / $p 不得被派生入口误拒",
                 Argon2KdfEngine.isWithinKdfBounds(m, i, p)
             )
+            // 解码侧裁决 = 逐项边界 ∧ `I×M ≤ 2^33` 联合预算 ∧ 堆门槛（heap/2 ≥ m）三面**相与**。
+            // 只看堆门槛会在大堆（≥1 GiB）下把 `512 MiB × 20`（= 2^33.3 > 2^33）误判为放行——
+            // 该配置无论堆多大都先被联合预算拒绝，故期望须含联合预算项。
+            val heapAllows = Runtime.getRuntime().maxMemory() / 2 >= m
+            val jointBudgetAllows = i <= KdbxKdfAcceptance.ARGON2_MAX_TOTAL_WORK / m
             assertEquals(
-                "$m / $i / $p 解码侧裁决应仅取决于堆门槛（heap/2 ≥ $m）",
-                Runtime.getRuntime().maxMemory() / 2 >= m,
+                "$m / $i / $p 解码侧裁决应取联合预算与堆门槛之合取" +
+                    "（heap/2 ≥ $m=$heapAllows, i ≤ 2^33/m=$jointBudgetAllows）",
+                heapAllows && jointBudgetAllows,
                 codecAccepts(m, i, p)
             )
         }

@@ -54,8 +54,8 @@ internal class BinaryNode(
     private val innerStreamCipher: InnerRandomStreamCipher? = null,
     /**
      * 本次解析共享的**附件物化预算**——两条放大通道合一（ISSUE-P2-48 池引用副本乘法 /
-     * ISSUE-P2-200 内联解压放大），计费口径经 ISSUE-P1-276 重定（去重 + 单条目次数 +
-     * 单条目物化字节三面），见 [AttachmentBudget] 的类 KDoc。
+     * ISSUE-P2-200 内联解压放大），计费口径经 ISSUE-P1-276 定版为**两面并存**
+     * （单条目引用次数 + 单条目物化字节），见 [AttachmentBudget] 的类 KDoc。
      *
      * 默认不限（仅供不经 `KdbxXmlParser` 的直接构造，如设备侧单节点内存行为实测）。
      */
@@ -228,7 +228,7 @@ internal class BinaryNode(
             )
         } else if (item != null) {
             // ISSUE-P2-48 / ISSUE-P1-276：先记账再物化——同一池条目被 N 次引用即 N 份副本。
-            // 计费口径按 refIndex 逐项记账（去重 + 单条目次数 + 单条目物化字节三面），
+            // 计费口径按 refIndex 逐项记账（单条目引用次数 + 单条目物化字节两面），
             // 见 [AttachmentBudget.accountPoolReference]。整改缘由（旧口径把「中等尺寸附件 +
             // 若干历史快照」判为引用放大攻击、整库打不开）见该类 KDoc。
             attachmentBudget.accountPoolReference(resolved.refIndex, item.size)

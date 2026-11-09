@@ -2,9 +2,16 @@ package com.keepasskey.crypto.cipher
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.util.Arrays
 
 /**
  * ISSUE-P3-153 / §145 设备侧验证（真机 / instrumented）：
@@ -86,5 +93,119 @@ class ChaCha20NativeDeviceTest {
             nonce.fill(0)
             plain.fill(0)
         }
+    }
+
+    /**
+     * `ENG-20261028-14` 真机侧验证：**小粒度读取**（`read()` 单字节、3 字节短读）、批量读取、
+     * EOF 幂等与关闭语义在真实 Android 运行时上成立。
+     *
+     * 与宿主 `ChaCha20NativeEngineTest` 的分工：宿主用例以 BC 为对照锁「两路径逐字节一致」并
+     * 经 `Assume` 在缺宿主原生库时跳过；本用例钉的是**生产分派（原生）在设备上的读取框架行为**
+     * ——整改前该行为是「每字节一次跨 JNI」，整改后由有界预读摊薄，正确性必须不变。
+     * 成本数据由 `crypto/perf/DeviceThroughputProbeTest` 的读取粒度探针另行实测输出。
+     */
+    @Test
+    fun 小粒度读取与EOF关闭_真机语义() {
+        val key = ByteArray(32) { ((it * 13 + 3) and 0xFF).toByte() }
+        val nonce = ByteArray(12) { ((it * 7 + 1) and 0xFF).toByte() }
+        val engine = ChaCha20CipherEngine()
+        val plain = ByteArray(64 * 1024 + 7) { ((it * 41 + 11) and 0xFF).toByte() }
+        val sink = ByteArrayOutputStream()
+        engine.createEncryptingStream(sink, key, nonce).use { it.write(plain) }
+        val cipherBytes = sink.toByteArray()
+        try {
+            listOf(0, 3, 4096, 64 * 1024).forEach { step ->
+                val restored = readAllAtGranularity(engine, cipherBytes, key, nonce, step)
+                try {
+                    assertArrayEquals("真机读取粒度 step=$step 必须逐字节还原明文", plain, restored)
+                } finally {
+                    restored.fill(0)
+                }
+            }
+            // 底层每次最多交付 5 字节的短读来源（HMAC 块流可产生短读）
+            val trickled = readAllAtGranularity(engine, cipherBytes, key, nonce, 4096, maxSourceRead = 5)
+            try {
+                assertArrayEquals("真机底层短读来源下必须逐字节还原明文", plain, trickled)
+            } finally {
+                trickled.fill(0)
+            }
+
+            val stream = engine.createDecryptingStream(ByteArrayInputStream(cipherBytes), key, nonce)
+            val buffer = ByteArray(4096)
+            try {
+                while (stream.read(buffer) != -1) Unit
+                assertEquals("EOF 后批量读取仍返回 -1", -1, stream.read(buffer))
+                assertEquals("EOF 后单字节读取仍返回 -1", -1, stream.read())
+            } finally {
+                Arrays.fill(buffer, 0)
+                stream.close()
+            }
+            try {
+                stream.read()
+                fail("关闭后单字节读取必须抛 IOException")
+            } catch (_: IOException) {
+                // 预期：已关闭
+            }
+            try {
+                stream.read(buffer, 0, 8)
+                fail("关闭后批量读取必须抛 IOException")
+            } catch (_: IOException) {
+                // 预期：已关闭
+            }
+            stream.close() // 重复 close 必须幂等不抛
+
+            // 所有权负例：调用方 key/nonce 原数组不在流的所有权内，不得被 close 擦除
+            assertTrue("close 后调用方 key 数组必须保持不变", key.any { it != 0.toByte() })
+            assertTrue("close 后调用方 nonce 数组必须保持不变", nonce.any { it != 0.toByte() })
+        } finally {
+            cipherBytes.fill(0)
+            plain.fill(0)
+            key.fill(0)
+            nonce.fill(0)
+        }
+    }
+
+    /** 按 [step] 粒度读完解密流；`step == 0` 走单字节路径，[maxSourceRead] 非空时包装短读来源。 */
+    private fun readAllAtGranularity(
+        engine: ChaCha20CipherEngine,
+        cipherBytes: ByteArray,
+        key: ByteArray,
+        nonce: ByteArray,
+        step: Int,
+        maxSourceRead: Int? = null
+    ): ByteArray {
+        val source = if (maxSourceRead == null) {
+            ByteArrayInputStream(cipherBytes)
+        } else {
+            object : InputStream() {
+                private val delegate = ByteArrayInputStream(cipherBytes)
+                override fun read(): Int = delegate.read()
+                override fun read(data: ByteArray, off: Int, len: Int): Int =
+                    delegate.read(data, off, minOf(len, maxSourceRead))
+
+                override fun close() {
+                    delegate.close()
+                }
+            }
+        }
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(if (step == 0) 1 else step)
+        engine.createDecryptingStream(source, key, nonce).use { stream ->
+            if (step == 0) {
+                while (true) {
+                    val value = stream.read()
+                    if (value < 0) break
+                    out.write(value)
+                }
+            } else {
+                while (true) {
+                    val count = stream.read(buffer, 0, step)
+                    if (count < 0) break
+                    out.write(buffer, 0, count)
+                }
+            }
+        }
+        Arrays.fill(buffer, 0)
+        return out.toByteArray()
     }
 }

@@ -224,8 +224,12 @@ class AutofillConfirmActivity : FragmentActivity() {
         completed = true
         // ISSUE-P3-95：库已锁定 → **丢弃**未决响应（绝不回传 RESULT_OK），
         // 且不写入「上次填充条目」记忆、不记录会话授权宽限（锁定后这些副作用均不应发生）
-        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
-            AppLog.w(TAG, "会话已锁定，丢弃本次自动填充确认响应")
+        // ENG-20261028-05：Autofill 通道开关在交付边界复核——数据集 / 本页在开关关闭前已下发，
+        // 用户确认后仍可能交付；关闭即按取消回传（同样不写记忆、不写会话授权、不发 TOTP）。
+        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked()) ||
+            !settingsStore.isAutofillServiceEnabled()
+        ) {
+            AppLog.w(TAG, "会话已锁定或自动填充通道已关闭，丢弃本次自动填充确认响应")
             discardPendingResult()
             return
         }
@@ -274,8 +278,11 @@ class AutofillConfirmActivity : FragmentActivity() {
     private suspend fun deliverAuthResult() {
         // ISSUE-P3-95：**回传前再次校验**——TOTP 二次动作（含超时等待）期间会话可能刚被
         // 自动锁定 / 手动锁定；锁定即丢弃未决响应，否则框架仍会把凭据值写入目标表单
-        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
-            AppLog.w(TAG, "会话在确认过程中被锁定，丢弃未决响应（不回传 RESULT_OK）")
+        // ENG-20261028-05：同一窗口内通道开关也可能被关闭，判定与锁定同口径（按取消回传）。
+        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked()) ||
+            !settingsStore.isAutofillServiceEnabled()
+        ) {
+            AppLog.w(TAG, "会话在确认过程中被锁定或自动填充通道已关闭，丢弃未决响应（不回传 RESULT_OK）")
             discardPendingResult()
             return
         }
@@ -290,6 +297,13 @@ class AutofillConfirmActivity : FragmentActivity() {
             AppLog.w(TAG, "确认后无可交付字段，按取消回传（不构造空数据集）")
             setResult(RESULT_CANCELED, authenticationCanceledIntent())
             finish()
+            return
+        }
+        // ENG-20261028-05：字段解析（挂起点）期间通道仍可能被关闭——交付前再按本次值判定一次，
+        // 且此判定与 setResult 之间只剩同步代码，不存在「已判过、又挂起、再交付」的窗口。
+        if (!settingsStore.isAutofillServiceEnabled()) {
+            AppLog.w(TAG, "字段解析完成时自动填充通道已关闭，按取消回传")
+            discardPendingResult()
             return
         }
         setResult(RESULT_OK, resultIntent)

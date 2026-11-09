@@ -601,6 +601,154 @@ class DeviceThroughputProbeTest {
         Arrays.fill(directIv, 0)
     }
 
+    // ================= ENG-20261028-14：ChaCha20 解密流读取粒度成本 =================
+
+    /**
+     * ChaCha20 解密流**读取粒度**成本探针（`ENG-20261028-14` 的测量入口）。
+     *
+     * 同一份 1 MiB 密文分别按 `read()` 单字节、16 字节、4 KiB、64 KiB 读取并解密，预热后
+     * 采样 [SAMPLES] 轮取中位数，输出 ms、ns/byte、调用方 read 次数与相对 64 KiB 批量的倍数；
+     * 末尾另以 **64 KiB 样本**实测「旧形态参照」（逐字节一次 direct JNI，即整改前
+     * `read()` → `refill(1)` 的等价形态），按 ns/byte 与新形态单字节行直接对照。
+     *
+     * 口径：`调用方 read 次数`只描述读取粒度；整改前每次 `read()` 都会触发一次原生变换
+     * （单字节即逐字节跨 JNI），整改后小请求由 [ChaCha20CipherEngine] 解密流的有界预读摊薄。
+     * 只做正确性断言 + 数据输出（`PERF-PROBE|` 前缀，经 logcat 落盘），不设阈值断言。
+     */
+    @Test
+    fun probeChaCha20解密流_读取粒度成本() {
+        val payload = ByteArray(1024 * 1024) { ((it * 31 + 11) and 0xFF).toByte() }
+        val key = ByteArray(32) { ((it * 13 + 3) and 0xFF).toByte() }
+        val nonce = ByteArray(12) { ((it * 7 + 1) and 0xFF).toByte() }
+        val engine = ChaCha20CipherEngine()
+        val sink = ByteArrayOutputStream(payload.size)
+        engine.createEncryptingStream(sink, key, nonce).use { it.write(payload) }
+        val cipherBytes = sink.toByteArray()
+        try {
+            val steps = listOf(0, 16, 4 * 1024, 64 * 1024)
+            val medians = LinkedHashMap<Int, Double>()
+            steps.forEach { step ->
+                // 正确性前置 + 预热
+                repeat(WARMUP + 1) {
+                    val restored = decryptAtGranularity(engine, cipherBytes, key, nonce, step)
+                    assertTrue(
+                        "读取粒度 step=$step 必须逐字节还原明文",
+                        Arrays.equals(payload, restored)
+                    )
+                    Arrays.fill(restored, 0)
+                }
+                val samples = (0 until SAMPLES).map {
+                    val start = System.nanoTime()
+                    val restored = decryptAtGranularity(engine, cipherBytes, key, nonce, step)
+                    val ms = (System.nanoTime() - start) / 1_000_000.0
+                    Arrays.fill(restored, 0)
+                    ms
+                }
+                medians[step] = samples.sorted()[samples.size / 2]
+            }
+            val bulk = medians.getValue(64 * 1024)
+            medians.forEach { (step, median) ->
+                val calls = if (step == 0) payload.size else (payload.size + step - 1) / step
+                println(
+                    "$PREFIX ChaCha20解密粒度|${if (step == 0) "单字节read()" else "${step}B短读"}|" +
+                        "payload=1MiB|调用方read次数=$calls|median=${fmt3(median)}ms|" +
+                        "ns/byte=${fmt3(median * 1_000_000 / payload.size)}|" +
+                        "相对64KiB批量=${fmt(median / bulk)}x"
+                )
+            }
+
+            // 旧形态参照：整改前 read() → refill(1) 的等价形态（每字节一次 direct JNI）。
+            // 用 64 KiB 样本控制总耗时；与上表按 ns/byte 对照即可量化整改收益。
+            val legacyCipher = cipherBytes.copyOf(64 * 1024)
+            val legacyPlain = payload.copyOf(64 * 1024)
+            try {
+                repeat(WARMUP) {
+                    val restored = decryptByteByByteLegacy(legacyCipher, key, nonce)
+                    assertTrue("旧形态参照必须逐字节还原明文", Arrays.equals(legacyPlain, restored))
+                    Arrays.fill(restored, 0)
+                }
+                val legacySamples = (0 until SAMPLES).map {
+                    val start = System.nanoTime()
+                    val restored = decryptByteByByteLegacy(legacyCipher, key, nonce)
+                    val ms = (System.nanoTime() - start) / 1_000_000.0
+                    Arrays.fill(restored, 0)
+                    ms
+                }
+                val legacyMedian = legacySamples.sorted()[legacySamples.size / 2]
+                println(
+                    "$PREFIX ChaCha20解密粒度|旧形态参照(逐字节JNI)|payload=64KiB|" +
+                        "调用方read次数=${legacyCipher.size}|median=${fmt3(legacyMedian)}ms|" +
+                        "ns/byte=${fmt3(legacyMedian * 1_000_000 / legacyCipher.size)}"
+                )
+            } finally {
+                Arrays.fill(legacyCipher, 0)
+                Arrays.fill(legacyPlain, 0)
+            }
+        } finally {
+            Arrays.fill(cipherBytes, 0)
+            Arrays.fill(payload, 0)
+            Arrays.fill(key, 0)
+            Arrays.fill(nonce, 0)
+        }
+    }
+
+    /**
+     * 旧形态参照（**仅测量用，不进入生产路径**）：按整改前 `read()` → `refill(1)` 的等价形态
+     * 逐字节施加 direct 密钥流——每字节一次 JNI 调用 + 1 字节堆外缓冲，用毕就地归零。
+     */
+    private fun decryptByteByByteLegacy(
+        cipherBytes: ByteArray,
+        key: ByteArray,
+        nonce: ByteArray
+    ): ByteArray {
+        val out = ByteArray(cipherBytes.size)
+        val one = ByteBuffer.allocateDirect(1)
+        try {
+            var offset = 0L
+            for (i in cipherBytes.indices) {
+                one.clear()
+                one.put(cipherBytes[i])
+                one.flip()
+                NativeChaCha20.applyKeystreamDirectChecked(key, nonce, offset, one.slice())
+                out[i] = one.get(0)
+                one.put(0, 0.toByte())
+                offset += 1
+            }
+        } finally {
+            one.put(0, 0.toByte())
+        }
+        return out
+    }
+
+    /** 按 [step] 粒度（0 = 单字节 `read()`）读完 ChaCha20 解密流并返回明文。 */
+    private fun decryptAtGranularity(
+        engine: ChaCha20CipherEngine,
+        cipherBytes: ByteArray,
+        key: ByteArray,
+        nonce: ByteArray,
+        step: Int
+    ): ByteArray {
+        val out = ByteArrayOutputStream(cipherBytes.size)
+        val buffer = ByteArray(if (step == 0) 1 else step)
+        engine.createDecryptingStream(ByteArrayInputStream(cipherBytes), key, nonce).use { stream ->
+            if (step == 0) {
+                while (true) {
+                    val value = stream.read()
+                    if (value < 0) break
+                    out.write(value)
+                }
+            } else {
+                while (true) {
+                    val count = stream.read(buffer, 0, step)
+                    if (count < 0) break
+                    out.write(buffer, 0, count)
+                }
+            }
+        }
+        Arrays.fill(buffer, 0)
+        return out.toByteArray()
+    }
+
     // ================= 采样与输出基建 =================
 
     /** 吞吐测量：预热 [WARMUP] 次后采样 [SAMPLES] 次，返回毫秒列表。 */

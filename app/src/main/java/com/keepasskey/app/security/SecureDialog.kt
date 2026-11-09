@@ -7,8 +7,14 @@ import android.view.Window
 import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
+import com.keepasskey.app.MainApplication
+import com.keepasskey.core.log.AppLog
+
+/** 调试级接线读数的日志标签（见 [SecureDialogWindowEffect] KDoc；release 由 R8 剥离调用点）。 */
+private const val TAG = "SecureDialog"
 
 /**
  * 敏感对话框窗口的防截屏包装（F-13 同批缺陷：对话框窗口的 FLAG_SECURE 缺口）。
@@ -39,11 +45,15 @@ import androidx.compose.ui.window.DialogWindowProvider
  * （每个对话框窗口独立，且仅撤销本包装自己施加的那一次）。
  *
  * 放在 `AlertDialog(...)` 之外包裹整个调用是**无效**的：那时 [LocalView] 属于 Activity 窗口，
- * 取不到对话框 provider，本包装会按 fail-safe 静默不动作（不崩溃、不误改 Activity 窗口）。
+ * 取不到对话框 provider，本包装会按 fail-safe 静默不动作（不崩溃、不误改 Activity 窗口）——
+ * 被静默丢掉的不只是 `FLAG_SECURE`，**遮挡触摸过滤同样不会施加**，而 `securePolicy` 仍会单独
+ * 把对话框窗口的 flag 置对，外观上「看起来已保护」。判断接线是否生效只能看**调用位置**
+ * （必须在内容槽位内），不能以窗口 flag 已置位或宿主 `Inherit` 的继承效果为证。
  *
- * **调用点必须同时传 `DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)`**——
- * 对话框窗口的 `FLAG_SECURE` 最终由 Compose 的 `SecureFlagPolicy` 决定（默认 `Inherit` 以
- * **宿主窗口**为准，会清掉本包装的施加），理由与设备实测见下节「与 `flagSecureEnabled` 开关的关系」。
+ * **调用点必须同时显式给出 `DialogProperties.securePolicy`**——对话框窗口的 `FLAG_SECURE` 最终由
+ * Compose 的 `SecureFlagPolicy` 决定（默认 `Inherit` 以**宿主窗口**为准，会清掉本包装的施加）；
+ * 强制遮罩的窗口传 `SecureOn`，跟随用户开关的窗口按开关在 `SecureOn` / `SecureOff` 两支中取值，
+ * 理由与设备实测见下节「与 `flagSecureEnabled` 开关的关系」。
  *
  * ## 遮挡触摸过滤（`ISSUE-P2-245`，2026-09-21 补接线）
  *
@@ -75,14 +85,19 @@ import androidx.compose.ui.window.DialogWindowProvider
  *
  * ## 与 `flagSecureEnabled` 开关的关系（**强制遮罩**，其实现方式见下，勿误当缺陷）
  *
- * 本包装的**产品意图**是：这四类对话框的敏感度最高（主密钥修改 / 子库凭据 / 附件明文预览 /
- * 密码明文差异），故**不读取** `SettingsRepository` 的用户开关，一律遮罩（[FlagSecureGuard]
- * 对 Activity 窗口则是「锁定态强制 ∨ 开关」的动态模型）。用户关闭开关时已在设置页履行过风险确认。
+ * 本包装的**产品意图**是：凭据与明文敏感对话框一律遮罩，**不读取** `SettingsRepository` 的用户
+ * 开关——建库、改主密钥、一次性密钥文件保存提示、子库凭据、附件明文预览、修订差异（密码明文）
+ * 与打开云端库的云端凭据表单。[FlagSecureGuard] 对 Activity 窗口则是「只由该开关决定」
+ * （2026-10-02 裁决已撤销「锁定态强制遮蔽」），两者口径不同是产品裁决而非实现遗漏，见
+ * `docs/architecture/产品裁决登记.md`「安全与界面」；用户关闭开关时已在设置页履行过风险确认。
  *
- * **例外（2026-09-26 `PD-47`）**：TOTP 扫码取景对话框（`TotpScanDialog`）**不属**上述四类——
- * 其 `FLAG_SECURE` 经 [SecureDialogWindowEffect] 的 `flagSecure` 参数与 `DialogProperties.securePolicy`
- * **跟随**用户开关（开关关 ⇒ 可截屏；静态守卫见 `SensitiveWindowHardeningTest`）；其反 overlay 与
- * 遮挡触摸过滤两层不随开关变化。本节四类的强制遮罩口径**不受**该裁决影响。
+ * **跟随开关的两处例外**：TOTP 扫码取景对话框（`TotpScanDialog`，`PD-47`）与扫码导入通行密钥的
+ * 导入确认对话框（`PasskeyImportConfirmDialog`，`PD-48` 裁决三）——其 `FLAG_SECURE` 经
+ * [SecureDialogWindowEffect] 的 `flagSecure` 参数与 `DialogProperties.securePolicy` **跟随**用户开关
+ * （开关关 ⇒ 可截屏）；其遮挡触摸过滤**不随开关变化**。本节其余窗口的强制遮罩口径不受这两项裁决影响。
+ * 注意本包装**不**施加 overlay 抑制（`setHideOverlayWindows`）：该层由宿主 Activity 窗口
+ * （`MainActivity` 与各凭据 / 自动填充 Activity）单独施加，见
+ * [ApplyObscuredTouchFilter] 的分工说明。
  *
  * **该意图的实现方式（2026-09-21 §254 更正，`ISSUE-P2-246`）**：对话框窗口的 `FLAG_SECURE`
  * 实际由 **Compose 的 `SecureFlagPolicy`** 决定——`DialogProperties.securePolicy` 默认 `Inherit`，
@@ -92,15 +107,17 @@ import androidx.compose.ui.window.DialogWindowProvider
  * Compose 会执行 `setFlags(FLAG_SECURE.inv(), FLAG_SECURE)` 即**清除**本窗的 flag。
  * ⇒ 本包装的 `addFlags(FLAG_SECURE)` **单独不足以**保住该 flag（真机实测：宿主窗口不带时
  * 对话框窗口 `flags=0x1800002` 缺 `0x2000`；宿主带时 `0x1802002` 含），
- * 故**各对话框调用点必须传 `DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)`**
- * （本仓 4 个文件 7 处调用点已全部如此，由 `SecureDialogFlagPolicyTest` 静态守卫）。
+ * 故**各对话框调用点必须显式给出 `DialogProperties.securePolicy`**：强制遮罩的窗口传
+ * `SecureFlagPolicy.SecureOn`，跟随用户开关的两处（`TotpScanDialog` / `PasskeyImportConfirmDialog`）
+ * 按 `flagSecureEnabled` 在 `SecureOn` / `SecureOff` 两支中取值，**不得**回退为省略参数的 `Inherit`。
+ * 调用点清单不再有静态扫描守护（原清单锁已按测试规则退役），新增对话框窗口时按本节规则接线，
+ * 由评审核对调用位置；真实窗口行为由 `DialogWindowHardeningDeviceTest` 在设备侧实证。
  * 本包装保留为**同窗内的一次显式施加**（防御性：万一调用点漏传，至少在该 flag 被 Compose 覆盖前的
  * 帧内已置位；且它同时承担下节的遮挡触摸过滤），并负责在 `onDispose` 撤销自己那一次。
  *
  * 若产品日后要求与 Activity 窗口完全一致的解除语义（尊重开关），需**改判**本节的意图陈述、
  * 把 `SettingsUiState.flagSecureEnabled` 下传至各对话框，并把调用点的 `SecureOn`
- * 换成按该开关求值——**这是产品裁决而非本包装的内部实现**，改动时须同步本节与
- * `SecureDialogFlagPolicyTest` 的清单。
+ * 换成按该开关求值——**这是产品裁决而非本包装的内部实现**，改动时须同步本节与产品裁决登记的口径。
  *
  * ## 未能覆盖：`DropdownMenu` / `Popup`
  *
@@ -125,16 +142,18 @@ import androidx.compose.ui.window.DialogWindowProvider
  *
  * ⇒ **不接线**（避免「全量加 flag」的过度改动）。**接线条件（须遵守）**：一旦任一 Popup
  * 的菜单项开始渲染**凭据类内容**（口令 / TOTP / 密钥 / 用户名等用户数据插值），
- * **必须**为该调用点补 `PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`；
- * 该条件由 `PopupSecureFlagInventoryTest` 以「调用点清单锁 + 菜单块内敏感记号扫描」自动守护——
- * 新增 Popup 调用点或菜单内出现敏感记号都会**当场报红**。
+ * **必须**为该调用点补 `PopupProperties(securePolicy = SecureFlagPolicy.SecureOn)`。
+ * 该条件**已无自动扫描守护**（原「调用点清单锁 + 菜单块内敏感记号扫描」随源码文本锁定类测试
+ * 一并退役），故新增 Popup 调用点或改动菜单内容时按本条人工接线并由评审核对；上段的调用点与
+ * 菜单项计数只是历次盘点的时点结论，触及相应文件时须重新核对。
  *
  * 官方等价 API 与**实际生效路径**：Compose 自 1.0 起在 `DialogProperties` 上提供
  * [`securePolicy`](https://developer.android.com/reference/kotlin/androidx/compose/ui/window/DialogProperties#securePolicy())
  * （`SecureFlagPolicy.SecureOn` 即强制对话框窗口携带 `FLAG_SECURE`）。**2026-09-21 §254 更正**：
  * 它不是「与本包装语义等价的另一条路」，而是**对话框窗口 `FLAG_SECURE` 的实际决定者**——
- * 默认 `Inherit` 会按**宿主窗口**状态清除本包装的施加（`ISSUE-P2-246`），故各调用点**必须**传
- * `SecureOn`（见上节）。本包装不被 `DialogProperties` 覆盖的部分只剩**遮挡触摸过滤**
+ * 默认 `Inherit` 会按**宿主窗口**状态清除本包装的施加（`ISSUE-P2-246`），故各调用点**必须**显式
+ * 给出策略——强制遮罩的传 `SecureOn`，跟随用户开关的按开关取 `SecureOn` / `SecureOff`（见上节）。
+ * 本包装不被 `DialogProperties` 覆盖的部分只剩**遮挡触摸过滤**
  * （`filterTouchesWhenObscured`，Compose 的 `DialogProperties` 无对应项）与同窗内的一次
  * 防御性显式施加，故它仍作为本仓的统一入口保留。
  *
@@ -162,16 +181,23 @@ internal fun SecureDialog(content: @Composable () -> Unit) {
  * 缩进改动）时直接调用即可，与 [SecureDialog] 共用同一实现（后者即「本函数 + content」）。
  *
  * 必须在**对话框自身的内容槽位内**调用；在 `AlertDialog(...)` 之外调用取不到对话框窗口，
- * 按 fail-safe 静默不动作。
+ * 按 fail-safe 静默不动作（并留下一条调试级读数，见下）。
  *
- * @param flagSecure 是否在本包装内施加 `FLAG_SECURE`。默认 `true` 维持四类敏感对话框的
- *   **无条件强制遮罩**语义；TOTP 扫码取景对话框传 `flagSecureEnabled`（`PD-47`，跟随用户开关，
- *   开关关 ⇒ 本包装不施加、由调用点 `SecureFlagPolicy.SecureOff` 一并保证不遮罩）。
+ * **调试级接线读数**：窗口解析结果会经 [AppLog.d] 输出一行（不含任何窗口内容 / 凭据），
+ * 使设备验收能直接确认两个动作真的落在本窗上，而不是只看到 `securePolicy` 把 flag 置对。
+ * 仅调试构建可见（release 由 R8 剥离；IDE 预览态不输出）。失配时读到的是「未解析到对话框窗口」。
+ *
+ * @param flagSecure 是否在本包装内施加 `FLAG_SECURE`。默认 `true` 维持凭据与明文敏感对话框的
+ *   **无条件强制遮罩**语义；跟随用户开关的两处（`TotpScanDialog` 的 `PD-47` 与
+ *   `PasskeyImportConfirmDialog` 的 `PD-48` 裁决三）传 `flagSecureEnabled`，开关关 ⇒ 本包装不施加、
+ *   由调用点 `SecureFlagPolicy.SecureOff` 一并保证不遮罩。
  *   **遮挡触摸过滤不受该参数影响**，始终施加（两层防护正交，反点击劫持不随开关放宽）。
  */
 @Composable
 internal fun SecureDialogWindowEffect(flagSecure: Boolean = true) {
+    TrackDialogInteractionEffect()
     val view = LocalView.current
+    val inInspectionMode = LocalInspectionMode.current
     DisposableEffect(view, flagSecure) {
         val dialogWindow = view.dialogWindowOrNull()
         val addedByThisWrapper = flagSecure &&
@@ -187,11 +213,23 @@ internal fun SecureDialogWindowEffect(flagSecure: Boolean = true) {
         val dialogDecorView = dialogWindow?.decorView
         val previousFilterTouchesWhenObscured = dialogDecorView?.filterTouchesWhenObscured
         if (previousFilterTouchesWhenObscured != null) {
-            dialogDecorView?.filterTouchesWhenObscured = true
+            dialogDecorView.filterTouchesWhenObscured = true
+        }
+        // 接线读数（调试级）：窗口解析不到时本包装是静默空操作，正是「看起来已保护」的成因；
+        // 预览态（inspection mode）本就取不到 provider，故不输出。消息不含窗口内容与凭据。
+        if (!inInspectionMode) {
+            AppLog.d(
+                TAG,
+                if (dialogWindow == null || previousFilterTouchesWhenObscured == null) {
+                    "未解析到对话框窗口：调用点不在对话框内容槽位内，遮罩与遮挡触摸过滤均未施加"
+                } else {
+                    "对话框窗口保护已施加：flagSecure=$flagSecure，遮挡触摸过滤=true"
+                }
+            )
         }
         onDispose {
             if (previousFilterTouchesWhenObscured != null) {
-                dialogDecorView?.filterTouchesWhenObscured = previousFilterTouchesWhenObscured
+                dialogDecorView.filterTouchesWhenObscured = previousFilterTouchesWhenObscured
             }
             // 仅撤销本包装自己施加的 flag；取不到 provider（fail-safe 空操作）时不触碰任何窗口
             if (SecureDialogFlagPolicy.onDispose(addedByThisWrapper) ==
@@ -201,6 +239,45 @@ internal fun SecureDialogWindowEffect(flagSecure: Boolean = true) {
             }
         }
     }
+}
+
+/**
+ * 为独立对话框窗口挂接闲置自动锁定交互转发。
+ *
+ * 独立对话框（Compose [androidx.compose.ui.window.Dialog] / [androidx.compose.material3.AlertDialog]）
+ * 拥有独立的 [Window.Callback]，其触摸与按键不经过宿主 Activity 窗口。
+ * 本函数经 [LocalView] 父链解析出对话框窗口后，将其 [Window.Callback] 接入
+ * [AutoLockInteractionTracker]，引用计数管理进入与离开组合。
+ */
+@Composable
+internal fun TrackDialogInteractionEffect() {
+    val view = LocalView.current
+    val inInspectionMode = LocalInspectionMode.current
+    DisposableEffect(view) {
+        val dialogWindow = view.dialogWindowOrNull()
+        val tracker = if (dialogWindow != null && !inInspectionMode) {
+            (view.context.applicationContext as? MainApplication)?.autoLockManager?.interactionTracker
+        } else null
+        if (dialogWindow != null) {
+            tracker?.attachWindow(dialogWindow)
+        }
+        onDispose {
+            if (dialogWindow != null) {
+                tracker?.detachWindow(dialogWindow)
+            }
+        }
+    }
+}
+
+/**
+ * 普通对话框内容的轻量交互包装：在对话框自身内容槽位内调用，
+ * 为独立对话框窗口挂接闲置自动锁定交互转发（[TrackDialogInteractionEffect]），
+ * 保持普通对话框的原有安全策略（不强制施加 FLAG_SECURE 与遮挡触摸过滤）。
+ */
+@Composable
+internal fun TrackDialogInteraction(content: @Composable () -> Unit) {
+    TrackDialogInteractionEffect()
+    content()
 }
 
 /**

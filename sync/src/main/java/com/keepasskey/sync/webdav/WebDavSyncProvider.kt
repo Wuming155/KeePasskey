@@ -14,6 +14,7 @@ import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.SyncTransferOptions
 import com.keepasskey.sync.network.TransientHttpRetry
 import com.keepasskey.sync.network.executeCancellable
+import com.keepasskey.sync.provider.CredentialReleasingProvider
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.network.runCatchingCancellable
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +31,8 @@ import java.util.UUID
  * 标准 WebDAV 客户端实现 (RFC 4918)。
  * 支持 Nextcloud、ownCloud、坚果云等公有 WebDAV 托管服务，以及自建服务器（NAS / 内网
  * HTTPS 端点默认可用，ISSUE-P2-425；明文 HTTP 一律拒绝）：
- * 1. PROPFIND: 基于 DOM 解析 getetag, getcontentlength, getlastmodified, resourcetype;
+ * 1. PROPFIND: 基于 DOM 解析 getetag, getcontentlength, getlastmodified, resourcetype；
+ *    报文不可解析时如实失败（不折成「成功 + 空元数据」，见 [WebDavPropfindParser.parse]）；
  * 2. GET: 二进制流下载;
  * 3. PUT: 支持 If-Match: <etag> 乐观并发保护;
  * 4. 事务写 (uploadAtomic): PUT 唯一随机临时名（后缀插在原扩展名前，保留原扩展名）-> MOVE 覆盖 -> 失败重试/回滚;
@@ -38,6 +40,27 @@ import java.util.UUID
  *
  * 纯结构性拆分（零行为变更）：XML(multistatus) 解析委托 [WebDavPropfindParser]、路径 ↔ URL
  * 编码纯函数委托 [WebDavUrlCodec]、Basic 认证头构造委托 [WebDavAuthHeader]；本类保留接口实现与编排。
+ *
+ * ## 凭据持有与释放周期（ENG-20261028-42）
+ *
+ * 本类**不再**把 `Basic <base64>` 头缓存在字段里：那是可逆明文的不可擦副本，一旦随字段驻留，
+ * 其生命周期就等于 Provider 的整个生命周期（跨越多个同步周期、多个用户交互窗口）。
+ * 现在只持有 [WebDavAuthCredentials]（口令的**独占可擦副本**），认证头由
+ * [WebDavAuthCredentials.authorizationHeader] 在**每次构造请求时**现算，不可擦的 String 因此
+ * 收缩到单次请求作用域（OkHttp header API 以 String 承载，跨协议边界无法全程可擦，属平台边界）。
+ *
+ * 持有：从构造起至 [clearCredentials] / [releaseCredentials] 被调用；构造期仍即时复制口令
+ * （`passwordChars` 借用数组随后由本类清零），因此调用方在构造返回后立即擦除入参数组不影响认证。
+ *
+ * 释放：**唯一的确定性失效点**由持有方的生命周期决定，见下（本类不自行在每次请求后释放——
+ * 一个 Provider 会在同一周期内服务多次请求，并在冲突待决窗口内被用户裁决继续复用）：
+ * - 同步周期结束：Provider 归 `SyncProviderResolver.useProvider*` 作用域所有，作用域退出时
+ *   经 `SyncProviderFactory.releaseOwned` 释放（S3 同口径）；
+ * - 会话终止（锁定 / 关库 / 换库）：`SyncSessionState.clear()` 经
+ *   `SyncEngine.releaseProviderCredentials()` 转调本类，覆盖「周期结束但引擎仍被会话引用」的窗口；
+ * - 一次性用途（云端导入 / 远端目录浏览）：调用方在自己的 `finally` 中释放。
+ * 失效后本类**拒绝**继续构造认证头并抛 [SyncException.AuthenticationError]（fail-closed，
+ * 不以空口令降级），因此仍可能发请求的存活消费者必须在释放前确认已无持有者。
  */
 class WebDavSyncProvider private constructor(
     // 测试注入口（ISSUE-P3-584）：注入即跳过 TLS-only / SSRF / 构造期 HTTPS 校验。已移出 public 主构造
@@ -58,7 +81,7 @@ class WebDavSyncProvider private constructor(
      * sync 不读取 app 偏好）。默认关闭 = 与接线前逐字节一致的单次定长 PUT。
      */
     private val transferOptions: SyncTransferOptions
-) : SyncProvider {
+) : SyncProvider, CredentialReleasingProvider {
 
     /** 生产构造（ISSUE-P3-584）：不暴露 `client`，杜绝 TLS-only / SSRF / 构造期 HTTPS 强制旁路。 */
     constructor(
@@ -85,10 +108,11 @@ class WebDavSyncProvider private constructor(
     // 已配置端点主机传入工厂登记连接期豁免（ISSUE-P2-425，见 createSyncClient KDoc）
     private val httpClient: OkHttpClient
 
-    // L4 整改：Basic 认证头在构造时立即计算——调用方（SyncCoordinator）在构造返回后
+    // L4 整改：口令副本在构造时立即复制——调用方（SyncCoordinator / 导入 / 浏览）在构造返回后
     // 会立即显式清零传入的密码 CharArray，此前的 by lazy 首请求延迟求值会在清零后
     // 才读取密码，导致实际以空密码认证、同步必然失败。
-    private val authHeader: String
+    // ENG-20261028-42：持有可擦副本而非「构造期算好的 Basic 头」，认证头按请求现算。
+    private val credentials: WebDavAuthCredentials
 
     init {
         if (client == null) {
@@ -110,9 +134,24 @@ class WebDavSyncProvider private constructor(
         } else {
             httpClient = client
         }
-        authHeader = WebDavAuthHeader.build(username, passwordChars)
+        credentials = WebDavAuthCredentials(username, passwordChars)
+        // 借用语义收口不变：副本已由 credentials 独占持有，入参数组即刻归还并擦除
         passwordChars.fill('0')
     }
+
+    /**
+     * ENG-20261028-42：确定性失效本实例的凭据（幂等）。
+     *
+     * 调用后 [WebDavAuthCredentials.authorizationHeader] 抛 [SyncException.AuthenticationError]，
+     * 任何后续请求都以鉴权失败结束，而不是以空口令发出「用户名 + 空密码」的可被服务端记录的错误凭据。
+     * 释放时机与「不可复活的存活消费者」约束见类 KDoc。
+     */
+    fun clearCredentials() {
+        credentials.invalidate()
+    }
+
+    /** 可选能力接口实现：与 [clearCredentials] 同一语义，供会话/作用域层按能力判定调用。 */
+    override fun releaseCredentials() = clearCredentials()
 
     /**
      * ISSUE-P3-298 ③：请求级瞬时错误重试的统一出口（[TransientHttpRetry]）。
@@ -153,7 +192,7 @@ class WebDavSyncProvider private constructor(
             val request = Request.Builder()
                 .url(url)
                 .method("PROPFIND", PROPFIND_XML.toRequestBody("application/xml".toMediaType()))
-                .header("Authorization", authHeader)
+                .header("Authorization", credentials.authorizationHeader())
                 .header("Depth", "0")
                 .build()
 
@@ -174,7 +213,7 @@ class WebDavSyncProvider private constructor(
             val request = Request.Builder()
                 .url(fullUrl)
                 .method("PROPFIND", PROPFIND_XML.toRequestBody("application/xml".toMediaType()))
-                .header("Authorization", authHeader)
+                .header("Authorization", credentials.authorizationHeader())
                 .header("Depth", "0")
                 .build()
 
@@ -199,7 +238,15 @@ class WebDavSyncProvider private constructor(
                     ),
                     Charsets.UTF_8
                 )
+                // ENG-20261028-32：解析失败（空白 / 损坏 / 截断 / 非 multistatus 根，如网关替换的
+                // HTML 错误页）一律 fail-closed，不得折成「成功但属性缺失」——被劫持的中间层可以
+                // 只改响应体不改状态码，伪装成无 ETag 服务器即可沿无锁路径剥掉后续覆盖上传的乐观锁。
+                // 「报文合法但缺 getetag」才是回退可信 HTTP 头的通道（见下方 ifBlank 回退）。
                 val parsed = WebDavPropfindParser.parse(xml)
+                    ?: throw SyncException.ProtocolError(
+                        response.code,
+                        "WebDAV PROPFIND 元数据响应无法解析为 multistatus（已拒绝把解析失败折成元数据）"
+                    )
 
                 val etag = parsed.etag.ifBlank {
                     response.header("ETag")?.cleanEtag().orEmpty()
@@ -228,20 +275,28 @@ class WebDavSyncProvider private constructor(
 
     /**
      * ISSUE-P3-387：WebDAV 远端目录浏览（PROPFIND Depth:1）。
-     * 实现下沉 [WebDavDirectoryList]；本方法仅委托（行数门禁）。
+     * 实现下沉 [WebDavDirectoryList]；本方法只负责按请求取头与委托。
      */
     override suspend fun listRemoteDirectory(
         remotePath: String,
         cursor: String?,
         pageSize: Int
-    ): Result<RemoteListPage> = WebDavDirectoryList.list(
-        serverUrl = serverUrl,
-        authHeader = authHeader,
-        remotePath = remotePath,
-        cursor = cursor,
-        pageSize = pageSize,
-        execute = { request -> executeTransientRetryable(retryable = true) { request } }
-    )
+    ): Result<RemoteListPage> {
+        // ENG-20261028-42：取头在凭据已失效时会抛 AuthenticationError。此处实参在
+        // WebDavDirectoryList 的 runCatchingCancellable **之外**求值，必须自行兜住，
+        // 否则异常外溢到调用方而不是与列举失败同口径返回 Result.failure。
+        // 边界：单页列举只发一次 PROPFIND，故该头的作用域即一次请求。
+        val authHeader = runCatchingCancellable { credentials.authorizationHeader() }
+            .getOrElse { return Result.failure(it) }
+        return WebDavDirectoryList.list(
+            serverUrl = serverUrl,
+            authHeader = authHeader,
+            remotePath = remotePath,
+            cursor = cursor,
+            pageSize = pageSize,
+            execute = { request -> executeTransientRetryable(retryable = true) { request } }
+        )
+    }
 
     override suspend fun download(remotePath: String, sink: OutputStream): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -250,7 +305,7 @@ class WebDavSyncProvider private constructor(
                 val request = Request.Builder()
                     .url(fullUrl)
                     .get()
-                    .header("Authorization", authHeader)
+                    .header("Authorization", credentials.authorizationHeader())
                     .build()
 
                 executeTransientRetryable(retryable = true) { request }.use { response ->
@@ -285,7 +340,7 @@ class WebDavSyncProvider private constructor(
             val requestBuilder = Request.Builder()
                 .url(fullUrl)
                 .put(WebDavUploadBody.create(data, transferOptions))
-                .header("Authorization", authHeader)
+                .header("Authorization", credentials.authorizationHeader())
 
             if (!expectedEtag.isNullOrBlank() && !isWeakEtag(expectedEtag)) {
                 requestBuilder.header("If-Match", WebDavUrlCodec.formatHeaderEtag(expectedEtag))
@@ -342,15 +397,16 @@ class WebDavSyncProvider private constructor(
      *    对远端目标文件的 ETag 预条件使用 RFC 4918 `If` 头 tagged list 语法
      *    （`If: <destUrl> (["etag"])`）——`If-Match` 默认仅作用于请求-URI（即源临时文件），
      *    对 MOVE 目标无约束效力；
-     * 3. MOVE 失败重试 1 次；
-     * 4. 仍失败则 DELETE 清除临时文件并抛错回滚。
+     * 3. 传输级失败（非 409/412/423）重试 1 次；
+     * 4. 仍失败则 DELETE **本次临时文件**并抛错回滚，正式远端目标不被改动。
      *
-     * **ISSUE-P2-381**：部分服务器对 MOVE 覆盖已有目标报 409/423（仅靠 `Overwrite:T` 不可靠；
-     * keepass2android `WebDavStorage.java:235` 注释 + 提交 `9c8ee243` 实证）。
-     * 收到 409/423 时先重探目标元数据做兜底守卫（**ISSUE-P2-572**：远端 ETag 非空且 ≠ 预期 ⇒
-     * ConflictError 不 DELETE——防销毁 / 覆盖他端并发写入；探测失败如实上抛 fail-closed；
-     * 相同 / 缺失才放行），再 DELETE 目标（404 容忍，与 `delete()` 同语义）并单次重试 MOVE
-     * （无 If 预条件、`Overwrite:T`——目标已被删除，预条件恒失败无意义），
+     * **ISSUE-P2-381 / ENG-20261028-20**：部分服务器对 MOVE 覆盖已有目标报 409/423（仅靠
+     * `Overwrite:T` 不可靠；keepass2android `WebDavStorage.java:235` 注释 + 提交 `9c8ee243` 实证）。
+     * 收到 409/423 时先重探目标元数据裁决（远端 ETag 非空且 ≠ 预期 ⇒ ConflictError，交上层合并；
+     * 探测失败 ⇒ 如实上抛，fail-closed）；远端未漂移也**不再**以「DELETE 正式目标 + 无预条件重试」
+     * 兜底——两步之间没有原子性：DELETE 成功而重试 MOVE 失败、取消或进程死亡会让正式远端路径缺失，
+     * DELETE 与重试之间他端重建的目标又会被无 `If` 的 MOVE 静默覆盖。此类服务器因此得到
+     * 可处理的协议错误（[WebDavMoveOverwritePolicy.overwriteRefusedMessage]），远端旧文件原样保留。
      * 409/423 与 412 分开报错文案。
      *
      * Overwrite 语义裁定（expectedEtag 为空时的两种形态必须区分）：
@@ -367,20 +423,31 @@ class WebDavSyncProvider private constructor(
         data: ByteArray,
         expectedEtag: String?,
         remoteExists: Boolean?
-    ): Result<String> = WebDavUploadAtomic.run(
-        serverUrl = serverUrl,
-        authHeader = authHeader,
-        remotePath = remotePath,
-        data = data,
-        expectedEtag = expectedEtag,
-        remoteExists = remoteExists,
-        upload = { path, bytes, etag -> upload(path, bytes, etag) },
-        getMetadata = { path -> getMetadata(path) },
-        delete = { path -> delete(path) },
-        execute = { retryable, requestFactory ->
-            executeTransientRetryable(retryable = retryable) { requestFactory() }
-        }
-    )
+    ): Result<String> {
+        // ENG-20261028-42：同 listRemoteDirectory——实参在 WebDavUploadAtomic 的保护段之外求值，
+        // 凭据已失效时必须在此收敛为 Result.failure，不能以异常外溢。
+        // **已知边界（helper 签名固定为 String，本次不改）**：该头在本事务内被 MOVE 复用
+        // （最多两次重试），因此其作用域是「一次事务」而非「一次请求」；若本事务进行中发生
+        // 凭据失效（锁定 / 配置撤销），最后的 MOVE 仍会带上失效前构造的头发出一次请求。
+        // 中间那个 PUT 由 [upload] 自行现算，因此失效后它会先失败。不可擦副本的存在面仍
+        // 远小于整改前的「随 Provider 常驻整个生命周期」。
+        val authHeader = runCatchingCancellable { credentials.authorizationHeader() }
+            .getOrElse { return Result.failure(it) }
+        return WebDavUploadAtomic.run(
+            serverUrl = serverUrl,
+            authHeader = authHeader,
+            remotePath = remotePath,
+            data = data,
+            expectedEtag = expectedEtag,
+            remoteExists = remoteExists,
+            upload = { path, bytes, etag -> upload(path, bytes, etag) },
+            getMetadata = { path -> getMetadata(path) },
+            delete = { path -> delete(path) },
+            execute = { retryable, requestFactory ->
+                executeTransientRetryable(retryable = retryable) { requestFactory() }
+            }
+        )
+    }
 
     override suspend fun delete(remotePath: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatchingCancellable {
@@ -388,7 +455,7 @@ class WebDavSyncProvider private constructor(
             val request = Request.Builder()
                 .url(fullUrl)
                 .delete()
-                .header("Authorization", authHeader)
+                .header("Authorization", credentials.authorizationHeader())
                 .build()
 
             executeTransientRetryable(retryable = true) { request }.use { response ->

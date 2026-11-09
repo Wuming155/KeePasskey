@@ -1,20 +1,39 @@
 package com.keepasskey.app.security
 
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.Button
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
+import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import kotlinx.coroutines.CompletableDeferred
 
 /**
@@ -43,6 +62,29 @@ import kotlinx.coroutines.CompletableDeferred
 class DialogWindowHardeningHostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        (applicationContext as? com.keepasskey.app.MainApplication)?.autoLockManager?.interactionTracker?.let { tracker ->
+            tracker.onWindowAttached = { attachedWindow ->
+                if (attachedWindow !== window) {
+                    val origCallback = attachedWindow.callback
+                    if (origCallback != null) {
+                        attachedWindow.callback = object : Window.Callback by origCallback {
+                            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                                    DialogWindowProbe.lastWindowCallbackEventFlags = event.flags
+                                }
+                                return origCallback.dispatchTouchEvent(event)
+                            }
+                        }
+                    }
+                    DialogWindowProbe.captureWindow(attachedWindow)
+                }
+            }
+            tracker.onWindowDetached = { detachedWindow ->
+                if (detachedWindow !== window) {
+                    DialogWindowProbe.notifyWindowDetached(detachedWindow)
+                }
+            }
+        }
         // 宿主窗口是否携带 FLAG_SECURE：**必须由测试在被启动前设定**
         // （见 `DialogWindowProbe.hostWindowSecureOnCreate` 的为什么）。
         if (DialogWindowProbe.hostWindowSecureOnCreate) {
@@ -51,23 +93,47 @@ class DialogWindowHardeningHostActivity : ComponentActivity() {
                 WindowManager.LayoutParams.FLAG_SECURE
             )
         }
+        if (DialogWindowProbe.hostHideOverlayWindows) {
+            window.setHideOverlayWindows(true)
+        }
         setContent {
-            if (DialogWindowProbe.visible) {
-                Dialog(
-                    onDismissRequest = {},
-                    // 与生产调用点同参数（§254 起生产 7 处调用点全部传 SecureOn）：
-                    // 本探针由测试切换策略，用于证明「SecureOn 强制并保持该 flag」这一机制本身。
-                    properties = DialogProperties(
-                        securePolicy = if (DialogWindowProbe.secureOn) {
-                            SecureFlagPolicy.SecureOn
-                        } else {
-                            SecureFlagPolicy.Inherit
-                        }
-                    )
+            val bg = DialogWindowProbe.hostBackgroundColor
+            KeePasskeyTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = bg ?: androidx.compose.material3.MaterialTheme.colorScheme.background
                 ) {
-                    DialogWindowProbe.Content()
+                    if (DialogWindowProbe.visible) {
+                        val custom = DialogWindowProbe.customContent
+                        if (custom != null) {
+                            custom()
+                        } else {
+                            Dialog(
+                                onDismissRequest = {},
+                                // 本探针由测试切换策略，用于证明「SecureOn 强制并保持该 flag」这一机制本身。
+                                properties = DialogProperties(
+                                    securePolicy = if (DialogWindowProbe.secureOn) {
+                                        SecureFlagPolicy.SecureOn
+                                    } else {
+                                        SecureFlagPolicy.Inherit
+                                    }
+                                )
+                            ) {
+                                DialogWindowProbe.Content()
+                            }
+                        }
+                    }
+                    DialogWindowProbe.HostContent()
                 }
             }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        (applicationContext as? com.keepasskey.app.MainApplication)?.autoLockManager?.interactionTracker?.let { tracker ->
+            tracker.onWindowAttached = null
+            tracker.onWindowDetached = null
         }
     }
 }
@@ -103,11 +169,37 @@ internal object DialogWindowProbe {
      * 探针 `Dialog` 的策略是否为 `SecureFlagPolicy.SecureOn`——**必须在 `ActivityScenario.launch`
      * 之前设定**。
      *
-     * 生产侧 7 处调用点自 §254 起全部传 `SecureOn`（由 `SecureDialogFlagPolicyTest` 静态守卫），
+     * 生产侧凭据类对话框统一显式指定 `SecureOn`（按 ENG-20261028-33 由各调用点明确策略），
      * 本开关让设备用例既能验证 `SecureOn` 的**保持**效果，也能在同一宿主机上复现
      * `Inherit`（＝调用点漏传）时的缺口，从而证明该策略参数是**承重**的。
      */
     var secureOn = true
+
+    /** 是否在 Dialog 内施加 SecureDialogWindowEffect（false 时仅施加普通对话框接线 TrackDialogInteractionEffect） */
+    var useSecureEffect = true
+
+    /** 是否呈现宿主界面的真实文本输入框 */
+    var showTextField by mutableStateOf(false)
+
+    /** 宿主 Activity 窗口是否在 onCreate 开启 setHideOverlayWindows(true) */
+    var hostHideOverlayWindows = false
+
+    /** 宿主 Activity 背景纯色覆盖（供截图像素对比正负对照使用） */
+    var hostBackgroundColor by mutableStateOf<Color?>(null)
+
+    /** 最近一次经真实 Window.Callback 收到的 ACTION_DOWN 事件 flags（由 OS 平台生成设置，非测试自填） */
+    var lastWindowCallbackEventFlags: Int? = null
+
+    /** 宿主文本框的当前文本内容 */
+    var textInput by mutableStateOf("")
+
+    /** 自定义测试对话框内容（如真实生产对话框 Composable） */
+    var customContent by mutableStateOf<(@Composable () -> Unit)?>(null)
+
+    /** 探针及生产对话框内部按钮点击计数器（用于验证非遮挡正对照触发点击，遮挡负对照不交付点击） */
+    var clickCount by mutableStateOf(0)
+
+    var focusRequester: FocusRequester? = null
 
     lateinit var window: CompletableDeferred<Window>
         private set
@@ -115,23 +207,88 @@ internal object DialogWindowProbe {
     lateinit var decorView: CompletableDeferred<View>
         private set
 
+    lateinit var detachedWindow: CompletableDeferred<Window>
+        private set
+
+    fun captureWindow(resolved: Window) {
+        if (!window.isCompleted) window.complete(resolved)
+        if (!decorView.isCompleted) decorView.complete(resolved.decorView)
+    }
+
+    fun notifyWindowDetached(resolved: Window) {
+        if (!detachedWindow.isCompleted) detachedWindow.complete(resolved)
+    }
+
     /** 每个用例开始前复位（instrumentation 的静态状态跨用例存活） */
-    fun reset(hostWindowSecure: Boolean, secure: Boolean = true) {
-        visible = true
+    fun reset(
+        hostWindowSecure: Boolean,
+        secure: Boolean = true,
+        useSecureEffect: Boolean = true,
+        showTextField: Boolean = false,
+        hostHideOverlayWindows: Boolean = false,
+        hostBackgroundColor: Color? = null,
+        customContent: (@Composable () -> Unit)? = null
+    ) {
+        visible = !showTextField
         hostWindowSecureOnCreate = hostWindowSecure
+        this.hostHideOverlayWindows = hostHideOverlayWindows
+        this.hostBackgroundColor = hostBackgroundColor
+        this.lastWindowCallbackEventFlags = null
         secureOn = secure
+        this.useSecureEffect = useSecureEffect
+        this.showTextField = showTextField
+        this.customContent = customContent
+        textInput = ""
+        clickCount = 0
+        focusRequester = FocusRequester()
         window = CompletableDeferred()
         decorView = CompletableDeferred()
+        detachedWindow = CompletableDeferred()
     }
 
     @Composable
     fun Content() {
-        SecureDialogWindowEffect()
+        if (useSecureEffect) {
+            SecureDialogWindowEffect()
+        } else {
+            TrackDialogInteractionEffect()
+        }
         val view = LocalView.current
         SideEffect {
             val resolved = view.dialogWindowOrNull() ?: return@SideEffect
-            window.complete(resolved)
-            decorView.complete(resolved.decorView)
+            captureWindow(resolved)
+        }
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 6.dp
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(240.dp, 120.dp)
+                    .padding(16.dp)
+            ) {
+                Button(
+                    onClick = { clickCount++ }
+                ) {
+                    Text("Probe Confirm")
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun HostContent() {
+        if (showTextField) {
+            val requester = focusRequester ?: remember { FocusRequester().also { focusRequester = it } }
+            BasicTextField(
+                value = textInput,
+                onValueChange = { textInput = it },
+                modifier = Modifier.focusRequester(requester)
+            )
+            androidx.compose.runtime.LaunchedEffect(requester) {
+                requester.requestFocus()
+            }
         }
     }
 }

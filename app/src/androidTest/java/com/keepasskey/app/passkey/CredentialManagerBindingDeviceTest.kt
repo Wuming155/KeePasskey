@@ -209,4 +209,81 @@ class CredentialManagerBindingDeviceTest {
 
         assertFalse(store.hasAnyBindingFor(pkg))
     }
+
+    // ── ENG-20261028-06：调用方签名裁决走真实绑定存储 ──────────────────
+
+    /** 真实存储下的签发裁决（与候选层分工见 [CredentialCandidateMatcher] KDoc） */
+    private fun verdict(callingPackage: String, digests: CallerCertDigests, requestRpId: String) =
+        PasskeyRpAuthorization.evaluate(
+            requestRpId = requestRpId,
+            credentialRpId = "example.com",
+            browserFlow = false,
+            callerBinding = CredentialManagerPackageBindingGate.decide(
+                callingPackage = callingPackage,
+                certDigests = digests,
+                isTrusted = store::isTrusted,
+                hasAnyBinding = store::hasAnyBindingFor
+            )
+        )
+
+    @Test
+    fun `真实存储下未登记签名的原生调用一律不得签发_显式与缺失RP同判`() {
+        assertFalse("前置：该包名必须确实未绑定", store.hasAnyBindingFor("com.keepasskey.neverbound"))
+
+        for (requestRp in listOf("", "example.com")) {
+            val result = verdict("com.keepasskey.neverbound", CallerCertDigests.ofSingle(digestA), requestRp)
+            assertEquals(
+                "requestRp='$requestRp'：自报的 rpId 不构成授权参照，必须拒签",
+                PasskeyRpVerdict.CALLER_UNBOUND,
+                result
+            )
+            assertTrue("该组合可经窗口内登记签名补救", result.authorizeCallerInWindow)
+        }
+    }
+
+    @Test
+    fun `真实存储下已登记同一签名时可签发`() {
+        assertTrue("前置：绑定必须真实落盘", store.trust(pkg, digestA))
+
+        for (requestRp in listOf("", "example.com")) {
+            assertEquals(
+                "requestRp='$requestRp'：签名绑定命中即可签发",
+                PasskeyRpVerdict.ALLOWED,
+                verdict(pkg, CallerCertDigests.ofSingle(digestA), requestRp)
+            )
+        }
+    }
+
+    @Test
+    fun `真实存储下已登记异签名时拒签且不得就地重绑`() {
+        store.trust(pkg, digestA)
+
+        for (requestRp in listOf("", "example.com")) {
+            val result = verdict(pkg, CallerCertDigests.ofSingle(digestB), requestRp)
+            assertEquals(
+                "requestRp='$requestRp'：已登记而签名不符 ⇒ 拒绝",
+                PasskeyRpVerdict.CALLER_BINDING_REJECTED,
+                result
+            )
+            assertFalse(
+                "已存在绑定记录而签名不符，不得就地重绑（等于让顶替者自证身份）",
+                result.authorizeCallerInWindow
+            )
+        }
+    }
+
+    @Test
+    fun `真实存储下请求自报其他RP一律拒绝`() {
+        store.trust(pkg, digestA)
+
+        assertEquals(
+            PasskeyRpVerdict.RP_MISMATCH,
+            verdict(pkg, CallerCertDigests.ofSingle(digestA), "other.example")
+        )
+        assertEquals(
+            "未登记包名同样先被 RP 不匹配拦下",
+            PasskeyRpVerdict.RP_MISMATCH,
+            verdict("com.keepasskey.neverbound", CallerCertDigests.ofSingle(digestA), "other.example")
+        )
+    }
 }

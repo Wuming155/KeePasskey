@@ -7,7 +7,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.net.Uri;
 
-/** 以前台测试客户端发送独立 holder 进程保留的系统 PendingIntent。 */
+/** 以前台测试客户端发送独立 holder 进程保留的系统 PendingIntent（A / B / 单句柄 P）。 */
 public final class LockedSaveRequestHolderActivity extends Activity {
 
     public static final String EXTRA_REQUEST = "holder_request";
@@ -25,8 +25,9 @@ public final class LockedSaveRequestHolderActivity extends Activity {
         super.onResume();
         if (sent) return;
         sent = true;
-        String method = "B".equals(request)
-                ? LockedSaveRequestHolderProvider.GET_B : LockedSaveRequestHolderProvider.GET_A;
+        String method = "B".equals(request) ? LockedSaveRequestHolderProvider.GET_B
+                : "P".equals(request) ? LockedSaveRequestHolderProvider.GET_ONE
+                : LockedSaveRequestHolderProvider.GET_A;
         try {
             Bundle result = getContentResolver().call(holderUri(), method, null, null);
             PendingIntent pending = result == null ? null : (PendingIntent) result.getParcelable("pending");

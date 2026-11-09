@@ -1,5 +1,6 @@
 package com.keepasskey.app.security
 
+import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -30,10 +31,12 @@ import com.keepasskey.app.coroutines.guardedScope
  * 遵循安全防护硬约束：
  * 1. 监听 ProcessLifecycleOwner 进程退至后台事件，按配置的自动锁定超时执行熔断；
  * 2. 注册 Intent.ACTION_SCREEN_OFF 屏幕熄灭广播，设备熄屏瞬间立即触发熔断；
- * 3. 熔断时立即触发 DatabaseSession 内存密码擦除 (clear) 与会话锁定，通知 UI 导航强退至 UnlockScreen。
+ * 3. 熔断时立即触发 DatabaseSession 内存密码擦除 (clear) 与会话锁定，通知 UI 导航强退至 UnlockScreen；
+ * 4. 前台闲置档以实际交互为计时起点——各 Activity 窗口的触摸 / 按键经 [AutoLockInteractionTracker]
+ *    接入 [onUserInteraction]，持续操作期间不到点锁定，真正闲置才锁。
  *
  * ISSUE-P0-01 (ZT-01)：判定与会话熔断内核拆分至 [AutoLockSessionGuard]（纯 Kotlin 可单测），
- * 本类仅保留 Android 侧注册管道（生命周期观察者 + 熄屏广播）并对内核做 API 委托。
+ * 本类仅保留 Android 侧注册管道（生命周期观察者 + 熄屏广播 + Activity 输入接线）并对内核做 API 委托。
  *
  * ISSUE-P2-13 (ZT-19)：修复「后台期间无定时器」缺陷——onStop 时按当前超时值调度一个延迟锁定
  * 任务，到点即锁（而非等回前台才判）；onStart / 解锁成功 / 超时设置变更时取消或重排该任务。
@@ -91,6 +94,14 @@ class AutoLockManager @Inject constructor(
     )
 
     /**
+     * ENG-20261028-04：Activity 窗口触摸 / 按键与软键盘输入 → [onUserInteraction] 的转发器。
+     * 由 [initialize] 在进程冷启动点注册到 Application，覆盖全部 Activity / 对话框与 Compose 文本输入。
+     */
+    internal val interactionTracker = AutoLockInteractionTracker(
+        onInteraction = { onUserInteraction() }
+    )
+
+    /**
      * ISSUE-P3-381：注册回前台监听（幂等重复注册由调用方负责；进程级单例生命周期）。
      */
     fun addOnForegroundResumeListener(listener: () -> Unit) {
@@ -109,13 +120,13 @@ class AutoLockManager @Inject constructor(
     }
 
     /**
-     * ISSUE-P2-379：前台闲置计时。交互刷新语义由 [onUserInteraction] 承担；
+     * ISSUE-P2-379：前台闲置计时的统一交互刷新入口。
+     * 生产调用方为 [AutoLockInteractionTracker]（Activity 窗口的触摸 / 按键经 [initialize] 接入）；
      * 锁定态下交互不刷新（[ForegroundIdleLockPolicy.shouldRefreshOnInteraction]）。
      */
     fun onUserInteraction() {
-        val now = System.currentTimeMillis()
         if (!ForegroundIdleLockPolicy.shouldRefreshOnInteraction(sessionLocked)) return
-        lastInteractionAtMillis = now
+        lastInteractionAtMillis = System.currentTimeMillis()
         // 后台定时器不受前台交互影响；仅前台闲置档需要重排
         if (!isInBackground) scheduleForegroundIdleLock()
     }
@@ -143,12 +154,18 @@ class AutoLockManager @Inject constructor(
      * 熄屏熔断与后台超时锁定均全程生效。幂等守卫保留，重复调用无害。
      *
      * ISSUE-P2-13 (ZT-19)：同时观察设置流，后台期间超时值（或后台锁定开关）变更时响应式重排定时器。
+     *
+     * ENG-20261028-04：注册 [AutoLockInteractionTracker]，把各 Activity 窗口受理的触摸 / 按键
+     * 接入 [onUserInteraction]，使持续交互期间前台闲置计时不会到点锁库。
      */
     fun initialize() {
         if (isInitialized) return
         isInitialized = true
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+
+        // 交互刷新接线：注册到 Application 的 Activity 生命周期，逐个 Activity 包装窗口回调
+        (context.applicationContext as? Application)?.let(interactionTracker::install)
 
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
         // P0 整改：官方自 androidx.core 1.9.0 起要求 context-registered receiver 显式声明导出标志。

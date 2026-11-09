@@ -21,16 +21,26 @@ import com.keepasskey.app.security.CallerCertDigests
  * |---|---|---|
  * | [Decision.AUTHORIZED] | 已绑定该包名，且本次调用方摘要**命中** | 正常放行 |
  * | [Decision.REJECTED] | 包名为空，**或**已绑定该包名但本次摘要**不匹配** | **不命中**（`AC②` 的两条负向判据） |
- * | [Decision.UNBOUND] | 该包名**从未**绑定过 | 无可参照，退回包名维度的既有行为 |
+ * | [Decision.UNBOUND] | 该包名**从未**绑定过 | 无可参照，退回包名维度的既有行为（签发侧另见下文） |
  *
  * ## `UNBOUND` 的边界（如实声明，不得读作「已加固」）
  *
- * `UNBOUND` 下本通道仍按「条目 `android://` 绑定包名 == 调用包名」放行，因此
- * **对从未绑定过的包名，`ISSUE-P2-83` 的越权面依然存在**。之所以不在此处 fail-closed：
- * 无参照时「拒绝」会打断所有存量条目，而「首次使用即绑定」更糟——若把**首个**调用方
- * （可能是侧载应用）记成绑定，之后真正的应用反而会被判为「已绑定但不匹配」而**永久失效**。
- * 正确的参照来自**可信的创建时机**：本通道的绑定由用户主动发起的保存 / 注册流程写入
- * （见 [CredentialManagerCallerTrustStore]），因而**凡经本应用流程创建的条目都必然已绑定**。
+ * `UNBOUND` 下**候选检索**仍按「条目 `android://` 绑定包名 == 调用包名」放行，因此
+ * 对从未绑定过的包名，包名维度本身不提供签名保证。之所以不在此处 fail-closed：
+ * 无参照时「拒绝」会让存量条目在系统 UI 上**零候选**，用户既看不到内容也拿不到授权入口；
+ * 而「首次使用即隐式绑定」更糟——若把**首个**调用方（可能是侧载应用）记成绑定，
+ * 之后真正的应用反而会被判为「已绑定但不匹配」而**永久失效**。
+ *
+ * ## 与签发授权的关系（`ENG-20261028-06`）
+ *
+ * 本对象只回答「包名维度**能不能用来挑选候选**」，不是签发授权：通行密钥签发由
+ * [PasskeyRpAuthorization] 裁决，两者的分工是刻意的：
+ *
+ * - **口令候选**：`UNBOUND` 继续按包名维度放行（`ISSUE-P2-83` 的取舍；口令没有 RP 概念）；
+ * - **通行密钥候选**：`UNBOUND` 仍出候选（保住授权入口的可达性），
+ * - **通行密钥签发**：原生调用 `UNBOUND` 一律拒绝（`CALLER_UNBOUND`，与请求是否带 RP 无关），
+ *   只能经用户在受保护窗口内**显式授权**（写入本次系统背书的签名摘要）后，下一次发起才能签发；
+ *   已绑定但签名不符（`REJECTED`）任何 RP 状态下都拒绝，且不得就地重绑。
  *
  * ## 纯函数
  *
@@ -42,7 +52,10 @@ object CredentialManagerPackageBindingGate {
         /** 已绑定且本次调用方摘要命中 —— 正常放行 */
         AUTHORIZED,
 
-        /** 该包名从未绑定过 —— 无可参照，退回包名维度的既有行为（**不等于已加固**） */
+        /**
+         * 该包名从未绑定过 —— 候选检索可按包名维度列候选，但**通行密钥签发一律拒绝**
+         * （`CALLER_UNBOUND`），须用户在受保护窗口内显式登记签名后才能签发
+         */
         UNBOUND,
 
         /** 包名为空，或已绑定该包名但本次摘要不匹配 —— 必须不命中 */
@@ -70,7 +83,12 @@ object CredentialManagerPackageBindingGate {
         return Decision.UNBOUND
     }
 
-    /** 包名维度是否可用于本次放行（仅 [Decision.REJECTED] 不放行）。 */
+    /**
+     * 包名维度是否可用于**候选检索**（仅 [Decision.REJECTED] 不放行）。
+     *
+     * 本函数**不是**签发授权：`UNBOUND` 返回 `true` 只表示「可以按包名挑候选」，
+     * 通行密钥签发须改用 [PasskeyRpAuthorization.evaluate]（它还会看请求是否带 RP）。
+     */
     fun allowsPackageDimension(
         callingPackage: String,
         certDigests: CallerCertDigests,

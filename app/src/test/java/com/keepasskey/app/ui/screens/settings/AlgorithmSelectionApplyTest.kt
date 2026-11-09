@@ -64,24 +64,46 @@ class AlgorithmSelectionApplyTest {
         }
     }
 
-    /** 以文件外层头确认保存完成；会话回到 OPENED 本身不能证明磁盘已写入新值。 */
+    /**
+     * 以文件外层头确认保存完成；会话回到 OPENED 本身不能证明磁盘已写入新值。
+     *
+     * **先等本次提交回执落定，再单次读盘**。原实现每 10ms 打开目标文件轮询外层头：原子写盘以
+     * `Files.move(ATOMIC_MOVE)` / `renameTo` 替换目标，宿主 Windows 上目标存在打开的读句柄时两者
+     * 都会 `AccessDeniedException`，[AtomicFileWriter] 遂按 ENG-20261028-17 拒绝非原子覆盖并如实
+     * 失败——会话停在 DIRTY、磁盘头保持旧值，条件永不成立（实测 60s 超时）。轮询读文件会把测试
+     * 自身变成写盘竞争者；改为「等回执 → 读一次」，既消除该竞态，也在提交失败时立刻带错误码失败。
+     *
+     * [SettingsPreferencesController.clearDatabaseConfigWriteFeedback] 须由调用方在触发本次提交**前**
+     * 清空，否则会读到上一次提交的旧回执。
+     */
     private fun awaitDiskHeader(
         file: File,
         session: DatabaseSession,
+        controller: SettingsPreferencesController,
         describe: String,
         expectedCipher: KdbxUuid,
         expectedKdf: KdbxUuid
     ) {
-        awaitCondition(describe) {
-            if (!file.isFile || file.length() == 0L) return@awaitCondition false
-            val (header, rawHeader) = file.inputStream().use { KdbxHeader.deserialize(it) }
-            try {
-                header.cipherUuid == expectedCipher &&
-                    header.kdfParameters.kdfUuid == expectedKdf &&
-                    session.state.value == DatabaseSession.SessionState.OPENED
-            } finally {
-                rawHeader.fill(0)
-            }
+        awaitCondition("$describe（等待提交回执）") {
+            val state = controller.databaseConfigWriteState.value
+            !state.isSaving && state.feedback != null
+        }
+        val feedback = controller.databaseConfigWriteState.value.feedback
+        assertTrue(
+            "$describe 提交应成功，实际回执 resId=${feedback?.resId}",
+            feedback != null && !feedback.isError
+        )
+        assertEquals(
+            "$describe 提交后会话须回到 OPENED",
+            DatabaseSession.SessionState.OPENED,
+            session.state.value
+        )
+        val (header, rawHeader) = file.inputStream().use { KdbxHeader.deserialize(it) }
+        try {
+            assertEquals("$describe（密文算法）", expectedCipher, header.cipherUuid)
+            assertEquals("$describe（KDF）", expectedKdf, header.kdfParameters.kdfUuid)
+        } finally {
+            rawHeader.fill(0)
         }
     }
 
@@ -129,13 +151,14 @@ class AlgorithmSelectionApplyTest {
 
         val (session, controller) = createSession(file, "cipher-switch", password)
 
+        controller.clearDatabaseConfigWriteFeedback()
         controller.setEncryptionAlgorithm(CipherLabels.CHACHA20)
 
         awaitCondition("会话头 cipherUuid 切到 ChaCha20") {
             session.databaseFlow.value?.header?.cipherUuid == KdbxConstants.Cipher.CHACHA20
         }
         awaitDiskHeader(
-            file, session, "磁盘头已写入 ChaCha20 + Argon2id",
+            file, session, controller, "磁盘头已写入 ChaCha20 + Argon2id",
             KdbxConstants.Cipher.CHACHA20, KdbxConstants.Kdf.ARGON2ID
         )
         // 回显随库真值统一下发（不再自持内存状态）
@@ -161,6 +184,7 @@ class AlgorithmSelectionApplyTest {
 
         val (session, controller) = createSession(file, "kdf-argon2d", password)
 
+        controller.clearDatabaseConfigWriteFeedback()
         controller.setKdfAlgorithm(KdfLabels.ARGON2D)
 
         awaitCondition("会话头 KDF 切到 Argon2d") {
@@ -168,7 +192,7 @@ class AlgorithmSelectionApplyTest {
                 ?.type == KdfParameters.Argon2.Argon2Type.ARGON2D
         }
         awaitDiskHeader(
-            file, session, "磁盘头已写入 AES-256-CBC + Argon2d",
+            file, session, controller, "磁盘头已写入 AES-256-CBC + Argon2d",
             KdbxConstants.Cipher.AES_256_CBC, KdbxConstants.Kdf.ARGON2D
         )
         awaitCondition("回显随头真值下发") {
@@ -198,13 +222,14 @@ class AlgorithmSelectionApplyTest {
 
         val (session, controller) = createSession(file, "kdf-aeskdf", password)
 
+        controller.clearDatabaseConfigWriteFeedback()
         controller.setKdfAlgorithm(KdfLabels.AES_KDF)
 
         awaitCondition("会话头 KDF 切到 AES-KDF") {
             session.databaseFlow.value?.header?.kdfParameters is KdfParameters.Aes
         }
         awaitDiskHeader(
-            file, session, "磁盘头已写入 AES-256-CBC + AES-KDF",
+            file, session, controller, "磁盘头已写入 AES-256-CBC + AES-KDF",
             KdbxConstants.Cipher.AES_256_CBC, KdbxConstants.Kdf.AES_KDF
         )
         awaitCondition("回显随头真值下发") {
@@ -284,14 +309,16 @@ class AlgorithmSelectionApplyTest {
         val password = PROBE_PASSWORD.toCharArray()
 
         val (session, controller) = createSession(file, "algo-probe", password)
+        controller.clearDatabaseConfigWriteFeedback()
         controller.setEncryptionAlgorithm(CipherLabels.TWOFISH_CBC)
         awaitDiskHeader(
-            file, session, "磁盘头已写入 Twofish + Argon2id",
+            file, session, controller, "磁盘头已写入 Twofish + Argon2id",
             KdbxConstants.Cipher.TWOFISH, KdbxConstants.Kdf.ARGON2ID
         )
+        controller.clearDatabaseConfigWriteFeedback()
         controller.setKdfAlgorithm(KdfLabels.ARGON2D)
         awaitDiskHeader(
-            file, session, "磁盘头已写入 Twofish + Argon2d",
+            file, session, controller, "磁盘头已写入 Twofish + Argon2d",
             KdbxConstants.Cipher.TWOFISH, KdbxConstants.Kdf.ARGON2D
         )
 

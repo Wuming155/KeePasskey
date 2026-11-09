@@ -1,12 +1,15 @@
 package com.keepasskey.sync.s3
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
 /**
  * S3 对象键与 URL 编解码纯函数协作单元（无状态，可自由复用）。
  *
  * 职责：
  * 1. 对象键分段 URL 编码，与 SigV4 canonicalUri 严格一致；
  * 2. 依据端点与寻址风格（virtual-host / path）拼装对象访问 URL；
- * 3. 从 URL 提取主机名与 canonicalUri。
+ * 3. 从 URL 提取主机名与 canonicalUri；
+ * 4. 依据寻址风格推导**实际请求主机**（SSRF 连接期豁免的唯一授权对象）。
  */
 internal object S3KeyCodec {
 
@@ -71,6 +74,20 @@ internal object S3KeyCodec {
     fun hostOf(url: String): String {
         return url.substringAfter(SCHEME_SEPARATOR).substringBefore('/')
     }
+
+    /**
+     * **实际请求主机**（不含端口，OkHttp 归一化后的 host）：SSRF 连接期豁免的精确授权对象
+     * （ENG-20261028-22）。
+     *
+     * path 风格即端点主机；virtual-host 风格为 `bucket.端点主机`——后者才是真正被解析与
+     * 建连的主机，只登记端点主机会让桶主机落入普通阻断分支（自建内网 MinIO/Ceph 的
+     * 虚拟主机寻址因此不可用）。主机由 [buildUrl] 的产物经 OkHttp 解析得出，与真实建连
+     * 所用主机同源，避免「授权主机」与「实际主机」出现第二套推导。
+     *
+     * @return 主机名；URL 无法解析时返回 null（调用方按「不豁免」fail-closed 处理）
+     */
+    fun requestHost(endpoint: String, bucketName: String, usePathStyle: Boolean): String? =
+        buildUrl(endpoint, bucketName, usePathStyle, "").toHttpUrlOrNull()?.host
 
     /** 提取 SigV4 canonicalUri（不得含 query string）。 */
     fun canonicalUri(url: String): String {

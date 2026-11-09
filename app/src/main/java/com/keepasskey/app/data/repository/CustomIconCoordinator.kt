@@ -50,7 +50,10 @@ internal class CustomIconCoordinator(
      * 上传 PNG 字节为库级自定义图标，返回其 UUID（hex）。
      * 内容去重：与既有图标字节完全一致时直接返回既有 UUID，不重复落盘。
      */
-    suspend fun addCustomIcon(pngBytes: ByteArray): KdbxResult<String> {
+    suspend fun addCustomIcon(pngBytes: ByteArray): KdbxResult<String> =
+        databaseSession.withWriteAcceptance { addCustomIconInternal(pngBytes) }
+
+    private suspend fun addCustomIconInternal(pngBytes: ByteArray): KdbxResult<String> {
         if (!isPngBytes(pngBytes)) {
             return KdbxResult.Failure(
                 IllegalArgumentException(strings.get(R.string.icon_invalid_not_png)),
@@ -98,7 +101,10 @@ internal class CustomIconCoordinator(
      * 任一环节失败都向上返回 Failure，绝不静默吞掉——否则会出现「界面已回退默认图标、
      * 库文件里图标与引用仍在」的假成功。
      */
-    override suspend fun deleteCustomIcon(iconIdHex: String): KdbxResult<Int> {
+    override suspend fun deleteCustomIcon(iconIdHex: String): KdbxResult<Int> =
+        databaseSession.withWriteAcceptance { deleteCustomIconInternal(iconIdHex) }
+
+    private suspend fun deleteCustomIconInternal(iconIdHex: String): KdbxResult<Int> {
         val targetIcon = parseKdbxUuidOrNull(iconIdHex)
             ?: return KdbxResult.Failure(
                 IllegalArgumentException(INVALID_ICON_ID),

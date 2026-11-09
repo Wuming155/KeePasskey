@@ -35,6 +35,37 @@ class SyncProviderResolver @Inject constructor(
         debugLog: DebugLogBuffer
     ) : this(syncCredentialsStore, preferences, debugLog, ProductionSyncProviderFactory())
 
+    /**
+     * ENG-20261028-42：作用域退出时的**保留判定**（未接线时恒 false = 作用域独占所有权）。
+     *
+     * 生产由 `SyncCoordinator` 在构造后接上「该 Provider 是否仍被待决冲突会话留存」的判定：
+     * 冲突待决期的引擎会在用户稍后裁决时继续发网络写，此时按作用域退出即释放会让裁决上传
+     * 以鉴权失败告终。判定为 true 时不释放，所有权转移给该存活消费者，由其丢弃时收口
+     * （`SyncConflictController.clearPendingConflictSession` / `SyncSessionState.clear`）。
+     *
+     * 以可变属性而非构造参数表达：Hilt 无法注入 lambda，且既有十余处单测/设备测试构造点
+     * 不应为此改签名。
+     */
+    @Volatile
+    internal var isProviderRetained: ((SyncProvider) -> Boolean)? = null
+
+    /** 释放本次作用域独占的 Provider；被存活消费者留存时跳过（见 [isProviderRetained]）。 */
+    private fun releaseProvider(provider: SyncProvider) {
+        if (isProviderRetained?.invoke(provider) == true) return
+        providerFactory.releaseOwned(provider)
+    }
+
+    /**
+     * ENG-20261028-42：**无条件**释放某个 Provider 的凭据，供持有方在生命周期终点收口
+     * （`SyncEngine.releaseProviderCredentials` 的注入实现）。
+     *
+     * 与 [releaseProvider] 的区别：本方法不看留存判定——调用方已确认该 Provider 不再有任何
+     * 存活消费者。仍走工厂的同一收口，S3 与 WebDAV 的凭据形态因此得到对称处理。
+     */
+    internal fun releaseOwnedProvider(provider: SyncProvider) {
+        providerFactory.releaseOwned(provider)
+    }
+
     /** ISSUE-P3-03 (43a)：偏好 → 传输层配置（依赖倒置；sync 模块不感知 app 偏好类型） */
     private fun transferOptions(): SyncTransferOptions {
         val settings = preferences.currentSettings()
@@ -263,7 +294,7 @@ class SyncProviderResolver @Inject constructor(
         try {
             return block(provider)
         } finally {
-            providerFactory.releaseOwned(provider)
+            releaseProvider(provider)
         }
     }
 
@@ -300,7 +331,7 @@ class SyncProviderResolver @Inject constructor(
         return try {
             block(resolved.provider, resolved.target)
         } finally {
-            providerFactory.releaseOwned(resolved.provider)
+            releaseProvider(resolved.provider)
         }
     }
 
@@ -339,7 +370,7 @@ class SyncProviderResolver @Inject constructor(
         try {
             return block(resolved.provider, resolved.target)
         } finally {
-            providerFactory.releaseOwned(resolved.provider)
+            releaseProvider(resolved.provider)
         }
     }
 

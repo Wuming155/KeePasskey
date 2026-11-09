@@ -8,6 +8,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * 安全设置页剩余的**确认类**弹窗。
@@ -33,6 +34,7 @@ internal fun FlagSecureRiskDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.sec_flag_secure_risk_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Text(
                 text = stringResource(R.string.sec_flag_secure_risk_message),
                 style = MaterialTheme.typography.bodyMedium,

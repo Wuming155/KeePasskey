@@ -1,6 +1,7 @@
 package com.keepasskey.core.model
 
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.core.security.ProtectedStringReclamation
 
 /**
  * 不可变条目领域模型。
@@ -158,13 +159,18 @@ data class KdbxEntry(
     }
 
     /**
-     * 擦除本节点（含 history）中**未被身份集合 [live] 引用**的敏感实例。
-     * [live] 必须是身份集合（如 Collections.newSetFromMap(IdentityHashMap())），
-     * 其 contains 走引用相等，避免把共享同一对象的存活实例一并擦除。
+     * 回收本节点（含 history）中**未被身份集合 [live] 引用**的受保护实例。
+     * [live] 必须是身份集合（如 [KdbxGroup] 侧的 `newSensitiveIdentitySet`），
+     * 其 contains 走引用相等，避免把共享同一对象的存活实例一并回收。
+     *
+     * `ENG-20261028-11`：受保护字段走 [ProtectedStringReclamation.retire]——有旧树读租约在册时
+     * 延到最后一个租约释放再擦除，无租约时立即擦除；附件不属该协调器的管辖面，仍就地清零
+     * （其字节由 BinaryStore 与会话锁定清理收口）。锁定 / 会话终止的直接擦除见
+     * [clearSensitiveData]，**不得**改走本方法。
      */
     internal fun clearSensitiveIdentitiesNotIn(live: Set<Any>) {
-        fields.values.forEach { if (it !in live) it.clear() }
-        customFields.forEach { if (it.value !in live) it.value.clear() }
+        fields.values.forEach { if (it !in live) ProtectedStringReclamation.retire(it) }
+        customFields.forEach { if (it.value !in live) ProtectedStringReclamation.retire(it.value) }
         attachments.forEach { if (it !in live) it.clear() }
         history.forEach { it.clearSensitiveIdentitiesNotIn(live) }
     }
@@ -180,10 +186,10 @@ data class KdbxEntry(
         history.forEach { it.dropSensitiveIdentitiesFrom(pending) }
     }
 
-    /** 擦除本节点（含 history）中**仍留在候选集合 [pending] 内**（即真正下线）的敏感实例 */
+    /** 回收本节点（含 history）中**仍留在候选集合 [pending] 内**（即真正下线）的受保护实例 */
     internal fun clearSensitiveIdentitiesIn(pending: Set<Any>) {
-        fields.values.forEach { if (it in pending) it.clear() }
-        customFields.forEach { if (it.value in pending) it.value.clear() }
+        fields.values.forEach { if (it in pending) ProtectedStringReclamation.retire(it) }
+        customFields.forEach { if (it.value in pending) ProtectedStringReclamation.retire(it.value) }
         attachments.forEach { if (it in pending) it.clear() }
         history.forEach { it.clearSensitiveIdentitiesIn(pending) }
     }

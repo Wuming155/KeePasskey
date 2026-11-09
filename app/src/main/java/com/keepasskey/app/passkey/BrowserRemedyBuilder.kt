@@ -16,8 +16,10 @@ import kotlinx.coroutines.withContext
  *
  * ## 三个 fail-closed 前提（任一不满足即返回 `null`，不给假入口）
  *
- * 1. 原因本身带补救动作（仅 `DAL_UNVERIFIED` / `DAL_NETWORK_UNAVAILABLE`，
- *    见 [CredentialRejectionAction.forReason]）；
+ * 1. 原因对应的动作**就是** [CredentialRejectionAction.ADD_PRIVILEGED_BROWSER]
+ *    （`DAL_UNVERIFIED` / `DAL_NETWORK_UNAVAILABLE` / `CALLER_BROWSER_NOT_TRUSTED`）。
+ *    刻意不写「`forReason` 非空」：`ENG-20261028-06` 起另有 `AUTHORIZE_CALLER_SIGNATURE`，
+ *    若按「非空」判定，原生调用方的签名登记会被误配成浏览器补救；
  * 2. 调用包名非空——它必须是**系统背书**的包名（`CallingOriginResolver.systemAttestedPackageName`），
  *    取不到即无从授权；
  * 3. 该包**确实是浏览器候选**：出现在 [PasskeyPrivilegedBrowserStore.installedBrowsers]
@@ -41,7 +43,9 @@ internal object BrowserRemedyBuilder {
         callerPackage: String?,
         scope: LifecycleCoroutineScope
     ): CredentialRejectionRemedy? {
-        if (CredentialRejectionAction.forReason(reason) == null) return null
+        if (CredentialRejectionAction.forReason(reason) != CredentialRejectionAction.ADD_PRIVILEGED_BROWSER) {
+            return null
+        }
         val pkg = callerPackage?.trim()?.takeIf { it.isNotEmpty() } ?: return null
 
         // 浏览器候选枚举（含资格 + 展示名 + 当前启用态）；仅拒绝路径执行，频率低

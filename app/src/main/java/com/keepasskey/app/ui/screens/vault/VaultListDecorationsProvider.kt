@@ -7,6 +7,7 @@ import com.keepasskey.app.ui.model.EntryIconPresenter
 import com.keepasskey.app.ui.model.EntryReferenceDisplayResolver
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
+import com.keepasskey.core.security.ProtectedStringReclamation
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -34,6 +35,8 @@ internal class VaultListDecorationsProvider(
 
     // 注：EntryReferenceDisplayResolver 不是 fun interface，且 protectedPlaceholder 为末位形参，
     // 故必须用具名参数装配（尾随 lambda 会被绑定到 protectedPlaceholder 上）
+    // ENG-20261028-11：`loadEntries` 保持裸读口——解析器拿到快照后还要逐条读字段，
+    // 租约由外层 `entryDecorations` 在「取快照 → 解析」整段持有（见该处注释）。
     private val entryTexts = EntryReferenceDisplayResolver(
         loadEntries = { vaultRepository.getKdbxEntries() }
     )
@@ -41,10 +44,16 @@ internal class VaultListDecorationsProvider(
     /** 条目图标投影 + 引用展开文案（`entries` 为共享投影流，见类 KDoc / ISSUE-P3-176） */
     val entryDecorations: Flow<EntryDecorations> = entries
         .map { entries ->
-            EntryDecorations(
-                icons = iconPresenter.present(entries),
-                texts = entryTexts.present(entries)
-            )
+            val icons = iconPresenter.present(entries)
+            // ENG-20261028-11：`{REF:}` 展示解析要现读整库条目做检索，租约覆盖「取快照 → 解析」整段
+            // ——并发整树替换期间被引用条目不得被回收，否则展示文案会降级成原文引用占位。
+            val lease = ProtectedStringReclamation.acquireReadLease()
+            val texts = try {
+                entryTexts.present(entries)
+            } finally {
+                lease.close()
+            }
+            EntryDecorations(icons = icons, texts = texts)
         }
         .flowOn(displayDispatcher)
 

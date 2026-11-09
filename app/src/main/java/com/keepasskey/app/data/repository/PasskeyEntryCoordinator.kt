@@ -10,6 +10,7 @@ import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.core.security.ProtectedStringReclamation
 import com.keepasskey.crypto.passkey.PasskeyCryptoEngine
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
@@ -30,18 +31,32 @@ internal class PasskeyEntryCoordinator(
 ) {
 
     /**
-     * 本协调器唯一的条目检索面：**排除回收站子树**（`ISSUE-P2-341`）。
+     * 本协调器唯一的条目检索面：**排除回收站子树**（`ISSUE-P2-341`），
+     * 且整段读取处于一条读租约内（`ENG-20261028-11`）。
      *
      * 四个消费点（`findExistingCredentialIds` 查重、`findPasskeyByCredentialId` 定位、
      * `findEntriesForRpId` 候选、`findReusablePasskeyEntry` 注册复用）都是「把凭据交给系统或用户」
      * 的路径，因此一律不含已删条目。特别地，若不排除会出一条更隐蔽的后果：
      * **把某条 passkey 丢进回收站、再在同一站点重新注册，会原地复活那条已删凭据**
      * （`findReusablePasskeyEntry` 命中它并只换 Passkey 字段，条目连同其历史一起被拉回可用区）。
+     *
+     * 为何要租约：取快照与随后读取条目字段（通行密钥自定义字段 / 标题 / 用户名 / URL）之间隔着
+     * 挂起点，会话在此期间替换整树会把下线实例就地清零——读者要么撞上解析面降级、要么撞上
+     * `KdbxEntry` 标准字段的 fail-fast 读抛异常。块内登记租约后，回收延到整段读取结束。
+     * **写路径不套租约**：落盘段（`saveEntry`）在块外，避免自己的定点擦除被自己的租约推迟。
      */
-    private suspend fun usableEntries(): List<KdbxEntry> {
-        val db = databaseSession.databaseFlow.first() ?: return emptyList()
-        val binGroupIds = recycleBinGroupIdsOf(db)
-        return db.rootGroup.allEntries().filterNot { it.parentGroupId in binGroupIds }
+    private suspend fun <R> withUsableEntries(block: suspend (List<KdbxEntry>) -> R): R {
+        val lease = ProtectedStringReclamation.acquireReadLease()
+        try {
+            val db = databaseSession.databaseFlow.first()
+            if (db == null) {
+                return block(emptyList())
+            }
+            val binGroupIds = recycleBinGroupIdsOf(db)
+            return block(db.rootGroup.allEntries().filterNot { it.parentGroupId in binGroupIds })
+        } finally {
+            lease.close()
+        }
     }
 
     /** 落盘交付（`ISSUE-P1-590`，实现见 [PasskeyWriteCommit.commit]） */
@@ -59,7 +74,13 @@ internal class PasskeyEntryCoordinator(
      * 内容（标题 / 备注 / 密码 / 标签 / 历史 / 附件等），仅整体换新 Passkey schema 字段；
      * 未命中则按原口径新建条目。
      */
-    suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxResult<KdbxEntry> {
+    suspend fun saveOrReplacePasskeyEntry(data: PasskeyData, boundPackage: String?): KdbxResult<KdbxEntry> =
+        databaseSession.withWriteAcceptance { saveOrReplacePasskeyEntryInternal(data, boundPackage) }
+
+    private suspend fun saveOrReplacePasskeyEntryInternal(
+        data: PasskeyData,
+        boundPackage: String?
+    ): KdbxResult<KdbxEntry> {
         val existing = findReusablePasskeyEntry(data) ?: return saveNewPasskeyEntry(data, boundPackage)
 
         val preserved = existing.customFields.filterNot { PasskeyData.isPasskeyFieldKey(it.key) }
@@ -90,9 +111,11 @@ internal class PasskeyEntryCoordinator(
     suspend fun findExistingCredentialIds(candidates: Set<String>): Set<String> {
         if (candidates.isEmpty()) return emptySet()
         val found = LinkedHashSet<String>()
-        for (entry in usableEntries()) {
-            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: continue
-            if (passkey.credentialId in candidates) found += passkey.credentialId
+        withUsableEntries { entries ->
+            for (entry in entries) {
+                val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: continue
+                if (passkey.credentialId in candidates) found += passkey.credentialId
+            }
         }
         return found
     }
@@ -100,28 +123,34 @@ internal class PasskeyEntryCoordinator(
     /** 可复用的既有 Passkey 条目（同 rpId + 同用户名） */
     private suspend fun findReusablePasskeyEntry(data: PasskeyData): KdbxEntry? {
         val cleanTarget = DomainMatcher.extractDomain(data.relyingPartyId)
-        return usableEntries().firstOrNull { entry ->
-            val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return@firstOrNull false
-            passkey.userName == data.userName &&
-                DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
+        return withUsableEntries { entries ->
+            entries.firstOrNull { entry ->
+                val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return@firstOrNull false
+                passkey.userName == data.userName &&
+                    DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
+            }
         }
     }
 
     /** 按 RP-ID 匹配候选条目：Passkey rpId 域匹配优先，条目 URL 域匹配兜底 */
     suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> {
         val cleanTarget = DomainMatcher.extractDomain(rpId)
-        return usableEntries().filter { entry ->
-            val passkey = PasskeyData.fromCustomFields(entry.customFields)
-            val passkeyMatch = passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
-            val urlMatch = entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, cleanTarget)
-            passkeyMatch || urlMatch
+        return withUsableEntries { entries ->
+            entries.filter { entry ->
+                val passkey = PasskeyData.fromCustomFields(entry.customFields)
+                val passkeyMatch = passkey != null && DomainMatcher.isDomainMatch(passkey.relyingPartyId, cleanTarget)
+                val urlMatch = entry.url.isNotBlank() && DomainMatcher.isDomainMatch(entry.url, cleanTarget)
+                passkeyMatch || urlMatch
+            }
         }
     }
 
     suspend fun findPasskeyByCredentialId(credentialId: String): KdbxEntry? {
-        return usableEntries().firstOrNull { entry ->
-            val passkey = PasskeyData.fromCustomFields(entry.customFields)
-            passkey?.credentialId == credentialId
+        return withUsableEntries { entries ->
+            entries.firstOrNull { entry ->
+                val passkey = PasskeyData.fromCustomFields(entry.customFields)
+                passkey?.credentialId == credentialId
+            }
         }
     }
 
@@ -138,6 +167,14 @@ internal class PasskeyEntryCoordinator(
         data: PasskeyData,
         boundPackage: String?,
         parentGroupId: KdbxUuid? = null
+    ): KdbxResult<KdbxEntry> = databaseSession.withWriteAcceptance {
+        saveNewPasskeyEntryInternal(data, boundPackage, parentGroupId)
+    }
+
+    private suspend fun saveNewPasskeyEntryInternal(
+        data: PasskeyData,
+        boundPackage: String?,
+        parentGroupId: KdbxUuid?
     ): KdbxResult<KdbxEntry> {
         val title = passkeyTitle(data)
         val url = passkeyUrl(data, boundPackage)
@@ -172,7 +209,13 @@ internal class PasskeyEntryCoordinator(
      *
      * @return 命中且落盘成功才 `Success`；未命中 / 只读 ⇒ 分型 `Failure`；落盘失败 ⇒ 上浮保存失败码。
      */
-    suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxResult<KdbxEntry> {
+    suspend fun replacePasskeyOnEntry(entryId: String, data: PasskeyData): KdbxResult<KdbxEntry> =
+        databaseSession.withWriteAcceptance { replacePasskeyOnEntryInternal(entryId, data) }
+
+    private suspend fun replacePasskeyOnEntryInternal(
+        entryId: String,
+        data: PasskeyData
+    ): KdbxResult<KdbxEntry> {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return missingEntryFailure()
         if (databaseSession.isReadOnly) return readOnlyFailure()
         val replacement = databaseSession.updateEntryById(targetUuid) { entry ->
@@ -211,7 +254,10 @@ internal class PasskeyEntryCoordinator(
      *
      * @return 命中且落盘成功（或幂等无写）才 `Success`；落盘失败 ⇒ 上浮保存失败码。
      */
-    suspend fun clearPasskeyOnEntry(entryId: String): KdbxResult<KdbxEntry> {
+    suspend fun clearPasskeyOnEntry(entryId: String): KdbxResult<KdbxEntry> =
+        databaseSession.withWriteAcceptance { clearPasskeyOnEntryInternal(entryId) }
+
+    private suspend fun clearPasskeyOnEntryInternal(entryId: String): KdbxResult<KdbxEntry> {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return missingEntryFailure()
         if (databaseSession.isReadOnly) return readOnlyFailure()
         val cleared = databaseSession.updateEntryById(targetUuid) { entry ->
@@ -255,7 +301,9 @@ internal class PasskeyEntryCoordinator(
      * `ISSUE-P1-590`：未命中 / 只读 / 落盘失败一律 `Failure`，调用方不得据「无返回值即成功」推定已提交。
      */
     suspend fun patchPasskeySignCount(entryId: String, newCount: Int): KdbxResult<Unit> =
-        applySignCountPatch(entryId, PasskeyData.clampSignCount(newCount)).map { }
+        databaseSession.withWriteAcceptance {
+            applySignCountPatch(entryId, PasskeyData.clampSignCount(newCount)).map { }
+        }
 
     /**
      * 原子递增签名计数器并返回**本次实际落库的计数器值**（ISSUE-P3-27 子项 2）。
@@ -273,7 +321,7 @@ internal class PasskeyEntryCoordinator(
      *   [persistSession] 失败 ⇒ 上浮保存失败码——调用方不得据此签发断言（否则重启后计数器回退）。
      */
     suspend fun incrementPasskeySignCount(entryId: String): KdbxResult<Int> =
-        applySignCountPatch(entryId, null)
+        databaseSession.withWriteAcceptance { applySignCountPatch(entryId, null) }
 
     /**
      * 签名计数器原子读-改-写核心：在会话 Mutex 内的单次受控变换中完成

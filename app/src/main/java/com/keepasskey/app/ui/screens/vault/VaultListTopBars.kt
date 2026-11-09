@@ -302,7 +302,7 @@ internal fun VaultListSearchTopBar(
                             }
                         )
                         // 扫码添加验证码条目（二维码解析成功后在当前分组直接落库）；只读会话不渲染
-                        // （本项为静态动作文案，无凭据插值——由 PopupSecureFlagInventoryTest 复验）
+                        // （本项为静态动作文案，无凭据插值）
                         if (onScanClick != null) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.vault_scan_menu)) },

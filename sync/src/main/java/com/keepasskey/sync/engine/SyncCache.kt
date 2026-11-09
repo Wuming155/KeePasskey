@@ -29,6 +29,7 @@ data class SyncCacheState(
  * - `<hash>.version`：本地版本号（内容 SHA-256 十六进制）
  * - `<hash>.baseversion`：基准版本号（最后确认与云端一致时的 SHA-256 十六进制）
  * - `<hash>.basecache`：基准内容快照（最后确认与云端一致时的完整字节）
+ *   （[readBaseContent] 以 `.baseversion` 核对它的实际摘要，见 ENG-20261028-02）
  * - `<hash>.meta`：简易 key=value 行文本元数据（remotePath, etag, lastSyncMillis）
  *
  * ISSUE-P1-07 数据生命周期治理：
@@ -302,28 +303,41 @@ open class SyncCache(
     }
 
     /**
-     * 读取基准内容快照（最后确认与云端一致时的完整字节）。
+     * 读取基准内容快照（最后确认与云端一致时的完整字节），并**按版本摘要自证身份**。
      * 三方合并需要 base 的完整内容而非仅哈希；本地缓存会被工作副本覆盖，
      * base 内容必须独立落盘，否则冲突会话中断后 base 会被本地修改版污染，
      * 后续合并将退化为"远端全胜"的静默数据丢失。
      *
+     * ENG-20261028-02：内容（`.basecache`）与身份标记（`.baseversion`）是两个文件，
+     * [advanceBaseAndPersist] 先写标记再写内容，两步之间中断会留下「新标记 + 旧内容」。
+     * 因此读取在**与写入相同的协调锁**内取两份文件，并核对内容摘要是否等于标记：
+     * 缺标记、空标记或摘要不符时返回 `null`——调用方回退「空库底版 + 双方并集」的保守合并，
+     * 绝不把无法自证身份的字节当作共同基线。多文件写入无法跨文件原子，读侧核对是恢复判据。
+     *
      * `open`（`ISSUE-P2-277` AC③）：仅供单元测试子类化，用于断言本方法的执行线程
      * （主线程零 IO 守卫）。生产无任何子类，语义与可见性实质不变——口径同 [readCache]。
      */
-    open fun readBaseContent(remotePath: String): ByteArray? {
-        val file = getFile(remotePath, SUFFIX_BASE_CACHE)
-        return if (file.exists() && file.isFile) {
-            file.readBytes()
-        } else {
-            null
+    open fun readBaseContent(remotePath: String): ByteArray? =
+        synchronized(files.pathLock(remotePath)) {
+            val contentFile = getFile(remotePath, SUFFIX_BASE_CACHE)
+            if (!contentFile.isFile) return@synchronized null
+            val versionFile = getFile(remotePath, SUFFIX_BASE_VERSION)
+            if (!versionFile.isFile) return@synchronized null
+            val expectedDigest = versionFile.readText().trim()
+            if (expectedDigest.isEmpty()) return@synchronized null
+            val bytes = contentFile.readBytes()
+            // 摘要不符即视为「标记先行中断」的残留组合，不得作为可信基线交给合并。
+            if (!expectedDigest.equals(sha256Hex(bytes), ignoreCase = true)) null else bytes
         }
-    }
 
     /**
      * 持久化基准内容快照。仅在字节确认与远端一致时由 SyncEngine 调用。
      *
      * ISSUE-P3-305：实现下沉 [SyncCacheMaintenance.writeBaseContent]（逐行搬运，
      * 含 ISSUE-P3-202 的 tmp 首字节降权口径）。
+     *
+     * ENG-20261028-02：交付与 [readBaseContent] 的摘要核对共用同一把协调锁，
+     * 使「读到的内容 + 读到的标记」在进程内始终来自同一提交边界。
      */
     fun writeBaseContent(remotePath: String, data: ByteArray) =
         maintenance.writeBaseContent(remotePath, data)
@@ -393,6 +407,9 @@ open class SyncCache(
         internal const val SUFFIX_CACHE = ".cache"
         internal const val SUFFIX_VERSION = ".version"
         internal const val SUFFIX_BASE_CACHE = ".basecache"
+
+        /** 基准版本标记（[SUFFIX_BASE_CACHE] 内容的 SHA-256 摘要），见 [readBaseContent] 的身份核对 */
+        internal const val SUFFIX_BASE_VERSION = ".baseversion"
 
         /** 流式搬运缓冲（64 KiB，兼顾吞吐与内存占用）。 */
         private const val STREAM_BUFFER_BYTES = 64 * 1024

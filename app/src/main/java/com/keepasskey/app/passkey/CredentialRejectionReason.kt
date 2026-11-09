@@ -68,6 +68,31 @@ enum class CredentialRejectionReason(@StringRes val messageRes: Int) {
      */
     PASSKEY_PERSISTENCE_FAILED(R.string.passkey_reject_persistence_failed),
 
+    /**
+     * `ENG-20261028-05`：用户验证 / 落库期间，用户在设置中关闭了凭据管理器通道
+     * （或「通行密钥支持」）——本次注册不再回传响应。与请求本身无关，故单列原因，
+     * 不复用「请求不符合规范」一类会把责任推给调用方的文案。
+     */
+    CHANNEL_DISABLED(R.string.passkey_reject_channel_disabled),
+
+    /**
+     * `ENG-20261028-06`（断言链路）：原生调用**从未**为该包名登记签名绑定。
+     *
+     * 包名相同不等于调用方已获授权：本地没有可比对的签名参照，故本次不签发。
+     * 用户可在受保护窗口内**显式授权**（把本次系统背书的包名 + 签名摘要写入信任存储），
+     * 授权只影响**下一次**发起（与 [CredentialRejectionAction] 的「就地」语义一致）。
+     * 不提供「跳过」入口：那等于让任意同包名应用一步取得签发权。
+     */
+    CALLER_SIGNATURE_UNBOUND(R.string.passkey_reject_caller_signature_unbound),
+
+    /**
+     * `ENG-20261028-06`（断言链路）：该包名**已登记**签名绑定，但本次调用的签名不一致
+     * （同 `applicationId` 顶替 / 换签名）。
+     *
+     * 一律拒绝且**不提供**就地重绑——就地补绑定等于让顶替者自证身份；防止应用被冒充。
+     */
+    CALLER_SIGNATURE_MISMATCH(R.string.passkey_reject_caller_signature_mismatch),
+
     /** 创建过程内部异常（fail-closed 兜底） */
     INTERNAL_ERROR(R.string.cred_error_unknown);
 

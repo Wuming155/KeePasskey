@@ -1,16 +1,18 @@
 package com.keepasskey.sync.webdav
 
 import com.keepasskey.sync.model.RemoteFileMetadata
+import com.keepasskey.sync.model.SyncException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ISSUE-P2-572：WebDAV 409/423 兜底 DELETE 前置元数据重探守卫的纯 JVM 判定单测。
+ * WebDAV 409/423「拒绝覆盖」裁决的纯 JVM 判定单测（ISSUE-P2-572 引入，ENG-20261028-20 收口）。
  *
- * 四分支：ETag 相同（放行）/ 漂移（禁 DELETE，携当前远端 ETag）/ 缺失（放行，无 ETag 服务器）/
- * 探测失败（fail-closed）；另锁「无预期基线不判漂移」与弱 ETag 原形态比较两条边界。
+ * 四分支：ETag 相同（远端未变 ⇒ 协议错误 + 保留远端）/ 漂移（ConflictError，携当前远端 ETag）/
+ * 缺失（无 ETag 服务器，同「远端未变」）/ 探测失败（fail-closed）；
+ * 另锁「无预期基线不判漂移」「弱 ETag 原形态比较」两条边界，以及最终错误码与文案映射。
  */
 class WebDavMoveOverwritePolicyTest {
 
@@ -22,62 +24,72 @@ class WebDavMoveOverwritePolicyTest {
     )
 
     @Test
-    fun `兜底守卫分支1 重探ETag与预期相同 放行DELETE重试`() {
+    fun `覆盖被拒裁决分支1 重探ETag与预期相同 判为服务器不支持覆盖`() {
         assertEquals(
-            OverwriteFallbackGuard.Proceed,
-            WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = meta("etag-7"), expectedEtag = "etag-7")
+            OverwriteRefusalGuard.RemoteUnchanged,
+            WebDavMoveOverwritePolicy.refusalGuard(currentMeta = meta("etag-7"), expectedEtag = "etag-7")
         )
     }
 
     @Test
-    fun `兜底守卫分支2 重探ETag漂移 禁DELETE并携当前远端ETag`() {
-        when (val verdict = WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = meta("etag-9"), expectedEtag = "etag-7")) {
-            is OverwriteFallbackGuard.Drifted ->
+    fun `覆盖被拒裁决分支2 重探ETag漂移 转冲突并携当前远端ETag`() {
+        when (
+            val verdict = WebDavMoveOverwritePolicy.refusalGuard(
+                currentMeta = meta("etag-9"),
+                expectedEtag = "etag-7"
+            )
+        ) {
+            is OverwriteRefusalGuard.Drifted ->
                 assertEquals("ConflictError 须携当前远端 ETag（他端版本）", "etag-9", verdict.currentRemoteEtag)
-            else -> throw AssertionError("漂移必须禁 DELETE: $verdict")
+            else -> throw AssertionError("漂移必须转冲突而非直接报错: $verdict")
         }
     }
 
     @Test
-    fun `兜底守卫分支3 重探ETag缺失即无ETag服务器 放行DELETE重试`() {
+    fun `覆盖被拒裁决分支3 重探ETag缺失即无ETag服务器 判为服务器不支持覆盖`() {
         assertEquals(
-            OverwriteFallbackGuard.Proceed,
-            WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = meta(""), expectedEtag = "etag-7")
+            OverwriteRefusalGuard.RemoteUnchanged,
+            WebDavMoveOverwritePolicy.refusalGuard(currentMeta = meta(""), expectedEtag = "etag-7")
         )
     }
 
     @Test
-    fun `兜底守卫分支4 重探失败 failClosed`() {
+    fun `覆盖被拒裁决分支4 重探失败 failClosed`() {
         assertEquals(
-            OverwriteFallbackGuard.ProbeFailed,
-            WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = null, expectedEtag = "etag-7")
+            OverwriteRefusalGuard.ProbeFailed,
+            WebDavMoveOverwritePolicy.refusalGuard(currentMeta = null, expectedEtag = "etag-7")
         )
     }
 
     @Test
-    fun `兜底守卫 无预期基线时不判漂移 放行既有兜底`() {
+    fun `覆盖被拒裁决 无预期基线时不判漂移`() {
         // expectedEtag 空白 = 本就是无预条件的覆盖上传，无「可失效的锁」可护
         assertEquals(
-            OverwriteFallbackGuard.Proceed,
-            WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = meta("etag-9"), expectedEtag = null)
+            OverwriteRefusalGuard.RemoteUnchanged,
+            WebDavMoveOverwritePolicy.refusalGuard(currentMeta = meta("etag-9"), expectedEtag = null)
         )
         assertEquals(
-            OverwriteFallbackGuard.Proceed,
-            WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = meta("etag-9"), expectedEtag = "  ")
+            OverwriteRefusalGuard.RemoteUnchanged,
+            WebDavMoveOverwritePolicy.refusalGuard(currentMeta = meta("etag-9"), expectedEtag = "  ")
         )
     }
 
     @Test
-    fun `兜底守卫 弱ETag按原形态比较 弱漂移判漂移弱相同放行`() {
+    fun `覆盖被拒裁决 弱ETag按原形态比较 弱漂移判漂移弱相同不判`() {
         // ISSUE-P1-275：cleanEtag 保留 W/ 标记——弱形态两侧一致化后逐字比较
-        when (val drifted = WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = meta("W/weak-2"), expectedEtag = "W/weak-1")) {
-            is OverwriteFallbackGuard.Drifted ->
+        when (
+            val drifted = WebDavMoveOverwritePolicy.refusalGuard(
+                currentMeta = meta("W/weak-2"),
+                expectedEtag = "W/weak-1"
+            )
+        ) {
+            is OverwriteRefusalGuard.Drifted ->
                 assertEquals("弱漂移必须携当前远端 ETag", "W/weak-2", drifted.currentRemoteEtag)
-            else -> throw AssertionError("弱漂移必须禁 DELETE: $drifted")
+            else -> throw AssertionError("弱漂移必须转冲突: $drifted")
         }
         assertEquals(
-            OverwriteFallbackGuard.Proceed,
-            WebDavMoveOverwritePolicy.fallbackGuard(currentMeta = meta("W/weak-1"), expectedEtag = "W/weak-1")
+            OverwriteRefusalGuard.RemoteUnchanged,
+            WebDavMoveOverwritePolicy.refusalGuard(currentMeta = meta("W/weak-1"), expectedEtag = "W/weak-1")
         )
     }
 
@@ -99,5 +111,22 @@ class WebDavMoveOverwritePolicyTest {
             "409/423 漂移文案不得冒用 412 字样",
             WebDavMoveOverwritePolicy.overwriteDriftMessage(409).contains("HTTP 412")
         )
+    }
+
+    @Test
+    fun `拒绝覆盖错误携服务器实际状态码且文案声明未删除远端`() {
+        val err = WebDavMoveOverwritePolicy.protocolErrorFor(overwriteRefusedCode = 423, lastMoveCode = 423)
+        assertEquals("错误码必须是服务器返回的 423", 423, err.statusCode)
+        val message = err.message.orEmpty()
+        assertTrue("文案须说明远端旧文件被保留（ENG-20261028-20）: $message", message.contains("远端旧文件未删除"))
+        assertFalse("文案不得再声称已 DELETE 目标: $message", message.contains("已 DELETE 目标"))
+    }
+
+    @Test
+    fun `非覆盖拒绝的MOVE失败仍归通用文案与500码`() {
+        val err = WebDavMoveOverwritePolicy.protocolErrorFor(overwriteRefusedCode = null, lastMoveCode = 502)
+        assertEquals(500, err.statusCode)
+        assertTrue(err.message.orEmpty().contains("(HTTP 502)"))
+        assertFalse(err.message.orEmpty().contains("拒绝覆盖"))
     }
 }

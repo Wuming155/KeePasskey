@@ -14,6 +14,7 @@ import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.app.ui.screens.vault.GroupPathPresenter
+import com.keepasskey.core.security.ProtectedStringReclamation
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -117,7 +118,18 @@ internal class EntryDetailStateAssembler(
      */
     private fun decorationsFlow(entryFlow: Flow<UiVaultEntry?>): Flow<EntryDecorations> = entryFlow
         .map { entry ->
-            if (entry == null) EntryDecorations.EMPTY else entryDecorations.decorate(entry)
+            if (entry == null) {
+                EntryDecorations.EMPTY
+            } else {
+                // ENG-20261028-11：详情页装饰含 `{REF:}` 展开，需要现读整库条目做检索；
+                // 租约覆盖「取快照 → 解析」整段，避免并发整树替换把被引用的条目擦成空值。
+                val lease = ProtectedStringReclamation.acquireReadLease()
+                try {
+                    entryDecorations.decorate(entry)
+                } finally {
+                    lease.close()
+                }
+            }
         }
         .flowOn(displayDispatcher)
 

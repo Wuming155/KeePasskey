@@ -8,7 +8,6 @@ import com.keepasskey.core.security.BinarySource
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
-import com.keepasskey.app.testutil.stripCommentsOnly
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -16,10 +15,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
-import java.io.File
 import java.io.InputStream
 
 /**
@@ -35,8 +32,13 @@ import java.io.InputStream
  *
  * 本用例按来源分别锁死（两侧断言互为「非空跑」证据——旧实现下第 1 例必红）：
  * 1. 落盘来源：只读回一次，且**交出该副本本身**（再次 `copyOf` 即失败）；
- * 2. 内存来源：`data` 是库内数组的借用视图，必须复制后交出（否则调用方清零会污染库内字节）；
- * 3. 下游写出侧（`EntryDetailAttachmentExporter`）：用毕必须清零（静态接线守卫）。
+ * 2. 内存来源：`data` 是库内数组的借用视图，必须复制后交出（否则调用方清零会污染库内字节）。
+ *
+ * ENG-20261028-12 整改：原第 3 例以源码文本（`os.write(bytes)` 出现在 `bytes.fill(0)` 之前、
+ * 且清零在 `finally` 内）守卫下游 `EntryDetailAttachmentExporter` 的「用毕清零」。该断言只锁
+ * 写法，重构（例如把写出与清零收进一个私有 `writeAndWipe` 辅助函数）即误红，却仍不能证明
+ * 真实写出的字节被清零。已由设备用例
+ * `app/src/androidTest/.../EntryDetailAttachmentExportDeviceTest` 以真实写出 + 缓冲归零替代。
  */
 class AttachmentDataOwnershipTest {
 
@@ -128,66 +130,5 @@ class AttachmentDataOwnershipTest {
         assertNull("uuid 非法必须返回 null", reader.getAttachmentData("not-a-uuid", 0))
     }
 
-    // ===== 下游写出侧：交付副本用毕必须清零 =====
-
-    @Test
-    fun `附件导出写出后必须清零交付副本且清零点晚于写出`() {
-        val code = stripComments(readSource(EXPORTER_SOURCE))
-
-        val writeIndex = code.indexOf("os.write(bytes)")
-        val wipeIndex = code.indexOf("bytes.fill(0)")
-
-        assertTrue(
-            "[$EXPORTER_SOURCE] 缺少 `bytes.fill(0)`：交付给导出路径的解密附件明文将随局部变量" +
-                "出栈静默留存至 GC",
-            wipeIndex >= 0
-        )
-        assertTrue(
-            "[$EXPORTER_SOURCE] `os.write(bytes)` 缺失，无法判定清零时机",
-            writeIndex >= 0
-        )
-        assertTrue(
-            "[$EXPORTER_SOURCE] 清零必须**晚于**写出（写前清零会导出全零附件）",
-            writeIndex < wipeIndex
-        )
-        assertTrue(
-            "[$EXPORTER_SOURCE] 清零必须置于 finally 中，覆盖三条早退分支与写出异常路径",
-            FINALLY_WIPE.containsMatchIn(code)
-        )
-    }
-
-    /** 源码全文；路径相对仓库根（app 模块测试工作目录为 app/，向上回溯定位仓库根） */
-    private fun readSource(path: String): String {
-        val file = File(repositoryRoot, path)
-        assertTrue("源码文件不存在（是否被重命名/移动）：$path", file.isFile)
-        return file.readText()
-    }
-
-    /** 剔除块注释与行注释——整改说明本身会写出关键字，不剔除即会「注释里的假接线」也通过 */
-    private fun stripComments(source: String): String = stripCommentsOnly(source)
-    private companion object {
-        const val EXPORTER_SOURCE =
-            "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailAttachmentExporter.kt"
-
-
-        /** 写出口的 finally 清零形态（`} finally { bytes.fill(0) }`） */
-        val FINALLY_WIPE = Regex("""finally\s*\{\s*bytes\.fill\(0\)\s*\}""")
-
-        /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
-        val repositoryRoot: File by lazy {
-            var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
-            repeat(ROOT_SEARCH_DEPTH) {
-                val candidate = dir ?: return@repeat
-                if (File(candidate, "app/src/main/java").isDirectory &&
-                    File(candidate, "core/src/main/java").isDirectory
-                ) {
-                    return@lazy candidate
-                }
-                dir = candidate.parentFile
-            }
-            error("无法定位仓库根目录（起始：${System.getProperty("user.dir")}）")
-        }
-
-        const val ROOT_SEARCH_DEPTH = 4
-    }
+    // ===== 下游写出侧（`EntryDetailAttachmentExporter`）用毕清零：见 androidTest 同名设备用例 =====
 }

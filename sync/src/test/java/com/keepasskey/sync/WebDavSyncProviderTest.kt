@@ -13,7 +13,9 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -563,5 +565,192 @@ class WebDavSyncProviderTest {
         val result = provider.upload("test.kdbx", "data".toByteArray(), expectedEtag = "stale")
         assertTrue(result.exceptionOrNull() is SyncException.ConflictError)
         assertEquals("412 不在瞬时重试面，PUT 仅 1 次（随后 1 次 PROPFIND 取最新元数据）", 2, server.requestCount)
+    }
+
+    // ===== ENG-20261028-32：PROPFIND 解析失败不得伪装成成功元数据 =====
+
+    /** 复用的最小 provider（回环明文客户端；仅本段用例使用）。 */
+    private fun parseProbeProvider(): WebDavSyncProvider = WebDavSyncProvider(
+        serverUrl = server.url("/").toString(),
+        username = "admin",
+        passwordChars = "pass123".toCharArray(),
+        client = plainLoopbackClient
+    )
+
+    @Test
+    fun `PROPFIND 报文不可解析时元数据读取如实失败而非折成空元数据`() = runTest {
+        // 即便响应带可信 HTTP ETag 头，被截断的报文也不得折成「成功 + 空元数据」——
+        // 折空会让上层把「远端元数据不可知」当成无 ETag 服务器，剥掉覆盖上传的乐观锁
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(207)
+                .setHeader("ETag", "\"header-etag\"")
+                .setBody("""<?xml version="1.0"?><D:multistatus xmlns:D="DAV:"><D:response>""")
+        )
+        // 被网关替换成 HTML 错误页（根元素不是 multistatus）同样必须失败
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(207)
+                .setBody("""<html><body><h1>502 Bad Gateway</h1></body></html>""")
+        )
+
+        val provider = parseProbeProvider()
+
+        val truncated = provider.getMetadata("test.kdbx")
+        assertTrue("截断报文必须如实失败: ${truncated.exceptionOrNull()}", truncated.isFailure)
+        assertTrue("必须是可处理的协议错误: ${truncated.exceptionOrNull()}", truncated.exceptionOrNull() is SyncException.ProtocolError)
+
+        val errorPage = provider.getMetadata("test.kdbx")
+        assertTrue("错误页必须如实失败: ${errorPage.exceptionOrNull()}", errorPage.isFailure)
+        assertTrue("必须是可处理的协议错误: ${errorPage.exceptionOrNull()}", errorPage.exceptionOrNull() is SyncException.ProtocolError)
+    }
+
+    @Test
+    fun `PROPFIND 报文合法但缺 getetag 时才回退可信 HTTP 头`() = runTest {
+        // 「属性缺失」与「解析失败」是两条通道：合法 multistatus 缺 getetag 才允许回退响应头 ETag
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(207)
+                .setHeader("ETag", "\"header-etag\"")
+                .setBody(
+                    """<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:"><D:response><D:propstat><D:prop><D:getcontentlength>7</D:getcontentlength></D:prop></D:propstat></D:response></D:multistatus>"""
+                )
+        )
+        // 无 ETag 服务器的口径保留：合法报文 + 无 ETag 属性 + 无响应头 ⇒ 成功且 etag 为空串
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(207)
+                .setBody("""<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:"/>""")
+        )
+
+        val provider = parseProbeProvider()
+
+        val withHeader = provider.getMetadata("test.kdbx")
+        assertTrue("缺属性但头可信时必须成功: ${withHeader.exceptionOrNull()}", withHeader.isSuccess)
+        assertEquals("header-etag", withHeader.getOrThrow().etag)
+        assertEquals("getetag 缺失时其余属性仍如实采信", 7L, withHeader.getOrThrow().contentLength)
+
+        val noHeader = provider.getMetadata("test.kdbx")
+        assertTrue("无 ETag 服务器必须仍成功: ${noHeader.exceptionOrNull()}", noHeader.isSuccess)
+        assertEquals("无 ETag 服务器须返回空 etag", "", noHeader.getOrThrow().etag)
+    }
+
+    @Test
+    fun `存在性探测报文不可解析时不得静默转为无条件覆盖`() = runTest {
+        // 无预期 ETag 时先探目标存在性；探测报文不可解析 ⇒ 按「目标存在」的保守对侧处理为
+        // `Overwrite: F`（原子创建保护）。目标真实存在时 MOVE 412，412 后的重探若仍不可解析
+        // ⇒ fail-closed 上抛探测失败，绝不发 `Overwrite: T` 的无条件覆盖
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"tmp-1\"")) // PUT 临时文件
+        server.enqueue(MockResponse().setResponseCode(207).setBody("<not xml"))            // 存在性探测：不可解析
+        server.enqueue(MockResponse().setResponseCode(412))                                 // MOVE：目标存在 ⇒ 412
+        server.enqueue(MockResponse().setResponseCode(207).setBody("<not xml"))            // 412 后重探：仍不可解析
+        server.enqueue(MockResponse().setResponseCode(204))                                 // DELETE 临时文件
+
+        val provider = parseProbeProvider()
+        val result = provider.uploadAtomic("vault.kdbx", "local-bytes".toByteArray())
+
+        assertTrue("不可解析的探测必须 fail-closed: ${result.exceptionOrNull()}", result.isFailure)
+        val err = result.exceptionOrNull()
+        assertFalse("探测失败不得折成 ConflictError: $err", err is SyncException.ConflictError)
+        assertTrue("必须如实上抛探测自身失败: $err", err is SyncException.ProtocolError)
+
+        val recorded = mutableListOf<okhttp3.mockwebserver.RecordedRequest>()
+        repeat(server.requestCount) { recorded += server.takeRequest() }
+        assertEquals(
+            "请求序应为 PUT → PROPFIND(探测) → MOVE(412) → PROPFIND(重探) → DELETE(临时文件)",
+            listOf("PUT", "PROPFIND", "MOVE", "PROPFIND", "DELETE"),
+            recorded.map { it.method }
+        )
+        val move = recorded.first { it.method == "MOVE" }
+        assertEquals("探测失败时必须以原子创建保护覆盖（不得无条件覆盖）", "F", move.getHeader("Overwrite"))
+        assertNull("无预期 ETag 时不得发送 If 预条件", move.getHeader("If"))
+        val delete = recorded.first { it.method == "DELETE" }
+        assertTrue("只清理本次临时文件", delete.path.orEmpty().contains(".kpktmp"))
+    }
+
+    // ---------------------------------------------------------------- ENG-20261028-42 凭据生命周期
+
+    @Test
+    fun `认证头按请求现算且失效后拒绝继续发请求`() = runTest {
+        // 每个请求都必须重新构造认证头（构造期缓存已被移除）：两次请求各自成功，
+        // 且都携带完整凭据——证明口令副本仍在、未被「用过一次就擦」。
+        server.enqueue(MockResponse().setResponseCode(207).setBody("<d:multistatus xmlns:d=\"DAV:\"></d:multistatus>"))
+        server.enqueue(MockResponse().setResponseCode(207).setBody("<d:multistatus xmlns:d=\"DAV:\"></d:multistatus>"))
+
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "fake-user",
+            passwordChars = "fake-pass-密".toCharArray(),
+            client = plainLoopbackClient
+        )
+
+        assertTrue(provider.testConnection().isSuccess)
+        assertTrue(provider.testConnection().isSuccess)
+
+        repeat(2) { index ->
+            val request = server.takeRequest()
+            assertEquals(
+                "第 ${index + 1} 次请求的认证头必须由现算产生",
+                "fake-user:fake-pass-密",
+                String(
+                    java.util.Base64.getDecoder().decode(request.getHeader("Authorization")!!.removePrefix("Basic ")),
+                    Charsets.UTF_8
+                )
+            )
+        }
+
+        provider.clearCredentials()
+
+        // 失效后所有请求面都以鉴权失败结束，且不发出任何网络请求（fail-closed，不以空口令降级）
+        val before = server.requestCount
+        val meta = provider.getMetadata("vault.kdbx")
+        assertTrue("失效后元数据读取必须失败: $meta", meta.isFailure)
+        assertTrue(
+            "必须以 AuthenticationError 失败: ${meta.exceptionOrNull()}",
+            meta.exceptionOrNull() is SyncException.AuthenticationError
+        )
+        val upload = provider.uploadAtomic("vault.kdbx", "bytes".toByteArray())
+        assertTrue("失效后原子上传必须返回 Result.failure 而非抛异常: $upload", upload.isFailure)
+        assertTrue(
+            "原子上传同样以 AuthenticationError 失败: ${upload.exceptionOrNull()}",
+            upload.exceptionOrNull() is SyncException.AuthenticationError
+        )
+        val list = provider.listRemoteDirectory("", cursor = null, pageSize = 10)
+        assertTrue("失效后目录列举必须返回 Result.failure: $list", list.isFailure)
+        assertTrue(
+            "目录列举同样以 AuthenticationError 失败: ${list.exceptionOrNull()}",
+            list.exceptionOrNull() is SyncException.AuthenticationError
+        )
+        assertEquals("失效后不得再发出任何请求", before, server.requestCount)
+
+        // 幂等：重复失效不放大失败面
+        provider.clearCredentials()
+        assertTrue(provider.testConnection().isFailure)
+    }
+
+    @Test
+    fun `构造期擦除借用口令数组后仍能认证`() = runTest {
+        // 既有所有权契约（CloudVaultImporter / RemoteBrowseController 依赖）：入参数组在构造返回后
+        // 立即被调用方清零，Provider 必须凭自己的独占副本继续认证。
+        server.enqueue(MockResponse().setResponseCode(207).setBody("<d:multistatus xmlns:d=\"DAV:\"></d:multistatus>"))
+
+        val borrowed = "fake-pass-借用".toCharArray()
+        val provider = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "fake-user",
+            passwordChars = borrowed,
+            client = plainLoopbackClient
+        )
+        assertTrue("Provider 构造后必须立即擦除借用数组", borrowed.all { it == '0' })
+
+        assertTrue(provider.testConnection().isSuccess)
+        val request = server.takeRequest()
+        assertEquals(
+            "fake-user:fake-pass-借用",
+            String(
+                java.util.Base64.getDecoder().decode(request.getHeader("Authorization")!!.removePrefix("Basic ")),
+                Charsets.UTF_8
+            )
+        )
     }
 }

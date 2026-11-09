@@ -139,10 +139,15 @@ object KdbxMerger {
     ): MergeResult {
         val rootId = local.rootGroup.id
 
+        // ISSUE-P3-63：parentGroupId=null 的既定语义是「根组」；内存中未显式写 parentGroupId 的
+        // 根级条目在三方合并前归一为 rootId，避免与 XML 解析侧显式附带的根组 UUID 发生虚假「移动」分歧
+        fun normalizeParent(entry: KdbxEntry): KdbxEntry =
+            if (entry.parentGroupId == null) entry.copy(parentGroupId = rootId) else entry
+
         // 1. 索引三方条目与分组
-        val baseEntries = base.rootGroup.allEntries().associateBy { it.id }
-        val localEntries = local.rootGroup.allEntries().associateBy { it.id }
-        val remoteEntries = remote.rootGroup.allEntries().associateBy { it.id }
+        val baseEntries = base.rootGroup.allEntries().map(::normalizeParent).associateBy { it.id }
+        val localEntries = local.rootGroup.allEntries().map(::normalizeParent).associateBy { it.id }
+        val remoteEntries = remote.rootGroup.allEntries().map(::normalizeParent).associateBy { it.id }
 
         val baseGroups = base.rootGroup.allGroups().associateBy { it.id }
         val localGroups = local.rootGroup.allGroups().associateBy { it.id }

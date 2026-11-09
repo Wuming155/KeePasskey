@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.screens.detail.PasswordEntropyEstimator
 import com.keepasskey.app.ui.theme.CapsuleShape
 import kotlinx.coroutines.Dispatchers
@@ -30,10 +31,18 @@ import kotlinx.coroutines.withContext
  *   （官方 `MinimumQuality` 的 AskYesNo 弱确认同族）；
  * - 强度评估走 crypto 内核 `guessesLog10`（[PasswordEntropyEstimator]，与详情页同一实现），
  *   评估不可用（null）时**不按弱处理**——强度信息缺失不构成拦截理由（如实不谎报）。
+ *
+ * **长度单位（ENG-20261028-07）**：口令长度一律按 **Unicode 码点**计（`Character.codePointCount`），
+ * 与 crypto 强度模型的 `TOO_SHORT` / 长度分档口径一致——代理对（如 emoji）只算 1 个字符。
+ * `CharArray.size` 是 UTF-16 码元数，会把 1 个 emoji 数成 2 个字符，**不得**直接用于门槛比较；
+ * 本类的入口统一收在 [lengthInCodePoints] / [meetsMinLength] / [verdictOf]。
  */
 object MasterPasswordPolicy {
 
+    /** 长度下限（**Unicode 码点数**，不是 UTF-16 码元数）。 */
     const val MIN_LENGTH = 8
+
+    /** 强度下限（bits，来自 crypto 内核 `guessesLog10` 换算）。 */
     const val MIN_STRENGTH_BITS = 40
 
     /** 门槛结论（三态：阻断 / 二次确认 / 直通）。 */
@@ -43,7 +52,27 @@ object MasterPasswordPolicy {
         OK
     }
 
-    /** 单一门槛判据（建库与改密禁各写一份）。 */
+    /**
+     * 口令字符数（**Unicode 码点**）——本类所有长度判据的唯一计量入口。
+     *
+     * 未配对代理项各计 1 个码点，与 `Character.codePointAt` 折叠、UTF-8 重编码后的字符数一致。
+     */
+    fun lengthInCodePoints(passwordChars: CharArray): Int =
+        Character.codePointCount(passwordChars, 0, passwordChars.size)
+
+    /** 是否达到长度下限 [MIN_LENGTH]（按码点计；硬阻断与提示文案共用）。 */
+    fun meetsMinLength(passwordChars: CharArray): Boolean =
+        lengthInCodePoints(passwordChars) >= MIN_LENGTH
+
+    /** 单一门槛判据（建库与改密禁各写一份；按码点计长）。 */
+    fun verdictOf(passwordChars: CharArray, strengthBits: Int?): Verdict =
+        verdictOf(lengthInCodePoints(passwordChars), strengthBits)
+
+    /**
+     * 单一门槛判据的纯数值形态。
+     *
+     * @param passwordLength **Unicode 码点数**（调用方应经 [lengthInCodePoints] 取得）
+     */
     fun verdictOf(passwordLength: Int, strengthBits: Int?): Verdict = when {
         passwordLength < MIN_LENGTH -> Verdict.TOO_SHORT
         strengthBits != null && strengthBits < MIN_STRENGTH_BITS -> Verdict.WEAK_REQUIRES_CONFIRM
@@ -94,6 +123,7 @@ fun MasterPasswordWeakConfirmDialog(
             )
         },
         text = {
+            TrackDialogInteractionEffect()
             Text(
                 text = stringResource(
                     R.string.master_pwd_weak_body,

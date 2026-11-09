@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * ISSUE-P3-310：过期编辑行——「永不过期」开关；开启后展示日期入口（Material3 日期选择器）。
@@ -104,6 +105,7 @@ internal fun ExpiryEditorRow(
                 }
             }
         ) {
+            TrackDialogInteractionEffect()
             androidx.compose.material3.DatePicker(state = pickerState)
         }
     }

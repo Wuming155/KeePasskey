@@ -99,15 +99,19 @@ class SyncHttpClientFactoryTest {
 
     @Test
     fun `云元数据字面量即便作为已配置端点也不预登记放行`() {
-        val client = SyncHttpClientFactory.createSyncClient(SyncNetworkOptions(), "169.254.169.254")
-        val failure = runCatching {
-            (client.socketFactory as SsrfGuardSocketFactory).createSocket()
-                .connect(java.net.InetSocketAddress(java.net.InetAddress.getByName("169.254.169.254"), 80), CONNECT_TIMEOUT_MS)
-        }.exceptionOrNull()
-        assertTrue(
-            "元数据红线不随已配置端点放行（连接期仍拒），实际=$failure",
-            failure is java.io.IOException && failure.message.orEmpty().contains("SSRF 防护")
-        )
+        // 4 字节、IPv4-mapped（平台归一时为 4 字节）与 IPv4-compatible 拼写都不得预登记放行
+        listOf("169.254.169.254", "::ffff:169.254.169.254", "::169.254.169.254").forEach { host ->
+            val client = SyncHttpClientFactory.createSyncClient(SyncNetworkOptions(), host)
+            val target = requireNotNull(SyncEndpointGuard.parseIpLiteral(host)) { "测试前置：$host 必须是 IP 字面量" }
+            val failure = runCatching {
+                (client.socketFactory as SsrfGuardSocketFactory).createSocket()
+                    .connect(java.net.InetSocketAddress(target, METADATA_PORT), CONNECT_TIMEOUT_MS)
+            }.exceptionOrNull()
+            assertTrue(
+                "元数据红线不随已配置端点放行（$host），实际=$failure",
+                failure is java.io.IOException && failure.message.orEmpty().contains("SSRF 防护")
+            )
+        }
     }
 
     private companion object {
@@ -118,5 +122,8 @@ class SyncHttpClientFactoryTest {
 
         /** 拒守卫用例的建连超时（毫秒）：获批路径即使超时也非「SSRF 防护」异常 */
         const val CONNECT_TIMEOUT_MS = 500
+
+        /** 元数据探测端口（守卫在建连前拒绝，端口只用于构造目标地址） */
+        const val METADATA_PORT = 80
     }
 }

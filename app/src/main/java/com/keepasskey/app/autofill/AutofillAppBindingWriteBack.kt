@@ -6,6 +6,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * 「记住这个应用与该条目的关联？」询问载荷（`ISSUE-P3-571` 方案 A，Kp2a 式询问）。
@@ -103,6 +104,7 @@ internal fun AppBindingWriteBackDialog(
         onDismissRequest = { onResult(false) },
         title = { Text(stringResource(R.string.autofill_app_binding_write_back_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Text(
                 stringResource(
                     R.string.autofill_app_binding_write_back_message,

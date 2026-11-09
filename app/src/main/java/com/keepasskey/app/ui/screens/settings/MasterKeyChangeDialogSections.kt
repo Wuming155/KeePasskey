@@ -26,7 +26,8 @@ import com.keepasskey.app.ui.components.SecurePasswordField
  * 本文件所有回调原样上行；整段随 [MasterKeyChangePasswordSection.enabled] /
  * [MasterKeyFileChoiceSection.enabled] 冻结（忙 / 已提交时不可再改，与既有口径一致）。
  * 密码开关为 ISSUE-P3-433 的 KeePassDX 口径：关闭＝保持当前主密码，两框不渲染。
- * `SecureDialog` 包装留在宿主文件——`SecureDialogFlagPolicyTest` 以该调用点计数锚定（§193 清单锁）。
+ * `SecureDialog` 包装留在宿主文件——它是**窗口级**副作用，必须与对话框本体同处一屏才能在
+ * 对话框自身内容槽内解析到窗口；搬进参数化段落组件会与窗口脱离、静默变成空操作。
  */
 
 /**

@@ -24,7 +24,8 @@ import javax.crypto.spec.SecretKeySpec
  * - **原生路径**：RustCrypto `chacha20` 内核（[NativeChaCha20]）——BC 纯 Java 实现真机吞吐
  *   仅 2.6~2.7 MB/s，Rust 内核实测 ≈118 MB/s（≈44×，见 `docs/records/真机吞吐实测记录_2026-09-17.md`
  *   §2.1）；流包装为 ChaCha20 专用的无填充分块流（[NativeEncryptingOutputStream] /
- *   [NativeDecryptingInputStream]，64 KiB 分块 + 字节偏移推进）。**解密流自 `ISSUE-P3-198`
+ *   [NativeDecryptingInputStream]，64 KiB 分块上限 + 字节偏移推进；解密流的小粒度读取按
+ *   4 KiB 有界预读摊薄 JNI，见该类 KDoc）。**解密流自 `ISSUE-P3-198`
  *   起走 direct `ByteBuffer` 直扣**（评估定案见 `records/JNI零拷贝评估_2026-09-19.md`）；
  *   加密流与整块 `byte[]` 路径维持拷贝桥（边界理由见各处 KDoc，§198 批次文档）；
  * - **兜底路径**：BC JCE `ChaCha7539`（[bouncyCastleProvider] 持有实例，§143 解耦）——
@@ -253,15 +254,29 @@ class ChaCha20CipherEngine internal constructor(
      * 交付——每块仅「堆→堆外 put」与「堆外→调用方 get」两次拷贝、零分配（旧形态为
      * `copyOf` + JNI 入/出拷贝 + 交付 `arraycopy` 共 4 次拷贝，且每块分配 2 个 64 KiB 数组）。
      *
+     * **读取粒度与有界预读**（`ENG-20261028-14`）：每次 refill 实际读取
+     * `min(CHUNK_SIZE, max(调用方请求量, PREFETCH_MIN))`。内层 Header 逐字段读取与
+     * `read()` 单字节读取不再「请求 1 字节就跨一次 JNI」，而由一次预读摊到
+     * [PREFETCH_MIN] 字节；请求量本身已 ≥ [PREFETCH_MIN] 时行为不变，批量读取仍以
+     * [CHUNK_SIZE] 封顶。代价是**未交付明文最多驻留 [PREFETCH_MIN] 字节**——不预设每次
+     * 填满 64 KiB，在缓冲摊销与明文驻留之间取有界折中。
+     *
      * 敏感数据处理：明文区间**交付即归零**（堆外内存不受 GC 管辖，归零必须显式且确定性），
      * close 时整段兜底归零；`key` / `nonce` 为本流自持副本，close 时擦除。`ISSUE-P3-177`
      * 的缓冲复用纪律由「单 direct 缓冲整流复用」承接。ChaCha20 无填充、无分组对齐，
      * 无 fail-closed 收尾语义。
      */
-    private class NativeDecryptingInputStream(
+    internal class NativeDecryptingInputStream(
         private val source: InputStream,
         private val key: ByteArray,
-        private val nonce: ByteArray
+        private val nonce: ByteArray,
+        /**
+         * 仅测试可见：把**流自持的堆外明文区**交给观察回调（回调只用于保留引用，不得产生
+         * 副作用）。存在理由：明文区在交付与 close 时就地归零，没有观察入口只能断言「读对了」，
+         * 无法区分「确定性擦除」与「丢引用等 GC」（`docs/architecture/敏感缓冲所有权契约.md`
+         * 明确禁止后者）。生产恒为 `null`，不保留引用。
+         */
+        observePlain: ((ByteBuffer) -> Unit)? = null
     ) : InputStream() {
 
         /** 密文中转缓冲（堆内）：`InputStream.read` 只收 `byte[]`，此一次拷贝受 API 限制。 */
@@ -277,13 +292,27 @@ class ChaCha20CipherEngine internal constructor(
         private var eofDone = false
         private var closed = false
 
+        init {
+            // 仅测试可见：实例级堆外明文区在全部属性初始化后暴露，便于断言交付擦除与 close 兜底
+            observePlain?.invoke(plain)
+        }
+
+        /**
+         * 单字节读取：直接消费待交付区并**就地把该字节归零**，不再分配 1 字节数组；
+         * 需要 refill 时由 [refill] 的有界预读取数，避免逐字节跨 JNI。
+         */
         override fun read(): Int {
-            val single = ByteArray(1)
-            val count = read(single, 0, 1)
-            if (count <= 0) return -1
-            val value = single[0].toInt() and 0xFF
-            Arrays.fill(single, 0)
-            return value
+            if (closed) throw java.io.IOException("流已关闭")
+            while (true) {
+                if (plainPos < plainLength) {
+                    val value = plain.get(plainPos).toInt() and 0xFF
+                    // 交付即归零：单字节用绝对 put 就地擦除，避免逐字节移动游标
+                    plain.put(plainPos, 0.toByte())
+                    plainPos += 1
+                    return value
+                }
+                if (eofDone || !refill(1)) return -1
+            }
         }
 
         override fun read(data: ByteArray, off: Int, len: Int): Int {
@@ -319,14 +348,17 @@ class ChaCha20CipherEngine internal constructor(
 
         /**
          * 读入一段密文并对 `[0, filled)` 的等容量视图就地变换；返回 `false` 表示流结束。
-         * [target] 为本次调用方请求的上限（与旧形态一致：读满请求量即交付，不做过量预读）。
+         *
+         * 实际读取量为 `min(CHUNK_SIZE, max([target], PREFETCH_MIN))`：小请求（单字节、
+         * 内层 Header 的逐字段短读）按 [PREFETCH_MIN] 有界预读，把固定 JNI 成本摊薄到该段；
+         * 请求量 ≥ [PREFETCH_MIN] 时按请求量读取，仍以 [CHUNK_SIZE] 封顶。
          */
         private fun refill(target: Int): Boolean {
             if (eofDone) return false
             wipePlain()
 
-            // 尽量读满请求量（单次底层读可能短读），读多少解密多少——与旧形态读满语义一致
-            val cap = minOf(target, CHUNK_SIZE)
+            // 单次底层读可能短读，循环读满本次目标量；读多少解密多少
+            val cap = minOf(CHUNK_SIZE, maxOf(target, PREFETCH_MIN))
             var filled = 0
             while (filled < cap) {
                 val count = source.read(buffer, filled, cap - filled)
@@ -363,6 +395,15 @@ class ChaCha20CipherEngine internal constructor(
 
         private companion object {
             const val CHUNK_SIZE = 64 * 1024
+
+            /**
+             * 小粒度读取的预读下限，同时是未交付明文的驻留上界。
+             *
+             * 取值依据：KDBX 未压缩内层 Header 的全部字段（含 64 字节流密钥）通常 < 1 KiB，
+             * 4 KiB 足以让整段 Header 只跨一次 JNI；而 64 KiB 的全程预读会让逐字节读取的
+             * 调用方多驻留 64 KiB 明文。此处不追求单次填满 [CHUNK_SIZE]。
+             */
+            const val PREFETCH_MIN = 4 * 1024
         }
     }
 }

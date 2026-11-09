@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,14 +53,16 @@ class WebDavPropfindParserDeviceTest {
             contentLength = "12345",
             lastModified = "Wed, 21 Oct 2015 07:28:00 GMT"
         )
-        val parsed = WebDavPropfindParser.parse(xml)
+        // ENG-20261028-32：解析失败已改为返回 null——合法报文必须在真机上解析成功，
+        // 否则「加固让整篇解析落空」的旧缺陷会以 null 形态静默通过
+        val parsed = requireNotNull(WebDavPropfindParser.parse(xml)) { "真机合法 PROPFIND 报文必须解析成功" }
         assertEquals("真机上合法 PROPFIND 报文必须解析出 etag", "live-etag", parsed.etag)
         assertEquals("真机上必须解析出 getcontentlength", 12_345L, parsed.contentLength)
         assertEquals("真机上必须解析出 getlastmodified", FROZEN_EPOCH_MILLIS, parsed.lastModifiedMillis)
         assertFalse("无 collection 元素时不得判为目录", parsed.isDirectory)
         assertTrue(
             "含 collection 元素时必须判为目录",
-            WebDavPropfindParser.parse(multistatus(collection = true)).isDirectory
+            requireNotNull(WebDavPropfindParser.parse(multistatus(collection = true))).isDirectory
         )
     }
 
@@ -81,7 +84,13 @@ class WebDavPropfindParserDeviceTest {
                     """<D:getetag>plain-etag</D:getetag></D:prop></D:propstat></D:response></D:multistatus>"""
             )
             for ((name, xml) in payloads) {
+                // 平台可能整体拒绝带 DOCTYPE 的报文（此时为 null = 解析失败，同样不泄漏），
+                // 断言口径只看哨兵不进入解析结果
                 val parsed = WebDavPropfindParser.parse(xml)
+                if (parsed == null) {
+                    println("XXE-DEVICE|payload=$name rejected=parse-failure api=${Build.VERSION.SDK_INT}")
+                    continue
+                }
                 assertFalse(
                     "$name：外部实体 / 外部 DTD 在真机上被展开，服务端可读到 ${canaryFile.absolutePath}",
                     parsed.etag.contains(canary)
@@ -93,7 +102,7 @@ class WebDavPropfindParserDeviceTest {
             }
             // 反向对照：同一份报文去掉 DOCTYPE 必须正常解析，
             // 否则上面的「未泄漏」只是「整篇没解析」的假阴性。
-            val control = WebDavPropfindParser.parse(multistatus(getetag = "\"etag-on-device\""))
+            val control = requireNotNull(WebDavPropfindParser.parse(multistatus(getetag = "\"etag-on-device\"")))
             assertEquals("对照报文必须能解析出 etag", "etag-on-device", control.etag)
         } finally {
             canaryFile.delete()
@@ -104,20 +113,27 @@ class WebDavPropfindParserDeviceTest {
     fun 超过信任深度的节点不被采信且超深报文不杀死进程() {
         // 深度上限（MAX_XML_DEPTH = 64）之内：multistatus(0)/response(1)/propstat(2)/prop(3)/wrapper*4.. → 采信
         val withinCap = nested(depth = 10, getetag = "shallow-etag")
-        assertEquals("上限内的 etag 必须被采信", "shallow-etag", WebDavPropfindParser.parse(withinCap).etag)
+        assertEquals(
+            "上限内的 etag 必须被采信",
+            "shallow-etag",
+            requireNotNull(WebDavPropfindParser.parse(withinCap)).etag
+        )
 
         // 上限之外：内容不采信（等价拒绝），但报文本身合法，不得抛错
         val beyondCap = nested(depth = 90, getetag = "deep-etag")
-        val deep = WebDavPropfindParser.parse(beyondCap)
+        val deep = requireNotNull(WebDavPropfindParser.parse(beyondCap)) { "合法 multistatus 不得整体落空" }
         assertEquals("超过信任深度的 etag 不得被采信", "", deep.etag)
         assertEquals("超过信任深度的长度不得被采信", -1L, deep.contentLength)
 
-        // 解析期爆栈探针：平台实现在建 DOM 时即可能递归过深，必须被 catch(Throwable) 遏制
+        // 解析期爆栈探针：平台实现在建 DOM 时即可能递归过深，必须被 catch(Throwable) 遏制。
+        // ENG-20261028-32：遏制结果是 null（解析失败）或「无采信内容的成功」，两者都不采信内容
         val absurd = nested(depth = PARSE_BOMB_DEPTH, getetag = "bomb-etag")
         val bomb = WebDavPropfindParser.parse(absurd)
-        assertEquals("超深报文必须回退空 etag 而非抛错穿透", "", bomb.etag)
-        assertEquals("超深报文必须回退 -1 长度哨兵", -1L, bomb.contentLength)
-        println("DEPTH-DEVICE|parseBomb=$PARSE_BOMB_DEPTH api=${Build.VERSION.SDK_INT}")
+        assertTrue(
+            "超深报文必须被拒绝或回退空元数据，不得抛错穿透",
+            bomb == null || (bomb.etag.isEmpty() && bomb.contentLength == -1L)
+        )
+        println("DEPTH-DEVICE|parseBomb=$PARSE_BOMB_DEPTH rejected=${bomb == null} api=${Build.VERSION.SDK_INT}")
     }
 
     @Test
@@ -127,7 +143,7 @@ class WebDavPropfindParserDeviceTest {
             contentLength = "0",
             lastModified = "Wed, 21 Oct 2015 07:28:00 GMT"
         )
-        val parsed = WebDavPropfindParser.parse(zeroByte)
+        val parsed = requireNotNull(WebDavPropfindParser.parse(zeroByte)) { "合法零字节元数据必须解析成功" }
         // §272（ISSUE-P1-275）读写一致化口径：cleanEtag 剥引号但**保留 W/ 弱标记**
         // （强比较下弱存储标签永不匹配，吞掉 W/ 会让写侧在严格服务器上退化为恒 412），
         // 宿主侧锁定见 SyncModelsTest「W/abc123」；本断言原期望「abc123」系 §151 旧语义遗留
@@ -136,11 +152,11 @@ class WebDavPropfindParserDeviceTest {
         assertEquals("RFC1123 时间戳必须解析为冻结时刻", FROZEN_EPOCH_MILLIS, parsed.lastModifiedMillis)
         assertFalse("无 collection 元素时不得判为目录", parsed.isDirectory)
 
-        // 节点缺失才是「回退 HTTP 头」的 -1 哨兵
-        val missing = WebDavPropfindParser.parse(multistatus(getetag = "\"x\""))
+        // 节点缺失才是「回退 HTTP 头」的 -1 哨兵（ENG-20261028-32：这是成功通道，不是解析失败）
+        val missing = requireNotNull(WebDavPropfindParser.parse(multistatus(getetag = "\"x\"")))
         assertEquals("getcontentlength 缺失时才回退 -1 哨兵", -1L, missing.contentLength)
 
-        val collection = WebDavPropfindParser.parse(multistatus(collection = true))
+        val collection = requireNotNull(WebDavPropfindParser.parse(multistatus(collection = true)))
         assertTrue("含 collection 元素时必须判为目录", collection.isDirectory)
     }
 
@@ -165,13 +181,14 @@ class WebDavPropfindParserDeviceTest {
     }
 
     @Test
-    fun 畸形报文一律回退空元数据() {
+    fun 畸形报文一律按解析失败处理() {
+        // ENG-20261028-32：真机平台 DOM 也不得把不可解析报文伪装成「成功 + 空元数据」，
+        // 否则远端元数据不可知会被上层当成「无 ETag 服务器」而剥除覆盖上传的乐观锁
         for (malformed in listOf("", "   ", "<not xml", "<D:multistatus xmlns:D=\"DAV:\">", "\u0000\u0001")) {
-            val parsed = WebDavPropfindParser.parse(malformed)
-            assertEquals("畸形输入 [$malformed] 必须回退空 etag", "", parsed.etag)
-            assertEquals("畸形输入 [$malformed] 必须回退 -1 长度", -1L, parsed.contentLength)
-            assertEquals("畸形输入 [$malformed] 必须回退 0 时间", 0L, parsed.lastModifiedMillis)
-            assertFalse("畸形输入 [$malformed] 不得判为目录", parsed.isDirectory)
+            assertNull(
+                "畸形输入 [$malformed] 必须解析失败（null），不得伪装成功",
+                WebDavPropfindParser.parse(malformed)
+            )
         }
     }
 

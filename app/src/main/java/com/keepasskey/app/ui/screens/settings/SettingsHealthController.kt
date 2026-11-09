@@ -7,6 +7,7 @@ import com.keepasskey.app.data.breach.BreachCheckStatus
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.security.ProtectedStringReclamation
 import com.keepasskey.database.audit.EntryHealthIssue
 import com.keepasskey.database.audit.HealthCheckEngine
 import com.keepasskey.database.audit.PasswordRiskLevel
@@ -144,16 +145,31 @@ internal class SettingsHealthController(
                 // ISSUE-P2-470：同一次装配里的 `scanDuplicates()`（全库扁平化 +
                 // `DuplicateEntryScanner.scan`，万级条目即整库遍历）一并移入同一块——
                 // 此前它在块外求值，仍跑在 Main 上；`runBreachCheck` 为挂起网络调用，按既有口径另判。
-                val (entries, issues, duplicateScan) = withContext(Dispatchers.Default) {
-                    val fetched = vaultRepository.getKdbxEntries()
-                    val analyzed = HealthCheckEngine.analyzeEntries(fetched)
-                    val duplicates = scanDuplicates()
-                    Triple(fetched, analyzed, duplicates)
+                //
+                // ENG-20261028-11：读租约仅覆盖纯内存读取段（取全库 → 口令分析 → 查重 → 提炼泄露候选）。
+                // 绝不持租约跨网络无限驻留：网络比对（runBreachCheck）在租约释放后执行，不占用读租约。
+                val isBreachEnabled = breachCheckEnabled()
+                val (scanRead, breachCandidates) = withContext(Dispatchers.Default) {
+                    val lease = ProtectedStringReclamation.acquireReadLease()
+                    try {
+                        val fetched = vaultRepository.getKdbxEntries()
+                        val analyzed = HealthCheckEngine.analyzeEntries(fetched)
+                        val duplicates = scanDuplicates()
+                        val candidates = if (isBreachEnabled) {
+                            breachCheckCoordinator.prepareCandidates(fetched)
+                        } else {
+                            emptyMap()
+                        }
+                        HealthScanRead(fetched, analyzed, duplicates) to candidates
+                    } finally {
+                        lease.close()
+                    }
                 }
+                val breachOutcome = runBreachCheck(isBreachEnabled, breachCandidates)
                 val summary = buildHealthScanSummary(
-                    issues = issues,
-                    duplicateScan = duplicateScan,
-                    breachOutcome = runBreachCheck(entries)
+                    issues = scanRead.issues,
+                    duplicateScan = scanRead.duplicateScan,
+                    breachOutcome = breachOutcome
                 )
                 applyHealthScanSummary(summary)
             } catch (e: Exception) {
@@ -308,14 +324,19 @@ internal class SettingsHealthController(
     /**
      * 按开关执行泄露比对：关闭态直接返回 [BreachCheckStatus.DISABLED]（零外联）；
      * 开启态失败转 [BreachCheckStatus.FAILED] 并透出原因。
+     *
+     * ENG-20261028-11：仅接收已提炼的散列候选 [candidates] 执行网络比对，不在读租约内运行，
+     * 避免持租约跨网络无限驻留。
      */
     private suspend fun runBreachCheck(
-        entries: List<com.keepasskey.core.model.KdbxEntry>
+        enabled: Boolean,
+        candidates: Map<String, List<BreachCheckCoordinator.BreachCandidate>>
     ): BreachCheckOutcome {
-        if (!breachCheckEnabled()) return BreachCheckOutcome(BreachCheckStatus.DISABLED)
+        if (!enabled) return BreachCheckOutcome(BreachCheckStatus.DISABLED)
+        if (candidates.isEmpty()) return BreachCheckOutcome(BreachCheckStatus.CLEAN)
         healthStateFlow.update { it.copy(breachCheckStatus = BreachCheckStatus.CHECKING) }
         return try {
-            breachCheckCoordinator.check(entries)
+            breachCheckCoordinator.checkCandidates(candidates)
         } catch (e: kotlinx.coroutines.CancellationException) {
             // ISSUE-P3-294：协程取消是「用户退出」而非查询失败——继续上抛，禁转 FAILED
             throw e
@@ -333,11 +354,21 @@ internal class SettingsHealthController(
     companion object {
         /** ISSUE-P3-550：异常细节只进日志，UI 侧只留错误码映射。 */
         private const val TAG = "SettingsHealth"
-
         private const val HEALTH_SCORE_BASE = 100
         private const val HEALTH_PENALTY_WEAK = 5
         private const val HEALTH_PENALTY_REUSED = 10
         private const val HEALTH_PENALTY_EXPIRED = 15
         private const val HEALTH_PENALTY_BREACHED = 20
     }
+
+    /**
+     * `ENG-20261028-11`：一次健康扫描在读租约内的读段产物。
+     *
+     * 仅包含内存分析出的健康问题与重复扫描结果，泄露比对候选在此段内提炼完毕后立即释放读租约。
+     */
+    private data class HealthScanRead(
+        val entries: List<com.keepasskey.core.model.KdbxEntry>,
+        val issues: List<EntryHealthIssue>,
+        val duplicateScan: DuplicateScanResult
+    )
 }

@@ -23,7 +23,8 @@ import java.io.File
  * 两项均改为**默认关闭**，因此本用例锁三件事：
  * 1. **默认值**——数据类与 UI 状态两处投影都必须是 false；
  * 2. **单键读取通道的缺省**——`ExtendedSettingsStore` 的两个 `isXxxEnabled()` 自带
- *    硬编码兜底（**不读**数据类默认值），是「改完默认值仍默认开启」的真实陷阱，须一并锁住；
+ *    硬编码兜底（**不读**数据类默认值），是「改完默认值仍默认开启」的真实陷阱；
+ *    「无持久化层」与「有持久化层但键缺失」两条路径都按实际取值锁定；
  * 3. **开关未被硬禁用**——用户显式开启后仍可持久化并生效（否则「默认关闭」会退化成
  *    「功能被删」）。
  *
@@ -52,20 +53,26 @@ class AutofillPrivacyDefaultsTest {
      * 关键回归锁：`ExtendedSettingsStore` 的两个单键读取方法此前把缺省值**硬编码为 true**
      * （`?: true`），仅改数据类默认值不会改变「无持久化层 / 键缺失」判定——
      * 即「默认关闭」会被该兜底悄悄抵消。
+     *
+     * ENG-20261028-12 整改：原用例在该行为读数之外再按源码反查 `K_XXX, true` 字面量。
+     * 那只能命中当时的写法（换个变量、换个缺省常量即漏判或误红），而真实陷阱是**键缺失时的取值**，
+     * 已由下面的「有持久化层但键缺失」行为读数直接覆盖。
      */
     @Test
     fun `单键读取通道的缺省值不得回退为开启`() {
-        val store = ExtendedSettingsStore(null)
-        assertFalse("TOTP 复制单键读取缺省须为关闭", store.isAutofillCopyTotpEnabled())
-        assertFalse("内联建议单键读取缺省须为关闭", store.isInlineSuggestionsEnabled())
+        val noPrefs = ExtendedSettingsStore(null)
+        assertFalse("无持久化层时 TOTP 复制单键读取缺省须为关闭", noPrefs.isAutofillCopyTotpEnabled())
+        assertFalse("无持久化层时内联建议单键读取缺省须为关闭", noPrefs.isInlineSuggestionsEnabled())
 
-        val source = readSource(EXTENDED_SETTINGS_STORE_PATH)
-        for (key in listOf("K_AUTOFILL_COPY_TOTP", "K_INLINE_SUGGESTIONS_ENABLED")) {
-            assertFalse(
-                "$key 的单键读取不得保留「$key, true」形式的开启兜底（是 P2-43 / P2-71 的真实陷阱）",
-                Regex("""$key,\s*true""").containsMatchIn(source)
-            )
-        }
+        val emptyPrefs = ExtendedSettingsStore(inMemoryContext(InMemorySharedPreferences()))
+        assertFalse(
+            "键缺失时 TOTP 复制单键读取须回落关闭（历史陷阱：硬编码 true 兜底抵消数据类默认值）",
+            emptyPrefs.isAutofillCopyTotpEnabled()
+        )
+        assertFalse(
+            "键缺失时内联建议单键读取须回落关闭（同上）",
+            emptyPrefs.isInlineSuggestionsEnabled()
+        )
     }
 
     // ---- AC③（P2-43）：关闭后不触达剪贴板 ----
@@ -108,11 +115,8 @@ class AutofillPrivacyDefaultsTest {
     fun `内联建议构建器以开关为前置门控（关闭即不下发展示）`() {
         val disabled = AutofillInlinePresentationFactory(inMemoryContext(InMemorySharedPreferences()), ExtendedSettingsStore(null))
         assertFalse("默认配置下构建器的开关判定须为 false", disabled.isEnabled())
-        assertTrue(
-            "构建器须在读取 InlineSuggestionsRequest 之前先判开关（否则关闭态仍可能走到下发路径）",
-            disabledGatePrecedesRequest()
-        )
-        // 请求为 null 时任何配置都返回 null（官方降级链末端），此处只锁「关闭态恒不下发」
+        // 请求为 null 时任何配置都返回 null（官方降级链末端）；
+        // 真实请求下「关闭恒不下发、开启下发与降级」契约已由 AutofillPlatformContractsDeviceTest 真实对象端到端验证
         assertTrue(disabled.build(null, "user", "title") == null)
     }
 
@@ -143,14 +147,6 @@ class AutofillPrivacyDefaultsTest {
 
     // ---- 辅助 ----
 
-    /** 构建器源码中「先判开关、后读请求」的顺序证据（静态，因 JVM 无法构造 InlineSuggestionsRequest）。 */
-    private fun disabledGatePrecedesRequest(): Boolean {
-        val source = readSource(INLINE_FACTORY_PATH)
-        val gate = source.indexOf("if (!isEnabled()) return null")
-        val requestRead = source.indexOf("inlineRequest == null")
-        return gate >= 0 && requestRead > gate
-    }
-
     private fun inMemoryContext(prefs: SharedPreferences): Context = object : ContextWrapper(null) {
         override fun getApplicationContext(): Context = this
         override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
@@ -168,10 +164,6 @@ class AutofillPrivacyDefaultsTest {
     }
 
     private companion object {
-        const val EXTENDED_SETTINGS_STORE_PATH =
-            "app/src/main/java/com/keepasskey/app/data/repository/ExtendedSettingsStore.kt"
-        const val INLINE_FACTORY_PATH =
-            "app/src/main/java/com/keepasskey/app/autofill/AutofillInlinePresentationFactory.kt"
         const val ROOT_SEARCH_DEPTH = 6
 
         /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */

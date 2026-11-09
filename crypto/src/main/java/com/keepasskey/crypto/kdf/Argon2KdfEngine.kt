@@ -13,10 +13,14 @@ import org.bouncycastle.crypto.params.Argon2Parameters
  * TASK-50 性能整改：优先走自维护原生 JNI 实现 `NativeArgon2`（ISSUE-P2-14 起为 **Rust 内核**：
  * RustCrypto `argon2` + `zeroize` 确定性擦除，对齐 KeePassDX 的 native libargon2 架构；
  * Batch 4 宿主侧实测较 BouncyCastle 快 2.2~5.4 倍，p=4 多核收益约 3×）；
- * JVM 实现仅作兜底——
+ * JVM 实现仅作**实现可用性**兜底——
  * 1. 桌面 JVM（单元测试）无法加载 Android .so 时；
  * 2. Argon2 版本非 0x10/0x13 时；
- * 3. 原生探活失败（个别机型）时。
+ * 3. 原生探活失败（个别机型）时；
+ * 4. associatedData 超过原生内核上限时（见 [NATIVE_MAX_AD_LEN]）。
+ *
+ * ENG-20261028-08：参数越界**不属于**上述兜底理由。公共接受域由 [Argon2KdfLimits] 判定，
+ * 越界即抛 [CryptoException.KdfException]，不再「排除原生后改由 BC 再算一次」。
  */
 class Argon2KdfEngine(
     val type: KdfParameters.Argon2.Argon2Type
@@ -57,16 +61,19 @@ class Argon2KdfEngine(
         val memoryKib = requireExpressibleAsInt(argonParams.memoryInBytes, "内存", 1024L)
         val nativeIterations = requireExpressibleAsInt(argonParams.iterations, "迭代")
 
-        // ISSUE-P2-59 AC①：原生路径参数上界镜像（与 `KdbxKdfParameterCodec` 同值）。
-        // 越界即**不**进入原生路径（回落到既有 BC 兜底，其自带 `isMemoryParamFeasible` 堆预检），
-        // 语义与原「原生 derive 返回 null → KdfException」一致，且不放松任何既有拒绝。
-        val withinKdfBounds = isWithinKdfBounds(
+        // ENG-20261028-08：公共接受域 = [Argon2KdfLimits]（基础边界与 database `KdbxKdfAcceptance`
+        // 同源）。越界即拒绝派生，**不**以「排除原生分支、改走 BC 再算」代替拒绝——BC 的堆预检
+        // 与自身参数校验只覆盖部分越界面，不能充当接受域；回退仅用于实现可用性差异。
+        val boundsRejection = Argon2KdfLimits.outOfBoundsReason(
             argonParams.memoryInBytes,
             argonParams.iterations,
             argonParams.parallelism
         )
+        if (boundsRejection != null) {
+            throw CryptoException.KdfException("$boundsRejection，拒绝派生")
+        }
 
-        if (NativeArgon2.available && versionSupported && !adExceedsNativeLimit && withinKdfBounds) {
+        if (NativeArgon2.available && versionSupported && !adExceedsNativeLimit) {
             return NativeArgon2.derive(
                 password = compositeKey,
                 salt = argonParams.salt,
@@ -81,7 +88,7 @@ class Argon2KdfEngine(
         }
 
         // ISSUE-P3-392：探活失败静默回落不可观测——回落时一次性记「已回落」事实。
-        // 版本不支持 / AD 超限 / 参数越界属**有意**走 JVM（非探活失败），不记本条日志。
+        // 版本不支持 / AD 超限属**有意**走 JVM（非探活失败）；参数越界已在上面拒绝，不进入本分支。
         if (!NativeArgon2.available) {
             NativeFallbackLog.noteFallbackOnce("Argon2")
         }
@@ -166,30 +173,19 @@ class Argon2KdfEngine(
         }
 
         /**
-         * ISSUE-P2-59（审计 RUST-05）AC①：原生路径参数上界**镜像**。
+         * 引擎公共接受域判据（基础边界与每通道下界的唯一定义见 [Argon2KdfLimits]）。
          *
-         * 与 `KdbxKdfParameterCodec.validateArgon2Bounds` **同值**——模块依赖单向
-         * （`database → crypto`），crypto 侧不可反向引用 database 常量，故此处同值声明并
-         * 以本 KDoc 与本仓单测双向锁定（值漂移即用例失败）。
+         * ISSUE-P2-59 AC① / ISSUE-P2-290 AC②：原生内核自身只有下界闸门
+         * （`memoryKib ≥ 8 × parallelism`）与 JNI 有符号闸门，无逐项上界，故上界裁决须在
+         * 引擎侧补齐；ISSUE-P2-290 另加入交叉约束（`m ≥ 8 × p × 1024`），与内核下界逐项对齐，
+         * 禁「上游放行、内核拒」的口径缺口。
          *
-         * 语义：原生内核自身只做下界闸门（`memoryKib ≥ 8 × parallelism`），无逐项上界，
-         * 故上界裁决须在引擎侧补齐；越界时**不进入**原生路径，回落 BC 兜底（其自带堆预检）。
-         * 取值宽于一切合法用户配置（本仓 `KdfBenchmark` 自荐上限 ≤512 MiB × 20，远小于 4 GiB / 2²⁴）。
+         * ENG-20261028-08：本判据即 [transform] 的**拒绝**条件（越界抛
+         * [CryptoException.KdfException]），不再是「是否进入原生路径」的路由条件。
+         * ENG-20261028-16：database `KdbxKdfAcceptance` 引用同一处定义，不再各自维护同值副本。
          */
-        /**
-         * ISSUE-P2-290 AC②：每通道内存下界（8 × 1024 字节）——原生内核自身的
-         * fail-closed 下界即 `memoryKib ≥ 8 × parallelism`，本谓词与其逐项对齐
-         * （禁「上游放行、内核拒」的口径缺口）。镜像 `KdbxKdfParameterCodec` 同值常量。
-         */
-        private const val ARGON2_MIN_MEMORY_PER_LANE_BYTES = 8L * 1024
-
         fun isWithinKdfBounds(memoryInBytes: Long, iterations: Long, parallelism: Int): Boolean =
-            memoryInBytes >= ARGON2_MIN_MEMORY_BYTES &&
-                memoryInBytes <= ARGON2_MAX_MEMORY_BYTES &&
-                iterations in 1..ARGON2_MAX_ITERATIONS &&
-                parallelism in 1..ARGON2_MAX_PARALLELISM &&
-                // ISSUE-P2-290 AC②：交叉约束（m ≥ 8 × p × 1024），与原生内核下界逐项对齐
-                memoryInBytes >= parallelism.toLong() * ARGON2_MIN_MEMORY_PER_LANE_BYTES
+            Argon2KdfLimits.isWithinBounds(memoryInBytes, iterations, parallelism)
 
         /**
          * ISSUE-P2-59 AC②：受检窄化——超 [Int] 可表达范围时**抛异常**，绝不静默截断。
@@ -207,17 +203,5 @@ class Argon2KdfEngine(
             }
             return scaled.toInt()
         }
-
-        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MIN_MEMORY_BYTES`（官方语义下界 8192 字节）。 */
-        private const val ARGON2_MIN_MEMORY_BYTES = 8192L
-
-        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MAX_MEMORY_BYTES`（4 GiB 防 DoS 封顶）。 */
-        private const val ARGON2_MAX_MEMORY_BYTES = 4L * 1024 * 1024 * 1024
-
-        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MAX_ITERATIONS`（2²⁴ 防 DoS 封顶）。 */
-        private const val ARGON2_MAX_ITERATIONS = 1L shl 24
-
-        /** 镜像 `KdbxKdfParameterCodec.ARGON2_MAX_PARALLELISM`。 */
-        private const val ARGON2_MAX_PARALLELISM = 64
     }
 }

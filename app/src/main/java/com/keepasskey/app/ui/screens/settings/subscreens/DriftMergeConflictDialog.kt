@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ExternalModificationChoice
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.security.VaultFileDriftMergeConflict
 
 /**
@@ -43,6 +44,7 @@ fun DriftMergeConflictDialog(
         modifier = modifier,
         title = { Text(stringResource(R.string.ext_mod_merge_conflict_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = stringResource(R.string.ext_mod_merge_conflict_body, conflict.conflictCount),

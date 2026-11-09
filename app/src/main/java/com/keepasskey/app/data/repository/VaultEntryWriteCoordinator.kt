@@ -15,6 +15,7 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.history.HistoryManager
 import com.keepasskey.database.session.DatabaseSession
+import com.keepasskey.database.session.withAcceptedRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -58,11 +59,13 @@ internal class VaultEntryWriteCoordinator(
         loadedCustomFieldKeys: Map<String, String> = emptyMap()
     ): KdbxResult<Unit> {
         try {
-            return withContext(Dispatchers.Default) {
-                try {
-                    saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars, groupIntent, loadedCustomFieldKeys)
-                } catch (error: IllegalArgumentException) {
-                    KdbxResult.Failure(error, code = KdbxError.SAVE_FAILED)
+            return databaseSession.withWriteAcceptance {
+                withContext(Dispatchers.Default) {
+                    try {
+                        saveEntryInternal(entry, passwordChars, totpSecretChars, protectedFieldChars, groupIntent, loadedCustomFieldKeys)
+                    } catch (error: IllegalArgumentException) {
+                        KdbxResult.Failure(error, code = KdbxError.SAVE_FAILED)
+                    }
                 }
             }
         } finally {
@@ -72,8 +75,18 @@ internal class VaultEntryWriteCoordinator(
         }
     }
 
-    /** 条目保存主体：既有条目合并更新（含历史修订），未命中则新建 */
-    suspend fun saveEntryInternal(
+    /**
+     * 跨读写的普通写受理：调用方需在同一请求内先读后写时（HOTP 取码 → 推进计数器），
+     * 由本入口在**读取之前**固定票据；只在写入口捕获会漏掉读与写之间的会话变化。
+     */
+    suspend fun <T> withinWriteAcceptance(block: suspend () -> KdbxResult<T>): KdbxResult<T> =
+        databaseSession.withWriteAcceptance { block() }
+
+    /** 条目保存主体：既有条目合并更新（含历史修订），未命中则新建。
+     *
+     * 只在 [saveEntryWithEraseContract] 的受理请求内运行；读取候选、改树与落盘共用受理票据。
+     */
+    private suspend fun saveEntryInternal(
         entry: UiVaultEntry, passwordChars: CharArray?, totpSecretChars: CharArray?,
         protectedFieldChars: Map<String, CharArray>,
         groupIntent: EntryGroupIntent = EntryGroupIntent.Keep,
@@ -243,6 +256,13 @@ internal class VaultEntryWriteCoordinator(
     suspend fun setEntryFavorite(
         entryId: String,
         favorite: Boolean
+    ): KdbxResult<Unit> = databaseSession.withWriteAcceptance {
+        setEntryFavoriteInternal(entryId, favorite)
+    }
+
+    private suspend fun setEntryFavoriteInternal(
+        entryId: String,
+        favorite: Boolean
     ): KdbxResult<Unit> {
         // TASK-34 整改：收藏状态持久化至 KDBX 条目 customData（随库文件同步），
         // 直接改内存树并落盘——不经 HistoryManager，收藏切换不产生历史修订。
@@ -276,7 +296,13 @@ internal class VaultEntryWriteCoordinator(
      * [otpChars] 为新的 OTP 配置原文（`otpauth://` URI 或 Base32 种子），**借用语义**——
      * 本方法用毕不清零，调用方负责。
      */
-    suspend fun updateEntryOtpConfig(entryId: String, otpChars: CharArray): KdbxResult<Unit> {
+    suspend fun updateEntryOtpConfig(entryId: String, otpChars: CharArray): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { updateEntryOtpConfigInternal(entryId, otpChars) }
+
+    private suspend fun updateEntryOtpConfigInternal(
+        entryId: String,
+        otpChars: CharArray
+    ): KdbxResult<Unit> {
         val entry = when (
             val resolved = resolveExistingEntryForFieldWrite(databaseSession, strings, entryId)
         ) {
@@ -301,6 +327,15 @@ internal class VaultEntryWriteCoordinator(
      * history 修订翻倍与同步脏标记污染。
      */
     suspend fun saveAutofillCredential(
+        packageName: String,
+        webDomain: String?,
+        username: String,
+        passwordChars: CharArray
+    ): KdbxResult<Unit> = databaseSession.withWriteAcceptance {
+        saveAutofillCredentialInternal(packageName, webDomain, username, passwordChars)
+    }
+
+    private suspend fun saveAutofillCredentialInternal(
         packageName: String,
         webDomain: String?,
         username: String,

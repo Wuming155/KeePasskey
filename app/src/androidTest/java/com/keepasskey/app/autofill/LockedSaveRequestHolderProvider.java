@@ -7,20 +7,31 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 
-/** 在独立 test APK 进程持有 PendingIntent，模拟系统保存 UI 对 IntentSender 的强引用。 */
+/**
+ * 在独立 test APK 进程持有 PendingIntent，模拟系统保存 UI 对 IntentSender 的强引用。
+ *
+ * 三个槽位：
+ * - {@link #EXTRA_A} / {@link #EXTRA_B}：ENG-21 进程重建场景的 A/B 两个句柄（跨进程存活）；
+ * - {@link #EXTRA_ONE}：单句柄槽（成功 / 取消 / 超时三类终态逐次送入），避免在 instrumented
+ *   进程内直接 `send()` 受后台启动限制影响。
+ */
 public final class LockedSaveRequestHolderProvider extends ContentProvider {
     public static final String HOLD = "hold";
+    public static final String HOLD_ONE = "hold_one";
     public static final String GET_A = "get_a";
     public static final String GET_B = "get_b";
+    public static final String GET_ONE = "get_one";
     public static final String REPORT_RESULT = "report_result";
     public static final String CLEAR_RESULT = "clear_result";
     public static final String READ_RESULT = "read_result";
     public static final String RELEASE = "release";
     public static final String EXTRA_A = "pending_a";
     public static final String EXTRA_B = "pending_b";
+    public static final String EXTRA_ONE = "pending_one";
 
     private PendingIntent pendingA;
     private PendingIntent pendingB;
+    private PendingIntent pendingOne;
     private String lastResult;
 
     @Override public boolean onCreate() { return true; }
@@ -38,8 +49,12 @@ public final class LockedSaveRequestHolderProvider extends ContentProvider {
                 pendingA = extras == null ? null : extras.getParcelable(EXTRA_A);
                 pendingB = extras == null ? null : extras.getParcelable(EXTRA_B);
                 result.putBoolean("ready", pendingA != null && pendingB != null);
-            } else if (GET_A.equals(method) || GET_B.equals(method)) {
-                PendingIntent pending = GET_A.equals(method) ? pendingA : pendingB;
+            } else if (HOLD_ONE.equals(method)) {
+                pendingOne = extras == null ? null : extras.getParcelable(EXTRA_ONE);
+                result.putBoolean("ready", pendingOne != null);
+            } else if (GET_A.equals(method) || GET_B.equals(method) || GET_ONE.equals(method)) {
+                PendingIntent pending = GET_A.equals(method) ? pendingA
+                        : GET_B.equals(method) ? pendingB : pendingOne;
                 if (pending == null) throw new IllegalStateException("holder has no requested PendingIntent");
                 result.putParcelable("pending", pending);
             } else if (REPORT_RESULT.equals(method)) {
@@ -53,8 +68,10 @@ public final class LockedSaveRequestHolderProvider extends ContentProvider {
             } else if (RELEASE.equals(method)) {
                 if (pendingA != null) pendingA.cancel();
                 if (pendingB != null) pendingB.cancel();
+                if (pendingOne != null) pendingOne.cancel();
                 pendingA = null;
                 pendingB = null;
+                pendingOne = null;
                 lastResult = null;
                 result.putBoolean("released", true);
             } else {

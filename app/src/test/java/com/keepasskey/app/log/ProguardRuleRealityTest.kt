@@ -6,8 +6,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * `proguard-rules.pro` 的**实物对照**守卫（`ISSUE-P3-507`；守卫模式照 `ISSUE-P3-98` 的
- * [AppLogProguardRuleTest]）。
+ * `proguard-rules.pro` 的**实物对照**守卫（`ISSUE-P3-507`）。
  *
  * ## 为什么需要它
  *
@@ -16,7 +15,8 @@ import java.io.File
  * `-keepclassmembers … { native byte[] findSuffix(java.lang.String[]); }` 自初版起就在
  * （`git log -S` 仅一个提交、注释无任何依据）⇒ **恒不匹配、静默 no-op**，与文件头自立的
  * 「据实最小保留」原则相悖。它之所以能存活这么久，是因为**没有任何守卫**去问一句
- * 「这条规则指向的类 / 成员真的存在吗」——`AppLogProguardRuleTest` 只锁了 AppLog 那一族。
+ * 「这条规则指向的类 / 成员真的存在吗」——只锁规则文件文本的用例（已按测试准入规则退役）
+ * 回答不了这个问题，而它恰是本用例存在的理由。
  *
  * 本用例补上这一层：把规则文件里**完全限定类名**（不含通配）的 keep 规则拿到当前测试
  * classpath（即真实依赖实物）上做 `Class.forName`，并对已删除的那条 no-op 规则做
@@ -63,6 +63,8 @@ class ProguardRuleRealityTest {
     fun `已删除的 no-op 规则在依赖实物中确实不存在`() {
         // 复活条件反查（fail-closed）：一旦依赖升级真的引入了该 native 成员，
         // 这里会红并提示把 keep 规则加回来——而不是让「曾经删错过」这一事实被永久遗忘。
+        // ENG-20261028-12：原另有一条「规则文本不得再出现 findSuffix」的源码字符串反查用例，
+        // 与本反查断言同一事实且锁的是规则文件写法；删除后由本用例（真实依赖实物）单独承担。
         val methods = try {
             Class.forName(PSL_CLASS).declaredMethods.map { it.name }
         } catch (e: ClassNotFoundException) {
@@ -70,18 +72,9 @@ class ProguardRuleRealityTest {
         }
         assertTrue(
             "$PSL_CLASS 现已存在 `findSuffix` 成员（$methods）——ISSUE-P3-507 删除的那条 "
-                + "-keepclassmembers 规则**应当恢复**（并同步本用例与规则注释）；"
+                + "-keepclassmembers 规则**应当恢复**（并同步规则注释）；"
                 + "若成员形态与旧规则不同，请按实际签名改写而非照抄旧签名。",
             "findSuffix" !in methods
-        )
-    }
-
-    @Test
-    fun `已删除的 no-op 规则不得复活`() {
-        assertTrue(
-            "已删除的 PublicSuffixDatabase keep 规则不得复活——如需恢复请先核对成员签名真实存在"
-                + "（见「已删除的 no-op 规则在依赖实物中确实不存在」用例）",
-            !rules.contains("findSuffix")
         )
     }
 

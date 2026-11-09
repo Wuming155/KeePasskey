@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.screens.settings.ExportArtifactKind
 import com.keepasskey.app.ui.screens.settings.ExportConfirmationPolicy
 import com.keepasskey.app.ui.screens.settings.ExportTicket
@@ -54,6 +55,7 @@ internal fun ExportConfirmationDialog(
         onDismissRequest = { cleanupCancelledTarget() },
         title = { Text(stringResource(titleResId)) },
         text = {
+            TrackDialogInteractionEffect()
             Text(
                 text = stringResource(messageResId),
                 style = MaterialTheme.typography.bodyMedium,

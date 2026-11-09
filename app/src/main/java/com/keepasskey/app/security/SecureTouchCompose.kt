@@ -13,6 +13,19 @@ import androidx.compose.ui.platform.LocalView
  *
  * 说明：Compose 无直接等价的 Modifier，官方做法即在宿主 View 上开启该标志，
  * 故以「组合期副作用 + 退出还原」实现。
+ *
+ * ## 与另两处施加点的分工（同一威胁面、不同窗口）
+ *
+ * 遮挡触摸过滤是**视图 / 窗口级**属性，不会跨窗口传播，故按窗口类型各有落点：
+ * - **Activity 窗口**：[FlagSecureGuard.applyObscuredTouchFilter] 在 `attach` 时对 `decorView` 恒常开启
+ *   （不随防截屏开关变化），独立凭据 / 自动填充 Activity 另有同等施加；
+ * - **对话框窗口**（Compose `AlertDialog` / `Dialog` 各自建窗）：[SecureDialogWindowEffect]
+ *   在本窗 `decorView` 上开启，**必须写在对话框自身的内容槽位内**；
+ * - **本函数**：把过滤绑定到页面根节点的组合生命周期。宿主 Activity 已自行施加时它是同一
+ *   落点的加固性重复；页面被未自行加固的承载复用时，它是该页唯一的施加点。
+ *
+ * 平台的遮挡判定本身（`MotionEvent.FLAG_WINDOW_IS_OBSCURED` / `FLAG_WINDOW_IS_PARTIALLY_OBSCURED`）
+ * 由系统完成，本仓不另建事件位判定内核：开旗后由 `View.onFilterTouchEventForSecurity` 丢弃事件。
  */
 @Composable
 fun ApplyObscuredTouchFilter() {

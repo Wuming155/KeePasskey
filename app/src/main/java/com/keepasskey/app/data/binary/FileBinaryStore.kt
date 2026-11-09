@@ -112,17 +112,33 @@ class FileBinaryStore private constructor(
 
     /** store 写入异常时 key 尚未交付调用方，因此由本实现立即回滚并保留失败项重试。 */
     private fun cleanupFailedWrite(key: String, originalFailure: Throwable) {
-        try {
-            cache.clear(key)
-            if (cache.cacheSize(key) == 0L) {
-                pendingFailedWriteKeys.remove(key)
-            } else {
-                pendingFailedWriteKeys.add(key)
-                originalFailure.addSuppressed(IllegalStateException("Failed attachment write cleanup remains pending"))
+        var cleared = false
+        var lastCleanupError: Throwable? = null
+        var attempt = 0
+        while (!cleared && attempt < CLEANUP_RETRIES) {
+            try {
+                cache.clear(key)
+                if (cache.cacheSize(key) == 0L) {
+                    cleared = true
+                    break
+                }
+            } catch (cleanupFailure: Throwable) {
+                lastCleanupError = cleanupFailure
             }
-        } catch (cleanupFailure: Throwable) {
+            attempt++
+            if (attempt < CLEANUP_RETRIES) {
+                Thread.sleep(CLEANUP_RETRY_GAP_MS)
+            }
+        }
+        if (cleared) {
+            pendingFailedWriteKeys.remove(key)
+        } else {
             pendingFailedWriteKeys.add(key)
-            if (cleanupFailure !== originalFailure) originalFailure.addSuppressed(cleanupFailure)
+            val pendingEx = IllegalStateException("Failed attachment write cleanup remains pending")
+            if (lastCleanupError != null && lastCleanupError !== originalFailure) {
+                pendingEx.addSuppressed(lastCleanupError)
+            }
+            originalFailure.addSuppressed(pendingEx)
         }
     }
 
@@ -145,7 +161,7 @@ class FileBinaryStore private constructor(
      */
     override fun onSessionLocked() = clear()
 
-    /** 清理失败告警：只落异常类名（[AppLog] release 侧统一脱敏），不含任何附件内容信息。 */
+    /** 清理失败告警：只落异常类型与栈帧（[AppLog] release 侧统一脱敏），不含任何附件内容信息。 */
     private fun logPurgeFailure(cause: Throwable?) {
         if (cause == null) {
             AppLog.w(TAG, "附件缓存目录存在删除失败项，可能残留明文附件快照")
@@ -160,6 +176,10 @@ class FileBinaryStore private constructor(
         /** `cacheDir` 下的附件缓存目录名。 */
         const val CACHE_DIR_NAME = "attachments"
         const val TAG = "FileBinaryStore"
+
+        /** 写入失败回滚清理重试次数与间隔（对齐 [SyncCacheFiles] 的瞬时句柄释放容限）。 */
+        private const val CLEANUP_RETRIES = 3
+        private const val CLEANUP_RETRY_GAP_MS = 15L
     }
 }
 

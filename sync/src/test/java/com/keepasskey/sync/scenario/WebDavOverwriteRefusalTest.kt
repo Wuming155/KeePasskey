@@ -7,27 +7,30 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
 /**
- * ISSUE-P2-572：WebDAV 409/423 兜底「DELETE + 无预条件重试」在 DELETE 前必须重探目标元数据。
- * 无条件 DELETE 会销毁他端在本端上传临时文件期间写入的新版本（窗口 A），其后的无预条件重试
- * 又会静默覆盖 DELETE 与重试之间他端新建的目标（窗口 B）。
+ * ENG-20261028-20 / ISSUE-P2-572：服务器拒绝 MOVE 覆盖已有目标（409/423）时的行为契约。
+ *
+ * 旧兜底「DELETE 正式目标 + 无预条件重试」已移除：DELETE 成功而重试 MOVE 失败、取消或进程死亡
+ * 会让正式远端路径缺失，两步之间他端重建的目标又会被无 `If` 的 MOVE 静默覆盖。HTTP/WebDAV
+ * 没有原子的覆盖原语，因此拒绝覆盖时只能如实失败并保留远端旧文件。
  *
  * 四条不变量：
  * ① 远端 ETag 漂移（他端并发写入）⇒ ConflictError（携当前远端 ETag），**不 DELETE 远端目标**；
  * ② 重探失败（PROPFIND 持续失败）⇒ fail-closed 如实上抛（不折 ConflictError），远端不被删除；
- * ③ 重探确认未漂移 ⇒ 既有兜底保留（DELETE + 无 `If` 重试成功，Kp2a 兼容收益不变）；
- * ④ 无 ETag 服务器（重探成功且空 etag）⇒ 同样放行兜底（无锁可护）。
+ * ③ 重探确认未漂移 ⇒ 可处理的协议错误（携服务器状态码、文案声明远端未删除），**不发任何 DELETE**；
+ * ④ 无 ETag 服务器（重探成功且空 etag）⇒ 与 ③ 相同：无锁可护不等于可以删除再重试。
  */
-class WebDavOverwriteFallbackGuardTest {
+class WebDavOverwriteRefusalTest {
 
     private lateinit var server: MockWebServer
     private val client = OkHttpClient()
@@ -54,14 +57,20 @@ class WebDavOverwriteFallbackGuardTest {
             client = client
         )
 
+    private fun drainRequests(): List<RecordedRequest> {
+        val recorded = mutableListOf<RecordedRequest>()
+        repeat(server.requestCount) { recorded += server.takeRequest() }
+        return recorded
+    }
+
     @Test
-    fun `兜底前重探发现他端并发写入 抛ConflictError携当前ETag且不DELETE远端`() = runTest {
+    fun `覆盖被拒时重探发现他端并发写入 抛ConflictError携当前ETag且不DELETE远端`() = runTest {
         val state = StatefulDavDispatcher()
         server.dispatcher = state
         server.start()
         val p = provider(fastFailOptions)
 
-        val v0 = "fallback-v0".toByteArray()
+        val v0 = "refusal-v0".toByteArray()
         val etag0 = p.upload("vault.kdbx", v0).getOrThrow()
 
         // 他端在「本端上传临时文件」窗口内写入 v1：远端 ETag 前移
@@ -80,14 +89,14 @@ class WebDavOverwriteFallbackGuardTest {
         assertTrue("必须是 ConflictError: $ex", ex is SyncException.ConflictError)
         assertEquals("ConflictError 必须携当前远端 ETag（他端版本）", etag1, (ex as SyncException.ConflictError).remoteEtag)
         assertEquals("localExpectedEtag 原样透传", etag0, ex.localExpectedEtag)
-        assertArrayEquals("他端写入不得被 DELETE 销毁（窗口 A 被守卫拦截）", v1, state.files["/vault.kdbx"])
+        assertArrayEquals("他端写入不得被 DELETE 销毁", v1, state.files["/vault.kdbx"])
         assertEquals("远端 ETag 保持他端版本", etag1, state.etags["/vault.kdbx"])
-        assertEquals("漂移后不得再发兜底重试 MOVE", 1, state.moveLog.size)
+        assertEquals("漂移后不得再发 MOVE", 1, state.moveLog.size)
         assertTrue("临时文件必须清理", state.tmpResidues().isEmpty())
     }
 
     @Test
-    fun `兜底前重探失败 failClosed如实上抛且远端不被删除`() = runTest {
+    fun `覆盖被拒后重探失败 failClosed如实上抛且远端不被删除`() = runTest {
         val state = StatefulDavDispatcher()
         server.dispatcher = state
         server.start()
@@ -116,33 +125,39 @@ class WebDavOverwriteFallbackGuardTest {
     }
 
     @Test
-    fun `兜底前重探确认未漂移 仍走DELETE加无If重试成功`() = runTest {
+    fun `覆盖被拒且远端未漂移 返回协议错误并保留远端旧文件不发送目标DELETE`() = runTest {
         val state = StatefulDavDispatcher()
         server.dispatcher = state
         server.start()
         val p = provider()
 
-        val etag0 = p.upload("vault.kdbx", "fallback-v0".toByteArray()).getOrThrow()
+        val v0 = "refusal-v0".toByteArray()
+        val etag0 = p.upload("vault.kdbx", v0).getOrThrow()
 
         state.failMoveOnExistingTarget409.set(true)
         val result = try {
-            p.uploadAtomic("vault.kdbx", "fallback-v1".toByteArray(), expectedEtag = etag0)
+            p.uploadAtomic("vault.kdbx", "refusal-v1".toByteArray(), expectedEtag = etag0)
         } finally {
             state.failMoveOnExistingTarget409.set(false)
         }
 
-        assertTrue("未漂移必须放行既有兜底: ${result.exceptionOrNull()}", result.isSuccess)
-        assertArrayEquals("远端内容为新版本", "fallback-v1".toByteArray(), state.files["/vault.kdbx"])
-        assertEquals("请求序应为 MOVE(409) + PROPFIND 重探 + DELETE + MOVE(重试)", 2, state.moveLog.size)
+        assertTrue("服务器不支持安全覆盖时必须如实失败: ${result.exceptionOrNull()}", result.isFailure)
+        val err = result.exceptionOrNull()
+        assertTrue("必须归可处理的 ProtocolError: $err", err is SyncException.ProtocolError)
+        assertEquals("错误码须为服务器返回的 409", 409, (err as SyncException.ProtocolError).statusCode)
+        assertTrue("文案须声明远端旧文件未被删除", err.message.orEmpty().contains("远端旧文件未删除"))
+        assertArrayEquals("远端旧文件必须原样保留", v0, state.files["/vault.kdbx"])
+        assertEquals("远端 ETag 不得变化", etag0, state.etags["/vault.kdbx"])
+        assertEquals("不得发出兜底重试 MOVE", 1, state.moveLog.size)
         assertTrue("临时文件必须清理", state.tmpResidues().isEmpty())
     }
 
     @Test
-    fun `兜底前重探无ETag服务器即成功且空etag 仍放行DELETE重试`() = runTest {
+    fun `覆盖被拒423且无ETag可锁 同样不删除正式目标只清理临时文件`() = runTest {
         server.start()
         server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"tmp-1\""))  // PUT 临时文件
-        server.enqueue(MockResponse().setResponseCode(409).setBody("destination exists"))   // MOVE 首试 409
-        server.enqueue(                                                                     // 重探：无 ETag 服务器
+        server.enqueue(MockResponse().setResponseCode(423).setBody("locked"))              // MOVE 首试 423
+        server.enqueue(                                                                    // 重探：无 ETag 服务器
             MockResponse().setResponseCode(207).setBody(
                 """<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:">
                    <D:response><D:propstat><D:prop><D:getetag></D:getetag>
@@ -150,24 +165,25 @@ class WebDavOverwriteFallbackGuardTest {
                    </D:multistatus>"""
             )
         )
-        server.enqueue(MockResponse().setResponseCode(204))                                 // DELETE 目标
-        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"final-1\"")) // MOVE 兜底重试
+        server.enqueue(MockResponse().setResponseCode(204))                                 // DELETE 临时文件
 
         val result = provider().uploadAtomic("vault.kdbx", "v1".toByteArray(), expectedEtag = "base-etag")
-        assertTrue("空 ETag 重探（无锁可护）必须放行兜底: ${result.exceptionOrNull()}", result.isSuccess)
-        assertEquals("final-1", result.getOrThrow())
 
-        val recorded = mutableListOf<okhttp3.mockwebserver.RecordedRequest>()
-        repeat(server.requestCount) { recorded += server.takeRequest() }
-        val moves = recorded.filter { it.method == "MOVE" }
-        assertEquals("应恰有两次 MOVE（首试 + 兜底重试）", 2, moves.size)
-        val probeIndex = recorded.indexOfFirst { it.method == "PROPFIND" }
-        val deleteIndex = recorded.indexOfFirst { it.method == "DELETE" }
-        assertTrue(
-            "重探必须发生在兜底 DELETE 之前（ISSUE-P2-572 判据核心）",
-            probeIndex in 0 until deleteIndex
-        )
-        assertNull("兜底重试不得携带 If 预条件", moves[1].getHeader("If"))
-        assertEquals("兜底重试仍须保持 Overwrite: T", "T", moves[1].getHeader("Overwrite"))
+        assertTrue("423 拒绝覆盖必须如实失败: $result", result.isFailure)
+        val err = result.exceptionOrNull()
+        assertTrue("必须是 ProtocolError: $err", err is SyncException.ProtocolError)
+        assertEquals("错误码须为服务器返回的 423", 423, (err as SyncException.ProtocolError).statusCode)
+
+        val recorded = drainRequests()
+        assertEquals("请求序应为 PUT → MOVE(423) → PROPFIND → DELETE(临时文件)", 4, recorded.size)
+        assertEquals("PUT", recorded[0].method)
+        assertEquals("MOVE", recorded[1].method)
+        assertEquals("PROPFIND", recorded[2].method)
+        val deletes = recorded.filter { it.method == "DELETE" }
+        assertEquals("只允许一次 DELETE", 1, deletes.size)
+        assertEquals("DELETE 必须是本次临时文件而非正式目标", recorded[0].path, deletes[0].path)
+        assertTrue("临时名必须含 .kpktmp 中缀", deletes[0].path.orEmpty().contains(".kpktmp"))
+        assertNotNull("首试 MOVE 必须携带 If 预条件", recorded[1].getHeader("If"))
+        assertEquals("MOVE 必须保持 Overwrite: T", "T", recorded[1].getHeader("Overwrite"))
     }
 }

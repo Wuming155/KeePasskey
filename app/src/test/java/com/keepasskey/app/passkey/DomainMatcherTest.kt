@@ -36,7 +36,44 @@ class DomainMatcherTest {
         // F5：公共后缀/单标签不得作为凭据侧 RP ID（防整条 TLD 冒充）
         assertFalse(DomainMatcher.isDomainMatch("co.uk", "news.bbc.co.uk"))
         assertFalse(DomainMatcher.isDomainMatch("com", "example.com"))
-        assertFalse(DomainMatcher.isDomainMatch("localhost", "localhost"))
+        // localhost 不参与后缀扩展（本地 RP 的精确相等放行见下一个用例）
+        assertFalse(DomainMatcher.isDomainMatch("localhost", "app.localhost"))
+    }
+
+    /**
+     * ENG-20261028-40：IP 形态**只允许精确相等**。整改前 `168.1.1` 会经 PSL 默认规则被判为
+     * 可注册域，从而命中 `192.168.1.1` 的后缀，令不同地址被视为同一主机。
+     */
+    @Test
+    fun `域名匹配_IP 形态仅精确相等`() {
+        assertTrue(DomainMatcher.isDomainMatch("192.168.1.1", "192.168.1.1"))
+        assertTrue(DomainMatcher.isDomainMatch("http://192.168.1.1:8080/admin", "192.168.1.1"))
+        assertFalse(DomainMatcher.isDomainMatch("168.1.1", "192.168.1.1"))
+        assertFalse(DomainMatcher.isDomainMatch("192.168.1.1", "1.192.168.1.1"))
+        assertFalse(DomainMatcher.isDomainMatch("192.168.1.1", "192.168.1.2"))
+        // 域名与 IP 两个方向都不得互相命中
+        assertFalse(DomainMatcher.isDomainMatch("1.1", "192.168.1.1"))
+        assertFalse(DomainMatcher.isDomainMatch("example.com", "192.168.1.1"))
+        // IPv6 字面量不是可授权主机（保持既有 fail-closed 口径）
+        assertFalse(DomainMatcher.isDomainMatch("::1", "::1"))
+        assertFalse(DomainMatcher.isDomainMatch("[::1]", "http://[::1]/"))
+    }
+
+    /**
+     * ENG-20261028-40：`localhost` 是单标签本地名，被 PSL 下限拒绝曾导致本地 RP 无法建凭据 /
+     * 匹配。放行范围刻意只到**逐字相等**：`*.localhost` 仍按普通域名走 PSL 默认规则，
+     * 避免一个回环服务借 `localhost` 凭据覆盖其它本地名。
+     */
+    @Test
+    fun `域名匹配_localhost 本地场景仅精确相等`() {
+        assertTrue(DomainMatcher.isDomainMatch("localhost", "localhost"))
+        assertTrue(DomainMatcher.isDomainMatch("http://localhost:5173/login", "localhost"))
+        assertTrue(DomainMatcher.isDomainMatch("LOCALHOST.", "https://localhost/"))
+        assertFalse(DomainMatcher.isDomainMatch("localhost", "app.localhost"))
+        assertFalse(DomainMatcher.isDomainMatch("app.localhost", "localhost"))
+        // 多标签本地名本来就按普通域名判定（PSL 默认规则）
+        assertTrue(DomainMatcher.isDomainMatch("app.localhost", "http://app.localhost:5173/"))
+        assertTrue(DomainMatcher.isDomainMatch("app.localhost", "www.app.localhost"))
     }
 
     @Test
@@ -145,39 +182,53 @@ class DomainMatcherTest {
     // ===== IP 字面量面（ISSUE-P3-234：DAL 出口 SSRF 覆盖层的可达性判据） =====
 
     /**
-     * `ISSUE-P3-234`：`extractDomain` **不做 IP 字面量识别**，而 PSL 下限对 IPv4 / IPv6 的裁决不同。
+     * `ISSUE-P3-234`：`extractDomain` **不做 IP 字面量识别**（原样返回去方括号 / 端口后的主机），
+     * 而 PSL 两个入口按 ENG-20261028-40 在查表前把 IP 形态判为非域名。
      *
-     * - IPv4 是「四段点分」⇒ 在默认规则 `*` 下被判为**可注册域**（三个标签位于公共后缀之上）；
-     * - IPv6 去方括号 / 端口后是**单标签**（或空串）⇒ 被 PSL 下限拒绝。
+     * - IPv4 / 点分数字形态 ⇒ 不是可注册域（`isRegistrableDomain` false、`registrableDomain` null），
+     *   匹配层另行按「仅精确相等」放行（见 `域名匹配_IP 形态仅精确相等`）；
+     * - IPv6 去方括号 / 端口后是**单标签**（或空串）⇒ 两入口同样拒绝。
      *
-     * 该差异是「`Dns` 层守卫（`SsrfGuardDns`）不构成 IP 字面量面完整覆盖」的**判据本身**：
-     * OkHttp 对 IP 字面量主机名不经 `Dns` 接口，故仅连接期层（`SsrfGuardSocketFactory`）可达。
+     * 该「IP 形态不参与域后缀」的结论是「`Dns` 层守卫（`SsrfGuardDns`）不构成 IP 字面量面
+     * 完整覆盖」的判据之一：OkHttp 对 IP 字面量主机名不经 `Dns` 接口，故仅连接期层
+     * （`SsrfGuardSocketFactory`）可达。
      */
     @Test
-    fun `IP 字面量_IPv4 通过可注册域下限而 IPv6 被拒`() {
+    fun `IP 字面量_非域名形态两入口一致拒绝`() {
         // 归一化不做 IP 识别（方括号 IPv6 与端口剥离后原样返回）
         assertEquals("127.0.0.1", DomainMatcher.extractDomain("https://127.0.0.1/path?q=1"))
         assertEquals("169.254.169.254", DomainMatcher.extractDomain("169.254.169.254"))
         assertEquals("::1", DomainMatcher.extractDomain("https://[::1]/x"))
 
-        assertTrue(PublicSuffixList.isRegistrableDomain("127.0.0.1"))
-        assertTrue(PublicSuffixList.isRegistrableDomain("169.254.169.254"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("127.0.0.1"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("169.254.169.254"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("168.1.1"))
         assertFalse(PublicSuffixList.isRegistrableDomain("::1"))
+        assertEquals(null, PublicSuffixList.registrableDomain("127.0.0.1"))
+        assertEquals(null, PublicSuffixList.registrableDomain("168.1.1"))
+        assertEquals(null, PublicSuffixList.registrableDomain("::1"))
     }
 
     /**
      * `ISSUE-P3-234`：IPv4 字面量**可作为 `rp.id` 通过创建校验** ⇒ DAL 随后会请求
      * `https://<ip>/.well-known/assetlinks.json`。这是「SSRF 连接期层必须保留」的可执行依据
      * ——不得据「`rp.id` 大概不会是 IP」推断该面不可达而拆除 `SsrfGuardSocketFactory`。
+     *
+     * 该放行是**创建层的本地授权下限**，不代表 IP 是可注册域；`localhost` 同样只解除下限，
+     * 归属仍由 DAL 对非 https 来源裁决。
      */
     @Test
-    fun `IP 字面量_IPv4 可作 rp_id 通过创建校验而 IPv6 不可`() {
+    fun `IP 字面量与 localhost 可作 rp_id 而 IPv6 不可`() {
         val appOrigin = "android:apk-key-hash:AbCdEf123456"
-        // 普通应用来源：仅要求「可注册域」⇒ IPv4 字面量放行
+        // 普通应用来源：可注册域 / localhost / IPv4 形态解除下限
         assertTrue(DomainMatcher.isRpIdTrustedForCreation("127.0.0.1", appOrigin))
         assertTrue(DomainMatcher.isRpIdTrustedForCreation("169.254.169.254", appOrigin))
-        // 浏览器来源：与 origin 主机名相等亦放行（域名匹配分支同样只受 PSL 下限约束）
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("localhost", appOrigin))
+        // 浏览器来源：与 origin 主机名相等亦放行（IP / localhost 走精确相等档）
         assertTrue(DomainMatcher.isRpIdTrustedForCreation("127.0.0.1", "https://127.0.0.1"))
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("localhost", "https://localhost:8443"))
+        // 浏览器来源：IP 仍不得做后缀扩展（`168.1.1` 不是 `192.168.1.1` 的父域）
+        assertFalse(DomainMatcher.isRpIdTrustedForCreation("168.1.1", "https://192.168.1.1"))
         // 对照：IPv6 字面量为单标签 ⇒ 两条分支一律拒绝
         assertFalse(DomainMatcher.isRpIdTrustedForCreation("::1", appOrigin))
         assertFalse(DomainMatcher.isRpIdTrustedForCreation("[::1]", appOrigin))

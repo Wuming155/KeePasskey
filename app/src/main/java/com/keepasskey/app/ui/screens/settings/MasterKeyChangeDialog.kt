@@ -141,7 +141,7 @@ internal fun MasterKeyChangeDialog(
     // ISSUE-P3-433：开关关＝保持当前主密码（字段已随关闭就地清零）；开＝按原改密校验
     val keepPassword = !passwordChangeEnabled
     val passwordValid = keepPassword ||
-        (passwordsMatch && newPasswordChars.size >= MasterPasswordPolicy.MIN_LENGTH)
+        (passwordsMatch && MasterPasswordPolicy.meetsMinLength(newPasswordChars))
     // ISSUE-P3-430→P3-433：至少要有一处改动（密码开关开且有输入，或密钥文件三态非 Keep），
     // 避免「无任何改动」的空提交
     val hasAnyChange = (!keepPassword && newPasswordChars.isNotEmpty()) ||
@@ -263,7 +263,7 @@ internal fun MasterKeyChangeDialog(
                 showProgress = isBusy || submitted,
                 onClick = {
                     if (!keepPassword &&
-                        MasterPasswordPolicy.verdictOf(newPasswordChars.size, strengthBits) ==
+                        MasterPasswordPolicy.verdictOf(newPasswordChars, strengthBits) ==
                         MasterPasswordPolicy.Verdict.WEAK_REQUIRES_CONFIRM
                     ) {
                         showWeakConfirm = true

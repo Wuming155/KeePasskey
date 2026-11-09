@@ -11,6 +11,10 @@ import java.util.logging.Logger
  * 承接拆分前 [DatabaseSession] 内的 `writeAtomicByBackupPreference` 与 `deleteBackupQuietly`：
  * 写盘走 [AtomicFileWriter] 的「临时文件 → fsync → 原子重命名」路径；是否生成 `.bak`
  * 由构造注入的偏好提供方实时决定（对应拆分前读取 `createBackupBeforeSave`）。
+ *
+ * ENG-20261028-17：原子替换不可用时不再退回非原子 copy 覆盖——异常原样抛给会话层映射为
+ * 保存失败，旧主文件与既有 `.bak` 均保持原样。备份偏好只影响「是否生成/清理 `.bak`」，
+ * 不改变替换方式的选取，也不因缺少备份而放宽原子性要求。
  */
 internal class SessionFileWriter(private val createBackupProvider: () -> Boolean) {
 
@@ -21,7 +25,8 @@ internal class SessionFileWriter(private val createBackupProvider: () -> Boolean
      *
      * 关闭偏好时既不再生成 `.bak`，也顺带清理历史遗留的 `.bak`——用户关闭「保存前备份」
      * 后旧密文快照不应继续驻留磁盘。写盘前一次性读取偏好，保证同一次写入的
-     * 「是否备份」与「是否清理」语义一致。
+     * 「是否备份」与「是否清理」语义一致。写盘抛异常时不执行清理：失败的保存既不产生
+     * 新备份，也不删除既有备份（旧主文件与 `.bak` 保持失败前状态）。
      */
     fun writeAtomicByBackupPreference(targetFile: File, writer: (OutputStream) -> Unit) {
         val createBackup = createBackupProvider()
@@ -64,9 +69,10 @@ internal class SessionFileWriter(private val createBackupProvider: () -> Boolean
      *
      * 语义：备份字节经「临时文件 → fsync → 原子重命名」写回主文件（复用 [AtomicFileWriter.writeAtomic]），
      * **不轮换备份**（createBackup=false：绝不把损坏的主文件覆盖成新 .bak）且**不删除备份**——
-     * 恢复后 .bak 仍在主文件旁，可再次恢复。内容为上次成功保存的版本（.bak 的既有语义）。
+     * 恢复后 .bak 仍在主文件旁，可再次恢复。内容为上次成功保存的版本（.bak 的既有语义；
+     * 备份自身由 [AtomicFileWriter] 经临时件原子替换，因此不会是中断留下的前缀残件）。
      * 失败仅记语义化告警并返回 false（调用方据此呈现用户可见失败提示；绝不静默）。
-     * 边界：原子替换的极少数降级路径（同目录 ATOMIC_MOVE 失败）按上层既定口径拒绝无保护覆盖 ⇒ 返回 false，
+     * 边界：原子 move 与标准 rename 皆不可用时按 ENG-20261028-17 拒绝非原子覆盖 ⇒ 返回 false，
      * 主文件与备份均保持原状（fail-closed，不产生半截文件）。
      *
      * @return true = 已从备份恢复；false = 无备份 / 恢复失败（主文件与 .bak 均未受损）。

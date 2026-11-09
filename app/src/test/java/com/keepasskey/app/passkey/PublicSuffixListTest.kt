@@ -62,16 +62,31 @@ class PublicSuffixListTest {
     }
 
     @Test
-    fun `判定_单标签_空值_IP 字面量`() {
+    fun `判定_单标签_空值_IP 与本地名`() {
         assertFalse(PublicSuffixList.isRegistrableDomain(""))
         assertFalse(PublicSuffixList.isRegistrableDomain("localhost"))
         assertFalse(PublicSuffixList.isRegistrableDomain("::1"))
         assertFalse(PublicSuffixList.isRegistrableDomain("a..com"))
         // 尾部根点归一后按普通主机处理
         assertTrue(PublicSuffixList.isRegistrableDomain("example.com."))
-        // IP 字面量的「末标签」不会是 PSL 规则 ⇒ 多标签一律放行（与既有行为一致）
-        assertTrue(PublicSuffixList.isRegistrableDomain("127.0.0.1"))
-        assertTrue(PublicSuffixList.isRegistrableDomain("169.254.169.254"))
+        // IP 形态不是域名：查表前即拒绝，与 registrableDomain 同口径（ENG-20261028-40）。
+        // 整改前 127.0.0.1 / 169.254.169.254 会被默认规则 `*` 判为「可注册域」，
+        // 从而让 168.1.1 成为 192.168.1.1 的「后缀」
+        assertFalse(PublicSuffixList.isRegistrableDomain("127.0.0.1"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("169.254.169.254"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("168.1.1"))
+        assertFalse(PublicSuffixList.isRegistrableDomain("192.168.1.1."))
+    }
+
+    /**
+     * `localhost` 只有**单标签本地名**这一种特殊形态：`*.localhost` 走的是 PSL 默认规则，
+     * 与任意未知 TLD 同形（本地 RP 的放行由 [DomainMatcher] 负责，本表不改语义）。
+     */
+    @Test
+    fun `判定_多标签本地名按普通域处理`() {
+        assertTrue(PublicSuffixList.isRegistrableDomain("app.localhost"))
+        assertEquals("app.localhost", PublicSuffixList.registrableDomain("app.localhost"))
+        assertEquals(null, PublicSuffixList.registrableDomain("localhost"))
     }
 
     @Test
@@ -110,9 +125,10 @@ class PublicSuffixListTest {
         assertEquals(null, PublicSuffixList.registrableDomain("localhost"))
         assertEquals(null, PublicSuffixList.registrableDomain(""))
         assertEquals(null, PublicSuffixList.registrableDomain("   "))
-        // IP 字面量 ⇒ null（与 isRegistrableDomain 的历史放行口径**刻意不同**——
-        // 同站比较下 192.168.1.1 与 192.168.1.2 的「末段剥离相等」绝不构成同站）
+        // IP 形态 ⇒ null（与 isRegistrableDomain 同口径；同站比较下
+        // 192.168.1.1 与 192.168.1.2 的「末段剥离相等」绝不构成同站）
         assertEquals(null, PublicSuffixList.registrableDomain("192.168.1.1"))
+        assertEquals(null, PublicSuffixList.registrableDomain("168.1.1"))
         assertEquals(null, PublicSuffixList.registrableDomain("127.0.0.1"))
         assertEquals(null, PublicSuffixList.registrableDomain("::1"))
     }

@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.theme.CapsuleShape
 
 /**
@@ -71,7 +72,10 @@ internal fun QuickUnlockDowngradeConsentDialog(
     AlertDialog(
         onDismissRequest = onDecline,
         title = { Text(text = stringResource(R.string.unlock_downgrade_dialog_title)) },
-        text = { Text(text = stringResource(R.string.unlock_downgrade_dialog_body)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(text = stringResource(R.string.unlock_downgrade_dialog_body))
+        },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(text = stringResource(R.string.unlock_downgrade_confirm))

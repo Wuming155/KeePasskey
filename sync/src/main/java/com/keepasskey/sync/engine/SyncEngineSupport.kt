@@ -69,8 +69,13 @@ internal class RemoteConsistencyProbe(
  * 「内容刚变更」之后被调用（上传成功 / 接受远端）⇒ 跳过判定在最常见路径上**净增**工作量；
  * ② 廉价推断（`basecache` 存在且 `<hash>.baseversion` 已等于该摘要）**不安全**：本函数的写序是
  * `updateBase` → `writeBaseContent`，两步之间崩溃会留下「baseversion 已前移、basecache 仍旧字节」，
- * 此时跳过写盘会把**陈旧基准永久固化**——正是基准快照存在的意义所要避免的。
+ * 此时跳过写盘会让该错配**永久停留**——`SyncCache.readBaseContent` 会拒绝交出摘要不符的内容，
+ * 每一轮三方合并都退化成「空库底版 + 双方并集」，直到下一次成功前移基线才自愈。
  * 结论与解除条件登记于 `docs/architecture/已知工程限界.md` §11。
+ *
+ * **ENG-20261028-02 的读侧配套**：上述错配窗口由读口按实际字节摘要自证（见
+ * [SyncCache.readBaseContent]），写序本身保持不变——把内容写在标记之前只会把错配换成
+ * 「旧标记 + 新内容」，同样不是可信基线，且会额外制造 `hasLocalChanges` 的假 dirty。
  */
 internal fun advanceBaseAndPersist(
     cache: SyncCache,

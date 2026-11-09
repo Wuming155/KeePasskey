@@ -180,6 +180,15 @@ open class SyncCoordinator @Inject constructor(
         // 若不在此同步释放，这些副本会跨锁定周期长期驻留——内存侧的生命周期同样需要终止点。
         // 磁盘侧缓存（cacheDir/sync 的 .cache/.basecache）由 SyncCacheEvictor 独立负责。
         databaseSession.addLockObserver(this)
+        // ENG-20261028-42：Provider 作用域退出时的保留判定——冲突待决期的 Provider 会被
+        // 用户稍后裁决继续复用，作用域（周期结束）不得释放其凭据，所有权转移给待决会话。
+        providers.isProviderRetained = { provider -> conflicts.retainsProvider(provider) }
+        // ENG-20261028-42：配置撤销（退出同步 / 换服务器）即确定性失效会话内 Provider 的凭据副本。
+        // 只失效凭据、不丢会话产物（那些属于锁库语义，由 clear() 负责）。
+        syncCredentialsStore.credentialRevocationHook = {
+            session.releaseProviderCredentials()
+            conflicts.releasePendingEngineCredentials()
+        }
     }
 
     /** 当前待决冲突清单；`ISSUE-P2-660`/`P2-659`：条目、分组、库级 Meta 各一条通道，三者都必须被消费。 */

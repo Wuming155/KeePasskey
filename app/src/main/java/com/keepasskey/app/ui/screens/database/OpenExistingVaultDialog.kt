@@ -18,7 +18,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.sync.WebDavDefaults
 import kotlinx.coroutines.launch
 
@@ -38,6 +41,10 @@ import kotlinx.coroutines.launch
  * ISSUE-P3-400 整改：表单内**不放**长段 supporting 提示（同步配置页保留完整文案）；
  * 「浏览远端目录」接入本对话框（复用设置页同一 `RemoteBrowseController` 单例，
  * 表单凭据优先），点选远端文件回填 remotePath / objectKey。
+ *
+ * 窗口保护：本窗是三来源共用的**凭据类对话框**（云端表单含 WebDAV 口令 / S3 SecretKey），
+ * 故 `securePolicy` 恒为 `SecureOn`，并由 [SecureDialogWindowEffect] 在本窗内容槽位内施加
+ * 遮挡触摸过滤，**不读**用户防截屏开关——与 `SecureDialog` KDoc 列出的其余始终保护对话框同口径。
  */
 @Composable
 internal fun OpenExistingVaultDialog(
@@ -115,8 +122,15 @@ internal fun OpenExistingVaultDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 本窗承载云端库凭据（WebDAV 口令 / S3 SecretKey），属**始终保护**的凭据类对话框：
+        // 不读用户防截屏开关，显式 SecureOn。对话框窗口 FLAG_SECURE 的实际决定者是本参数
+        // （默认 Inherit 会按宿主窗口清除，宿主关掉开关时本窗就会变成可截屏）
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = { OpenVaultDialogTitle() },
         text = {
+            // FLAG_SECURE 与遮挡触摸过滤都是窗口级属性，不会从宿主 Activity 窗口传播；
+            // 必须在对话框自身内容槽位内施加（在 AlertDialog(...) 之外调用解析不到本窗）
+            SecureDialogWindowEffect()
             OpenVaultFormBody(
                 selectedSource = selectedSource,
                 onSelectSource = {

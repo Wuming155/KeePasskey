@@ -150,16 +150,21 @@ internal const val MAX_PERSISTED_BASELINE_BYTES: Int = 160 * 1024 * 1024
 /**
  * `ISSUE-P1-631`：登记持久化基线的 **best-effort** 收口。
  *
- * 为什么吞：基线是**增强通道**——登记失败（克隆 / 清零时 OOM）的后果是下游按
+ * 为什么吞：基线是**增强通道**——登记失败（克隆时 OOM）的后果是下游按
  * 「无可信基线」走保守并集合并（已定义、可接受的状态），而向上抛出会让一次**已成功**的
  * 打开 / 保存 / 换密被 catch 清理路径回收为失败（用户看到解锁失败、脏树被清），代价远大于收益。
- * 失败不改变调用方结果语义，也不在此伪造成功：基线确实未登记（[SessionCore.persistedBaselineClone]
- * 为 null），该状态对下游可观测。
+ *
+ * `ENG-20261028-18`：失败**不等于「什么都没发生」**。调用点在「写盘已确认成功」之后，此刻
+ * 残留的旧基线对应的是上一个持久化版本，若原样保留，下游合并就会拿过期内容当共同底版。
+ * 因此失败收口 = [SessionCore.invalidatePersistedBaselineAfterFailedRetain]：作废旧基线并前移
+ * 修订，使该状态对下游**可观测**（快照为 null、修订已变），而不是「旧基线冒充最新已提交版本」。
+ * 失败仍不改变调用方结果语义，也不在此伪造登记成功。
  */
 internal fun SessionCore.retainPersistedBaselineBestEffort(bytes: ByteArray?, pathIdentifier: String?) {
     try {
         retainPersistedBaseline(bytes, pathIdentifier)
     } catch (_: Throwable) {
-        // 有意吞掉：见 KDoc。数据库模块无日志面，不引入额外依赖。
+        // 有意吞掉登记异常：见 KDoc。数据库模块无日志面，不引入额外依赖。
+        invalidatePersistedBaselineAfterFailedRetain()
     }
 }

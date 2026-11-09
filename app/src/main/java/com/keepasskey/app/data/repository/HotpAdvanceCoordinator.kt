@@ -28,7 +28,10 @@ internal class HotpAdvanceCoordinator(
      * 绝不返回一个未推进的码（否则同一计数器会被重复使用）。计数器推进经
      * [VaultEntryWriteCoordinator.updateEntryOtpConfig]，**不产生历史修订**。
      */
-    suspend fun advance(entryId: String): KdbxResult<EntryTotpSnapshot> {
+    suspend fun advance(entryId: String): KdbxResult<EntryTotpSnapshot> =
+        entryWriter.withinWriteAcceptance { advanceInternal(entryId) }
+
+    private suspend fun advanceInternal(entryId: String): KdbxResult<EntryTotpSnapshot> {
         val snapshot = secretReader.calculateEntryTotp(entryId)
             ?: return KdbxResult.Failure(
                 IllegalStateException("entry missing or no OTP configured"),
@@ -60,7 +63,7 @@ internal class HotpAdvanceCoordinator(
         }
         return when (writeResult) {
             is KdbxResult.Success -> KdbxResult.Success(snapshot)
-            is KdbxResult.Failure -> KdbxResult.Failure(writeResult.error, writeResult.userText)
+            is KdbxResult.Failure -> KdbxResult.Failure(writeResult.error, writeResult.userText, writeResult.code)
         }
     }
 }

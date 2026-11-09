@@ -518,6 +518,15 @@ class FakeVaultRepository(
      * ISSUE-P2-341：可用条目＝排除回收站子树。Fake 的 `KdbxEntry` 转换不带组归属，
      * 故按 UI 侧 `isRecycled`（由 `groupId` 推导）过滤同一批 id，语义与生产一致。
      */
+    /**
+     * `ENG-20261028-11`：替身不建模回收协调器，故租约是 **no-op**。
+     *
+     * 理由：替身返回的条目从不经 `ProtectedStringReclamation.retire` 下线，登记真实租约只会让
+     * 单测（尤其 `AutofillPickerViewModel.loadEntries` 这种「VM 未 `onCleared` 即结束」的用例）
+     * 把进程级租约留在注册表里，推迟同一 JVM 内其它用例观察到的回收时机。
+     */
+    override fun acquireEntriesReadLease(): java.io.Closeable = java.io.Closeable { }
+
     override suspend fun getUsableKdbxEntries(): List<KdbxEntry> {
         val recycledIds = entriesFlow.value.filter { it.isRecycled }.map { it.id }.toSet()
         return getKdbxEntries().filterNot { it.id.toHexString() in recycledIds }

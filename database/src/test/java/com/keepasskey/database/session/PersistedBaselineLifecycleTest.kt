@@ -214,6 +214,46 @@ class PersistedBaselineLifecycleTest {
             assertEquals("结果不确定不得前移基线修订", revBefore, revisionOf(session))
             session.close()
         }
+
+        // 分支四（ENG-20261028-18）：writer 确认提交，但登记新基线克隆抛出 OOM/受控异常 ⇒
+        // 事务提交仍成功且新 Meta 已发布，经过 bestEffort catch 后旧基线作废清零且修订前移
+        run {
+            var failClone = false
+            val core = SessionCore(
+                baselineCloner = { data ->
+                    if (failClone) throw OutOfMemoryError("synthetic OOM during meta baseline retain")
+                    data.clone()
+                }
+            )
+            val session = DatabaseSession(core = core)
+            assertTrue(
+                open(session, "meta.kdbx", bytes, pwd, trackedWriter = { _, receipt ->
+                    receipt.writing()
+                    receipt.committed()
+                })
+            )
+            val before = session.persistedBaselineSnapshot() ?: error("前置基线必须存在")
+            val revBefore = before.revision
+            before.wipe()
+            val oldBuffer = session.persistedBaselineInternalBytesForTesting() ?: error("内部缓冲必须存在")
+
+            val expected = session.databaseFlow.value ?: error("活动库不得为空")
+            failClone = true
+            val result = session.writeIntents.commitDatabaseMeta(expected) {
+                it.copy(databaseDescription = "meta-committed-even-if-retain-fails")
+            }
+            assertTrue("写盘已确认提交时Meta事务仍必须成功: $result", result.isSuccess)
+            assertFalse("基线登记异常不得令会话进入写不确定态", session.credentialWriteUncertain.value)
+            assertEquals(
+                "新Meta必须已成功发布到活动会话",
+                "meta-committed-even-if-retain-fails",
+                session.databaseFlow.value?.databaseDescription
+            )
+            assertNull("基线留存失败后快照必须为null（不得留旧基线冒充最新已提交版本）", session.persistedBaselineSnapshot())
+            assertTrue("旧基线内部缓冲必须被就地清零", oldBuffer.all { it == 0.toByte() })
+            assertTrue("修订必须前移令在途校验失效", core.persistedBaselineRevision() > revBefore)
+            session.close()
+        }
     }
 
     @Test

@@ -45,8 +45,14 @@ internal class SyncCacheMaintenance(
      *
      * ISSUE-P3-202：同 [SyncCache.writeCache]——tmp 写入改走 [SyncCacheFiles.writeTmpSynced]，
      * 落盘第一字节起即仅属主可见（原实现裸 `FileOutputStream` 依赖进程 umask）。
+     *
+     * ENG-20261028-02：交付与 [SyncCache.readBaseContent] 的摘要核对共用同一把协调锁，
+     * 与 [updateBase] 同边界——读取看到的「内容 + 标记」不会来自两次交错提交。
      */
-    fun writeBaseContent(remotePath: String, data: ByteArray) {
+    fun writeBaseContent(remotePath: String, data: ByteArray) =
+        synchronized(files.pathLock(remotePath)) { writeBaseContentLocked(remotePath, data) }
+
+    private fun writeBaseContentLocked(remotePath: String, data: ByteArray) {
         val baseFile = getFile(remotePath, SyncCache.SUFFIX_BASE_CACHE)
         val tmpFile = files.tmpFileFor(baseFile)
         try {
@@ -73,6 +79,10 @@ internal class SyncCacheMaintenance(
      * 上传的是**缓存中已有字节**、不经 `writeCache`，崩溃窗口里落后的标记不会自行刷新；
      * 基线前移即「本地内容已等于基线」，三份标记必须同源，否则 `hasLocalChanges` 会因
      * 陈旧标记恒为真而每轮重复上传。
+     *
+     * ENG-20261028-02：标记与 `.basecache` 内容仍是两次独立交付（跨文件原子性受 POSIX 限制
+     * 不存在），两步之间中断留下的「新标记 + 旧内容」由 [SyncCache.readBaseContent]
+     * 按本摘要核对内容后拒绝交出；两者共用同一把协调锁，读取不会跨越两次提交。
      */
     fun updateBase(remotePath: String, baseVersion: String, etag: String? = null) =
         synchronized(files.pathLock(remotePath)) { updateBaseLocked(remotePath, baseVersion, etag) }
@@ -240,7 +250,8 @@ internal class SyncCacheMaintenance(
     private fun getFile(remotePath: String, suffix: String): File = files.fileFor(keyOf(remotePath), suffix)
 
     companion object {
-        private const val SUFFIX_BASE_VERSION = ".baseversion"
+        /** 基准版本标记后缀：字面量唯一来源在 [SyncCache.SUFFIX_BASE_VERSION]，此处仅别名 */
+        private const val SUFFIX_BASE_VERSION = SyncCache.SUFFIX_BASE_VERSION
         private const val SUFFIX_META = ".meta"
 
         private const val KEY_REMOTE_PATH = "remotePath"

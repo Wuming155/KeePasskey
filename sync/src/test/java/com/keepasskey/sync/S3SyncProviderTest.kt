@@ -1,6 +1,7 @@
 package com.keepasskey.sync
 
 import com.keepasskey.sync.model.SyncException
+import com.keepasskey.sync.s3.S3KeyCodec
 import com.keepasskey.sync.s3.S3SyncProvider
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
@@ -580,5 +581,40 @@ class S3SyncProviderTest {
             }.exceptionOrNull()
             assertTrue("自建/内网 https 端点 \"$endpoint\" 构造不应被拒: $ex", ex == null)
         }
+    }
+
+    // ===== ENG-20261028-22：连接期豁免按实际寻址模式授权 =====
+
+    @Test
+    fun `实际请求主机按寻址模式推导（virtual-host 为桶前缀主机）`() {
+        // virtual-host：真正被解析与建连的是 bucket.端点主机；端口与端点路径前缀不进入 host
+        assertEquals(
+            "vault.minio.nas.local",
+            S3KeyCodec.requestHost("https://minio.nas.local:9000", "vault", usePathStyle = false)
+        )
+        assertEquals(
+            "vault.minio.nas.local",
+            S3KeyCodec.requestHost("https://minio.nas.local:9000/s3", "vault", usePathStyle = false)
+        )
+        // 路径风格：请求主机即端点主机本身（与既有豁免对象一致）
+        assertEquals(
+            "minio.nas.local",
+            S3KeyCodec.requestHost("https://minio.nas.local:9000", "vault", usePathStyle = true)
+        )
+        assertEquals(
+            "192.168.1.10",
+            S3KeyCodec.requestHost("https://192.168.1.10:9000", "vault", usePathStyle = true)
+        )
+        // 桶名被前置到 IP 字面量端点（该组合本身不可寻址，DNS 必然失败）：推导仍如实反映实际
+        // 请求主机，不得回退为端点主机——豁免只授给真正会被访问的那台主机
+        assertEquals(
+            "vault.192.168.1.10",
+            S3KeyCodec.requestHost("https://192.168.1.10:9000", "vault", usePathStyle = false)
+        )
+        // 商业云端点同样按寻址模式推导，不得回退为端点主机
+        assertEquals(
+            "kp-sync-bucket.s3.ap-east-1.amazonaws.com",
+            S3KeyCodec.requestHost("https://s3.ap-east-1.amazonaws.com", "kp-sync-bucket", usePathStyle = false)
+        )
     }
 }

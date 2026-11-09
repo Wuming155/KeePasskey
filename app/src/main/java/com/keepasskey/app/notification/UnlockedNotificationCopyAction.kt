@@ -96,7 +96,11 @@ class UnlockedNotificationCopyAction @Inject constructor(
     }
 
     private suspend fun copyUsername(entryId: String) {
-        val username = vaultRepository.getKdbxEntry(entryId)?.userName.orEmpty()
+        // ENG-20261028-11：「取条目 → 读用户名」整段在一条读租约内——用户名同为被替换下线的候选，
+        // 并发整树替换会让它读成空串（被误报「未配置用户名」）。
+        val username = vaultRepository.withKdbxEntry(entryId) { entry ->
+            entry?.userName.orEmpty()
+        }
         if (username.isBlank()) {
             // 复用列表行复制用户的「未配置」文案（同一语义，不另造一份）
             notify(UiMessage(R.string.vault_copy_username_missing, isError = true))

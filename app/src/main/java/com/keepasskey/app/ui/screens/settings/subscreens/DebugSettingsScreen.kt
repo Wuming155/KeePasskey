@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.AppSnackbarChannel
 import com.keepasskey.app.ui.AppSnackbarEvent
 import com.keepasskey.app.ui.components.BentoCard
@@ -303,6 +304,7 @@ fun DebugSettingsScreen(
             onDismissRequest = { showExportConfirmDialog = false },
             title = { Text(stringResource(R.string.debug_export_dialog_title)) },
             text = {
+                TrackDialogInteractionEffect()
                 Text(
                     text = stringResource(R.string.debug_export_dialog_desc),
                     style = MaterialTheme.typography.bodySmall,

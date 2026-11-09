@@ -68,7 +68,7 @@ internal class VaultGroupCoordinator(
         }
     }
 
-    suspend fun saveGroup(group: VaultGroup): KdbxResult<Unit> {
+    suspend fun saveGroup(group: VaultGroup): KdbxResult<Unit> = databaseSession.withWriteAcceptance {
         val targetId = parseKdbxUuidOrRandom(group.id)
         // P0-1 灾难性缺陷修复：重命名/改图标路径曾以仅含 4 个字段的新建 KdbxGroup 直接
         // 覆盖既有分组（entries/subgroups 均为默认空列表），导致其全部子条目与子分组被清空。
@@ -100,7 +100,7 @@ internal class VaultGroupCoordinator(
             )
         }
         databaseSession.saveGroup(kdbxGroup)
-        return persistSession()
+        persistSession()
     }
 
     /**
@@ -109,10 +109,11 @@ internal class VaultGroupCoordinator(
      * 目标分组为 null 表示移至根组；id 非法者按既有口径静默丢弃（`mapNotNull`）。
      * 树变换由会话层在同一次受控变换内完成，随后统一落盘。
      */
-    suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): KdbxResult<Unit> {
-        val uuidSet = entryIds.mapNotNull { parseKdbxUuidOrNull(it) }.toSet()
-        val targetUuid = targetGroupId?.let { parseKdbxUuidOrNull(it) }
-        databaseSession.batchMoveEntries(uuidSet, targetUuid)
-        return persistSession()
-    }
+    suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance {
+            val uuidSet = entryIds.mapNotNull { parseKdbxUuidOrNull(it) }.toSet()
+            val targetUuid = targetGroupId?.let { parseKdbxUuidOrNull(it) }
+            databaseSession.batchMoveEntries(uuidSet, targetUuid)
+            persistSession()
+        }
 }

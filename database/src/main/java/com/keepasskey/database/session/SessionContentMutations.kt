@@ -241,12 +241,12 @@ internal class SessionContentMutations(
     }
 
     /**
-     * `ISSUE-P1-631`（原子采纳 + 落盘）：[adoptDatabaseIfUnchanged] 的**无锁内核**。
+     * [adoptDatabaseIfUnchanged] 的**无锁内核**（外部不可直接调用带锁版本，否则不可重入会自锁）。
      *
-     * 抽出原因：采纳与落盘之间若释放会话锁，换库 / 关闭可在窗口内发生——届时 `save()` 写的是
-     * **后来会话**的目标与内容，而调用方会据其返回值判定「合并已保存」，合并产物却被静默丢弃。
-     * 故 `DatabaseSession.adoptAndSaveIfUnchanged` 需要在**同一次**临界区内完成两件事，
-     * 由本内核提供「已在锁内」的采纳实现（外部不可直接调用带锁版本，否则不可重入会自锁）。
+     * 「校验-采用」必须在会话临界区内完成：采纳与后续落盘之间若释放会话锁，换库 / 关闭可在窗口内
+     * 发生——届时写的是**后来会话**的目标与内容，而调用方会据其返回值判定「本次已保存」。
+     * 需要「先落盘、成功后才发布」的调用方（`SessionPersistence.commitPreparedSave`）改用
+     * [canAdoptDatabaseIfUnchangedLocked] + [publishPersistedAdoptionLocked] 两半，不复用本方法。
      *
      * 语义与带锁版**逐字相同**，仅去掉取锁。
      */
@@ -255,22 +255,61 @@ internal class SessionContentMutations(
         replacement: KdbxDatabase,
         expectedPersistedBaselineRevision: Long? = null
     ): Boolean {
+        if (!canAdoptDatabaseIfUnchangedLocked(expectedAtCycleStart, expectedPersistedBaselineRevision)) {
+            return false
+        }
+        // ISSUE-P0-531：与 updateDatabaseMeta 同口径——**先发布、后擦除**（理由与两层兜底见该处注释）
+        publishAdoptedDatabase(expectedAtCycleStart, replacement, persisted = false)
+        return true
+    }
+
+    /**
+     * `ENG-20261028-19`：[adoptDatabaseIfUnchangedLocked] 的**只校验半边**——判定「此刻允许采纳」，
+     * 但不发布、不擦除。
+     *
+     * 存在理由：预备保存的提交边界要求「写盘成功之后才发布候选」。写盘是一次挂起的 IO，
+     * 其间会话锁由调用方持有，因此**同一次临界区**内可以先用本方法判定采纳资格，落盘确认成功后
+     * 再调 [publishPersistedAdoptionLocked]。整改前是「先采纳（并擦除部分旧实例）→ 再写盘」，
+     * 写盘失败即留下「内存已合并、文件未合并」的半步状态。
+     *
+     * 判据与带锁 / 无锁采纳入口逐字一致：只读态、持久化基线修订、会话树实例身份。
+     */
+    internal fun canAdoptDatabaseIfUnchangedLocked(
+        expectedAtCycleStart: KdbxDatabase,
+        expectedPersistedBaselineRevision: Long? = null
+    ): Boolean {
         if (readOnly()) return false
         if (expectedPersistedBaselineRevision != null &&
             persistedBaselineRevision() != expectedPersistedBaselineRevision
         ) {
             return false
         }
-        val currentDb = databaseFlow.value ?: return false
-        if (currentDb !== expectedAtCycleStart) return false
-        // ISSUE-P0-531：与 updateDatabaseMeta 同口径——**先发布、后擦除**（理由与两层兜底见该处注释）
+        return databaseFlow.value === expectedAtCycleStart
+    }
+
+    /**
+     * `ENG-20261028-19`：**写盘已确认成功**后的发布点——仅在调用方持有会话 Mutex、且本轮
+     * [canAdoptDatabaseIfUnchangedLocked] 为真时调用；[expectedAtCycleStart] 即此刻的活动树实例。
+     *
+     * 与 [adoptDatabaseIfUnchangedLocked] 的差别只在状态机终态：内容已落盘 ⇒ 直接置 OPENED，
+     * 不再留下「DIRTY 但磁盘已是该版本」的中间态。擦除口径两者同形（先发布、后按身份集合擦除）。
+     */
+    internal fun publishPersistedAdoptionLocked(expectedAtCycleStart: KdbxDatabase, replacement: KdbxDatabase) {
+        publishAdoptedDatabase(expectedAtCycleStart, replacement, persisted = true)
+    }
+
+    private fun publishAdoptedDatabase(
+        expectedAtCycleStart: KdbxDatabase,
+        replacement: KdbxDatabase,
+        persisted: Boolean
+    ) {
         databaseFlow.value = replacement
-        stateFlow.value = DatabaseSession.SessionState.DIRTY
-        currentDb.rootGroup.clearSupersededSensitiveData(replacement.rootGroup)
-        currentDb.clearBinaryPool(replacement)
+        stateFlow.value =
+            if (persisted) DatabaseSession.SessionState.OPENED else DatabaseSession.SessionState.DIRTY
+        expectedAtCycleStart.rootGroup.clearSupersededSensitiveData(replacement.rootGroup)
+        expectedAtCycleStart.clearBinaryPool(replacement)
         // ISSUE-P3-471：图标池与树 / 池同点收口（判据见 updateDatabaseMeta 处注释）
-        currentDb.clearCustomIconPool(replacement.customIcons)
-        return true
+        expectedAtCycleStart.clearCustomIconPool(replacement.customIcons)
     }
 
     /** 删除分组。 */

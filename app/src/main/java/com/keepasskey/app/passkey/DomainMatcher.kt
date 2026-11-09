@@ -80,13 +80,21 @@ object DomainMatcher {
     }
 
     /**
-     * 严格域名匹配逻辑。
-     * 双方经 [extractDomain] 归一化后：必须完全相等，或 [originHost] 以 ".$rpIdOrDomain" 结尾（严格点号标签边界）。
+     * 严格主机匹配逻辑。双方经 [extractDomain] 归一化后按 [HostShape] 分档裁决
+     * （ENG-20261028-40：IP 精确比较、域后缀比较与 localhost 本地场景必须区分）：
      *
-     * 严禁使用模糊双向 contains，防止 "evilgithub.com" 恶意冒充 "github.com"。
-     * F5 整改：凭据侧域名（[rpIdOrDomain]）须满足公共后缀下限约束（[isRegistrableDomain]）——
-     * 单标签（如 "io"）或多标签公共后缀（如 "com.cn"）一律拒绝，杜绝经恶意 kdbx 导入植入
-     * 公共后缀条目后冒充整条 TLD 的钓鱼匹配（WebAuthn 规范亦禁止公共后缀作 RP ID）。
+     * - **点分数字形态（IPv4）**：只允许**逐字相等**，绝不做后缀扩展——`168.1.1` 不是
+     *   `192.168.1.1` 的父域；自建服务经 IP 访问时，凭据归属只能落在同一个地址上；
+     * - **IPv6 字面量**：不是可授权主机，一律拒绝（沿袭既有 fail-closed 口径）；
+     * - **`localhost`**：仅限同一本地主机逐字相等（本地 RP 的开发场景）；`*.localhost`
+     *   仍按普通域名走 PSL 判定，不因本条放开；
+     * - **常规域名**：凭据侧须满足公共后缀下限约束（F5 整改，[isRegistrableDomain]），
+     *   再要求完全相等，或 [originHost] 以 `.$rpIdOrDomain` 结尾（严格点号标签边界）。
+     *
+     * 严禁使用模糊双向 contains，防止 "evilgithub.com" 恶意冒充 "github.com"；域名与
+     * IP / 本地名之间**永不**互相命中（两个方向都拒）。F5 的理由保留：单标签（如 "io"）
+     * 或多标签公共后缀（如 "com.cn"）一律拒绝，杜绝经恶意 kdbx 导入植入公共后缀条目后
+     * 冒充整条 TLD 的钓鱼匹配（WebAuthn 规范亦禁止公共后缀作 RP ID）。
      *
      * @param rpIdOrDomain 凭据中记录的 RP ID 或条目域名（如 "github.com"）
      * @param originHost 调用方真实来源主机名（如 "github.com", "login.github.com"）
@@ -95,9 +103,20 @@ object DomainMatcher {
         val d1 = toAsciiHost(extractDomain(rpIdOrDomain))
         val d2 = toAsciiHost(extractDomain(originHost))
         if (d1.isEmpty() || d2.isEmpty()) return false
-        if (!isRegistrableDomain(d1)) return false
 
-        return d1 == d2 || d2.endsWith(".$d1")
+        if (d1 == d2) {
+            return when (HostShapes.of(d1)) {
+                // IP / 本地名档：相等即「精确比较」成立，不经 PSL 域名下限
+                HostShape.Ipv4Like, HostShape.Localhost -> true
+                HostShape.Ipv6 -> false
+                HostShape.Domain -> isRegistrableDomain(d1)
+            }
+        }
+        if (HostShapes.of(d1) != HostShape.Domain || HostShapes.of(d2) != HostShape.Domain) {
+            return false
+        }
+        if (!isRegistrableDomain(d1)) return false
+        return d2.endsWith(".$d1")
     }
 
     /** 非 ASCII 域名（IDN）归一为 punycode，使 unicode / punycode 两种表示可跨形式匹配；失败原样返回 */
@@ -115,20 +134,26 @@ object DomainMatcher {
      * "rp.id 必须是调用方 origin 的可注册后缀"）。
      *
      * - 浏览器委派调用（origin 为 https web origin）：[rpId] 必须与 origin 主机严格点号边界匹配
-     *   （复用 [isDomainMatch]，含公共后缀下限拒绝）；
-     * - 普通应用调用（android:apk-key-hash origin）：无 web 域可绑定，仅要求 [rpId] 本身为可注册域名——
-     *   应用与域名的真实归属由 RP 服务端经 Digital Asset Links 在注册响应校验阶段裁决；
-     * - 任何空白 / 单标签 / 公共后缀 rp.id 一律拒绝（WebAuthn 规范禁止其作 RP ID）。
+     *   （复用 [isDomainMatch]，含公共后缀下限拒绝，以及 IP / `localhost` 的「仅精确相等」档）；
+     * - 普通应用调用（android:apk-key-hash origin）：无 web 域可绑定，要求 [rpId] 本身为可注册域名；
+     *   `localhost` 与 IPv4 形态作为本地 / 自建 RP 场景解除域名下限（只解除下限，不代表归属通过），
+     *   应用与域名的真实归属仍由 RP 服务端经 Digital Asset Links 在注册响应校验阶段裁决——
+     *   `http://localhost` 与 `http://<ip>` 不是 [CallingOriginResolver.isBrowserOrigin] 口径下的
+     *   浏览器 origin，故 DAL 门禁对它们继续生效；IPv6 字面量一律拒绝；
+     * - 任何空白 / 单标签公共后缀 rp.id 一律拒绝（WebAuthn 规范禁止其作 RP ID）。
      */
     fun isRpIdTrustedForCreation(rpId: String, callingOrigin: String): Boolean {
         val rp = extractDomain(rpId)
         if (rp.isEmpty()) return false
 
         val originHost = extractDomain(callingOrigin)
-        return if (originHost.isNotEmpty() && CallingOriginResolver.isBrowserOrigin(callingOrigin)) {
-            isDomainMatch(rp, originHost)
-        } else {
-            isRegistrableDomain(rp)
+        if (originHost.isNotEmpty() && CallingOriginResolver.isBrowserOrigin(callingOrigin)) {
+            return isDomainMatch(rp, originHost)
+        }
+        return when (HostShapes.of(rp)) {
+            HostShape.Domain -> isRegistrableDomain(rp)
+            HostShape.Localhost, HostShape.Ipv4Like -> true
+            HostShape.Ipv6 -> false
         }
     }
 
@@ -136,6 +161,9 @@ object DomainMatcher {
      * 判断主机名是否为可注册域名（批次 G / P1 安全整改）：
      * 委托 [PublicSuffixList] 按 Mozilla 官方 PSL 全量数据判定（含私有段与通配/例外规则），
      * 根治原 47 条硬编码清单的漏判盲区（如 `edu.cn`、`gov.au`、`co.id`、`github.io` 自身）。
+     *
+     * IP 字面量与 `localhost` 在 [PublicSuffixList] 两个入口都先于查表被排除（它们不是域名）；
+     * 本工具对这两类形态另有「仅精确相等」与本地 RP 放行档，见 [isDomainMatch]。
      */
     private fun isRegistrableDomain(host: String): Boolean {
         return PublicSuffixList.isRegistrableDomain(host)

@@ -99,10 +99,13 @@ class HealthCheckEngineTest {
     /**
      * ISSUE-P3-36 回归锁：以下口令**不在**接线前的 15 条常见口令表内、长度也 >= 8，
      * 旧实现（`长度 < 8 || 命中 15 条表`）会完全漏判；接入强度引擎后必须被识别。
+     *
+     * ENG-20261028-07 起同时覆盖强度模型新增的识别面：8 位 `DDMMYYYY` 日期形状
+     * （`31122026`）与单元二次重复（`passwordpassword`）——都不得因「长度够、不在表内」漏判。
      */
     @Test
     fun `模式化弱口令被强度引擎识别（旧实现漏判面）`() {
-        val cases = listOf("qwertyuiop", "abcabcabc", "20260101")
+        val cases = listOf("qwertyuiop", "abcabcabc", "20260101", "31122026", "passwordpassword")
         val entries = cases.mapIndexed { index, pw ->
             KdbxEntry(
                 id = KdbxUuid(ByteArray(16) { (index + 20).toByte() }),
@@ -139,10 +142,20 @@ class HealthCheckEngineTest {
             )
         )
 
-        val issues = HealthCheckEngine.analyzeEntries(listOf(strong))
+        // ENG-20261028-07：整串是「强单元 × 2」时按单元 + 一次重复计（周期标志置位），
+        // 仍属最高档——二次重复惩罚不得把强口令误判为弱。
+        val doubledStrong = KdbxEntry(
+            id = KdbxUuid(ByteArray(16) { 41 }),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Doubled Strong", isProtected = false),
+                KdbxConstants.Fields.PASSWORD to ProtectedString("aB3\$kLmQ7#xZ".repeat(2), isProtected = true)
+            )
+        )
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(strong, doubledStrong))
 
         assertFalse(
-            "长随机口令不应被判为 WEAK",
+            "长随机口令与「强单元重复」都不应被判为 WEAK",
             issues.any { it.riskLevel == PasswordRiskLevel.WEAK }
         )
     }
@@ -228,6 +241,91 @@ class HealthCheckEngineTest {
         )
     }
 
+    // ===== ENG-20261028-29：重用检测与强度评估统一按「生效口令」（引用展开后） =====
+    //
+    // 判据：两趟共用同一展开口径——「直接值」与「指向同一口令的引用」必须归为同一重用；
+    // 生效口令不同者（含未命中引用的回退原文与真实口令）不得误判。数据全部为虚构假凭据。
+
+    @Test(timeout = 10_000)
+    fun `直接值与指向同一口令的引用归为重用`() {
+        val target = entryOf("ReuseTarget", "StrongPass#2026!")
+        val direct = entryOf("ReuseDirect", "StrongPass#2026!")
+        val referrer = entryOf("ReuseReferrer", "{REF:P@T:ReuseTarget}")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(target, direct, referrer))
+
+        val reused = issues.filter { it.riskLevel == PasswordRiskLevel.REUSED }
+        assertEquals(
+            "直接值、被引用条目与引用条目必须归为同一口令",
+            setOf("ReuseTarget", "ReuseDirect", "ReuseReferrer"),
+            reused.map { it.title }.toSet()
+        )
+        assertTrue(
+            "重用计数按生效口令聚合，三条均应报告 3 个条目",
+            reused.all { it.description.contains("3 个不同条目") }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `多级引用链的终端口令与直接值归为重用`() {
+        val c = entryOf("ChainC", "StrongPass#2026!")
+        val b = entryOf("ChainB", "{REF:P@T:ChainC}")
+        val a = entryOf("ChainA", "{REF:P@T:ChainB}")
+        val direct = entryOf("ChainDirect", "StrongPass#2026!")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(a, b, c, direct))
+
+        assertEquals(
+            "链终端口令与直接值相同，四条必须同组",
+            setOf("ChainA", "ChainB", "ChainC", "ChainDirect"),
+            issues.filter { it.riskLevel == PasswordRiskLevel.REUSED }.map { it.title }.toSet()
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `未命中引用的回退原文不与真实口令误判重用`() {
+        val broken = entryOf("BrokenRef", "{REF:P@T:Missing}")
+        val real = entryOf("RealSecret", "StrongPass#2026!")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(broken, real))
+
+        assertFalse(
+            "未命中引用回退的原文与真实口令不同，不得判为重用",
+            issues.any { it.riskLevel == PasswordRiskLevel.REUSED }
+        )
+    }
+
+    @Test(timeout = 10_000)
+    fun `两条相同的未命中引用按生效口令同组`() {
+        // 未命中引用按引擎语义保留原文，两条相同原文即同一个生效口令——这是两趟同口径的直接
+        // 推论：重用统计不得因「原文是引用」而整条跳过（否则等于对引用条目静默失去查重能力）。
+        val first = entryOf("BrokenA", "{REF:P@T:Missing}")
+        val second = entryOf("BrokenB", "{REF:P@T:Missing}")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(first, second))
+
+        val reused = issues.filter { it.riskLevel == PasswordRiskLevel.REUSED }
+        assertEquals(setOf("BrokenA", "BrokenB"), reused.map { it.title }.toSet())
+        assertTrue(reused.all { it.description.contains("2 个不同条目") })
+    }
+
+    @Test(timeout = 10_000)
+    fun `展开为空的引用按空口令豁免不判弱也不计重用`() {
+        val emptyTarget = entryOf("EmptyTarget", "")
+        val refToEmpty1 = entryOf("RefToEmptyA", "{REF:P@T:EmptyTarget}")
+        val refToEmpty2 = entryOf("RefToEmptyB", "{REF:P@T:EmptyTarget}")
+
+        val issues = HealthCheckEngine.analyzeEntries(listOf(emptyTarget, refToEmpty1, refToEmpty2))
+
+        assertFalse(
+            "生效口令为空＝本条目不需要密码，不判 WEAK 也不计重用",
+            issues.any {
+                it.title in setOf("EmptyTarget", "RefToEmptyA", "RefToEmptyB") &&
+                    it.riskLevel in setOf(PasswordRiskLevel.WEAK, PasswordRiskLevel.REUSED)
+            }
+        )
+    }
+
     // ---- ISSUE-P3-408：空密码一律不判弱密码；弱口令仍判 WEAK ----
 
     private fun passkeyEntryOf(
@@ -279,12 +377,24 @@ class HealthCheckEngineTest {
     @Test(timeout = 10_000)
     fun `已填写的弱口令仍判弱密码`() {
         val weak = entryOf("Legacy Weak", "123456")
+        // ENG-20261028-07：7 个 emoji 是 7 个**码点**（UTF-16 下为 14 码元）→ TOO_SHORT → WEAK；
+        // 文案里的「长度」必须按码点给出 7，与强度模型的长度口径一致。
+        val emojiWeak = entryOf("Emoji Weak", "🔐🔑🧩🛡🔒🔓🚀")
 
-        val issues = HealthCheckEngine.analyzeEntries(listOf(weak))
+        val issues = HealthCheckEngine.analyzeEntries(listOf(weak, emojiWeak))
 
         assertTrue(
             "非空弱口令仍必须报 WEAK（强度审计只针对已填写口令）",
             issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Legacy Weak" }
+        )
+        assertTrue(
+            "7 个 emoji 不足 8 个码点，必须报 WEAK",
+            issues.any { it.riskLevel == PasswordRiskLevel.WEAK && it.title == "Emoji Weak" }
+        )
+        assertTrue(
+            "WEAK 文案的长度必须是码点数（7），不是 UTF-16 码元数（14）",
+            issues.filter { it.title == "Emoji Weak" && it.riskLevel == PasswordRiskLevel.WEAK }
+                .all { it.description.contains("长度: 7") }
         )
     }
 

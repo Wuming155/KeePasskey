@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ChangeKeyFileIntent
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
@@ -171,7 +172,10 @@ internal fun DatabaseImportExportCard(
         AlertDialog(
             onDismissRequest = { showKeyFileReadFailed = false },
             title = { Text(stringResource(R.string.dbset_keyfile_import_title)) },
-            text = { Text(stringResource(R.string.unlock_keyfile_read_failed)) },
+            text = {
+                TrackDialogInteractionEffect()
+                Text(stringResource(R.string.unlock_keyfile_read_failed))
+            },
             confirmButton = {
                 TextButton(onClick = { showKeyFileReadFailed = false }) {
                     Text(stringResource(R.string.btn_close))
@@ -215,6 +219,7 @@ private fun KeyFileImportConfirmDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_keyfile_import_warn_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column {
                 Text(
                     text = picked.displayName,

@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
 /**
@@ -130,7 +131,10 @@ internal fun DeleteCustomIconDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.vault_icon_delete_title)) },
-        text = { Text(stringResource(R.string.vault_icon_delete_message)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.vault_icon_delete_message))
+        },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(

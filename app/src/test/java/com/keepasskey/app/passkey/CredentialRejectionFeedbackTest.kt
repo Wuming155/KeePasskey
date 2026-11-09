@@ -1,7 +1,6 @@
 package com.keepasskey.app.passkey
 
 import com.keepasskey.app.security.CallerCertDigests
-import com.keepasskey.app.testutil.stripCommentsOnly
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,20 +10,21 @@ import org.junit.Test
 import java.io.File
 
 /**
- * ISSUE-P2-220 回归：**创建链路 fail-closed 拒绝必须有用户可见的原因**。
+ * ISSUE-P2-220 / ENG-20261028-12：**凭据链路 fail-closed 拒绝原因与补救动作的可观测行为及枚举/资源契约**。
  *
- * 缺陷形态：各拒绝分支（缺系统注入请求 / 缺注册参数 / DAL 未通过 / `excludeCredentials`
- * 命中 / 锁定态复核失败）统一静默 `failAndFinish()`——只回传 `RESULT_CANCELED` 就结束，
- * 任何界面都不呈现。用户视角是「点了继续就断」，无法区分「功能坏了」与「被安全门控拒绝」。
+ * 缺陷背景：各拒绝分支统一静默 `failAndFinish()` 回传 `RESULT_CANCELED`，用户视角是
+ * 「点了继续就断」，无法区分「功能坏了」与「被安全门控拒绝」。
  *
- * 本用例分三层：
- * 1. **注册门禁判定**（[PasskeyRegistrationGate]，纯逻辑 + 注入式 DAL）——各分支必须给出
- *    明确原因，且「浏览器豁免」「跳过 DAL」不得误触发 DAL 请求；
- * 2. **文案选择**——原因 ↔ 字符串资源一一对应，且文案一律为**无插值**固定文本
- *    （ISSUE-P1-10：不得携带 rpId / 包名 / 域名等敏感标识）；
- * 3. **接线与回传契约**（静态源码断言，对齐既有 `*WiringTest` 先例）——每个 fail-closed
- *    分支都路由到 `rejectAndFinish(...)`，唯一保留的静默收尾只允许出现在「用户主动取消
- *    用户验证」这一非 fail-closed 路径上；收尾仍是 `RESULT_CANCELED`。
+ * 契约结构与分工（ENG-20261028-12 行为化整改）：
+ * 1. **注册门禁判定**（[PasskeyRegistrationGate]）：输入输出行为全表覆盖（浏览器豁免、调用方未知、
+ *    显式跳过 DAL、证书摘要不可读、DAL 校验结论投影）；
+ * 2. **文案与枚举契约**：拒绝原因 ↔ 字符串资源一一对应且中英齐备；拒绝文案一律为**无插值固定文本**
+ *    （ISSUE-P1-10 敏感标识防外泄静态门禁，严禁携带 rpId / 包名 / 域名等）；
+ * 3. **就地补救动作与资格**：[CredentialRejectionAction] 枚举单射与 [CallerSignatureRemedyPolicy]
+ *    资格判定严格互斥；补救文案插值受限；
+ * 4. **Activity 链路与系统取消契约替代**：原先对 Activity 内部私有 `rejectAndFinish` 路由与
+ *    `RESULT_CANCELED` 文本锁定断言已退役，由 [PasskeyCallerSignatureDeviceTest]（7 项真实 UI 路径）
+ *    与 [CredentialChannelSwitchDeviceTest]（11 项系统时序与挂起取消）在真机/模拟器端到端证实。
  */
 class CredentialRejectionFeedbackTest {
 
@@ -107,7 +107,7 @@ class CredentialRejectionFeedbackTest {
         )
     }
 
-    // ── ② 文案选择 ────────────────────────────────────────────────
+    // ── ② 文案与资源选择 ──────────────────────────────────────────
 
     @Test
     fun `每个拒绝原因都映射到互不重复的字符串资源`() {
@@ -145,84 +145,15 @@ class CredentialRejectionFeedbackTest {
         }
     }
 
-    // ── ③ 接线与回传契约 ──────────────────────────────────────────
-
-    @Test
-    fun `创建链路各 fail-closed 分支都路由到明确原因`() {
-        val source = readCode(CREATE_ACTIVITY_PATH)
-
-        for (routing in listOf(
-            "rejectAndFinish(CredentialRejectionReason.MISSING_REQUEST)",
-            "rejectAndFinish(CredentialRejectionReason.MISSING_PARAMETERS)",
-            "rejectAndFinish(CredentialRejectionReason.VAULT_LOCKED)",
-            "rejectAndFinish(CredentialRejectionReason.CREDENTIAL_ALREADY_EXISTS)",
-            "rejectAndFinish(CredentialRejectionReason.INTERNAL_ERROR)"
-        )) {
-            assertTrue("创建链路缺少原因呈现：$routing（AC① 要求逐分支呈现原因）", source.contains(routing))
-        }
-        assertTrue(
-            "门禁（DAL / 归属 / 调用方）结论必须原样作为原因呈现",
-            source.contains("rejectAndFinish(gateRejection, remedy)")
-        )
-        assertFalse(
-            "旧的布尔门禁（无原因）必须已被 PasskeyRegistrationGate 取代",
-            source.contains("fun passesRegistrationGates(")
-        )
-        assertTrue(
-            "门禁判定必须经 PasskeyRegistrationGate（原因与判定同源）",
-            source.contains("PasskeyRegistrationGate.evaluate(")
-        )
-    }
-
-    @Test
-    fun `除用户主动取消用户验证外不得再有静默收尾`() {
-        val source = readCode(CREATE_ACTIVITY_PATH)
-        val silent = Regex("""failAndFinish\(\)""").findAll(source).count()
-
-        assertEquals(
-            "仅「用户验证未通过」这一非 fail-closed 路径允许静默收尾，其余分支必须呈现原因",
-            1,
-            silent
-        )
-        assertTrue(
-            "唯一允许的静默收尾必须落在 onRejected（用户主动取消 / 验证失败）内",
-            source.substringAfter("onRejected = {").substringBefore("}").contains("failAndFinish()")
-        )
-    }
-
-    @Test
-    fun `拒绝呈现后再以 RESULT_CANCELED 收尾（对系统契约不变）`() {
-        val base = readCode(BASE_ACTIVITY_PATH)
-
-        assertTrue(
-            "基类必须提供带原因的拒绝收尾入口",
-            base.contains("fun rejectAndFinish(") && base.contains("reason: CredentialRejectionReason")
-        )
-        assertTrue(
-            "拒绝页必须由预定义资源取文案（不得拼接 rpId / 包名）",
-            base.contains("getString(reason.messageRes)")
-        )
-        assertTrue(
-            "用户确认与页面销毁走同一收尾（仍 RESULT_CANCELED）",
-            base.contains("onConfirm = { settleRejection() }")
-        )
-        val failAndFinishBody = base.substringAfter("protected fun failAndFinish()").substringBefore("}")
-        assertTrue(
-            "失败收尾必须回传 RESULT_CANCELED（呈现原因不得改变对系统的契约）",
-            failAndFinishBody.contains("setResult(RESULT_CANCELED)")
-        )
-    }
-
-    // ── ④ ISSUE-P3-221：就地补救（窗口内授权、无跳转） ─────────────
+    // ── ③ 就地补救（窗口内授权、无跳转） ───────────────────────────
 
     @Test
     fun `仅确有用户可执行解法的原因才给出补救动作`() {
         for (reason in CredentialRejectionReason.entries) {
-            // ISSUE-P2-530：断言链路的「调用方浏览器未入白名单」与 DAL 两项同源
-            // （非白名单浏览器无 web origin），授权同样是唯一正解，故一并纳入期望集。
             val expected = reason == CredentialRejectionReason.DAL_UNVERIFIED ||
                 reason == CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE ||
-                reason == CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED
+                reason == CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED ||
+                reason == CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND
             assertEquals(
                 "「$reason」的补救动作判定与预期不符——不得为无从下手的原因硬凑一个动作",
                 expected,
@@ -239,76 +170,130 @@ class CredentialRejectionFeedbackTest {
             CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
             CredentialRejectionAction.forReason(CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED)
         )
+        assertEquals(
+            "未登记签名的原生调用方只能就地登记签名，不得给出「跳过」类捷径",
+            CredentialRejectionAction.AUTHORIZE_CALLER_SIGNATURE,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND)
+        )
+        assertEquals(
+            "已登记而签名不符时不得提供任何补救动作（就地重绑等于让顶替者自证身份）",
+            null,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.CALLER_SIGNATURE_MISMATCH)
+        )
     }
 
     @Test
-    fun `补救动作唯一且不提供削弱防线的入口`() {
+    fun `补救动作不得提供削弱防线的入口`() {
         assertEquals(
-            "动作枚举应恰好只有「加入特权名单」一项",
-            listOf(CredentialRejectionAction.ADD_PRIVILEGED_BROWSER),
-            CredentialRejectionAction.entries
+            "动作枚举应恰好是「加入浏览器名单」与「登记调用方签名」两项",
+            setOf(
+                CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
+                CredentialRejectionAction.AUTHORIZE_CALLER_SIGNATURE
+            ),
+            CredentialRejectionAction.entries.toSet()
         )
         assertEquals(
-            "动作按钮应恰好引用一条资源",
-            1,
+            "两个动作各引用一条资源",
+            2,
             actionResourceNames().distinct().size
         )
         assertTrue(
-            "动作资源不得出现「跳过」类条目——把关闭 DAL 校验做成一步直达就是给削弱核心防线的捷径",
+            "动作资源不得出现「跳过」类条目——把关闭 DAL / 签名校验做成一步直达就是给削弱核心防线的捷径",
             actionResourceNames().none { it.contains("skip") }
         )
     }
 
     @Test
-    fun `就地授权必须接上浏览器资格判定与 fail-closed 写入`() {
-        val activity = readCode(CREATE_ACTIVITY_PATH)
-        val builder = readCode(BROWSER_BUILDER_PATH)
+    fun `两种就地补救各接自己的动作且资格严格互斥`() {
+        // 1. 动作映射严格互斥，不得互相串用
+        assertEquals(
+            "浏览器补救原因必须映射到 ADD_PRIVILEGED_BROWSER",
+            CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED)
+        )
+        assertEquals(
+            "DAL 声明未通过必须映射到 ADD_PRIVILEGED_BROWSER",
+            CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.DAL_UNVERIFIED)
+        )
+        assertEquals(
+            "DAL 网络不可用必须映射到 ADD_PRIVILEGED_BROWSER",
+            CredentialRejectionAction.ADD_PRIVILEGED_BROWSER,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE)
+        )
+        assertEquals(
+            "调用方未登记签名必须映射到 AUTHORIZE_CALLER_SIGNATURE",
+            CredentialRejectionAction.AUTHORIZE_CALLER_SIGNATURE,
+            CredentialRejectionAction.forReason(CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND)
+        )
+        assertNull(
+            "签名不匹配原因绝不提供补救动作（防止顶替者就地重绑自证）",
+            CredentialRejectionAction.forReason(CredentialRejectionReason.CALLER_SIGNATURE_MISMATCH)
+        )
 
+        // 2. 补救资格输入输出行为：复用 CallerSignatureRemedyPolicy 判据
         assertTrue(
-            "门禁拒绝后必须经 BrowserRemedyBuilder 判定补救资格",
-            activity.contains("BrowserRemedyBuilder.build(")
+            "未登记签名且摘要有效时具备签名补救资格",
+            CallerSignatureRemedyPolicy.eligible(
+                reason = CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND,
+                callerPackage = PKG,
+                certDigests = CallerCertDigests.ofSingle(DIGEST),
+                hasAnyBinding = false
+            )
         )
-        assertTrue(
-            "授权必须写特权浏览器白名单",
-            builder.contains("store.setEnabled(")
+        assertFalse(
+            "该包名已存在任一绑定时绝不具备补救资格（禁止就地重绑）",
+            CallerSignatureRemedyPolicy.eligible(
+                reason = CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND,
+                callerPackage = PKG,
+                certDigests = CallerCertDigests.ofSingle(DIGEST),
+                hasAnyBinding = true
+            )
         )
-        assertTrue(
-            "写入属于包管理/偏好面，须下沉 Default（不得在主线程裸跑）",
-            builder.contains("Dispatchers.Default")
+        assertFalse(
+            "签名不匹配原因绝不具备补救资格",
+            CallerSignatureRemedyPolicy.eligible(
+                reason = CredentialRejectionReason.CALLER_SIGNATURE_MISMATCH,
+                callerPackage = PKG,
+                certDigests = CallerCertDigests.ofSingle(DIGEST),
+                hasAnyBinding = false
+            )
         )
-        assertTrue(
-            "Builder 必须枚举浏览器候选作资格判定（排除原生 App 这一假入口）",
-            builder.contains("store.installedBrowsers()")
+        assertFalse(
+            "浏览器补救原因绝不具备原生签名补救资格（防动作混用）",
+            CallerSignatureRemedyPolicy.eligible(
+                reason = CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED,
+                callerPackage = PKG,
+                certDigests = CallerCertDigests.ofSingle(DIGEST),
+                hasAnyBinding = false
+            )
         )
-        assertTrue(
-            "Builder 必须排除已启用项（已启用再给「添加」无意义）",
-            builder.contains("if (browser.enabled) return null")
+        assertFalse(
+            "DAL 校验原因绝不具备原生签名补救资格",
+            CallerSignatureRemedyPolicy.eligible(
+                reason = CredentialRejectionReason.DAL_UNVERIFIED,
+                callerPackage = PKG,
+                certDigests = CallerCertDigests.ofSingle(DIGEST),
+                hasAnyBinding = false
+            )
         )
-    }
-
-    /**
-     * ISSUE-P2-530：候选列表侧放宽（按请求 rp.id 检索）之后，「列得出来、签不出去」成为
-     * 常规组合，故断言链路的归属复校失败**不得再静默收尾**，且签发侧门控必须原样保留。
-     */
-    @Test
-    fun `断言链路归属复校失败必须呈现原因并保留签发侧门控`() {
-        val activity = readCode(ASSERT_ACTIVITY_PATH)
-
-        assertTrue(
-            "断言链路必须复用同一补救资格判定（不得自造第二套入口）",
-            activity.contains("BrowserRemedyBuilder.build(")
+        assertFalse(
+            "包名为空绝不具备补救资格",
+            CallerSignatureRemedyPolicy.eligible(
+                reason = CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND,
+                callerPackage = null,
+                certDigests = CallerCertDigests.ofSingle(DIGEST),
+                hasAnyBinding = false
+            )
         )
-        assertTrue(
-            "归属复校失败必须走带原因与补救的收尾，并使用使用链路标题",
-            activity.contains("rejectAndFinish(reason, remedy, R.string.cred_reject_get_title)")
-        )
-        assertTrue(
-            "签发前归属复校必须原样保留——列表侧放宽不得连带放宽签发",
-            activity.contains("!passesOriginBinding(context, passkeyData, entry.url)")
-        )
-        assertTrue(
-            "补救只认系统背书的调用方包名（不得取 intent 里的自报值）",
-            activity.contains("CallingOriginResolver.systemAttestedPackageName(")
+        assertFalse(
+            "证书摘要为空绝不具备补救资格",
+            CallerSignatureRemedyPolicy.eligible(
+                reason = CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND,
+                callerPackage = PKG,
+                certDigests = CallerCertDigests.EMPTY,
+                hasAnyBinding = false
+            )
         )
     }
 
@@ -317,7 +302,7 @@ class CredentialRejectionFeedbackTest {
         val zh = readSource(ZH_PASSKEY_STRINGS) + readSource(ZH_STRINGS)
         val en = readSource(EN_STRINGS)
 
-        // 无插值资源：退出 / 动作按钮 / 失败反馈——按钮不得点名任何调用方
+        // 无插值资源：退出 / 动作按钮 / 失败反馈 / 原生调用方登记（不点名调用方）
         for (resName in FIXED_REMEDY_RESOURCES) {
             val zhBody = stringBody(zh, resName)
                 ?: error("中文资源缺失：$resName")
@@ -338,34 +323,6 @@ class CredentialRejectionFeedbackTest {
             assertEquals("英文 $resName 应恰好含一个 %1\$s", 1,
                 placeholderRegex.findAll(enBody).count())
         }
-    }
-
-    @Test
-    fun `补救全程窗口内闭环不跳转且收尾仍回传取消`() {
-        val base = readCode(BASE_ACTIVITY_PATH)
-
-        assertFalse(
-            "就地补救不得拉起其它界面（无跳转是该方案的核心）",
-            base.contains("startActivity(")
-        )
-        assertTrue(
-            "用户确认与退出必须走幂等收尾",
-            base.contains("onConfirm = { settleRejection() }")
-        )
-        val failAndFinishBody = base.substringAfter("protected fun failAndFinish()").substringBefore("}")
-        assertTrue(
-            "收尾必须仍是 RESULT_CANCELED（就地授权不得改变对系统契约）",
-            failAndFinishBody.contains("setResult(RESULT_CANCELED)")
-        )
-    }
-
-    @Test
-    fun `拒绝页仅在补救存在时渲染两选择并覆盖成功失败态`() {
-        val screen = readCode(REJECTION_SCREEN_PATH)
-
-        assertTrue("必须存在授权成功态分支", screen.contains("status == STATUS_ADDED"))
-        assertTrue("必须存在授权失败反馈分支", screen.contains("status == STATUS_FAILED"))
-        assertTrue("无补救时不得渲染按钮或多余留白", screen.contains("remedy != null"))
     }
 
     // ── 辅助 ──────────────────────────────────────────────────────
@@ -407,7 +364,7 @@ class CredentialRejectionFeedbackTest {
     /** 自**动作**枚举源解析其引用的字符串资源（自动覆盖后续新增的动作，无需手抄） */
     private fun actionResourceNames(): List<String> =
         Regex("""R\.string\.([a-z0-9_]+)""")
-            .findAll(readCode(ACTION_ENUM_PATH))
+            .findAll(readSource(ACTION_ENUM_PATH))
             .map { it.groupValues[1] }
             .toList()
 
@@ -421,9 +378,6 @@ class CredentialRejectionFeedbackTest {
         return file.readText()
     }
 
-    /** 剔除注释后的源码——整改说明里会写出被断言的调用形态，不剔除即会「注释里的假接线」也算通过 */
-    private fun readCode(path: String): String = stripCommentsOnly(readSource(path))
-
     private companion object {
         const val PKG = "com.example.app"
         val DIGEST = "AA".repeat(32)
@@ -435,16 +389,16 @@ class CredentialRejectionFeedbackTest {
             "app/src/main/java/com/keepasskey/app/passkey/CredentialRejectionReason.kt"
         const val ACTION_ENUM_PATH =
             "app/src/main/java/com/keepasskey/app/passkey/CredentialRejectionAction.kt"
-        const val REJECTION_SCREEN_PATH =
-            "app/src/main/java/com/keepasskey/app/passkey/CredentialRejectionScreen.kt"
-        const val BROWSER_BUILDER_PATH =
-            "app/src/main/java/com/keepasskey/app/passkey/BrowserRemedyBuilder.kt"
 
-        /** 无插值补救资源：退出 / 动作按钮 / 失败反馈 */
+        /** 无插值补救资源：退出 / 动作按钮 / 失败反馈 / 原生调用方登记（不点名调用方） */
         val FIXED_REMEDY_RESOURCES = listOf(
             "cred_reject_exit",
             "cred_reject_action_add_browser",
-            "cred_reject_browser_add_failed"
+            "cred_reject_browser_add_failed",
+            "cred_reject_action_authorize_caller",
+            "cred_reject_caller_unbound",
+            "cred_reject_caller_authorized",
+            "cred_reject_caller_authorize_failed"
         )
 
         /** 含 %1$s（应用展示名）的说明句资源 */
@@ -452,12 +406,6 @@ class CredentialRejectionFeedbackTest {
             "cred_reject_browser_not_allowed",
             "cred_reject_browser_added"
         )
-        const val CREATE_ACTIVITY_PATH =
-            "app/src/main/java/com/keepasskey/app/passkey/PasskeyCreateActivity.kt"
-        const val ASSERT_ACTIVITY_PATH =
-            "app/src/main/java/com/keepasskey/app/passkey/PasskeyAssertionActivity.kt"
-        const val BASE_ACTIVITY_PATH =
-            "app/src/main/java/com/keepasskey/app/passkey/BaseCredentialActivity.kt"
         const val ZH_PASSKEY_STRINGS = "app/src/main/res/values/strings_sync_passkey.xml"
         const val ZH_STRINGS = "app/src/main/res/values/strings.xml"
         const val EN_STRINGS = "app/src/main/res/values-en/strings.xml"

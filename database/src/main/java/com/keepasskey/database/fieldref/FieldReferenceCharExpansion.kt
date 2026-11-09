@@ -31,6 +31,8 @@ import java.util.Arrays
  *   负责用毕清零；
  * - 检索面 `SearchIn=P`（按口令检索）**不建** String 索引（那会把全库口令物化成 String），
  *   改对候选条目口令做 CharArray 区域比较——被比较的检索文本同样只以 Char 形态存在；
+ *   该比较实现只有 [FieldReferenceEngine.RefIndex.findPassword] 一处，String 引擎的口令检索面
+ *   同走此处（ENG-20261028-13），两通道在此不可能漂移；
  * - `SearchIn ∈ {T,U,A,N,I}` 时检索键为公开字段文本，物化 String 与领域模型对这些字段的
  *   既有 String 暴露同面（`KdbxEntry.title` 等本就是 String），不新增敏感面。
  *
@@ -53,15 +55,19 @@ internal object FieldReferenceCharExpansion {
      */
     internal fun resolvePasswordFace(text: CharArray, root: KdbxGroup): CharArray? {
         if (!containsReferenceIgnoreCase(text)) return null
-        // 索引检索面只放公开字段（P 返回 null，见 [publicFieldValueOrNull]）：
-        // 按口令检索由 [findTarget] 走 Char 区域比较专路，全库口令绝不物化成检索键
+        // 按口令检索由 [FieldReferenceEngine.RefIndex.findPassword] 走 Char 区域比较专路，
+        // String 索引只收公开字段（[publicFieldValueOrNull] 对 `P` 返回 null 是第二道保险）：
+        // 全库口令绝不物化成检索键
         val index = FieldReferenceEngine.RefIndex(root) { entry, field ->
             publicFieldValueOrNull(entry, field)
         }
         return expand(text, index, depth = 0, budget = FieldReferenceEngine.ExpansionBudget())
     }
 
-    /** String 索引只收公开字段；`P` 返回 null——口令检索不走 String 键（敏感数据铁律） */
+    /**
+     * 取值器：`P` 返回 null——本通道的 String 索引永不接收口令（敏感数据铁律）。
+     * [FieldReferenceEngine.RefIndex.find] 已把口令面改道 Char 比较，此处是防未来误用的第二道保险。
+     */
     private fun publicFieldValueOrNull(entry: KdbxEntry, field: FieldReferenceEngine.RefField): String? =
         if (field == FieldReferenceEngine.RefField.PASSWORD) {
             null
@@ -159,23 +165,16 @@ internal object FieldReferenceCharExpansion {
         Arrays.fill(expanded, '0')
     }
 
-    /** 目标定位：`SearchIn=P` 走 Char 区域比较线性扫描（文档序首个，与索引同答），其余走共享 String 索引 */
+    /** 目标定位：`SearchIn=P` 走共享的 Char 区域比较（文档序首个），其余走共享 String 索引 */
     private fun findTarget(
         ref: ParsedRef,
         text: CharArray,
         index: FieldReferenceEngine.RefIndex
     ): KdbxEntry? {
         if (ref.searchField == FieldReferenceEngine.RefField.PASSWORD) {
-            for (entry in index.entries) {
-                val candidate = entry.password?.readChars() ?: continue
-                val hit = try {
-                    regionEqualsIgnoreCase(text, ref.searchFrom, ref.searchTo, candidate)
-                } finally {
-                    Arrays.fill(candidate, '0')
-                }
-                if (hit) return entry
-            }
-            return null
+            // 口令检索只有一条实现（RefIndex.findPassword）：String 引擎同走此处，
+            // 故两通道在「候选口令比较、用毕清零、命中即停」上不可能漂移
+            return index.findPassword(text, ref.searchFrom, ref.searchTo)
         }
         // 检索键为公开字段文本（模型对 T/U/A/N/I 的既有 String 暴露同面，非敏感新增）
         val key = String(text, ref.searchFrom, ref.searchTo - ref.searchFrom)
@@ -253,19 +252,10 @@ internal object FieldReferenceCharExpansion {
      * 与 Kotlin `Char.equals(other, ignoreCase = true)` 同一三折口径
      * （相等 / 大写折等 / 小写折等）——引擎的 `contains(ignoreCase)` 与
      * `String.CASE_INSENSITIVE_ORDER` 在该口径下逐字符一致。
+     * 实现只有 [FieldReferenceEngine.charEqualsIgnoreCase] 一处（口令区域比较与字符扫描共用）。
      */
     private fun charEqualsIgnoreCase(a: Char, b: Char): Boolean =
-        a == b || Character.toUpperCase(a) == Character.toUpperCase(b) ||
-            Character.toLowerCase(a) == Character.toLowerCase(b)
-
-    /** [from, to) 区域与 [other] 全串比较（长度不等即否），口径同 [charEqualsIgnoreCase] */
-    private fun regionEqualsIgnoreCase(source: CharArray, from: Int, to: Int, other: CharArray): Boolean {
-        if (to - from != other.size) return false
-        for (i in other.indices) {
-            if (!charEqualsIgnoreCase(source[from + i], other[i])) return false
-        }
-        return true
-    }
+        FieldReferenceEngine.charEqualsIgnoreCase(a, b)
 
     /** 可增长 Char 缓冲：[finish] 裁剪为精确长度并清零工作缓冲（工作缓冲承载过敏感明文） */
     private class CharSink {

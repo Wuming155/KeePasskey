@@ -2,6 +2,7 @@ package com.keepasskey.database.fieldref
 
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxGroup
+import java.util.Arrays
 import java.util.TreeMap
 
 /**
@@ -207,25 +208,57 @@ object FieldReferenceEngine {
      * （每次都是一遍递归遍历 + 一个新 `List` 分配）。本索引在解析入口建一次、沿递归全程共享：
      *
      * - 条目树**只展平一次**，且**惰性**——文本不含引用时根本不触发（[resolveWith] 已短路）；
-     * - 按**检索字段**分桶的索引同样惰性构建，故「无人引用口令」时**不会**去解密口令，
-     *   与既有「按需读取受保护字段」的成本面一致（若改为一次性建全部字段的索引，就会把
-     *   全库口令都解密一遍——那是**反向优化**）；
+     * - 按**检索字段**分桶的索引同样惰性构建，故「无人按公开字段检索」时不会额外物化任何字段；
      * - 查找语义与 `firstOrNull { valueOf(…).equals(searchText, ignoreCase = true) }` **逐字等价**：
      *   键用 `String.CASE_INSENSITIVE_ORDER`（与 `equalsIgnoreCase` 同一套逐字符折叠，
      *   故不会像 `lowercase()` 那样在希腊语末位 sigma 等码点上改变等价类），
      *   同值只保留**文档序首个**条目（`TreeMap` 的 `containsKey` 走同一比较器）。
+     *
+     * **口令面（`SearchIn=P`）不建索引、不做 `String` 键**（ENG-20261028-13）：`TreeMap` 的键一经
+     * 写入便无法擦除，按口令建索引会让**全库口令**以 `String` 形式驻留到索引释放为止，违反敏感
+     * 数据「不新增不可擦副本」的所有权目标。该面改走 [findPassword]：逐条 `readChars()` 后区域
+     * 比较、比较后立即清零、命中即停——与 [FieldReferenceCharExpansion] 的口令检索共用同一实现。
+     * 代价是命中位置之后的条目会在每次引用解析时逐条解密（不缓存、不物化），换取口令明文不以
+     * `String` 常驻；命中位置之前的部分仍与「文档序首个」语义一致，只读一次。
      */
     /** `internal` 供同包 Char 通道（[FieldReferenceCharExpansion]）共享，索引语义见上（ISSUE-P3-394） */
     internal class RefIndex(
         root: KdbxGroup,
         private val valueOf: (KdbxEntry, RefField) -> String?
     ) {
-        /** `internal` 供 Char 通道做 `SearchIn=P` 的 Char 区域比较线性扫描（文档序与本索引一致） */
-        internal val entries: List<KdbxEntry> by lazy { root.allEntries() }
+        private val entries: List<KdbxEntry> by lazy { root.allEntries() }
         private val byField = mutableMapOf<RefField, TreeMap<String, KdbxEntry>>()
 
-        fun find(field: RefField, text: String): KdbxEntry? = indexOf(field)[text]
+        /** 检索 [field] 等于 [text] 的文档序首个条目；口令面走 Char 比较专路（不建键） */
+        fun find(field: RefField, text: String): KdbxEntry? =
+            if (field == RefField.PASSWORD) {
+                findPassword { candidate -> FieldReferenceEngine.regionEqualsIgnoreCase(text, candidate) }
+            } else {
+                indexOf(field)[text]
+            }
 
+        /** Char 通道入口：检索文本是调用方 Char 数组的 `[from, to)` 区段（敏感，本方法只读不改） */
+        fun findPassword(source: CharArray, from: Int, to: Int): KdbxEntry? =
+            findPassword { candidate -> FieldReferenceEngine.regionEqualsIgnoreCase(source, from, to, candidate) }
+
+        /**
+         * 口令检索的文档序首个命中：候选口令逐条以 Char 读出、比较后立即清零；命中即返回，
+         * 其后的条目完全不读（既是「文档序首个」的语义要求，也避免无谓解密）。
+         */
+        private fun findPassword(matches: (CharArray) -> Boolean): KdbxEntry? {
+            for (entry in entries) {
+                val candidate = entry.password?.readChars() ?: continue
+                val hit = try {
+                    matches(candidate)
+                } finally {
+                    Arrays.fill(candidate, '0')
+                }
+                if (hit) return entry
+            }
+            return null
+        }
+
+        /** 公开字段的 `String` 索引（口令面不经过此处，见类注释） */
         private fun indexOf(field: RefField): TreeMap<String, KdbxEntry> =
             byField.getOrPut(field) {
                 val index = TreeMap<String, KdbxEntry>(String.CASE_INSENSITIVE_ORDER)
@@ -301,9 +334,45 @@ object FieldReferenceEngine {
     }
 
     /**
+     * 逐字符比较口径：与 Kotlin `Char.equals(other, ignoreCase = true)` 同一三折
+     * （相等 / 大写折等 / 小写折等）——`contains(ignoreCase)`、`String.CASE_INSENSITIVE_ORDER`
+     * 与 [FieldReferenceCharExpansion] 的字符扫描在该口径下逐字符一致。
+     *
+     * 口令检索（[RefIndex.findPassword]）与 Char 通道共用本实现：检索键是敏感文本，不能走
+     * `String.CASE_INSENSITIVE_ORDER`（那要求把检索文本与候选口令都物化成 `String` 键）。
+     */
+    internal fun charEqualsIgnoreCase(a: Char, b: Char): Boolean =
+        a == b || Character.toUpperCase(a) == Character.toUpperCase(b) ||
+            Character.toLowerCase(a) == Character.toLowerCase(b)
+
+    /** [text] 与 [candidate] 全串比较（长度不等即否），口径同 [charEqualsIgnoreCase] */
+    internal fun regionEqualsIgnoreCase(text: String, candidate: CharArray): Boolean {
+        if (text.length != candidate.size) return false
+        for (i in text.indices) {
+            if (!charEqualsIgnoreCase(text[i], candidate[i])) return false
+        }
+        return true
+    }
+
+    /** [source] 的 `[from, to)` 区段与 [candidate] 全串比较（长度不等即否），口径同 [charEqualsIgnoreCase] */
+    internal fun regionEqualsIgnoreCase(
+        source: CharArray,
+        from: Int,
+        to: Int,
+        candidate: CharArray
+    ): Boolean {
+        if (to - from != candidate.size) return false
+        for (i in candidate.indices) {
+            if (!charEqualsIgnoreCase(source[from + i], candidate[i])) return false
+        }
+        return true
+    }
+
+    /**
      * `internal` 供同包 Char 通道共享取值语义（ISSUE-P3-394）。
      * 注意：`P` 面会物化 String——Char 通道只在**取值面为公开字段**时调用本函数，
-     * 口令取值走 `ProtectedString.readChars()`（用毕清零）。
+     * 口令取值走 `ProtectedString.readChars()`（用毕清零）。[RefIndex] 也不再用本函数
+     * 为口令面建索引（ENG-20261028-13），`P` 面只剩「本引擎的 String 产物」这一处物化。
      */
     internal fun valueOf(entry: KdbxEntry, field: RefField): String? = when (field) {
         RefField.TITLE -> entry.title

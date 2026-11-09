@@ -16,15 +16,19 @@ import java.util.Locale
  * `.internal`）**默认可用**——自托管 NAS / MinIO / Nextcloud 是合法加密同步目标，不再与
  * 恶意内网重定向同等待遇。SSRF 防御的重心随之收敛到**连接期**：拦截「非用户意图」的内网到达。
  *
+ * **云元数据红线优先于一切豁免**：`169.254.0.0/16`（含其 IPv4-mapped / IPv4-compatible 拼写）
+ * 在构造期、豁免 DNS 分支与连接期复核中都是**先判**的那一条，白名单与已配置端点都不能使其放行。
+ *
  * 残余攻击面与各层职责（均 fail-closed）：
  * 1. **构造期（纯字符串/字面 IP 校验，零网络）**：桶名严格按 S3 命名正则校验杜绝 authority
  *    注入（S3 virtual-hosted 分支 `scheme://bucket.host/key`，注入 `x@evil.com/`、`x#`、`x?`
  *    即可改写真实目标主机并投递对其有效的 SigV4 签名）；端点主机拒绝 userinfo 注入与
- *    明文 scheme；**云元数据红线**——`169.254.0.0/16` 字面量即便作为配置端点也仍拒绝
+ *    明文 scheme；**云元数据红线**——`169.254.0.0/16` 字面量即便同时命中显式白名单也仍拒绝
  *    （非合法同步目标，仅攻击面）；
  * 2. **连接期（DNS 解析后校验）**：经 [SsrfGuardDns] 拦截主机名解析结果，任一解析地址落入
  *   内网/保留网段即整体拒绝——同时抵御 DNS 重绑定（校验用的解析结果即喂给实际连接）；
- *   用户显式配置的端点主机经 [SyncHttpClientFactory] 登记为豁免（其解析地址获批放行），
+ *   用户显式配置的**实际请求主机**经 [SyncHttpClientFactory] 登记为豁免（其解析地址获批放行；
+ *   S3 virtual-host 风格的实际请求主机是 `bucket.端点主机`，由 `S3KeyCodec.requestHost` 推导），
  *   但豁免**不延伸到云元数据网段**；
  * 3. **连接期（目标地址复核）**：经 [SsrfGuardSocketFactory] 在建立 TCP 之前复核**实际目标地址**，
  *   覆盖 Dns 层天然够不着的两条路径——**IP 字面量**（OkHttp 路由层对其短路，不经自定义 Dns；
@@ -91,9 +95,11 @@ object SyncEndpointGuard {
      * 守卫（[SsrfGuardDns] / [SsrfGuardSocketFactory]）复核，见类 KDoc。
      *
      * @param rawEndpoint 用户填写的端点（可无 scheme，按 https 归一化）
-     * @param allowedHosts 显式白名单豁免（默认空，高级逃生通道）
-     * @return 规范化后的端点主机（调用方须传给 [SyncHttpClientFactory.createSyncClient]
-     *   登记连接期豁免——「用户显式配置的端点」即其声明意图）
+     * @param allowedHosts 显式白名单（构造期不再据此跳过任何检查——白名单只在连接期由
+     *   [SsrfGuardDns] 生效，云元数据红线更不随其放行；参数保留以维持调用方签名）
+     * @return 规范化后的端点主机。调用方须把**实际请求主机**传给
+     *   [SyncHttpClientFactory.createSyncClient] 登记连接期豁免：WebDAV 即本返回值，
+     *   S3 还要按寻址模式推导桶前缀主机（virtual-host 风格访问 `bucket.端点主机`）
      */
     fun validateEndpointHost(rawEndpoint: String, allowedHosts: Set<String> = emptySet()): String {
         val trimmed = rawEndpoint.trim()
@@ -121,13 +127,18 @@ object SyncEndpointGuard {
         if (host.isBlank()) {
             throw SyncException.InvalidEndpointError("同步端点 URL 缺少有效主机：\"$rawEndpoint\"")
         }
-        if (isHostAllowed(host, allowedHosts)) return host
-        // 云元数据红线（AC④）：169.254.0.0/16 字面量即便作为配置端点也仍拒绝
+        // 云元数据红线（AC④）：169.254.0.0/16 字面量即便作为配置端点、即便同时命中显式白名单
+        // 也仍拒绝——红线先于豁免批准（ENG-20261028-41）
         val literal = parseIpLiteral(host.lowercase(Locale.US).removeSuffix("."))
         if (literal != null && isCloudMetadataAddress(literal)) {
+            val whitelistedHint = if (isHostAllowed(host, allowedHosts)) {
+                "；该主机虽在显式白名单中，红线仍不随白名单放行"
+            } else {
+                ""
+            }
             throw SyncException.InvalidEndpointError(
                 "同步端点主机 \"$host\" 为云元数据网段（169.254.0.0/16）地址，已拒绝" +
-                    "（该网段仅是攻击面而非合法同步目标，任何口径下不放行）"
+                    "（该网段仅是攻击面而非合法同步目标，任何口径下不放行$whitelistedHint）"
             )
         }
         return host
@@ -161,24 +172,59 @@ object SyncEndpointGuard {
     /**
      * 判定地址是否属云元数据网段 `169.254.0.0/16`（ISSUE-P2-425 的唯一网段级红线）。
      *
-     * 该网段在 ISSUE-P2-425 放宽后**不再随内网一并豁免**：无论作为配置端点（构造期拒绝）
-     * 还是作为豁免主机的解析结果（[SsrfGuardDns] 豁免分支仍拒绝），一律不放行——
+     * 该网段在 ISSUE-P2-425 放宽后**不再随内网一并豁免**：无论作为配置端点（构造期拒绝，
+     * 白名单不改变该结论）、作为白名单 / 已配置端点主机的解析结果（DNS 豁免分支先判元数据）
+     * 还是连接目标（连接期复核先判元数据），一律不放行——
      * 元数据服务只可能被攻击面利用，不存在「合法的元数据同步目标」。
-     * 未知地址族保守判定为命中（fail-closed）。
+     *
+     * 判据对象是**承载的 IPv4**，而不是 IPv6 字面量本身：`::ffff:169.254.169.254`
+     * （IPv4-mapped，RFC 4291）与 `::169.254.169.254`（已废弃的 IPv4-compatible，RFC 4291/RFC 6890）
+     * 的内嵌地址都在网段内。平台常把前者归一为 4 字节
+     * （`InetAddress.getByAddress` 即转换，本仓 okhttp 也把 `[::ffff:a.b.c.d]` 规格化为 IPv4 文本），
+     * 但 `Inet6Address.getByAddress` 与部分 DNS / 连接层结果会保留 16 字节形态，
+     * 故两种字节数都必须按内嵌 IPv4 判定（ENG-20261028-41）。
+     * 未知地址族保守判定为命中（fail-closed）；普通 IPv6 不是元数据地址。
      */
     fun isCloudMetadataAddress(addr: InetAddress): Boolean {
         val bytes = addr.address
-        return when {
-            bytes.size == 4 ->
-                bytes[0] == METADATA_OCTET_1.toByte() && bytes[1] == METADATA_OCTET_2.toByte()
-            // IPv4-mapped 形态：内嵌 IPv4 即元数据网段同样命中（getByName 通常已归一为 4 字节，
-            // 此处为防御性复核）；未知地址族保守视为命中
-            bytes.size == 16 ->
-                (0 until IPV4_MAPPED_MARKER_OFFSET).all { bytes[it].toInt() == 0 } &&
-                    bytes[IPV4_MAPPED_MARKER_OFFSET] == METADATA_OCTET_1.toByte() &&
-                    bytes[IPV4_MAPPED_MARKER_OFFSET + 1] == METADATA_OCTET_2.toByte()
-            else -> true
+        val embedded = embeddedIpv4(bytes) ?: return bytes.size != IPV6_ADDRESS_BYTES
+        return (embedded[0].toInt() and 0xFF) == METADATA_OCTET_1 &&
+            (embedded[1].toInt() and 0xFF) == METADATA_OCTET_2
+    }
+
+    /**
+     * 地址承载的 IPv4 字节：4 字节地址本身、`::ffff:a.b.c.d`（IPv4-mapped）或
+     * `::a.b.c.d`（已废弃 IPv4-compatible）的内嵌 IPv4；其余（普通 IPv6、未知地址族）返回 null。
+     *
+     * 映射形态要求前 10 字节全零**且**第 10–11 字节为 `0xFF,0xFF` 标记，内嵌 IPv4 固定在偏移 12–15：
+     * 只比较偏移 10–11 与 169/254 会漏判真实的映射地址（该处是 0xFF 标记，永不与 169/254 相等），
+     * 也会对前导零段形态取错偏移（`::a9fe:a9fe` 的内嵌 IPv4 起于偏移 12 而非 10）。
+     */
+    private fun embeddedIpv4(bytes: ByteArray): ByteArray? {
+        if (bytes.size == IPV4_ADDRESS_BYTES) return bytes
+        if (bytes.size != IPV6_ADDRESS_BYTES) return null
+        val compat = (0 until IPV4_EMBEDDED_OFFSET).all { bytes[it].toInt() == 0 }
+        val mapped = (0 until IPV4_MAPPED_MARKER_OFFSET).all { bytes[it].toInt() == 0 } &&
+            (bytes[IPV4_MAPPED_MARKER_OFFSET].toInt() and 0xFF) == IPV4_MAPPED_MARKER_OCTET &&
+            (bytes[IPV4_MAPPED_MARKER_OFFSET + 1].toInt() and 0xFF) == IPV4_MAPPED_MARKER_OCTET
+        return if (compat || mapped) {
+            bytes.copyOfRange(IPV4_EMBEDDED_OFFSET, IPV6_ADDRESS_BYTES)
+        } else {
+            null
         }
+    }
+
+    /**
+     * 地址的规范文本键：承载同一 IPv4 的不同拼写（`a.b.c.d` / `::ffff:a.b.c.d` / `::a.b.c.d`）
+     * 归一为点分十进制，其余按 `hostAddress` 小写。
+     *
+     * [SsrfAddressApprovals] 用它比对「DNS 解析结果」与「实际连接目标」：`InetAddress.equals`
+     * 不跨形态相等（映射形态的 `Inet6Address` 与 4 字节 `Inet4Address` 互不相等），
+     * 只按 `hostAddress` 文本比对会让同一地址因归一形态不同而失配。
+     */
+    internal fun addressKey(addr: InetAddress): String {
+        val embedded = embeddedIpv4(addr.address) ?: return addr.hostAddress.lowercase(Locale.US)
+        return (0 until IPV4_ADDRESS_BYTES).joinToString(".") { (embedded[it].toInt() and 0xFF).toString() }
     }
 
     /** 云元数据网段 `169.254.0.0/16` 的首字节 */
@@ -242,15 +288,10 @@ object SyncEndpointGuard {
         val b0 = b[0].toInt() and 0xFF
         // fc00::/7 唯一本地地址（ULA，IPv6 版 RFC1918）
         if (b0 == ULA_PREFIX_LOWER || b0 == ULA_PREFIX_UPPER) return true
-        // ::ffff:0:0/96 IPv4-mapped：抽取内嵌 IPv4 递归判定，杜绝以映射地址绕过 IPv4 网段检查
-        val isMapped = (0 until IPV4_MAPPED_MARKER_OFFSET).all { b[it].toInt() == 0 } &&
-            (b[IPV4_MAPPED_MARKER_OFFSET].toInt() and 0xFF) == IPV4_MAPPED_MARKER_OCTET &&
-            (b[IPV4_MAPPED_MARKER_OFFSET + 1].toInt() and 0xFF) == IPV4_MAPPED_MARKER_OCTET
-        if (isMapped) {
-            val v4 = b.copyOfRange(IPV4_MAPPED_EMBEDDED_OFFSET, IPV6_ADDRESS_BYTES)
-            return runCatching { isBlockedAddress(InetAddress.getByAddress(v4)) }.getOrDefault(true)
-        }
-        return false
+        // 承载 IPv4 的形态（::ffff:0:0/96 映射与废弃的 ::/96）：抽取内嵌 IPv4 递归判定，
+        // 杜绝以映射地址绕过 IPv4 网段检查
+        val embedded = embeddedIpv4(b) ?: return false
+        return runCatching { isBlockedAddress(InetAddress.getByAddress(embedded)) }.getOrDefault(true)
     }
 
     /** fc00::/7 唯一本地地址首字节下界 */
@@ -265,8 +306,11 @@ object SyncEndpointGuard {
     /** IPv4-mapped 标记字节的取值 */
     private const val IPV4_MAPPED_MARKER_OCTET = 0xFF
 
-    /** 内嵌 IPv4 地址在 IPv6 字串中的起始偏移 */
-    private const val IPV4_MAPPED_EMBEDDED_OFFSET = 12
+    /** IPv6 字串中内嵌 IPv4 的起始偏移（同时是 IPv4-compatible 前导零段长度） */
+    private const val IPV4_EMBEDDED_OFFSET = 12
+
+    /** IPv4 地址字节数 */
+    private const val IPV4_ADDRESS_BYTES = 4
 
     /** IPv6 地址字节数（亦作内嵌 IPv4 的截取上界） */
     private const val IPV6_ADDRESS_BYTES = 16
@@ -295,18 +339,18 @@ class SsrfGuardDns(
 
     override fun lookup(hostname: String): List<InetAddress> {
         val addresses = delegate.lookup(hostname)
+        // ISSUE-P2-425 / ENG-20261028-41：云元数据红线先于豁免与网段判定——豁免只覆盖
+        // 「内网自建可用性」这一意图，**不延伸到云元数据网段**（映射形态的内嵌 IPv4 同样命中）
+        val metadata = addresses.firstOrNull { SyncEndpointGuard.isCloudMetadataAddress(it) }
+        if (metadata != null) {
+            throw UnknownHostException(
+                "SSRF 防护：主机 \"$hostname\" 解析到云元数据网段地址（${metadata.hostAddress}），" +
+                    "红线不随豁免放行，已拒绝连接"
+            )
+        }
         val lower = hostname.lowercase(Locale.US).removeSuffix(".")
         val exempt = allowedHosts.any { it.lowercase(Locale.US) == lower }
         if (exempt) {
-            // ISSUE-P2-425：豁免只覆盖「内网自建可用性」这一意图，**不延伸到云元数据红线**——
-            // 豁免主机（含已配置端点）解析出 169.254.0.0/16 时仍整体拒绝
-            val metadata = addresses.firstOrNull { SyncEndpointGuard.isCloudMetadataAddress(it) }
-            if (metadata != null) {
-                throw UnknownHostException(
-                    "SSRF 防护：豁免主机 \"$hostname\" 解析到云元数据网段地址（${metadata.hostAddress}），" +
-                        "红线不随豁免放行，已拒绝连接"
-                )
-            }
             approvals.approveAll(addresses)
             return addresses
         }

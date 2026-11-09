@@ -208,6 +208,12 @@ class ProtectedString(
      * `CoroutineExceptionHandler`）直接杀进程（`ISSUE-P0-531` 真机实测：`DefaultDispatcher-worker` 上
      * `KdbxEntry.getUserName` → 本方法 → 进程闪退）。
      * 降级后的表现是「短暂显示空值」，语义上**正确**：被替换下线的数据本就不该再展示。
+     *
+     * `ENG-20261028-11`：下线实例的回收已改为**读租约协议**（[ProtectedStringReclamation]）——
+     * 消费面在消费一份树快照期间登记租约时，回收会等最后一个租约释放，投影因此不再读到
+     * 「正在被填零」的密文。本读口与 [readStringForDisplayOrNull] 等**继续保留**：锁定 / 会话终止
+     * 的直接擦除不等租约，未按协议登记的迟到读取也仍可能命中已回收实例，这两类读取必须继续
+     * fail-closed 降级而不是抛异常。
      */
     fun readStringForDisplay(fallback: String = ""): String =
         try {
@@ -266,6 +272,10 @@ class ProtectedString(
      * 显式擦除敏感内存（密文、IV 与等值标签一并清零）。
      * P3-10 整改：[EMPTY] 为全局共享单例，对其 clear 一律 no-op——
      * 防止任一调用方把共享空实例置为已清零态后污染后续引用者（equals/close 语义异常）。
+     *
+     * 这是**立即**擦除路径：锁定、会话终止与独占实例的清理都走这里，不等读者。
+     * copy-on-write 下线实例的回收**不走**本方法，而是经 [ProtectedStringReclamation] 的读租约协议
+     * （有旧树读者在册时延后到其结束）。
      */
     fun clear() {
         if (this === EMPTY) return

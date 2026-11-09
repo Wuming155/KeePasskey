@@ -21,6 +21,28 @@ class FileBinaryStoreFailedWriteCleanupTest {
             if (failAfterCommit) throw IOException("synthetic failure after cache commit")
             return digest
         }
+
+        override fun writeCache(
+            remotePath: String,
+            data: ByteArray,
+            updateVersion: Boolean,
+            precomputedDigest: String?
+        ): String {
+            val digest = super.writeCache(remotePath, data, updateVersion, precomputedDigest)
+            if (failAfterCommit) throw IOException("synthetic failure after byte cache commit")
+            return digest
+        }
+    }
+
+    private fun assertNoExistingCacheFiles(cacheDir: File) {
+        var remaining = cacheDir.listFiles().orEmpty().filter { it.exists() }
+        var attempt = 0
+        while (remaining.isNotEmpty() && attempt < 5) {
+            Thread.sleep(15)
+            remaining = cacheDir.listFiles().orEmpty().filter { it.exists() }
+            attempt++
+        }
+        assertTrue("无 key 交付时不得留 cache 文件", remaining.isEmpty())
     }
 
     @Test
@@ -37,10 +59,37 @@ class FileBinaryStoreFailedWriteCleanupTest {
             }.exceptionOrNull()
 
             assertTrue("原始写入异常必须继续向上传播", failure is IOException)
-            assertTrue("无 key 交付时不得留 cache 文件", cacheDir.listFiles().orEmpty().isEmpty())
+            assertNoExistingCacheFiles(cacheDir)
 
             syncCache.failAfterCommit = false
             val key = store.storeFromStream(ByteArrayInputStream(payload), payload.size.toLong())
+            assertEquals(payload.size.toLong(), store.sizeOf(key))
+            assertArrayEquals(payload, store.load(key))
+            store.delete(key)
+            assertEquals(0L, store.sizeOf(key))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `字节写入在返回key前失败时删除已提交文件`() {
+        val root = Files.createTempDirectory("p3-622-file-binary-store-byte").toFile()
+        try {
+            val cacheDir = File(root, "attachments")
+            val syncCache = CommitThenFailSyncCache(cacheDir)
+            val store = FileBinaryStore(syncCache, Unit)
+            val payload = ByteArray(4096) { (it % 239).toByte() }
+
+            val failure = runCatching {
+                store.store(payload)
+            }.exceptionOrNull()
+
+            assertTrue("原始写入异常必须继续向上传播", failure is IOException)
+            assertNoExistingCacheFiles(cacheDir)
+
+            syncCache.failAfterCommit = false
+            val key = store.store(payload)
             assertEquals(payload.size.toLong(), store.sizeOf(key))
             assertArrayEquals(payload, store.load(key))
             store.delete(key)

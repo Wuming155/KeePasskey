@@ -34,8 +34,9 @@ import com.keepasskey.app.ui.screens.settings.childDatabaseSourceDisplayName
  * 不读页面级 `UiState`、不自持状态）。
  *
  * **刻意留在原对话框的两样东西**：
- * 1. `SecureDialogWindowEffect()`——`SecureDialogFlagPolicyTest` 按**文件**计数
- *    （该文件必须恰有 2 处），把它跟段落组件一起搬走会让该页的 FLAG_SECURE 接线失去可断言落点；
+ * 1. `SecureDialogWindowEffect()`——它是**窗口级**副作用，只有留在对话框自身内容槽内才能解析到
+ *    对话框窗口；搬进窄参数段落组件后调用点与窗口脱离，会按 fail-safe 静默不施加（真实窗口的
+ *    flag 与遮挡触摸过滤由设备用例 `DialogWindowHardeningDeviceTest` 覆盖）；
  * 2. 子库主密码链路（`password` 的 `CharArray` 副本、`SecurePasswordField`、
  *    提交后即 `fill('0')` 清空、`credentialEpoch` 擦除通知）——明文所有权与擦除义务必须同处一屏，
  *    与 §179 / §186 的「保密钥链路留本体」同一口径。

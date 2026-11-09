@@ -4,12 +4,14 @@ import com.keepasskey.crypto.exception.CryptoException
 import com.keepasskey.crypto.kdf.KdfParameters.Argon2.Argon2Type
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ISSUE-P2-59（审计 RUST-05）回归：原生 Argon2 路径的参数上界镜像与受检窄化。
+ * ISSUE-P2-59（审计 RUST-05）回归：Argon2 派生入口的参数接受域与受检窄化。
  *
  * 背景：
  * ① 原生内核只做**下界**闸门（`memoryKib ≥ 8 × parallelism`）与 JNI 有符号闸门，**无逐项上界**；
@@ -18,8 +20,11 @@ import org.junit.Test
  * ② `(memoryInBytes / 1024).toInt()` / `iterations.toInt()` 在超 `Int` 范围时**静默窄化**
  *    （回绕为任意值，含负数），使「被静默改写的参数」参与派生或被 JNI 闸门拒绝，根因不可辨。
  *
- * 解码后的上界值须与 `KdbxKdfParameterCodec` **同值**——本用例以硬编码期望值双向锁定，
- * 任一侧漂移即失败（模块依赖单向，crypto 不可反向引用 database 常量，故用同值声明 + 测试锁）。
+ * ENG-20261028-08：越界的裁决点是**公共接受域本身**，不再是「走原生还是走 BC」的路由条件——
+ * [Argon2KdfEngine.transform] 对界外参数直接抛 [CryptoException.KdfException]，原生不可用 /
+ * 版本不支持 / AD 超限这三类**实现可用性**回退保持原样（AD 回退见 `Argon2AdLimitFallbackTest`）。
+ * ENG-20261028-16：基础边界定义在 [Argon2KdfLimits]，database `KdbxKdfAcceptance` 引用同一处，
+ * 两侧的逐点对拍仍由 `Argon2KdfBoundsAlignmentTest` 守着，但不再需要同值副本。
  */
 class Argon2KdfEngineBoundsTest {
 
@@ -38,10 +43,10 @@ class Argon2KdfEngineBoundsTest {
         version = KdfParameters.Argon2.ARGON2_VERSION_13
     )
 
-    // ===== AC①：上界镜像（与 KdbxKdfParameterCodec.validateArgon2Bounds 同值）=====
+    // ===== AC①：基础边界（唯一定义见 Argon2KdfLimits，database 接受域引用同一处）=====
 
     @Test
-    fun `上界镜像_内存边界与 codec 同值`() {
+    fun `基础边界_内存上下界`() {
         val gib4 = 4L * 1024 * 1024 * 1024
         // ISSUE-P2-290：交叉约束后 p=1 的下界恰为 8192（p=2 需 ≥ 16384，见专项用例）
         assertTrue("8192B 且 p=1 恰达下界，应在界内", Argon2KdfEngine.isWithinKdfBounds(8192L, 2, 1))
@@ -69,7 +74,7 @@ class Argon2KdfEngineBoundsTest {
     }
 
     @Test
-    fun `上界镜像_迭代与并行度边界与 codec 同值`() {
+    fun `基础边界_迭代与并行度上下界`() {
         val maxIterations = 1L shl 24
         assertTrue(Argon2KdfEngine.isWithinKdfBounds(64L * 1024 * 1024, maxIterations, 2))
         assertFalse(
@@ -83,7 +88,7 @@ class Argon2KdfEngineBoundsTest {
     }
 
     @Test
-    fun `上界镜像_不误拒合法用户配置`() {
+    fun `基础边界_不误拒合法用户配置`() {
         // AC③：上界须 ≥ 一切合法用户配置——覆盖本仓 KdfBenchmark 自荐上限（≤512 MiB × 20）与
         // 官方默认（64 MiB / t=2 / p=2）及常见更强配置
         assertTrue(
@@ -97,6 +102,60 @@ class Argon2KdfEngineBoundsTest {
         assertTrue(
             "边界内大内存配置不得被拒",
             Argon2KdfEngine.isWithinKdfBounds(4L * 1024 * 1024 * 1024 - 1, 1, 1)
+        )
+    }
+
+    // ===== ENG-20261028-08：越界参数在派生前拒绝（与原生可用性无关）=====
+
+    /**
+     * 低成本边界样本：全部在**任何派生之前**被拒绝，故不消耗 Argon2 工作量，也不依赖
+     * 宿主是否加载到原生库——拒绝发生在本机实现路由之前，原生 / BC 两侧结论一致。
+     */
+    @Test
+    fun `越界参数_派生入口抛出可处理的 KDF 失败`() {
+        val overUpperMemory = 4L * 1024 * 1024 * 1024 + 1
+        val samples = mapOf(
+            "内存低于下界" to params(memoryInBytes = 8191L),
+            "内存高于上界" to params(memoryInBytes = overUpperMemory),
+            "内存低于每通道下界" to params(memoryInBytes = 8192L),
+            "迭代为 0" to params(memoryInBytes = 64L * 1024, iterations = 0L),
+            "迭代超上界" to params(memoryInBytes = 64L * 1024, iterations = (1L shl 24) + 1),
+            "并行度为 0" to params(memoryInBytes = 64L * 1024, iterations = 2L, parallelism = 0),
+            "并行度超上界" to params(memoryInBytes = 64L * 1024, iterations = 2L, parallelism = 65)
+        )
+        for ((label, sample) in samples) {
+            assertFalse(
+                "$label 不在公共接受域内",
+                Argon2KdfEngine.isWithinKdfBounds(
+                    sample.memoryInBytes,
+                    sample.iterations,
+                    sample.parallelism
+                )
+            )
+            val ex = assertThrows("$label 必须拒绝派生", CryptoException.KdfException::class.java) {
+                engine.transform(ByteArray(32), sample)
+            }
+            assertTrue(
+                "$label 的失败须指明边界而非派生错误: ${ex.message}",
+                ex.message?.contains("拒绝派生") == true
+            )
+        }
+    }
+
+    @Test
+    fun `界内参数_接受域放行`() {
+        // 与上一条互为对照：同一判据不得把合法配置判为越界
+        assertTrue(
+            "官方默认配置须在公共接受域内",
+            Argon2KdfEngine.isWithinKdfBounds(64L * 1024 * 1024, 2L, 2)
+        )
+        assertNull(
+            "界内参数不得产生越界原因",
+            Argon2KdfLimits.outOfBoundsReason(64L * 1024 * 1024, 2L, 2)
+        )
+        assertNotNull(
+            "越界参数须给出可读原因",
+            Argon2KdfLimits.outOfBoundsReason(8191L, 2L, 2)
         )
     }
 

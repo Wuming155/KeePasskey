@@ -15,6 +15,12 @@ import org.junit.Test
  *   物化为 `String`，且摘要字节数组不清零）——现统一走字节态 `splitPrefixSuffixOfSha1()`；
  * - 「长度非法 fail-closed」用例随实现一并删除：摘要宽度由 SHA-1 结构性保证
  *   （20 字节 → 恒 40 位十六进制），不再存在「长度非法的入参」这一失败面。
+ *
+ * ENG-20261028-12 整改：原「已删除的字符串态入口不得回归」用例按源码文本反查
+ * `fun sha1HexUpper(` / `toHexString(`。该判据过宽（同文件的任何十六进制转换都会被判红）且只锁
+ * 当时的实现写法，不能证明摘要未被物化为 String；已删除的 API 本身由编译期（无调用点即无编译）
+ * 与代码评审兜底。若需长期约束「HMAC/SHA-1 摘要不得物化为不可擦 String」，应在既有扫描入口
+ * 或评审规则中统一声明，不在此处按单文件字符串反查。
  */
 class BreachHasherTest {
 
@@ -40,39 +46,5 @@ class BreachHasherTest {
         val before = data.copyOf()
         BreachHasher.splitPrefixSuffixOfSha1(data)
         assertTrue("哈希器不得改动调用方的明文缓冲", data.contentEquals(before))
-    }
-
-    @Test
-    fun `已删除的字符串态入口不得回归（源码守卫）`() {
-        // ISSUE-P3-102：`sha1HexUpper` / `splitPrefixSuffix(String)` 会把完整 40 位摘要物化为
-        // 不可擦的 String，属已整改的泄漏面——禁止被重新引入
-        val source = java.io.File(repositoryRoot, "app/src/main/java/com/keepasskey/app/data/breach/BreachHasher.kt")
-        assertTrue("哈希器源码文件不存在", source.isFile)
-        val code = source.readText()
-            .replace(Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("""//[^\n]*"""), "")
-        assertTrue(
-            "不得重新引入返回完整 40 位摘要 String 的入口（ISSUE-P3-102 已整改）",
-            !code.contains("fun sha1HexUpper(") && !code.contains("toHexString(")
-        )
-    }
-
-    private companion object {
-        const val ROOT_SEARCH_DEPTH = 6
-
-        /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
-        val repositoryRoot: java.io.File by lazy {
-            var dir: java.io.File? = java.io.File(System.getProperty("user.dir").orEmpty()).absoluteFile
-            repeat(ROOT_SEARCH_DEPTH) {
-                val candidate = dir ?: return@repeat
-                if (java.io.File(candidate, "app/src/main/java").isDirectory &&
-                    java.io.File(candidate, "core/src/main/java").isDirectory
-                ) {
-                    return@lazy candidate
-                }
-                dir = candidate.parentFile
-            }
-            error("未能定位仓库根（自 ${System.getProperty("user.dir")} 向上 ${ROOT_SEARCH_DEPTH} 层）")
-        }
     }
 }

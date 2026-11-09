@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.security.ExternalModificationChoice
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * ISSUE-P2-378：库文件被外部修改后的三选对话框。
@@ -36,6 +37,7 @@ fun ExternalModificationDialog(
         modifier = modifier,
         title = { Text(stringResource(R.string.ext_mod_dialog_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = stringResource(R.string.ext_mod_dialog_body),

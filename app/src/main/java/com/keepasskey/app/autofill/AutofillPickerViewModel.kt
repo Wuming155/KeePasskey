@@ -5,8 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.core.security.ProtectedString
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -57,13 +59,13 @@ class AutofillPickerViewModel @Inject constructor(
     /** 库内条目光栅（Core 层直出，密码仍为 [com.keepasskey.core.security.ProtectedString] 密文态） */
     val entries: StateFlow<List<KdbxEntry>> = _entries.asStateFlow()
 
+    /** ISSUE-P3-148：整库装载只允许发生一次（幂等），且只由选择器页发起 */
+    private var entriesLoadStarted = false
+
     /** ISSUE-P2-52：锁定即清空缓存活树（清零后的条目任何字段读取都会抛异常） */
     private val sessionLockGuard = com.keepasskey.database.session.SessionLockGuard(databaseSession) {
         _entries.value = emptyList()
     }
-
-    /** ISSUE-P3-148：整库装载只允许发生一次（幂等），且只由选择器页发起 */
-    private var entriesLoadStarted = false
 
     init {
         // ISSUE-P2-52：注册会话锁定观察者（须在 [sessionLockGuard] 声明之后）
@@ -71,6 +73,48 @@ class AutofillPickerViewModel @Inject constructor(
         // ISSUE-P3-148：**刻意不在 init 装载整库**——确认页（按需创建本 VM）不需要全库，
         // 而 init 装载会让每次「确认填充」都付一次与库规模成正比的成本。需要全库的
         // 选择器页显式调用 [loadEntries]。
+        observeTreeChanges()
+    }
+
+    /**
+     * 订阅会话快照流：会话树换代时即时重载缓存，避免长期持有失效快照。
+     *
+     * ENG-20261028-11：读租约仅在装载/重载读取瞬间持有（[vaultRepository.withUsableKdbxEntries]），
+     * **绝不将租约常驻为成员变量跨用户等待**，彻底消除用户停留在选择器界面期间全进程回收被阻断的风险。
+     */
+    private fun observeTreeChanges() {
+        val session = databaseSession ?: return
+        viewModelScope.launch {
+            var seenFirst = false
+            session.databaseFlow.collect { db ->
+                // 首个 emission 是当前已装载的那一代，跳过（避免与 loadEntries 重复装载）
+                if (!seenFirst) {
+                    seenFirst = true
+                    return@collect
+                }
+                if (!entriesLoadStarted) return@collect
+                // **锁定 / 关库不得重载**：此时会话已把库树清零，缓存必须保持为空
+                // （`sessionLockGuard` 已清空，这里只是防止重载把它再填回来）。
+                if (db == null || vaultRepository.isLocked()) return@collect
+                reloadForNewTree()
+            }
+        }
+    }
+
+    /** 会话树已换代：按新快照重载缓存。装载在瞬时作用域租约内完成，映射为非敏感不可变投影后释放租约。 */
+    private suspend fun reloadForNewTree() {
+        val lease = vaultRepository.acquireEntriesReadLease()
+        val loaded = try {
+            val list = vaultRepository.getUsableKdbxEntries()
+            list.map(::toImmutableProjection)
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            AppLog.e(TAG, "库树换代后重载条目失败，选择器按空列表处理", t)
+            null
+        } finally {
+            lease.close()
+        } ?: return
+        _entries.value = loaded
     }
 
     /**
@@ -78,21 +122,50 @@ class AutofillPickerViewModel @Inject constructor(
      *
      * 幂等：重复调用不重复装载（与整改前的 `init` 装载同语义——选择器为一次性 Activity，
      * 锁定清空后重开即新建 VM 并重新拉取）。确认路径**不得**调用本方法。
+     *
+     * ENG-20261028-11：装载走瞬时租约，在租约内读取可用条目并映射为非敏感不可变投影，
+     * 随后立即释放租约，绝不持租约跨用户交互与等待期持有。
      */
     fun loadEntries() {
         if (entriesLoadStarted) return
         entriesLoadStarted = true
         viewModelScope.launch {
-            _entries.value = try {
+            val lease = vaultRepository.acquireEntriesReadLease()
+            try {
                 // ISSUE-P2-341：选择器列的是"可交给调用方的凭据"，回收站内的须排除
-                vaultRepository.getUsableKdbxEntries()
+                val list = vaultRepository.getUsableKdbxEntries()
+                _entries.value = list.map(::toImmutableProjection)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "读取库内条目失败，选择器按空列表处理", t)
-                emptyList()
+                _entries.value = emptyList()
+            } finally {
+                lease.close()
             }
         }
     }
+
+    /**
+     * 将库内活跃条目映射为选择器专用的非敏感不可变投影。
+     *
+     * 边界：
+     * 1. 标题 / 用户名 / 网址等非敏感元数据以独立不可变 String 存入全新 [ProtectedString]（isProtected=false）；
+     * 2. 不缓存密码字段，不与数据库会话内部树共享任何敏感 [ProtectedString] 引用；
+     * 3. 会话后续改树或就地擦除绝不会使本投影字段失效，搜索与列表渲染无须依赖 clear 降级；
+     * 4. 用户点选后由 [resolveCredentials] 在读租约内向活动库重新定位取密。
+     */
+    private fun toImmutableProjection(entry: KdbxEntry): KdbxEntry = KdbxEntry(
+        id = entry.id,
+        parentGroupId = entry.parentGroupId,
+        iconId = entry.iconId,
+        customIconId = entry.customIconId,
+        tags = entry.tags,
+        fields = mapOf(
+            KdbxConstants.Fields.TITLE to ProtectedString(runCatching { entry.title }.getOrDefault(""), isProtected = false),
+            KdbxConstants.Fields.USER_NAME to ProtectedString(runCatching { entry.userName }.getOrDefault(""), isProtected = false),
+            KdbxConstants.Fields.URL to ProtectedString(runCatching { entry.url }.getOrDefault(""), isProtected = false)
+        )
+    )
 
     override fun onCleared() {
         sessionLockGuard.unregister()
@@ -100,9 +173,8 @@ class AutofillPickerViewModel @Inject constructor(
     }
 
     fun search(query: String): List<KdbxEntry> =
-        // ISSUE-P2-52：锁定竞态下缓存条目可能已清零（title/userName 读取抛异常）→ 按空结果处理
+        // 投影条目持有独立非敏感字符串，检索不依赖锁定清零降级
         runCatching { AutofillEntrySearch.filter(_entries.value, query) }
-            .onFailure { AppLog.w(TAG, "选择器检索命中已清零条目，按空结果处理", it) }
             .getOrDefault(emptyList())
 
     // ---------- ISSUE-P3-571 方案A：「记住这个应用？」询问（Kp2a 式，随库持久通道） ----------
@@ -135,7 +207,11 @@ class AutofillPickerViewModel @Inject constructor(
         entryTitle: String
     ): Boolean {
         // ISSUE-P3-570：getKdbxEntry 为挂起调用，取消须沿链重抛（不归一为「空 URL」）
-        val currentUrl = runCatching { vaultRepository.getKdbxEntry(entryId)?.url }
+        // ENG-20261028-11：读 URL 与判断同处一条读租约（`withKdbxEntry`）——否则并发整树替换
+        // 会把条目下线擦除，`runCatching` 把失败折叠成空 URL，反而误判成「可以询问是否写回」。
+        val currentUrl = runCatching {
+            vaultRepository.withKdbxEntry(entryId) { entry -> entry?.url.orEmpty() }
+        }
             .onFailure { if (it is CancellationException) throw it }
             .getOrNull().orEmpty()
         if (!AutofillAppBindingWriteBackPolicy.shouldOffer(
@@ -194,43 +270,51 @@ class AutofillPickerViewModel @Inject constructor(
      */
     suspend fun resolveCredentials(entryId: String): Credentials? {
         if (entryId.isBlank()) return null
-        // ISSUE-P2-52：用户名读取 fail-safe——锁定竞态窗口内条目可能已清零
-        // （readString 抛 IllegalStateException），按空用户名降级而非崩溃
-        // ISSUE-P3-371 ②：用户名侧补 {REF:} 展开（与同函数 password 侧口径统一）——
-        // 非口令消费点声明 USER_NAME 面，{REF:P@…} 经引擎掩码输出，口令明文不走用户名通道
-        // ISSUE-P3-570：保护段含 getKdbxEntry / resolveFieldReferences 两个挂起调用，
-        // 取消须沿链重抛（与下方 password 侧 catch 守卫同口径），不归一为空用户名
-        val username = runCatching {
-            val raw = cachedUsername(entryId)
-                ?: vaultRepository.getKdbxEntry(entryId)?.userName.orEmpty()
-            vaultRepository.resolveFieldReferences(
-                entryId, raw,
-                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME
-            ) ?: raw
-        }.onFailure { if (it is CancellationException) throw it }.getOrDefault("")
+        // ENG-20261028-11：整段（缓存用户名 → 单条快照用户名 → `{REF:}` 展开 → 取口令 → 口令展开）
+        // 处于一条读租约内。这些读取分属多个挂起点且跨两个仓库入口；会话若在中间替换整树，
+        // 本条目被下线擦除会让口令侧 fail-fast 抛错（交付面「凭据读取失败」）或用户名降级为空。
+        val lease = vaultRepository.acquireEntriesReadLease()
+        try {
+            // ISSUE-P2-52：用户名读取 fail-safe——锁定竞态窗口内条目可能已清零
+            // （readString 抛 IllegalStateException），按空用户名降级而非崩溃
+            // ISSUE-P3-371 ②：用户名侧补 {REF:} 展开（与同函数 password 侧口径统一）——
+            // 非口令消费点声明 USER_NAME 面，{REF:P@…} 经引擎掩码输出，口令明文不走用户名通道
+            // ISSUE-P3-570：保护段含 getKdbxEntry / resolveFieldReferences 两个挂起调用，
+            // 取消须沿链重抛（与下方 password 侧 catch 守卫同口径），不归一为空用户名
+            val username = runCatching {
+                val raw = cachedUsername(entryId)
+                    ?: vaultRepository.getKdbxEntry(entryId)?.userName.orEmpty()
+                vaultRepository.resolveFieldReferences(
+                    entryId, raw,
+                    com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.USER_NAME
+                ) ?: raw
+            }.onFailure { if (it is CancellationException) throw it }.getOrDefault("")
 
-        val chars = try {
-            vaultRepository.getEntryPasswordChars(entryId)
-        } catch (t: Throwable) {
-            if (t is CancellationException) throw t
-            AppLog.e(TAG, "按需解密选中条目密码失败", t)
-            null
-        } ?: return Credentials(username, "")
+            val chars = try {
+                vaultRepository.getEntryPasswordChars(entryId)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                AppLog.e(TAG, "按需解密选中条目密码失败", t)
+                null
+            } ?: return Credentials(username, "")
 
-        val password = try {
-            // ISSUE-P0-08：选择器按选取下发**口令**，声明口令消费点（P 面）——受保护引用按 KDBX 语义展开
-            vaultRepository.resolveFieldReferences(
-                entryId, String(chars),
-                com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.PASSWORD
-            ) ?: String(chars)
-        } catch (t: Throwable) {
-            if (t is CancellationException) throw t
-            AppLog.w(TAG, "解析字段引用失败，按原值下发", t)
-            String(chars)
+            val password = try {
+                // ISSUE-P0-08：选择器按选取下发**口令**，声明口令消费点（P 面）——受保护引用按 KDBX 语义展开
+                vaultRepository.resolveFieldReferences(
+                    entryId, String(chars),
+                    com.keepasskey.database.fieldref.FieldReferenceEngine.RefField.PASSWORD
+                ) ?: String(chars)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                AppLog.w(TAG, "解析字段引用失败，按原值下发", t)
+                String(chars)
+            } finally {
+                chars.fill('0')
+            }
+            return Credentials(username = username, password = password)
         } finally {
-            chars.fill('0')
+            lease.close()
         }
-        return Credentials(username = username, password = password)
     }
 
     /**

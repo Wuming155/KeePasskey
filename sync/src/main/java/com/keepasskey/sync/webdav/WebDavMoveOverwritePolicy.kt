@@ -5,16 +5,23 @@ import com.keepasskey.sync.model.RemoteFileMetadata
 import com.keepasskey.sync.model.SyncException
 
 /**
- * WebDAV MOVE 覆盖已有目标的 409/423 兜底判定（ISSUE-P2-381）。
+ * WebDAV MOVE 覆盖已有目标的 409/423 处理策略（ISSUE-P2-381 引入，ENG-20261028-20 收口）。
  *
  * 背景：部分服务器对 MOVE 覆盖已有目标报 409/423（仅靠 `Overwrite:T` 不可靠；
  * keepass2android `WebDavStorage.java:235` 注释 + 提交 `9c8ee243` 实证）。
  *
- * 语义：
- * - 409/423 → 调用方应先重探目标元数据做兜底守卫（[fallbackGuard]，ISSUE-P2-572），
- *   放行时 DELETE 目标（404 容忍）后单次无预条件重试；
+ * 语义（**不以删除正式目标作为覆盖兜底**）：
+ * - 409/423 → 先重探目标元数据做裁决（[refusalGuard]）：
+ *   远端 ETag 已漂移 ⇒ 调用方抛 ConflictError（他端并发写入，交上层合并）；
+ *   重探失败 ⇒ 如实上抛探测异常（fail-closed）；
+ *   远端未漂移 ⇒ 服务器确实不支持安全覆盖，抛 [protocolErrorFor] 构造的可处理协议错误，
+ *   **远端旧文件原样保留**；
  * - 412 → ConflictError（ETag 预条件失败），与 409/423 分开报错；
  * - 其它状态码 → ProtocolError（通用 MOVE 失败）。
+ *
+ * 旧「DELETE 目标 + 无预条件重试」兜底已移除：HTTP/WebDAV 没有原子的「覆盖」原语，
+ * 删除成功而随后的 MOVE 失败、取消或进程死亡会让正式远端路径缺失，两步之间他端还可重建，
+ * 无预条件重试又会静默覆盖该重建结果。宁可如实失败并保留旧文件。
  *
  * 抽为纯策略：错误文案与「是否可重试」的判定可在纯 JVM 上断言，
  * 不依赖真实 DAV 服务器。
@@ -30,32 +37,31 @@ internal object WebDavMoveOverwritePolicy {
     /** HTTP 412 Precondition Failed：ETag / If 预条件失败 */
     const val HTTP_PRECONDITION_FAILED = 412
 
-    /** MOVE 是否应走「DELETE 目标 + 无预条件重试」兜底 */
+    /** MOVE 是否属于「服务器拒绝覆盖已有目标」形态（409/423） */
     fun isOverwriteConflict(httpCode: Int): Boolean =
         httpCode == HTTP_CONFLICT || httpCode == HTTP_LOCKED
 
-    /** MOVE 是否应转 ConflictError（预条件失败，不可用 DELETE+重试解决） */
+    /** MOVE 是否应转 ConflictError（预条件失败，不可用覆盖重试解决） */
     fun isPreconditionFailure(httpCode: Int): Boolean =
         httpCode == HTTP_PRECONDITION_FAILED
 
     /**
-     * ISSUE-P2-572：409/423 兜底 DELETE 前置条件判定——409/423 本身无法区分
+     * 409/423 拒绝覆盖后的裁决（ENG-20261028-20）——409/423 本身无法区分
      * 「服务器对 MOVE 覆盖的能力性拒绝」与「远端内容已被他端并发修改」，须以重探结果裁决：
-     * - [currentMeta] 为 null（重探**失败**，含 404 / 5xx）→ [OverwriteFallbackGuard.ProbeFailed]：
-     *   调用方如实上抛探测异常、不得 DELETE（fail-closed，ISSUE-P2-501 同口径——
-     *   探测失败 ≠ 「成功但无 ETag」，两者不得混折）；
-     * - 远端 ETag 非空且 ≠ 非空 [expectedEtag] → [OverwriteFallbackGuard.Drifted]（携当前远端 ETag）：
-     *   他端在本端上传临时文件期间写入了新版本，此刻 DELETE 会销毁他端刚写入的内容，
-     *   调用方抛 ConflictError、**不得 DELETE**；
+     * - [currentMeta] 为 null（重探**失败**，含 404 / 5xx / 不可解析）→ [OverwriteRefusalGuard.ProbeFailed]：
+     *   调用方如实上抛探测异常（fail-closed，ISSUE-P2-501 同口径——探测失败 ≠「成功但无 ETag」）；
+     * - 远端 ETag 非空且 ≠ 非空 [expectedEtag] → [OverwriteRefusalGuard.Drifted]（携当前远端 ETag）：
+     *   他端已写入新版本，调用方抛 ConflictError；
      * - ETag 相同、缺失（无 ETag 服务器）或本就无预期基线（[expectedEtag] 空白）→
-     *   [OverwriteFallbackGuard.Proceed]：无锁可护或锁未失效，放行既有兜底（维持 Kp2a 兼容收益）。
+     *   [OverwriteRefusalGuard.RemoteUnchanged]：远端未变而服务器仍拒绝覆盖 ⇒
+     *   不支持安全覆盖，调用方返回协议错误并保留远端旧文件。
      */
-    fun fallbackGuard(currentMeta: RemoteFileMetadata?, expectedEtag: String?): OverwriteFallbackGuard =
+    fun refusalGuard(currentMeta: RemoteFileMetadata?, expectedEtag: String?): OverwriteRefusalGuard =
         when {
-            currentMeta == null -> OverwriteFallbackGuard.ProbeFailed
+            currentMeta == null -> OverwriteRefusalGuard.ProbeFailed
             isOverwriteDrift(currentRemoteEtag = currentMeta.etag, expectedEtag = expectedEtag) ->
-                OverwriteFallbackGuard.Drifted(currentMeta.etag)
-            else -> OverwriteFallbackGuard.Proceed
+                OverwriteRefusalGuard.Drifted(currentMeta.etag)
+            else -> OverwriteRefusalGuard.RemoteUnchanged
         }
 
     /**
@@ -68,10 +74,10 @@ internal object WebDavMoveOverwritePolicy {
             !currentRemoteEtag.isNullOrBlank() &&
             currentRemoteEtag != expectedEtag
 
-    /** 覆盖冲突最终失败时的报错文案（与 412 分开，ISSUE-P2-381 AC②） */
-    fun overwriteConflictMessage(httpCode: Int): String =
+    /** 覆盖被拒且远端未变时的报错文案：明确「未删除远端文件」，用户可据以检查服务器配置 */
+    fun overwriteRefusedMessage(httpCode: Int): String =
         "WebDAV 原子写入 MOVE 失败：服务器拒绝覆盖已有目标 (HTTP $httpCode)，" +
-            "已 DELETE 目标并重试仍失败，已清理临时文件"
+            "远端旧文件未删除、临时文件已清理；请确认服务器允许 MOVE 覆盖已有目标 (Overwrite: T) 后重试"
 
     /** 非预条件、非覆盖冲突时的通用 MOVE 失败文案 */
     fun genericMoveFailureMessage(httpCode: Int): String =
@@ -81,26 +87,26 @@ internal object WebDavMoveOverwritePolicy {
     fun preconditionFailureMessage(): String =
         "WebDAV 原子写入 MOVE 失败：远端已被其他人修改 (HTTP 412)"
 
-    /** ISSUE-P2-572：兜底前重探发现远端已漂移的 ConflictError 文案（携实际 409/423 状态码） */
+    /** 覆盖被拒后重探发现远端已漂移的 ConflictError 文案（携实际 409/423 状态码） */
     fun overwriteDriftMessage(httpCode: Int): String =
         "WebDAV 原子写入 MOVE 失败：远端已被其他人修改 (HTTP $httpCode)"
 
     /**
-     * 记录一次覆盖冲突兜底日志（不含路径 / 密码等任何用户数据）。
-     * 调用方在 DELETE 目标之前调用。
+     * 记录一次覆盖被拒日志（不含路径 / 密码等任何用户数据）。
+     * 调用方在抛协议错误之前调用——本路径不删除远端正式目标。
      */
-    fun logOverwriteConflict(httpCode: Int) {
+    fun logOverwriteRefusal(httpCode: Int) {
         AppLog.i(
             "WebDavSyncProvider",
-            "MOVE 覆盖已有目标返回 HTTP $httpCode，先 DELETE 目标（404 容忍）再重试"
+            "MOVE 覆盖已有目标返回 HTTP $httpCode，服务器不支持安全覆盖：保留远端旧文件，仅清理临时文件"
         )
     }
 
     /** 按最终失败形态构造 ProtocolError */
-    fun protocolErrorFor(overwriteConflictCode: Int?, lastMoveCode: Int): SyncException.ProtocolError {
-        val code = overwriteConflictCode
+    fun protocolErrorFor(overwriteRefusedCode: Int?, lastMoveCode: Int): SyncException.ProtocolError {
+        val code = overwriteRefusedCode
         return if (code != null) {
-            SyncException.ProtocolError(code, overwriteConflictMessage(code))
+            SyncException.ProtocolError(code, overwriteRefusedMessage(code))
         } else {
             SyncException.ProtocolError(500, genericMoveFailureMessage(lastMoveCode))
         }
@@ -108,16 +114,16 @@ internal object WebDavMoveOverwritePolicy {
 }
 
 /**
- * ISSUE-P2-572：409/423 兜底 DELETE 前元数据重探的裁决（纯策略，纯 JVM 可断言）。
+ * 409/423 拒绝覆盖后、以重探元数据作出的裁决（纯策略，纯 JVM 可断言，ENG-20261028-20）。
  */
-internal sealed interface OverwriteFallbackGuard {
+internal sealed interface OverwriteRefusalGuard {
 
-    /** 远端未被并发改写（或双方均无锁可持）：放行既有「DELETE 目标 + 无预条件重试」兜底 */
-    data object Proceed : OverwriteFallbackGuard
+    /** 远端未被并发改写而服务器仍拒绝覆盖：不支持安全覆盖 ⇒ 协议错误 + 保留远端旧文件 */
+    data object RemoteUnchanged : OverwriteRefusalGuard
 
-    /** 远端 ETag 已漂移（他端并发写入新版本）：禁止 DELETE，转 ConflictError */
-    data class Drifted(val currentRemoteEtag: String) : OverwriteFallbackGuard
+    /** 远端 ETag 已漂移（他端并发写入新版本）：转 ConflictError，交上层合并 */
+    data class Drifted(val currentRemoteEtag: String) : OverwriteRefusalGuard
 
     /** 重探失败：与「成功但无 ETag」两回事（ISSUE-P2-501 分型），fail-closed 如实上抛 */
-    data object ProbeFailed : OverwriteFallbackGuard
+    data object ProbeFailed : OverwriteRefusalGuard
 }

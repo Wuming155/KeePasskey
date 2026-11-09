@@ -155,6 +155,30 @@ internal class FieldReferenceCharExpansionTest {
             rootWith(github, consumerUpper),
             "octocat"
         )
+        // 同值多条目取文档序首个（口令面与公开字段索引同一「命中即停」语义）
+        val second = entry(title = "GitHub2", username = "octocat-2", password = "gh_secret")
+        assertExpandsTo(
+            consumer.password!!.readString(),
+            rootWith(github, second, consumer),
+            "octocat"
+        )
+        // 未命中：保守回退原文
+        assertExpandsTo("{REF:U@P:nope}", rootWith(github), "{REF:U@P:nope}")
+        // 空检索文本命中首个空口令条目；无口令字段的条目被跳过
+        val noPass = entry(title = "NoPass", username = "u-no-pass", password = null)
+        val emptyPass = entry(title = "EmptyPass", username = "u-empty", password = "")
+        assertExpandsTo("{REF:U@P:}", rootWith(noPass, emptyPass), "u-empty")
+    }
+
+    @Test(timeout = 10_000)
+    fun `口令检索命中后不再读取其后条目的口令`() {
+        // ENG-20261028-13：口令检索不得为全库建 String 键索引（那会对每条口令调用 readString 并
+        // 使其以不可擦除的 String 驻留）。命中即停的可观察证据：命中之后的条目口令即使已清零
+        // （读取会 fail-fast），本通道与 String 引擎都必须照常解析。
+        val hit = entry(title = "Hit", username = "octocat", password = "gh_secret")
+        val erased = entry(title = "Erased", username = "ghost", password = "stale_secret")
+        erased.password!!.clear()
+        assertExpandsTo("{REF:U@P:gh_secret}", rootWith(hit, erased), "octocat")
     }
 
     @Test

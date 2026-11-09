@@ -1,9 +1,7 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.testutil.MainDispatcherGuard
-import android.content.Context
-import android.content.ContextWrapper
-import android.content.SharedPreferences
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.FakeSettingsRepository
@@ -34,7 +32,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.lang.reflect.Proxy
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
@@ -74,50 +71,12 @@ class UnlockViewModelBiometricAutoPromptTest {
     private val activeDbId = "db_personal"
 
     /**
-     * JVM 内存版封印凭据存储：`SharedPreferences` 以 `java.lang.reflect.Proxy` 内存实现替换，
+     * JVM 内存版封印凭据存储：基于 [InMemorySharedPreferences] 内存替身，
      * 其余（IV/密文 Base64 编解码、按库存在性判定）全部走生产实现，保证与真机同源语义。
      */
     private class InMemorySealedCredentialStore {
-        private val entries = mutableMapOf<String, Any?>()
-
-        private val editor: SharedPreferences.Editor = Proxy.newProxyInstance(
-            SharedPreferences.Editor::class.java.classLoader,
-            arrayOf(SharedPreferences.Editor::class.java)
-        ) { proxy, method, args ->
-            when (method.name) {
-                "putString" -> {
-                    entries[args[0] as String] = args[1]
-                    proxy
-                }
-                "remove" -> {
-                    entries.remove(args[0] as String)
-                    proxy
-                }
-                "clear" -> {
-                    entries.clear()
-                    proxy
-                }
-                "apply", "commit" -> null
-                else -> proxy
-            }
-        } as SharedPreferences.Editor
-
-        private val prefs: SharedPreferences = Proxy.newProxyInstance(
-            SharedPreferences::class.java.classLoader,
-            arrayOf(SharedPreferences::class.java)
-        ) { _, method, args ->
-            when (method.name) {
-                "getString" -> (entries[args[0] as String] as? String) ?: args[1] as? String
-                "contains" -> entries.containsKey(args[0] as String)
-                "edit" -> editor
-                else -> null
-            }
-        } as SharedPreferences
-
         val storage: BiometricCredentialStorage = BiometricCredentialStorage(
-            object : ContextWrapper(null) {
-                override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs
-            },
+            InMemorySharedPreferences().context(),
             keystoreManager = null
         )
     }

@@ -20,17 +20,23 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import com.keepasskey.app.MainApplication
 
 data class SecurityColors(
     val passkey: Color,
@@ -129,16 +135,51 @@ fun KeePasskeyTheme(
         LocalThemePalette provides themePalette,
         LocalSecurityColors provides securityColors
     ) {
-        // TASK-07：Material 3 Expressive——Expressive 主题承载官方弹性动效（MotionScheme），
-        // 形状/排版在 Expressive 语义下渲染；品牌 ColorScheme/typography/shapes 定制保持不变
-        MaterialExpressiveTheme(
-            colorScheme = finalColorScheme,
-            typography = Typography,
-            shapes = Shapes,
-            motionScheme = MotionScheme.expressive(),
-            content = content
-        )
+        AutoLockPlatformTextInputEffect {
+            // TASK-07：Material 3 Expressive——Expressive 主题承载官方弹性动效（MotionScheme），
+            // 形状/排版在 Expressive 语义下渲染；品牌 ColorScheme/typography/shapes 定制保持不变
+            MaterialExpressiveTheme(
+                colorScheme = finalColorScheme,
+                typography = Typography,
+                shapes = Shapes,
+                motionScheme = MotionScheme.expressive(),
+                content = content
+            )
+        }
     }
+}
+
+/**
+ * 全局软键盘输入接线（ENG-20261028-04 补强）。
+ *
+ * 通过 Compose [InterceptPlatformTextInput] 全局挂载 [PlatformTextInputInterceptor]，
+ * 将所有 Compose 文本框建立的输入会话的 [android.view.inputmethod.InputConnection]
+ * 接入 [com.keepasskey.app.security.AutoLockInteractionTracker.wrapInputConnection]。
+ * 真实软键盘编辑（输入、删除等）重排前台闲置计时，只读查询不重排，避免逐字段逐表单机械接线。
+ */
+@Composable
+internal fun AutoLockPlatformTextInputEffect(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val inInspectionMode = LocalInspectionMode.current
+    if (inInspectionMode) {
+        content()
+        return
+    }
+    val autoLockManager = (context.applicationContext as? MainApplication)?.autoLockManager
+    val tracker = autoLockManager?.interactionTracker
+    if (tracker == null) {
+        content()
+        return
+    }
+    val interceptor = remember(tracker) {
+        PlatformTextInputInterceptor { request, nextHandler ->
+            val wrappedRequest = PlatformTextInputMethodRequest { outAttrs ->
+                tracker.wrapInputConnection(request.createInputConnection(outAttrs))
+            }
+            nextHandler.startInputMethod(wrappedRequest)
+        }
+    }
+    InterceptPlatformTextInput(interceptor = interceptor, content = content)
 }
 
 /**

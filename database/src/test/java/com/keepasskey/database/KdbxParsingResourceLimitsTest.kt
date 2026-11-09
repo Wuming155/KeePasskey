@@ -9,6 +9,7 @@ import com.keepasskey.database.io.LittleEndianUtil
 import com.keepasskey.database.xml.KdbxXmlParser
 import com.keepasskey.database.xml.TextNode
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -118,6 +119,48 @@ class KdbxParsingResourceLimitsTest {
     }
 
     /**
+     * ENG-20261028-30：skip 跳过的字节同样是解压输出的一部分，必须计入同一预算——
+     * 此前继承的 `FilterInputStream.skip` 直接委派底层流、免计费，消费方可绕开整包上限。
+     */
+    @Test
+    fun `解压输出护栏_skip 计入累计消费且越界即拒绝`() {
+        val data = ByteArray(64) { it.toByte() }
+        val bounded = SizeBoundedInputStream(ByteArrayInputStream(data), maxBytes = 8)
+
+        assertEquals("预算内的 skip 应返回实际跳过量", 5L, bounded.skip(5))
+        assertThrows(KdbxCorruptFileException::class.java) { bounded.skip(10) }
+    }
+
+    @Test
+    fun `解压输出护栏_read 与 skip 混用共享同一预算`() {
+        val data = ByteArray(16) { it.toByte() }
+        val bounded = SizeBoundedInputStream(ByteArrayInputStream(data), maxBytes = 8)
+        val buffer = ByteArray(5)
+
+        assertEquals(3L, bounded.skip(3))
+        assertEquals("skip 3 + read 5 恰好用尽预算", 5, bounded.read(buffer, 0, 5))
+        assertThrows(KdbxCorruptFileException::class.java) { bounded.read() }
+    }
+
+    @Test
+    fun `解压输出护栏_用尽预算后的 skip 同样被拒绝`() {
+        val bounded = SizeBoundedInputStream(ByteArrayInputStream(ByteArray(64)), maxBytes = 8)
+
+        assertEquals(8L, bounded.skip(8))
+        assertThrows(KdbxCorruptFileException::class.java) { bounded.skip(1) }
+    }
+
+    @Test
+    fun `解压输出护栏_skip 非正入参与 EOF 返回 0 且不计费`() {
+        val bounded = SizeBoundedInputStream(ByteArrayInputStream(ByteArray(4)), maxBytes = 8)
+
+        assertEquals("跳过 0 字节返回 0", 0L, bounded.skip(0))
+        assertEquals("负数按 InputStream.skip 契约返回 0", 0L, bounded.skip(-5))
+        assertEquals("预算充裕时只跳实际剩余字节", 4L, bounded.skip(8))
+        assertEquals("EOF 后不计费也不抛异常", 0L, bounded.skip(8))
+    }
+
+    /**
      * ISSUE-P3-10 子项 1：载荷解压上限常量本身的取值契约——
      * 必须落在 64 ~ 128 MiB 区间（移动端可承受），且不得低于内层 Header 单字段上限
      * （[InnerHeader.MAX_INNER_FIELD_BYTES]，承载单个合法附件），否则会误拒合法库。
@@ -141,6 +184,21 @@ class KdbxParsingResourceLimitsTest {
         assertThrows(KdbxCorruptFileException::class.java) {
             KdbxFile.guardPayloadSize(ByteArrayInputStream(bomb), isGzipCompressed = true)
                 .use { it.readAllBytes() }
+        }
+    }
+
+    /**
+     * ENG-20261028-30：生产护栏（`guardPayloadSize` 的 GZip 解压 + 尺寸预算）上 skip 同样计费，
+     * 不得以「跳过而非读取」绕过解压炸弹防线。skip 不物化解压输出，比逐字节读更省内存。
+     */
+    @Test
+    fun `载荷解压护栏_skip 不能绕过整包上限`() {
+        val bomb = gzipOfRepeatedZeros(KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES + 1024)
+
+        KdbxFile.guardPayloadSize(ByteArrayInputStream(bomb), isGzipCompressed = true).use { guarded ->
+            assertThrows(KdbxCorruptFileException::class.java) {
+                guarded.skip(KdbxFile.MAX_DECOMPRESSED_PAYLOAD_BYTES + 1024)
+            }
         }
     }
 

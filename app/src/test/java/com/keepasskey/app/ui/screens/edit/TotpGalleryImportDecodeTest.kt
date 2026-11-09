@@ -126,7 +126,7 @@ class TotpGalleryImportDecodeTest {
         const val WHITE_PIXEL = 0xFFFFFFFF.toInt()
         const val TRANSPARENT_PIXEL = 0x00000000
 
-        /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先（同 SensitiveWindowHardeningTest 口径）。 */
+        /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先（与仓内既有源码定位辅助同口径）。 */
         val repositoryRoot: File by lazy {
             var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
             repeat(4) {

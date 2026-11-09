@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.AppPickerDialog
 
 /**
@@ -129,6 +130,7 @@ internal fun PackageBlocklistManageDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            TrackDialogInteractionEffect()
             PackageBlocklistBody(
                 description = description,
                 emptyText = emptyText,
@@ -197,6 +199,7 @@ internal fun FieldBlocklistClearDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.autofill_field_block_dialog_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     text = stringResource(R.string.autofill_field_block_dialog_desc),

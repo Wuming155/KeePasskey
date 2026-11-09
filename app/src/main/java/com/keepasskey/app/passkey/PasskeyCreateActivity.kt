@@ -183,6 +183,19 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     }
 
     /**
+     * ENG-20261028-05：注册交付的通道开关复核（CM 通道总开关 ∧「通行密钥支持」开关，
+     * 判定表见 [CredentialDeliveryChannelGate]）。总开关关闭时即使通行密钥开关仍开启也不交付。
+     */
+    private fun rejectsClosedChannel(): Boolean {
+        val closed = !CredentialDeliveryChannelGate.allowsPasskeyDelivery(
+            credentialProviderEnabled = extendedSettingsStore.isCredentialProviderEnabled(),
+            passkeySupportEnabled = extendedSettingsStore.isPasskeySupportEnabled()
+        )
+        if (closed) AppLog.w(TAG, "凭据管理器通道或通行密钥支持已在设置中关闭，拒绝创建 Passkey")
+        return closed
+    }
+
+    /**
      * 注册门禁链（ISSUE-P3-188 拆分）：锁定态复核 → 注册门禁（DAL / 归属校验）→
      * `excludeCredentials` 查重 → 用户验证门控；判定顺序与 fail-closed 口径逐字不变。
      *
@@ -319,6 +332,12 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
     ) {
         lifecycleScope.launch {
             try {
+                // ENG-20261028-05：用户验证期间通道可能已被关闭——先按本次开关值复核，关闭即
+                // 不再生成密钥、不落库，也不写调用方绑定（该绑定只在真正交付时成立）。
+                if (rejectsClosedChannel()) {
+                    rejectAndFinish(CredentialRejectionReason.CHANNEL_DISABLED)
+                    return@launch
+                }
                 // fail-closed 兜底：凡不可签发的验证结果（理论不可达）一律拒绝创建
                 val flags = PasskeyAuthFlags.forRegistration(verification)
                 if (flags == null) {
@@ -382,13 +401,29 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                     )
                 }
 
+                // ENG-20261028-05：密钥生成 / 落库期间通道仍可能被关闭——回传前按本次开关值
+                // 再判一次，关闭即不交付（已落库的密钥不向调用方回传成功，收尾同落库失败型）。
+                if (rejectsClosedChannel()) {
+                    rejectAndFinish(CredentialRejectionReason.CHANNEL_DISABLED)
+                    return@launch
+                }
+
                 val resultIntent = Intent()
                 val response = CreatePublicKeyCredentialResponse(regResponseJson)
                 PendingIntentHandler.setCreateCredentialResponse(resultIntent, response)
-                if (!credentialSessionGate.complete {
+                // ENG-20261028-05：创建结果在票据窄锁内交付；通道开关在锁内最后再判一次，
+                // 覆盖「等待窄锁期间用户关闭通道」的挂起窗口（块内只有同步代码）。
+                var delivered = false
+                val accepted = credentialSessionGate.complete {
+                    if (rejectsClosedChannel()) return@complete
+                    delivered = true
                     setResult(RESULT_OK, resultIntent)
                     finish()
-                }) rejectAndFinish(CredentialRejectionReason.REQUEST_INVALID)
+                }
+                when {
+                    !accepted -> rejectAndFinish(CredentialRejectionReason.REQUEST_INVALID)
+                    !delivered -> rejectAndFinish(CredentialRejectionReason.CHANNEL_DISABLED)
+                }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "Passkey 注册异常", t)

@@ -69,9 +69,16 @@ import java.io.File
                     rollbackStateDir ?: File(context.filesDir, SyncRollbackGuard.STATE_DIR_NAME),
                     cacheScope
                 )
-                val engine = SyncEngine(provider, syncCache, rollbackGuard)
+                val engine = SyncEngine(
+                    provider,
+                    syncCache,
+                    rollbackGuard,
+                    // ENG-20261028-42：同 setupCycleContext——凭据释放走工厂统一收口，引擎不感知协议
+                    credentialReleaser = { target -> providerResolver.releaseOwnedProvider(target) }
+                )
                 engine.isOffline = session.isOfflineMode
-                session.lastSyncEngine = engine
+                // ENG-20261028-42：同 setupCycleContext——登记新引擎并释放不再被待决冲突留存的旧引擎凭据
+                session.replaceSyncEngine(engine) { previous -> conflicts.retainsEngine(previous) }
                 when (val takeoverCommit = engine.commitLocalForce(remotePath, localBytes)) {
                     is SyncCommitResult.Uploaded -> {
                         // ISSUE-P2-308：上传内容即当前会话库内容，采纳已隐式完成，立即落地基线

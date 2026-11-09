@@ -13,7 +13,8 @@ plugins {
 
 // 自动签名的发布密钥库配置：口令解析顺序＝环境变量 → Windows 凭证管理器 → keystore.properties
 // （ISSUE-P3-418：凭证管理器通道经 DPAPI 按当前用户加密，本机不再需要口令明文落盘；
-//  ISSUE-P2-573：该通道的 PR 可改脚本受「release 产物闸门 + SHA-256 完整性基线」两道约束，见下）
+//  ISSUE-P2-573：该通道的 PR 可改脚本另受「release 产物闸门 + SHA-256 漂移检测」两道约束；
+//  两者只收窄执行面、检测单文件漂移，不提供「变更已评审」或「防同批修改」的保证，见下）
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
@@ -26,8 +27,9 @@ val keystoreProperties = Properties().apply {
 //
 // 缺陷背景：`tools/signing/read-cred.ps1` 是 PR 可改文件，此前在**配置阶段**被**任意** gradle 任务
 // （test / lint / help / IDE 同步……）无条件执行。攻击者 PR 只需在保持「退出码 0/1/2 + stdout 语义」
-// （脚本头部契约、调用方依赖）不变的前提下插入外传调用即可伪装；PR 被人工合并后（main 无分支保护，
-// `PD-04`），Windows 维护者本机跑任意 gradlew 即静默外传口令，且同一次执行可连带读取 keystore 文件
+// （脚本头部契约、调用方依赖）不变的前提下插入外传调用即可伪装；PR 被人工合并后（合并前没有
+// 必需检查，见 docs/architecture/已知工程限界.md#构建与验证），Windows 维护者本机跑任意 gradlew
+// 即静默外传口令，且同一次执行可连带读取 keystore 文件
 // 本身——「口令 + 密钥库 = 伪造官方更新」的组合前提单次攻击即满足。三个 workflow 全在 ubuntu
 // （永不执行该脚本），无第二道检测。
 //
@@ -36,12 +38,16 @@ val keystoreProperties = Properties().apply {
 //   `gradle.startParameter.taskNames`——口令必须在**配置阶段**进入 signingConfig（AGP 读取
 //   signingConfig 的时机不受本仓控制），而任务图要到配置结束才可知，故只能取命令行任务名判定。
 //   漏判的兜底是下方 ISSUE-P3-422 的 taskGraph 就绪断言（fail-closed：拒绝产出未签名包）。
-// 闸门二（完整性基线，fail-closed）：执行前对脚本做 SHA-256 白名单校验，与 `credManReadScriptSha256`
-//   常量不一致（或脚本缺失）即中止构建。这是唯一覆盖「Windows 维护者本机构建」这一攻击路径的手段
-//   （CI 在 ubuntu 上永不执行该脚本，无法代劳）；脚本**任何**字节改动都必须在同一批同步更新哈希
-//   （两文件同时被改仍是可在评审中识别的两处敏感面 diff，残余取舍见限界表 §41）。
-// 锁定面：`SigningCredentialChainHardeningTest`（纯 JVM）钉住「基线 ↔ 脚本字节一致」与
-//   「先过闸门一 / 闸门二、后 `ProcessBuilder`」的调用顺序。
+// 闸门二（漂移检测，fail-closed）：执行前对脚本做 SHA-256 比对，与 `credManReadScriptSha256`
+//   常量不一致（或脚本缺失）即中止构建。它能发现的只有「脚本被改、基线未同步」这一类**单文件**
+//   漂移；脚本与基线同处本仓、可被同一个改动同时修改，因此对恶意同批修改**没有**防护力，
+//   校验通过也**不构成**「变更已经评审」的证明。信任边界仍是评审与合并权限
+//   （合并前没有必需检查，见 docs/architecture/已知工程限界.md#构建与验证）以及维护者本机的
+//   执行环境。CI 三个 workflow 全在 ubuntu 上、永不执行该脚本，故本检查也不改变 CI 侧信任面。
+//   触发条件：仅当「命令行显式请求 release 分发产物」且口令确实走凭证管理器通道时执行；
+//   口令来自 KEYSTORE_PASSWORD / KEY_PASSWORD 环境变量或 keystore.properties 时本检查不运行。
+// 验证入口：release 产物构建本身（漂移即配置阶段失败）。该行为没有独立的静态锁定用例——
+//   原先引用它的纯 JVM 用例已按测试准入规则退役，不以源码文本断言替代构建行为。
 // =============================================================================================
 
 val credManReadScript = rootProject.file("tools/signing/read-cred.ps1")
@@ -63,8 +69,9 @@ val releaseArtifactRequested: Boolean = gradle.startParameter.taskNames.any { re
 }
 
 /**
- * ISSUE-P2-573 闸门二：完整性基线校验——脚本缺失或哈希漂移即 `GradleException` 中止构建。
+ * ISSUE-P2-573 闸门二：SHA-256 漂移检测——脚本缺失或哈希漂移即 `GradleException` 中止构建。
  * 有意不做「告警后继续」：那等于把基线降级为注释。
+ * 边界：通过只代表「脚本字节 == 本文件钉定的值」，不代表变更已评审，也不防脚本与基线同批修改。
  */
 fun verifyCredManReadScriptIntegrity() {
     if (!credManReadScript.isFile) {
@@ -80,8 +87,9 @@ fun verifyCredManReadScriptIntegrity() {
         throw GradleException(
             "签名口令链完整性基线失配：tools/signing/read-cred.ps1 实际 SHA-256=$actual，" +
                 "与 app/build.gradle.kts 钉定值 $credManReadScriptSha256 不一致——" +
-                "拒绝在**未经审阅变更**的脚本上读取发布签名口令（ISSUE-P2-573）。" +
-                "若确为有意的脚本变更：先经评审与批次登记，再同步更新本文件中的基线常量。",
+                "拒绝在脚本字节与钉定基线不一致时读取发布签名口令（ISSUE-P2-573）。" +
+                "基线一致只说明两处字节相同，不证明变更已评审，也无法识别脚本与基线同批修改。" +
+                "若确为有意的脚本变更：先经评审，再同步更新本文件中的基线常量。",
         )
     }
     logger.lifecycle("凭证管理器通道：tools/signing/read-cred.ps1 SHA-256 基线校验通过（ISSUE-P2-573）")
@@ -144,7 +152,9 @@ val hasReleaseSigning = releaseStoreResolvedFile?.exists() == true &&
     !releaseKeyPassword.isNullOrBlank()
 
 // =============================================================================================
-// ISSUE-P2-55（审计 F-06）AC③：**发布签名口令的构建期断言**（fail-closed，不可绕过）。
+// ISSUE-P2-55（审计 F-06）AC③：**发布签名口令的构建期断言**（fail-closed，无关闭开关）。
+// 信任边界同闸门二：断言写在可修改的构建脚本里，能改脚本的人也能删断言，约束力以评审与
+// 合并权限为前提；它排除的是「照抄示例值 / 弱口令」这类配置错误，不是防篡改机制。
 //
 // 缺陷背景：`keystore.properties.example` 曾公开示例口令 `keepasskey123`，而本地/流水线
 // 直接照抄该值签名 —— 示例值随公开仓库泄露，等于把发布密钥交给任何人（可用任意 APK

@@ -7,6 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.passkey.PasskeyCxfDisplayField
@@ -24,7 +26,7 @@ import com.keepasskey.app.security.SecureDialogWindowEffect
  * 同时载荷可能带着本库不承载的扩展（`credBlob` / `largeBlob` / `payments`）、
  * 或文档里还有别的凭据——同类实现（fenris 的 `IncompatibleItem` → `ConfirmImportSheet`）
  * 的「先列清单、确认后才导」比「导入后告知」更强 ⇒ 两类信息**合并进同一个对话框**
- * （不新增第二个对话框，也不新增 `FLAG_SECURE` 账目类别）。
+ * （不新增第二个对话框，也不另立一类窗口遮罩口径）。
  *
  * ## 呈现纪律
  *
@@ -32,9 +34,14 @@ import com.keepasskey.app.security.SecureDialogWindowEffect
  *   「来源未提供」标注；**不回显 `credentialId` / `userHandle` / 私钥**，也不显示载荷原文
  *   （[PasskeyImportDraft] 只活在内存里）；
  * - 文案口径（`§292`）：类型一律写「FIDO2 软件密钥（库内加密存储）」，**禁**「芯片 / 硬件」表述；
- * - `FLAG_SECURE` **跟随设置开关**（`PD-48` 裁决三，与 `PD-47` 的扫码取景同源），
- *   故它**不属于** `SecureDialogFlagPolicyTest` 清单里那 4 类无条件强制遮罩对话框；
- *   反 overlay 与点击劫持过滤两层由 [SecureDialogWindowEffect] 始终施加。
+ * - `FLAG_SECURE` **跟随设置开关**（`PD-48` 裁决三，与 `PD-47` 的扫码取景同源，不属于
+ *   无条件强制遮罩的凭据类对话框）；**遮挡触摸过滤恒常施加、不随开关放宽**——它丢弃被其它
+ *   窗口遮挡时的触摸（`MotionEvent.FLAG_WINDOW_IS_OBSCURED`），是反 overlay 点击劫持的那一层。
+ *   该过滤由 [SecureDialogWindowEffect] 施加，而它是**窗口级**的：本组件只在
+ *   `AlertDialog` 的 `text` 槽位内调用它——放在 `AlertDialog(...)` 之前调用时 `LocalView`
+ *   属于宿主窗口，解析不到对话框窗口，过滤会按 fail-safe 静默不动作。
+ *   本包装**不**调用 `setHideOverlayWindows`（抑制 overlay 绘制，与丢弃遮挡态触摸正交），
+ *   该层只由 Activity 窗口（如 `MainActivity`）与 TOTP 取景对话框单独施加。
  */
 @Composable
 internal fun PasskeyImportConfirmDialog(
@@ -48,12 +55,25 @@ internal fun PasskeyImportConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    SecureDialogWindowEffect(flagSecure = flagSecureEnabled)
     val labels = passkeyImportLabels()
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 跟随防截屏开关（同 PD-47 的扫码取景）：开 ⇒ SecureOn 强制遮罩，关 ⇒ SecureOff 显式不遮罩。
+        // 对话框窗口 FLAG_SECURE 的实际决定者是本参数（默认 Inherit 会按宿主窗口清除），
+        // 故两支都必须显式写出，不得回退为省略参数的 Inherit
+        properties = DialogProperties(
+            securePolicy = if (flagSecureEnabled) {
+                SecureFlagPolicy.SecureOn
+            } else {
+                SecureFlagPolicy.SecureOff
+            }
+        ),
         title = { Text(stringResource(R.string.passkey_import_confirm_title)) },
-        text = { Text(passkeyImportSummary(draft, replacesEntry) { labels.getValue(it) }) },
+        text = {
+            // 必须落在对话框自身的内容槽位内（窗口级副作用，见 SecureDialog KDoc）
+            SecureDialogWindowEffect(flagSecure = flagSecureEnabled)
+            Text(passkeyImportSummary(draft, replacesEntry) { labels.getValue(it) })
+        },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(

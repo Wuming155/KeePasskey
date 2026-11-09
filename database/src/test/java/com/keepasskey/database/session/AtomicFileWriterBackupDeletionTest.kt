@@ -9,11 +9,11 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * ISSUE-P3-26 回归测试：删除滚动备份 `.bak` 后的目录项 fsync（目录项变更路径⑤）。
+ * ISSUE-P3-26 回归测试：删除滚动备份 `.bak` 后的目录项 fsync（目录项变更路径④）。
  *
- * 缺陷：ISSUE-P3-13 已把四条落盘路径（.bak copy 后、原子 move 后、降级 rename 后、
- * 降级 copy 覆盖后）统一经可注入的 [DirectorySync] 触达，但 `deleteBackup` 删除 `.bak`
- * 后未执行目录 fsync——unlink 与 rename/copy 同属「目录项变更」，不固化则该删除在断电时
+ * 缺陷：ISSUE-P3-13 已把三条落盘路径（.bak 原子替换后、原子 move 后、降级 rename 后）
+ * 统一经可注入的 [DirectorySync] 触达，但 `deleteBackup` 删除 `.bak`
+ * 后未执行目录 fsync——unlink 与 rename 同属「目录项变更」，不固化则该删除在断电时
  * 可能尚未落盘，**已清理的旧密文快照会重新出现**（旧口令仍可解开）。
  *
  * 断言范式沿用 ISSUE-P3-13：注入记录型替身 [RecordingDirectorySync]（见
@@ -105,5 +105,37 @@ class AtomicFileWriterBackupDeletionTest {
         assertTrue("目录 fsync 异常不得阻断删除结果", deleted)
         assertEquals("钩子必须被调用到（异常发生在调用内部）", 1, invoked)
         assertFalse(bak.exists())
+    }
+
+    @Test
+    fun testDeleteBackupAlsoRemovesAbandonedStagedBackup() {
+        // ENG-20261028-17：写盘中断可能留下暂存备份 .bak.tmp（同样是可被旧口令解开的密文
+        // 快照）；关闭备份偏好或轮换凭据时的清理必须一并移除，且与正式 .bak 同一次目录固化。
+        val (target, bak) = vaultWithBackup()
+        val staged = File(tempFolder.root, "vault.kdbx.bak.tmp")
+        staged.writeBytes("abandoned-staged".toByteArray())
+        val dirSync = RecordingDirectorySync()
+
+        val deleted = AtomicFileWriter.deleteBackup(target, dirSync)
+
+        assertTrue("存在正式备份时必须返回 true", deleted)
+        assertFalse("正式 .bak 必须被删除", bak.exists())
+        assertFalse("遗留暂存备份必须被一并删除", staged.exists())
+        assertEquals("删除两个文件仍只触达一次目录 fsync 钩子", 1, dirSync.syncedDirectories.size)
+    }
+
+    @Test
+    fun testDeleteBackupRemovesOnlyAbandonedStagedBackupWithoutFormalBackup() {
+        // 正式 .bak 不在但遗留暂存件在场：删除同样成立并固化目录项
+        val target = File(tempFolder.root, "vault.kdbx")
+        val staged = File(tempFolder.root, "vault.kdbx.bak.tmp")
+        staged.writeBytes("abandoned-staged".toByteArray())
+        val dirSync = RecordingDirectorySync()
+
+        val deleted = AtomicFileWriter.deleteBackup(target, dirSync)
+
+        assertTrue(deleted)
+        assertFalse(staged.exists())
+        assertEquals("删除暂存件同样是目录项变更，必须固化", 1, dirSync.syncedDirectories.size)
     }
 }

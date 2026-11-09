@@ -199,10 +199,7 @@ class KdbxXmlBinaryNodeBufferWipeTest {
         val raw = ByteArray(50_000) { 0x41 }
         val compressed = gzip(raw)
         // 预算只留 1 KiB：解压必然在中途触发 fail-closed
-        val budget = AttachmentBudget(
-            maxPoolReferenceBytes = Long.MAX_VALUE / 2,
-            maxInlineMaterializedBytes = 1024L
-        )
+        val budget = AttachmentBudget(maxInlineMaterializedBytes = 1024L)
 
         val error = assertThrows(KdbxCorruptFileException::class.java) {
             feedBinary(

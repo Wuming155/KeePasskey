@@ -90,7 +90,13 @@ class RemoteBrowseController @Inject constructor(
             publishBrowseFailure(t.javaClass.simpleName)
             return
         }
-        runAndPublish(provider, directoryPath, cursor)
+        try {
+            runAndPublish(provider, directoryPath, cursor)
+        } finally {
+            // ENG-20261028-42：一次性浏览用的 Provider 在本次浏览结束即确定性失效凭据
+            // （与下方 S3 分支同口径；浏览是单次请求，不存在后续复用者）。
+            provider.clearCredentials()
+        }
     }
 
     suspend fun browseS3(

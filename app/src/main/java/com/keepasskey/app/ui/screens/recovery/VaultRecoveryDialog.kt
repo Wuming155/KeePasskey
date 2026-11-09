@@ -19,8 +19,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureDialogWindowEffect
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.security.VaultRecoveryCoordinator
 import com.keepasskey.app.ui.components.SecurePasswordField
 import java.time.Instant
@@ -32,6 +36,12 @@ import java.time.format.DateTimeFormatter
  *
  * 挂点只呈现：待处置副本清单 → 选中后用主密码解锁比较差异 → 恢复 / 另存 / 暂不处理 / 删除。
  * 主密码以最短生命周期持有于本组件内（输入变更即复制，离开组合即清零），不进入 ViewModel 状态。
+ *
+ * 窗口保护：本窗承载主密码输入与恢复副本差异预览，属**凭据类对话框**，故 `securePolicy` 恒为
+ * `SecureOn`，并由 [SecureDialogWindowEffect] 在本窗内容槽位内施加遮挡触摸过滤，**不读**用户
+ * 防截屏开关——与 `SecureDialog` KDoc 列出的其余始终保护对话框同口径。两者的目标都是**对话框
+ * 自己的窗口**（Compose `AlertDialog` 由 `Dialog` 另建窗口，宿主 Activity 的 flag 与过滤不会传播），
+ * 故 effect 必须在内容槽位内调用。
  */
 @Composable
 fun VaultRecoveryDialogHost(viewModel: RecoveryViewModel) {
@@ -42,7 +52,10 @@ fun VaultRecoveryDialogHost(viewModel: RecoveryViewModel) {
         AlertDialog(
             onDismissRequest = viewModel::dismissPreservationAlert,
             title = { Text(stringResource(R.string.recovery_alert_title)) },
-            text = { Text(stringResource(R.string.recovery_alert_body)) },
+            text = {
+                TrackDialogInteractionEffect()
+                Text(stringResource(R.string.recovery_alert_body))
+            },
             confirmButton = {
                 TextButton(onClick = viewModel::dismissPreservationAlert) {
                     Text(stringResource(R.string.btn_close))
@@ -57,7 +70,10 @@ fun VaultRecoveryDialogHost(viewModel: RecoveryViewModel) {
         AlertDialog(
             onDismissRequest = viewModel::cancelOverwriteConfirm,
             title = { Text(stringResource(R.string.recovery_confirm_overwrite_title)) },
-            text = { Text(stringResource(R.string.recovery_confirm_overwrite_body)) },
+            text = {
+                TrackDialogInteractionEffect()
+                Text(stringResource(R.string.recovery_confirm_overwrite_body))
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.cancelOverwriteConfirm()
@@ -88,8 +104,15 @@ private fun RecoveryDialog(viewModel: RecoveryViewModel, state: RecoveryViewMode
 
     AlertDialog(
         onDismissRequest = viewModel::keep,
+        // 本窗含主密码输入（SecurePasswordField）与差异预览，属**始终保护**的凭据类对话框：
+        // 不读用户防截屏开关，显式 SecureOn。对话框窗口 FLAG_SECURE 的实际决定者是本参数
+        // （默认 Inherit 会按宿主窗口清除，宿主关掉开关时本窗就会变成可截屏）
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = { Text(stringResource(R.string.recovery_dialog_title)) },
         text = {
+            // FLAG_SECURE 与遮挡触摸过滤都是窗口级属性，不会从宿主 Activity 窗口传播；
+            // 必须在对话框自身内容槽位内施加（在 AlertDialog(...) 之外调用解析不到本窗）
+            SecureDialogWindowEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.recovery_dialog_body), style = MaterialTheme.typography.bodyMedium)
                 state.pending.forEach { pending ->

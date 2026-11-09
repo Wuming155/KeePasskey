@@ -4,6 +4,7 @@ import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
+import com.keepasskey.core.security.ProtectedStringReclamation
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.ConcurrentHashMap
@@ -110,14 +111,24 @@ internal class VaultEntrySecretReader(
      *
      * 重取后仍失败则**如实上抛**：那已不是竞态，而是真缺陷，由调用方按既有契约呈现失败。
      * 留痕只记异常类型（不含任何凭据内容）。
+     *
+     * `ENG-20261028-11`：本守卫整段处于读租约内——「取快照 → 读字段」期间会话替换整树时，
+     * 下线实例只登记不擦除，正常时序下不会再撞上并发擦除；重试保留为**未按协议登记的迟到读取**
+     * 与锁定擦除（不等租约）的最后一道防线。
      */
-    private suspend fun <T> guardedCredentialRead(block: suspend () -> T): T =
+    private suspend fun <T> guardedCredentialRead(block: suspend () -> T): T {
+        val lease = ProtectedStringReclamation.acquireReadLease()
         try {
-            block()
-        } catch (e: IllegalStateException) {
-            AppLog.w(TAG, "凭据读取撞上会话树并发替换，重取快照后重试：${e.javaClass.simpleName}")
-            block()
+            return try {
+                block()
+            } catch (e: IllegalStateException) {
+                AppLog.w(TAG, "凭据读取撞上会话树并发替换，重取快照后重试：${e.javaClass.simpleName}")
+                block()
+            }
+        } finally {
+            lease.close()
         }
+    }
 
     // 原 readErasableChars（ProtectedString? → CharArray?）随 ISSUE-P3-273 的字段定位收敛
     // 失去全部调用点（修订快照改走 VaultEntryTotpMapping.locateConfigSource().readChars()），
@@ -208,14 +219,23 @@ internal class VaultEntrySecretReader(
      * 按 id 计算单条 TOTP 验证码（ISSUE-P2-90：命中缓存时**不触碰会话、不解密、不算 HMAC**）。
      *
      * 返回 null 的三种情形（与接线前一致）：条目不存在 / 未配置 OTP / 验证码计算失败。
+     *
+     * `ENG-20261028-11`：未命中缓存时，「取快照 → 定位条目 → 解析种子 → 出码」整段处于一条读租约内
+     * ——TOTP 种子与标准字段同为被替换下线的候选，解析途中被回收会得到「无码」的假失败。
+     * 命中缓存的分支不进入租约（不触碰任何受保护实例）。
      */
     suspend fun calculateEntryTotp(entryId: String): EntryTotpSnapshot? {
         val now = nowMillis()
         cachedTotpOrNull(entryId, now)?.let { return it }
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
-        return computeAndCacheTotp(entryId, entry, now)
+        val lease = ProtectedStringReclamation.acquireReadLease()
+        try {
+            val currentDb = databaseSession.databaseFlow.first() ?: return null
+            val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
+            return computeAndCacheTotp(entryId, entry, now)
+        } finally {
+            lease.close()
+        }
     }
 
     /**
@@ -224,6 +244,8 @@ internal class VaultEntrySecretReader(
      *
      * 未命中缓存且条目不存在 / 无 OTP 的 id **不出现在返回值中**（与单条通道返回 null 同义）。
      * 索引只在**存在缺失项**时构建——全命中时零遍历、零分配。
+     *
+     * `ENG-20261028-11`：存在缺失项时，索引构建与逐条出码整段处于一条读租约内（同单条通道）。
      */
     suspend fun calculateEntryTotps(entryIds: List<String>): Map<String, EntryTotpSnapshot> {
         if (entryIds.isEmpty()) return emptyMap()
@@ -236,17 +258,22 @@ internal class VaultEntrySecretReader(
         }
         if (pending.isEmpty()) return result
 
-        val currentDb = databaseSession.databaseFlow.first() ?: return result
-        // 批次内条目集合固定，故单次物化索引优于「每条各走一遍深度优先」：
-        // 这里的 O(N) 是一次性成本，而逐条 findEntry 是 O(T×N)（ISSUE-P3-148 针对的是
-        // 「只需一条」的路径，两处取舍不冲突）
-        val index = currentDb.rootGroup.allEntries().associateBy { it.id }
-        for (id in pending) {
-            val uuid = parseKdbxUuidOrNull(id) ?: continue
-            val entry = index[uuid] ?: continue
-            computeAndCacheTotp(id, entry, now)?.let { result[id] = it }
+        val lease = ProtectedStringReclamation.acquireReadLease()
+        try {
+            val currentDb = databaseSession.databaseFlow.first() ?: return result
+            // 批次内条目集合固定，故单次物化索引优于「每条各走一遍深度优先」：
+            // 这里的 O(N) 是一次性成本，而逐条 findEntry 是 O(T×N)（ISSUE-P3-148 针对的是
+            // 「只需一条」的路径，两处取舍不冲突）
+            val index = currentDb.rootGroup.allEntries().associateBy { it.id }
+            for (id in pending) {
+                val uuid = parseKdbxUuidOrNull(id) ?: continue
+                val entry = index[uuid] ?: continue
+                computeAndCacheTotp(id, entry, now)?.let { result[id] = it }
+            }
+            return result
+        } finally {
+            lease.close()
         }
-        return result
     }
 
     /**
@@ -304,13 +331,19 @@ internal class VaultEntrySecretReader(
 
     suspend fun getEntryTotpSecretChars(entryId: String): CharArray? {
         val targetUuid = parseKdbxUuidOrNull(entryId) ?: return null
-        val currentDb = databaseSession.databaseFlow.first() ?: return null
-        val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
-        // 断点4 整改：与 parseTotpConfig 同源读取。
-        // ISSUE-P3-273：改为直接复用单一真相源（原为本地重写一份优先序，与解析侧漂移即出错）
-        // TASK-10：返回配置原文独占 CharArray 副本（otpauth:// URI 或 Base32 种子）供编辑页回填，
-        // 调用方按借用语义用毕清零
-        return VaultEntryTotpMapping.locateConfigSource(entry, totpPreferences())?.readChars()
+        // ENG-20261028-11：取快照 → 定位 → 读配置原文整段在一条读租约内（种子同为下线候选）
+        val lease = ProtectedStringReclamation.acquireReadLease()
+        try {
+            val currentDb = databaseSession.databaseFlow.first() ?: return null
+            val entry = currentDb.rootGroup.findEntry(targetUuid) ?: return null
+            // 断点4 整改：与 parseTotpConfig 同源读取。
+            // ISSUE-P3-273：改为直接复用单一真相源（原为本地重写一份优先序，与解析侧漂移即出错）
+            // TASK-10：返回配置原文独占 CharArray 副本（otpauth:// URI 或 Base32 种子）供编辑页回填，
+            // 调用方按借用语义用毕清零
+            return VaultEntryTotpMapping.locateConfigSource(entry, totpPreferences())?.readChars()
+        } finally {
+            lease.close()
+        }
     }
 
     /**

@@ -83,6 +83,45 @@ fn date_like_flag() {
     assert_eq!(estimate(b"user1234name").flags & FLAG_DATE_LIKE, 0);
 }
 
+/// ENG-20261028-07：已声明的日期格式逐条生效——6 位串的末两位（日）必须参与判定，
+/// 旧实现只把前四位当月日，与 `YYMMDD` 语义不符。
+#[test]
+fn declared_date_formats_recognize_all_positions() {
+    // 6 位：YYMMDD / MMDDYY / DDMMYY
+    assert_ne!(estimate(b"260131").flags & FLAG_DATE_LIKE, 0, "YYMMDD 正例");
+    assert_ne!(estimate(b"013126").flags & FLAG_DATE_LIKE, 0, "MMDDYY 正例");
+    assert_ne!(estimate(b"311230").flags & FLAG_DATE_LIKE, 0, "DDMMYY 正例");
+    // 反例：任何布局都凑不出合法月 / 日
+    assert_eq!(estimate(b"123456").flags & FLAG_DATE_LIKE, 0);
+    // 8 位：YYYYMMDD / MMDDYYYY / DDMMYYYY
+    assert_ne!(estimate(b"20260101").flags & FLAG_DATE_LIKE, 0, "YYYYMMDD 正例");
+    assert_ne!(estimate(b"01012026").flags & FLAG_DATE_LIKE, 0, "MMDDYYYY 正例");
+    assert_ne!(estimate(b"31122026").flags & FLAG_DATE_LIKE, 0, "DDMMYYYY 正例");
+    assert_eq!(estimate(b"12345678").flags & FLAG_DATE_LIKE, 0);
+    // 整串日期形状按 4.0 扣减（不是仅内含年份的 2.0）
+    assert!(estimate(b"20260101").guesses_log10_x100 < 800);
+}
+
+/// ENG-20261028-07：字符计数单位为 Unicode 码点（补充平面字符只算 1 个），与 JVM 降级侧同口径。
+#[test]
+fn supplementary_plane_chars_count_as_one_code_point() {
+    let distinct = "🔐🔑🧩🛡🔒🔓🚀"; // 7 个互异码点（UTF-16 下为 14 个码元）
+    assert_eq!(distinct.chars().count(), 7);
+    let seven = estimate(distinct.as_bytes());
+    assert_ne!(seven.flags & FLAG_TOO_SHORT, 0, "7 个码点必须判长度不足");
+    assert_eq!(seven.score, 2, "长度不足的分档上限必须按码点生效");
+    assert_eq!(estimate("🔐🔑🧩🛡🔒🔓🚀🧪".as_bytes()).flags & FLAG_TOO_SHORT, 0);
+
+    // 同一码点 ×7：按码点计为 7 连重复，且整串是一个单元的高次重复
+    let repeated = estimate("🔐🔐🔐🔐🔐🔐🔐".as_bytes());
+    assert_ne!(repeated.flags & FLAG_REPEATED_RUN, 0);
+    assert_ne!(repeated.flags & FLAG_PERIODIC_REPEAT, 0);
+    assert!(repeated.score <= 1);
+
+    // emoji 不因码元数翻倍而额外获得长度上限
+    assert_eq!(estimate("aB3$kL🔑".as_bytes()).score, 2);
+}
+
 #[test]
 fn single_class_and_low_unique_flags() {
     assert_ne!(estimate(b"abcdefghijkl").flags & FLAG_SINGLE_CHAR_CLASS, 0);
@@ -99,6 +138,25 @@ fn periodic_repeat_flag_and_score() {
     assert_ne!(estimate(b"xyxyxyxy").flags & FLAG_PERIODIC_REPEAT, 0);
     // 反例：非周期
     assert_eq!(estimate(b"abcdefghi").flags & FLAG_PERIODIC_REPEAT, 0);
+}
+
+/// ENG-20261028-07：二次重复同样按「一个单元」重估——猜测成本是「猜中单元 + 一次重复」，
+/// 不是长度翻倍后的字符集熵。旧实现把 `passwordpassword` 评为 4 档。
+#[test]
+fn doubled_unit_is_rated_as_one_unit() {
+    for pw in ["passwordpassword", "abcabc", "xyxy", "QwertyQwerty"] {
+        let e = estimate(pw.as_bytes());
+        assert_ne!(e.flags & FLAG_PERIODIC_REPEAT, 0, "[{pw}] 二次重复须命中周期标志");
+        assert!(e.score <= 1, "[{pw}] 二次重复不得被评为强口令（实际 {}）", e.score);
+    }
+    // 对照：单元本身足够强时，重复后仍按「单元 + 1 次重复」计，最高档不被误伤
+    let strong = "aB3$kLmQ7#xZ";
+    let doubled = format!("{strong}{strong}");
+    let e = estimate(doubled.as_bytes());
+    assert_ne!(e.flags & FLAG_PERIODIC_REPEAT, 0);
+    assert_eq!(e.score, SCORE_MAX, "强单元重复仍应落在最高档");
+    // 反例：仅末段偶合前缀，不构成整周期
+    assert_eq!(estimate(b"aB3$kLmQ7#xZaB3").flags & FLAG_PERIODIC_REPEAT, 0);
 }
 
 #[test]

@@ -22,6 +22,7 @@ import com.keepasskey.sync.merge.KdbxMerger
 import com.keepasskey.sync.merge.MergeResult
 import com.keepasskey.sync.merge.SyncConflictStrategy
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.provider.SyncProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -135,6 +136,17 @@ class SyncConflictController @Inject constructor(
         conflictUploadExpectedEtag(conflictMomentEtag)
 
     /**
+     * `ENG-20261028-09` / `ENG-20261028-31`：合并产物已上传但本地落盘失败 / 取消时，作废进程内
+     * 同步基线的**窄口**（语义见 `SyncUploadSettlement.invalidateSyncedBaselineAfterLocalFailure`）。
+     *
+     * 为什么需要本口：[session] 是本类的私有依赖，而实现下沉在同包 `SyncConflictResolution.kt`
+     * 的 [resolveConflicts] / `adoptMergedDatabase` 需要该能力；经此转调，不放宽依赖的可见性。
+     */
+    internal fun invalidateSyncedBaselineOnLocalFailure() {
+        invalidateSyncedBaselineAfterLocalFailure(session)
+    }
+
+    /**
      * 解决冲突并执行最终提交回写。
      *
      * ISSUE-P3-305：实现下沉同包 `SyncConflictResolution.kt`——用户裁决落树、上传与本地采纳
@@ -246,7 +258,12 @@ class SyncConflictController @Inject constructor(
      * `binaries` 同步做**身份集合判定**擦除（存活侧共享的池条目跳过、独立解析池全量清零）——
      * 本方法由此同时收口 pending 树与 pending 池，不再把 ≤ 落盘阈值的附件明文留给 GC。
      */
-    fun clearPendingConflictSession() {
+    fun clearPendingConflictSession(keepEngine: SyncEngine? = null) {
+        // ENG-20261028-42：待决会话是「引擎 + Provider」的第二个持有者。丢弃待决会话后该引擎
+        // 不再有存活消费者，其 Provider 的凭据副本必须在此确定性失效（会话终止路径同样经此收口，
+        // 由 SyncCoordinator.onSessionLocked 调用；此处先于字段置空取值）。
+        // 测试注入的借用 Provider 不属本会话所有，跳过（见 SyncSessionState 同口径）。
+        val discardedEngine = pendingRemoteEngine
         val live = databaseSession.databaseFlow.value
         pendingLocalDb?.let { eraseDiscardedDatabase(it, live) }
         pendingRemoteDb?.let { eraseDiscardedDatabase(it, live) }
@@ -255,6 +272,12 @@ class SyncConflictController @Inject constructor(
         _groupConflictFlow.value = emptyList()
         _metaConflictFlow.value = emptyList()
         pendingRemoteEngine = null
+        // @param keepEngine 同一调用栈里仍要继续用该引擎发请求的「替换 / 重入」路径
+        // （裁决上传 412 后重入合并、新一轮冲突覆盖旧待决会话）：此时待决**会话**被丢弃，
+        // 但引擎并未失去持有者，提前失效会让紧随其后的上传以鉴权失败告终。
+        if (discardedEngine != null && discardedEngine !== keepEngine && !isBorrowedEngine(discardedEngine)) {
+            discardedEngine.releaseProviderCredentials()
+        }
         pendingRemotePath = null
         pendingLocalDb = null
         pendingRemoteDb = null
@@ -266,6 +289,42 @@ class SyncConflictController @Inject constructor(
         pendingRemoteCache = null
         // ISSUE-P2-278：仅丢引用——该快照是活动会话树的身份别名，绝不列入擦除面
         pendingSessionSnapshot = null
+    }
+
+    /**
+     * ENG-20261028-42：该引擎是否仍被待决冲突会话留存（用户稍后裁决时会继续用它发网络写）。
+     *
+     * 供 `SyncSessionState.replaceSyncEngine` 判定「旧周期引擎能否在替换时释放凭据」：
+     * 待决冲突的裁决上传复用同一引擎，提前失效会让裁决以鉴权失败告终。
+     */
+    fun retainsEngine(engine: SyncEngine): Boolean = pendingRemoteEngine === engine
+
+    /**
+     * ENG-20261028-42：该 Provider 是否仍被待决冲突会话的引擎持有（作用域退出时的保留判定）。
+     *
+     * 与 [retainsEngine] 同一事实的 Provider 视角：`SyncProviderResolver` 在 `useProvider*`
+     * 作用域退出时据此决定是否释放凭据——冲突待决期不能释放，否则用户稍后裁决的上传必然鉴权失败。
+     */
+    fun retainsProvider(provider: SyncProvider): Boolean =
+        pendingRemoteEngine?.ownsProvider(provider) == true
+
+    /**
+     * ENG-20261028-42：配置撤销时失效待决冲突引擎的 Provider 凭据（幂等；无待决会话时无操作）。
+     *
+     * 与 [clearPendingConflictSession] 的区别：只失效凭据，不丢弃待决树与冲突清单——
+     * 配置撤销后用户仍可能看到旧冲突列表，但任何上传都会以鉴权失败如实结束，
+     * 而不是拿撤销前的口令继续访问云端。
+     */
+    fun releasePendingEngineCredentials() {
+        val engine = pendingRemoteEngine ?: return
+        if (isBorrowedEngine(engine)) return
+        engine.releaseProviderCredentials()
+    }
+
+    /** 引擎是否借用了测试注入的 Provider（借用依赖不属本会话，不做凭据释放）。 */
+    private fun isBorrowedEngine(engine: SyncEngine): Boolean {
+        val borrowed = session.testSyncProvider ?: return false
+        return engine.ownsProvider(borrowed)
     }
 
     /**
@@ -357,9 +416,9 @@ class SyncConflictController @Inject constructor(
             )
         } else {
             when (val upload = autoMergeAndUpload(
-                codec = codec,
                 strings = strings,
                 databaseSession = databaseSession,
+                syncSession = session,
                 syncEngine = syncEngine,
                 remotePath = remotePath,
                 localDb = localDb,
@@ -379,26 +438,33 @@ class SyncConflictController @Inject constructor(
                 is AutoMergeUploadResult.Superseded -> {
                     if (isReentry) {
                         // ISSUE-P1-275 AC③ 深度界限：重入后远端仍再次变更 ⇒ 如实上浮类型化错误，
-                        // 不无限循环（四棵树已由 autoMergeAndUpload 在返回前擦除）
+                        // 不无限循环（四棵树已由 autoMergeAndUpload 在返回前擦除；
+                        // 交付的密文副本不再有消费者，就地清零）
+                        upload.mergedBytes.fill(0)
                         SyncOutcome.Error(strings.get(R.string.sync_error_remote_changed_during_resolve))
                     } else {
                         // ISSUE-P1-275 AC③：合并上传 412 ⇒ 重新进入冲突流程——以「合并产物字节」
                         // 为本地侧**全新解析**（localDbOverride = null，与已擦除的首轮树零实例共享），
-                        // base 取缓存基准快照（上传失败 ⇒ 基线未动，仍为本轮合并所用底版）
-                        handleConflictMerge(
-                            syncEngine = syncEngine,
-                            syncCache = syncCache,
-                            remotePath = remotePath,
-                            localBytes = upload.mergedBytes,
-                            remoteBytes = upload.freshRemoteBytes,
-                            baseSnapshotBytes = syncCache.readBaseContent(remotePath),
-                            remoteEtag = upload.freshEtag,
-                            strategy = strategy,
-                            localDbOverride = null,
-                            isReentry = true,
-                            // ISSUE-P2-278：重入轮透传周期起点快照，校验窗口覆盖整个重入过程
-                            expectedSessionSnapshot = expectedSessionSnapshot
-                        )
+                        // base 取缓存基准快照（上传失败 ⇒ 基线未动，仍为本轮合并所用底版）。
+                        // `ENG-20261028-31`：该副本只服务于本次重入，用毕清零。
+                        try {
+                            handleConflictMerge(
+                                syncEngine = syncEngine,
+                                syncCache = syncCache,
+                                remotePath = remotePath,
+                                localBytes = upload.mergedBytes,
+                                remoteBytes = upload.freshRemoteBytes,
+                                baseSnapshotBytes = syncCache.readBaseContent(remotePath),
+                                remoteEtag = upload.freshEtag,
+                                strategy = strategy,
+                                localDbOverride = null,
+                                isReentry = true,
+                                // ISSUE-P2-278：重入轮透传周期起点快照，校验窗口覆盖整个重入过程
+                                expectedSessionSnapshot = expectedSessionSnapshot
+                            )
+                        } finally {
+                            upload.mergedBytes.fill(0)
+                        }
                     }
                 }
             }
@@ -426,7 +492,9 @@ class SyncConflictController @Inject constructor(
         // 与旧 `pendingMergedRoot` 的远端独有节点会在**任何会话终止事件之前**失去唯一持有者，
         // 树密文与池内附件明文只能等 GC——三事件永远追不上已不可达的对象。
         // live = 当前活动会话树：旧 `pendingLocalDb` 恒为其实例（或 copy 共享）⇒ 判定护栏不误擦。
-        clearPendingConflictSession()
+        // ENG-20261028-42：本轮随即以同一引擎登记新待决会话，旧待决会话被**覆盖**而非引擎失主，
+        // 故保留其 Provider 凭据（keepEngine）。
+        clearPendingConflictSession(keepEngine = syncEngine)
         _conflictFlow.value = decisionConflicts.entries
         _groupConflictFlow.value = decisionConflicts.groups
         _metaConflictFlow.value = decisionConflicts.meta

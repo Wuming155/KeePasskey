@@ -46,9 +46,9 @@ class StatefulDavDispatcher : Dispatcher() {
     /** 所有 MOVE 返回 500（模拟 MOVE 持续失败，验证回滚幂等） */
     val failAllMoves = AtomicBoolean(false)
     /**
-     * ISSUE-P2-381：模拟「MOVE 覆盖已有目标报 409/423」的服务器。
-     * 目标存在且本开关开启时，MOVE 恒返回 409（即便 Overwrite:T）——
-     * 验证客户端「DELETE 目标 + 无预条件重试」兜底路径。
+     * ISSUE-P2-381 / ENG-20261028-20：模拟「MOVE 覆盖已有目标报 409/423」的服务器。
+     * 目标存在且本开关开启时，MOVE 恒返回 409（即便 Overwrite:T）——验证客户端
+     * 「拒绝覆盖 ⇒ 保留远端旧文件 + 返回可处理协议错误」的语义（旧 DELETE+重试兜底已移除）。
      */
     val failMoveOnExistingTarget409 = AtomicBoolean(false)
     /** 下一次 GET 返回 500（模拟服务端错误） */

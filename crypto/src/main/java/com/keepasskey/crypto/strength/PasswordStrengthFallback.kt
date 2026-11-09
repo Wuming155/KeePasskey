@@ -12,14 +12,19 @@ import java.nio.charset.CodingErrorAction
  * 原生判、降级不判）。现改为**逐条直译**——常量、判据顺序、惩罚系数、`score_of` / `length_cap` /
  * `clamp_x100` 均与 Rust 侧一一对应。
  *
+ * **字符计数单位（ENG-20261028-07）**：两侧统一为 **Unicode 码点（scalar value）**，与 Rust
+ * `str::chars()` 同口径。长度分档、`TOO_SHORT`、`MAX_ANALYZED_CHARS` 截断、重复段 / 唯一计数 / 周期
+ * 均按码点计——补充平面字符（代理对，如 emoji）只算 1 个字符。旧实现按 UTF-16 码元计数，
+ * 会把 7 个 emoji 当成 14 个字符而漏判 `TOO_SHORT`。
+ *
  * **两侧一致性口径**（如实声明）：分档 `score` 与标志位 `flags` 在**同一输入集上逐条一致**，由
  * 宿主侧行为向量用例（`PasswordStrengthTest`，与 `strength_tests.rs` 同款向量）与设备侧对拍用例
  * （`NativePasswordStrengthDeviceTest`）双向锁定；`guessesLog10` 允许**末位定点差**——两侧
  * `log2` / `log10` 分别取自 Rust libm 与 JDK `Math`，ULP 级差异不可消除，不作为等价判据。
  *
  * **敏感数据边界（不变）**：全程**不构造 `String`**。口令字节经 `CharsetDecoder` 解码为可清零的
- * `CharArray`（直译需要字符语义：字符集分类、唯一计数、周期均按字符计），用毕 `fill('\u0000')`；
- * 唯一计数的小表同样受管清零。词表为公开常量，非敏感数据。
+ * `CharArray`，再折叠为可清零的 `IntArray`（码点）；两级缓冲均用毕清零。词表为公开常量，
+ * 非敏感数据。
  *
  * **与 Rust 的已知残余差异**（语言标准库边界所致，不构成缺陷）：
  * - 非法 UTF-8 的替换粒度：Rust `from_utf8_lossy` 与 JDK `CharsetDecoder(REPLACE)` 对同一条非法
@@ -33,7 +38,7 @@ internal object PasswordStrengthFallback {
     private const val SCORE_MAX = PasswordStrengthEvaluator.SCORE_MAX
     private const val LONG_ENOUGH_LEN = 12
 
-    /** 热路径分析长度上限（与 Rust 侧同值）；超额部分不计熵信用、另按线性惩罚扣减。 */
+    /** 热路径分析长度上限（与 Rust 侧同值，按**码点**计）；超额部分不计熵信用、另按线性惩罚扣减。 */
     private const val MAX_ANALYZED_CHARS = 256
 
     /** 超额每字符的线性惩罚（`log10` 维度），与 Rust 侧同值。 */
@@ -89,24 +94,38 @@ internal object PasswordStrengthFallback {
                 flags = PasswordStrengthFlags.TOO_SHORT
             )
         }
-        val chars = decodeUtf8Lossy(password)
-        try {
-            return evaluateChars(chars)
+        val codePoints = decodeUtf8CodePoints(password)
+        return try {
+            evaluateCodePoints(codePoints, codePoints.size)
         } finally {
-            chars.fill('\u0000')
+            codePoints.fill(0)
         }
     }
 
-    /** UTF-8 解码为可清零的 `CharArray`（非法字节按 U+FFFD 替换，对齐 Rust `from_utf8_lossy`）。 */
-    private fun decodeUtf8Lossy(bytes: ByteArray): CharArray {
+    /**
+     * UTF-8 解码为**码点**数组（非法字节按 U+FFFD 替换，对齐 Rust `from_utf8_lossy`）。
+     *
+     * 解码分两级：`CharsetDecoder` 产出可清零的 `CharArray`（与 JDK 的替换粒度对齐），
+     * 再按 `Character.codePointAt` 折叠为码点。两级缓冲用毕均清零；被丢弃的尾部是零填充，无明文。
+     */
+    private fun decodeUtf8CodePoints(bytes: ByteArray): IntArray {
         val decoder = Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPLACE)
             .onUnmappableCharacter(CodingErrorAction.REPLACE)
         val buffer = decoder.decode(ByteBuffer.wrap(bytes))
-        val chars = CharArray(buffer.remaining())
-        buffer.get(chars)
+        val units = CharArray(buffer.remaining())
+        buffer.get(units)
         if (buffer.hasArray()) buffer.array().fill('\u0000')
-        return chars
+        val points = IntArray(units.size)
+        var count = 0
+        var i = 0
+        while (i < units.size) {
+            val codePoint = Character.codePointAt(units, i)
+            points[count++] = codePoint
+            i += Character.charCount(codePoint)
+        }
+        units.fill('\u0000')
+        return if (count == points.size) points else points.copyOf(count)
     }
 
     /**
@@ -115,9 +134,11 @@ internal object PasswordStrengthFallback {
      * 顺序**不可交换**——[applyCommonPassword] 与
      * [PasswordStrengthFallbackPatterns.applyPeriodicRepeat] 用 `min` 收口，其余为线性扣减，
      * 故必须按 Rust 的先后执行。
+     *
+     * `size` 为参与评估的码点个数（整串或周期单元），不复制、不持有 [codePoints]。
      */
-    private fun evaluateChars(chars: CharArray): PasswordStrength {
-        val len = chars.size
+    internal fun evaluateCodePoints(codePoints: IntArray, size: Int): PasswordStrength {
+        val len = size
         if (len == 0) {
             return PasswordStrength(PasswordStrengthEvaluator.SCORE_MIN, 0.0, PasswordStrengthFlags.TOO_SHORT)
         }
@@ -127,13 +148,13 @@ internal object PasswordStrengthFallback {
         val acc = Acc(0, 0.0)
         if (len < MIN_RECOMMENDED_LEN) acc.flags = acc.flags or PasswordStrengthFlags.TOO_SHORT
 
-        val profile = charsetProfile(chars, analyzedLen)
+        val profile = charsetProfile(codePoints, analyzedLen)
         if (profile.classCount == 1) acc.flags = acc.flags or PasswordStrengthFlags.SINGLE_CHAR_CLASS
         acc.log10 = analyzedLen.toDouble() * log2(profile.size.toDouble()) / LOG2_10
 
-        applyCommonPassword(acc, chars, analyzedLen)
-        PasswordStrengthFallbackPatterns.applyPeriodicRepeat(acc, chars, len)
-        PasswordStrengthFallbackPatterns.applySubtractivePatterns(acc, chars, analyzedLen)
+        applyCommonPassword(acc, codePoints, analyzedLen)
+        PasswordStrengthFallbackPatterns.applyPeriodicRepeat(acc, codePoints, len)
+        PasswordStrengthFallbackPatterns.applySubtractivePatterns(acc, codePoints, analyzedLen)
         if (excess > 0) acc.log10 -= EXCESS_PENALTY_PER_CHAR * excess
 
         val log10 = if (acc.log10 > 0.0) acc.log10 else 0.0
@@ -145,14 +166,14 @@ internal object PasswordStrengthFallback {
     }
 
     /** 常见口令判定（完全命中 → 上限 `1.0`；剥除尾部数字 / 标点后命中 → 上限 `4.0`）。 */
-    private fun applyCommonPassword(acc: Acc, chars: CharArray, len: Int) {
-        if (matchesCommonTable(chars, len)) {
+    private fun applyCommonPassword(acc: Acc, codePoints: IntArray, len: Int) {
+        if (matchesCommonTable(codePoints, len)) {
             acc.flags = acc.flags or PasswordStrengthFlags.COMMON_PASSWORD
             acc.log10 = minOf(acc.log10, 1.0)
             return
         }
-        val stemLen = trimmedAsciiStemLength(chars, len)
-        if (stemLen in 1 until len && matchesCommonTable(chars, stemLen)) {
+        val stemLen = trimmedAsciiStemLength(codePoints, len)
+        if (stemLen in 1 until len && matchesCommonTable(codePoints, stemLen)) {
             acc.flags = acc.flags or PasswordStrengthFlags.COMMON_PASSWORD
             acc.log10 = minOf(acc.log10, 4.0)
         }
@@ -161,44 +182,40 @@ internal object PasswordStrengthFallback {
     /**
      * 前缀是否命中常见口令表。
      *
-     * 表项恒为 ASCII 小写，故前缀含非 ASCII 字符时**不可能命中**（Rust 侧
+     * 表项恒为 ASCII 小写，故前缀含非 ASCII 码点时**不可能命中**（Rust 侧
      * `flat_map(to_lowercase).eq(table)` 的直接推论）——此处等价地提前返回，避免全表扫描。
      */
-    private fun matchesCommonTable(chars: CharArray, len: Int): Boolean {
-        for (i in 0 until len) if (chars[i].code >= ASCII_MAX) return false
+    private fun matchesCommonTable(codePoints: IntArray, len: Int): Boolean {
+        for (i in 0 until len) if (codePoints[i] >= ASCII_MAX) return false
         for (table in COMMON_PASSWORDS) {
-            if (table.size == len && tableMatches(chars, table)) return true
+            if (table.size == len && tableMatches(codePoints, table)) return true
         }
         return false
     }
 
-    private fun tableMatches(chars: CharArray, table: ByteArray): Boolean {
+    private fun tableMatches(codePoints: IntArray, table: ByteArray): Boolean {
         for (i in table.indices) {
-            if (asciiLower(chars[i]) != (table[i].toInt() and 0xFF)) return false
+            if (asciiLower(codePoints[i]) != (table[i].toInt() and 0xFF)) return false
         }
         return true
     }
 
-    /** ASCII 小写化（非 ASCII 原样返回）；表项恒为 ASCII 小写，故与 Rust 语义一致。 */
-    private fun asciiLower(c: Char): Int {
-        val v = c.code
-        return if (v in 0x41..0x5A) v + 32 else v
-    }
+    /** ASCII 小写化（非 ASCII 码点原样返回）；表项恒为 ASCII 小写，故与 Rust 语义一致。 */
+    private fun asciiLower(codePoint: Int): Int =
+        if (codePoint in 0x41..0x5A) codePoint + 32 else codePoint
 
     /** 剥除尾部「ASCII 数字或标点」后的长度（对齐 Rust `trim_end_matches`，**不含空白**）。 */
-    private fun trimmedAsciiStemLength(chars: CharArray, len: Int): Int {
+    private fun trimmedAsciiStemLength(codePoints: IntArray, len: Int): Int {
         var end = len
-        while (end > 0 && isAsciiDigitOrPunctuation(chars[end - 1])) end--
+        while (end > 0 && isAsciiDigitOrPunctuation(codePoints[end - 1])) end--
         return end
     }
 
     /** 对齐 Rust `is_ascii_digit() || is_ascii_punctuation()`（标点为 ASCII 可见标点，不含控制字符与空白）。 */
-    private fun isAsciiDigitOrPunctuation(c: Char): Boolean {
-        val v = c.code
-        return (v in 0x30..0x39) ||
-            (v in 0x21..0x2F) || (v in 0x3A..0x40) ||
-            (v in 0x5B..0x60) || (v in 0x7B..0x7E)
-    }
+    private fun isAsciiDigitOrPunctuation(codePoint: Int): Boolean =
+        (codePoint in 0x30..0x39) ||
+            (codePoint in 0x21..0x2F) || (codePoint in 0x3A..0x40) ||
+            (codePoint in 0x5B..0x60) || (codePoint in 0x7B..0x7E)
 
     /** 字符集画像（规模 + 类别数）。 */
     internal class CharsetProfile(val size: Int, val classCount: Int)
@@ -209,7 +226,7 @@ internal object PasswordStrengthFallback {
      * 类别宽度：小写 `26` / 大写 `26` / 数字 `10` / ASCII 符号 `33` / 空白 `1` / 非 ASCII `100`
      * （非 ASCII 保守取 100，不放大非拉丁语系强度）。
      */
-    internal fun charsetProfile(chars: CharArray, len: Int): CharsetProfile {
+    internal fun charsetProfile(codePoints: IntArray, len: Int): CharsetProfile {
         var lower = false
         var upper = false
         var digit = false
@@ -217,14 +234,13 @@ internal object PasswordStrengthFallback {
         var space = false
         var other = false
         for (i in 0 until len) {
-            val c = chars[i]
-            val v = c.code
+            val codePoint = codePoints[i]
             when {
-                v in 0x61..0x7A -> lower = true
-                v in 0x41..0x5A -> upper = true
-                v in 0x30..0x39 -> digit = true
-                isUnicodeWhitespace(c) -> space = true
-                v < ASCII_MAX -> symbol = true
+                codePoint in 0x61..0x7A -> lower = true
+                codePoint in 0x41..0x5A -> upper = true
+                codePoint in 0x30..0x39 -> digit = true
+                isUnicodeWhitespace(codePoint) -> space = true
+                codePoint < ASCII_MAX -> symbol = true
                 else -> other = true
             }
         }
@@ -258,8 +274,8 @@ internal object PasswordStrengthFallback {
     }
 
     /** 近似 Unicode `White_Space`（对齐 Rust `char::is_whitespace`；差异边界见类 KDoc）。 */
-    internal fun isUnicodeWhitespace(c: Char): Boolean =
-        c.isWhitespace() || Character.isSpaceChar(c)
+    internal fun isUnicodeWhitespace(codePoint: Int): Boolean =
+        Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)
 
     /** 分档映射（阈值按 `log10(猜测次数)`），与 Rust `score_of` 同阈值。 */
     private fun scoreOf(log10: Double): Int = when {
@@ -270,7 +286,7 @@ internal object PasswordStrengthFallback {
         else -> SCORE_MAX
     }
 
-    /** 长度分档上限（**策略项，非熵推导**，与 Rust `length_cap` 同策略）。 */
+    /** 长度分档上限（**策略项，非熵推导**，与 Rust `length_cap` 同策略；长度按码点计）。 */
     private fun lengthCap(len: Int): Int = when {
         len < MIN_RECOMMENDED_LEN -> 2
         len < LONG_ENOUGH_LEN -> 3

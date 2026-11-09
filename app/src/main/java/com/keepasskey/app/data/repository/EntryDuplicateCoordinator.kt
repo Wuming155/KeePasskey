@@ -31,7 +31,10 @@ internal class EntryDuplicateCoordinator(
      * 克隆 [id] 指向的条目至同一分组。
      * 成功返回新条目的十六进制 UUID（KdbxResult.Success.data），供 UI 导航至克隆体。
      */
-    suspend fun duplicateEntry(id: String): KdbxResult<String> {
+    suspend fun duplicateEntry(id: String): KdbxResult<String> =
+        databaseSession.withWriteAcceptance { duplicateEntryInternal(id) }
+
+    private suspend fun duplicateEntryInternal(id: String): KdbxResult<String> {
         val uuid = parseKdbxUuidOrNull(id)
             ?: return KdbxResult.Failure(
                 IllegalArgumentException(strings.get(R.string.repo_invalid_entry_id)),

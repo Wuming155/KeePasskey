@@ -28,3 +28,34 @@ class FakeUnlockThrottleStore : UnlockThrottleStore {
         records[databaseId] = record
     }
 }
+
+/**
+ * [ThrottleClock] 的可控替身（ENG-20261028-37）：墙钟与单调时钟可**分别**推进，
+ * 用于区分「系统调时」与「真实流逝」——只有 [shiftWall] 才模拟用户/网络调整系统时间。
+ */
+class FakeThrottleClock(
+    wallStart: Long = 0L,
+    monotonicStart: Long = 0L
+) : ThrottleClock() {
+
+    /** 当前墙钟（epoch millis），供用例构造持久截止 */
+    var wall: Long = wallStart
+
+    /** 当前单调时钟（millis） */
+    var monotonic: Long = monotonicStart
+
+    override fun wallMillis(): Long = wall
+
+    override fun monotonicMillis(): Long = monotonic
+
+    /** 两钟同步推进：模拟正常流逝 */
+    fun advance(ms: Long) {
+        wall += ms
+        monotonic += ms
+    }
+
+    /** 只移动墙钟：模拟调时（进程存续期间单调时钟不回退、不跳变） */
+    fun shiftWall(ms: Long) {
+        wall += ms
+    }
+}

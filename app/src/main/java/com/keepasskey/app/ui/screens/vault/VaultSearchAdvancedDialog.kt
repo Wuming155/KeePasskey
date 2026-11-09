@@ -21,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.screens.settings.SearchAdvancedOptions
 import com.keepasskey.app.ui.screens.settings.SearchField
 
@@ -58,6 +59,7 @@ internal fun VaultSearchAdvancedDialog(
             )
         },
         text = {
+            TrackDialogInteractionEffect()
             Column {
                 // ① 字段范围勾选（横向滚动芯片行，避免窄屏截断）
                 Row(

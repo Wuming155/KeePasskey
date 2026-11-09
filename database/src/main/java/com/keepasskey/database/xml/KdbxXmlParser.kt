@@ -50,7 +50,7 @@ class KdbxXmlParser(
         // ISSUE-P2-48（审计 F-10）+ ISSUE-P2-200 落点①：本次解析共享的「附件物化预算」——
         // 池引用副本乘法（逐引用 copyOf 不得取消）与内联压缩附件解压放大两条通道合一封顶，
         // 且**按累计**而非按单次调用（后者是 ISSUE-P2-200 的原始缺陷形态）。
-        val attachmentBudget = AttachmentBudget.forParse(binaries)
+        val attachmentBudget = AttachmentBudget()
 
         var metaData = KdbxMetaData()
         var rootGroup: KdbxGroup? = null

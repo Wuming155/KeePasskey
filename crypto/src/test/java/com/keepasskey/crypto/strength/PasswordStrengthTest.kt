@@ -280,6 +280,36 @@ class PasswordStrengthTest {
             PasswordStrengthEvaluator.SCORE_MAX,
             fallbackScore(longMixedRandomLike(300))
         )
+        // ENG-20261028-07：日期格式（6 位末两位参与判定）与三种 8 位布局
+        assertFallbackFlag(PasswordStrengthFlags.DATE_LIKE, "260131", true)
+        assertFallbackFlag(PasswordStrengthFlags.DATE_LIKE, "013126", true)
+        assertFallbackFlag(PasswordStrengthFlags.DATE_LIKE, "311230", true)
+        assertFallbackFlag(PasswordStrengthFlags.DATE_LIKE, "123456", false)
+        assertFallbackFlag(PasswordStrengthFlags.DATE_LIKE, "01012026", true)
+        assertFallbackFlag(PasswordStrengthFlags.DATE_LIKE, "31122026", true)
+        assertFallbackFlag(PasswordStrengthFlags.DATE_LIKE, "12345678", false)
+        // 二次重复：按「一个单元」重估，不得因长度翻倍升档
+        for (pw in listOf("passwordpassword", "abcabc", "xyxy", "QwertyQwerty")) {
+            val strength = PasswordStrengthFallback.evaluate(pw.toByteArray(Charsets.UTF_8))
+            assertTrue("[$pw] 二次重复须命中周期标志", strength.flags and PasswordStrengthFlags.PERIODIC_REPEAT != 0)
+            assertTrue("[$pw] 二次重复不应被评为强口令（实际 ${strength.score}）", strength.score <= 1)
+        }
+        assertEquals(
+            "强单元重复仍应为最高档",
+            PasswordStrengthEvaluator.SCORE_MAX,
+            fallbackScore("aB3\$kLmQ7#xZ".repeat(2))
+        )
+        // Unicode 码点单位：7 个 emoji 与 7 个 ASCII 字符同属长度不足，分档上限一致
+        for (pw in listOf("🔐🔑🧩🛡🔒🔓🚀", "aB3\$kL🔑")) {
+            val strength = PasswordStrengthFallback.evaluate(pw.toByteArray(Charsets.UTF_8))
+            assertTrue("[$pw] 7 个码点应判长度不足", strength.isTooShort)
+            assertEquals("[$pw] 长度不足的分档上限应按码点生效", 2, strength.score)
+        }
+        // 同一补充平面字符 ×7：按码点计为 7 连重复，且整串是一个单元的高次重复
+        val repeatedEmoji = PasswordStrengthFallback.evaluate("🔐🔐🔐🔐🔐🔐🔐".toByteArray(Charsets.UTF_8))
+        assertTrue("同一 emoji ×7 应命中重复段", repeatedEmoji.flags and PasswordStrengthFlags.REPEATED_RUN != 0)
+        assertTrue("同一 emoji ×7 应命中周期重复", repeatedEmoji.flags and PasswordStrengthFlags.PERIODIC_REPEAT != 0)
+        assertTrue("同一 emoji ×7 应判弱", repeatedEmoji.isWeak)
     }
 
     @Test
@@ -329,7 +359,11 @@ class PasswordStrengthTest {
             "xyxyxyxy", "user1990name", "1999", "20260101", "user1234name", "qwertyui",
             "asdfghjk", "qazplmok", "0qPz7w", "aC3fH9kM", "wC3gJ8mR", "7890", "wxyz",
             "tR7#kL9@mQ2!xZ4&vB6*", "Xk92!mQp#7Lz@4Rt&8Wn", "aB3\$kL", "aB3\$kLmQ7#",
-            "correct-Horse_42-battery", "口令密码测试", "aαbβcγdδeε", "1234".repeat(100)
+            "correct-Horse_42-battery", "口令密码测试", "aαbβcγdδeε", "1234".repeat(100),
+            // ENG-20261028-07：补充平面字符（码点单位）、日期各布局正反例、二次重复组合
+            "🔐🔑🧩🛡🔒🔓🚀", "🔐🔐🔐🔐🔐🔐🔐", "aB3\$kL🔑", "260131", "013126", "311230",
+            "01012026", "31122026", "12345678", "passwordpassword", "abcabc", "abab",
+            "QwertyQwerty"
         )
     }
 

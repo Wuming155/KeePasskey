@@ -182,7 +182,7 @@ private fun CreateVaultWizardAlertDialog(
                 enabled = state.isFormValid && !isBusy,
                 showProgress = isBusy,
                 onCreate = {
-                    if (MasterPasswordPolicy.verdictOf(state.passwordChars.size, strengthBits) ==
+                    if (MasterPasswordPolicy.verdictOf(state.passwordChars, strengthBits) ==
                         MasterPasswordPolicy.Verdict.WEAK_REQUIRES_CONFIRM
                     ) {
                         showWeakConfirm = true
@@ -358,10 +358,10 @@ private fun CreateVaultPasswordFields(state: CreateVaultWizardState) {
         },
         isPasswordVisible = state.passwordVisible,
         onToggleVisibility = { state.passwordVisible = !state.passwordVisible },
-        // ISSUE-P2-288：短口令如实提示（硬阻断的用户可辨反馈）
+        // ISSUE-P2-288：短口令如实提示（硬阻断的用户可辨反馈；长度按 Unicode 码点，与强度模型一致）
         supportingText = {
             if (state.passwordChars.isNotEmpty() &&
-                state.passwordChars.size < MasterPasswordPolicy.MIN_LENGTH
+                !MasterPasswordPolicy.meetsMinLength(state.passwordChars)
             ) {
                 Text(
                     stringResource(R.string.master_pwd_too_short, MasterPasswordPolicy.MIN_LENGTH),

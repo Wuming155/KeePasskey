@@ -84,9 +84,13 @@ object BothModifiedEntryCollector {
         // base 不可信（缺失 / 被本地副本污染）时不扩充：详见类注释的可信性裁决
         if (trustedBase == null) return alreadyConflicted
 
-        val baseEntries = trustedBase.rootGroup.allEntries().associateBy { it.id }
-        val localEntries = local.rootGroup.allEntries().associateBy { it.id }
-        val remoteEntries = remote.rootGroup.allEntries().associateBy { it.id }
+        val rootId = local.rootGroup.id
+        fun normalizeParent(entry: KdbxEntry): KdbxEntry =
+            if (entry.parentGroupId == null) entry.copy(parentGroupId = rootId) else entry
+
+        val baseEntries = trustedBase.rootGroup.allEntries().map(::normalizeParent).associateBy { it.id }
+        val localEntries = local.rootGroup.allEntries().map(::normalizeParent).associateBy { it.id }
+        val remoteEntries = remote.rootGroup.allEntries().map(::normalizeParent).associateBy { it.id }
         val known = alreadyConflicted.mapTo(mutableSetOf()) { it.entryId }
 
         val extra = mutableListOf<ConflictedEntryPair>()

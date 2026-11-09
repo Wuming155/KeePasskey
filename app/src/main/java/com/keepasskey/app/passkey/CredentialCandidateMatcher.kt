@@ -26,6 +26,8 @@ import java.time.Instant
  *   > **零候选**——用户在系统 UI 上既看不到内容也拿不到补救面（`已知工程限界.md` §6）。
  *   > 四个同类实现（KeePassDX / Monica / Authnkey / fenris）一律按请求 rp.id 检索，
  *   > 本仓此前是唯一例外（`ISSUE-P2-530`）。
+ *   > `ENG-20261028-06`：本层对「缺 RP + 包名未绑定」仍照旧出候选（同上，收紧即零候选），
+ *   > 该组合的**签发**由 [PasskeyRpAuthorization] 判为拒绝——列出候选不等于已授权签发。
  * - 密码候选：域匹配 **或** `android://` 包名匹配，后者同样受门控约束；条目必须**确有密码**。
  * - ISSUE-P3-393：两通道均排除**已过期**条目（与 Autofill 候选面同口径）。
  */
@@ -52,13 +54,13 @@ internal object CredentialCandidateMatcher {
         val passkey = PasskeyData.fromCustomFields(entry.customFields) ?: return false
         if (allowedCredentialIds.isNotEmpty() && passkey.credentialId !in allowedCredentialIds) return false
         // ISSUE-P3-339：域维度只认凭据自身的 `rpId` 一个真相源（`entry.url` 不参与 passkey 候选）
-        val domainMatch = targetRpId.isNotBlank() &&
-            PasskeyRequestRpBinding.matches(targetRpId, passkey.relyingPartyId)
+        val rpBinding = PasskeyRequestRpBinding.evaluate(targetRpId, passkey.relyingPartyId)
+        val domainMatch = rpBinding == RequestRpBinding.MATCHED
         if (browserFlow) return domainMatch
         val packageMatch = packageDimensionAllowed && callingPackage.isNotBlank() &&
             DomainMatcher.isAndroidPackageMatch(entry.url, callingPackage)
-        // 显式 RP 是权威；只有缺失 RP 的旧请求才退回包名维度。
-        return if (targetRpId.isNotBlank()) domainMatch else packageMatch
+        // 显式 RP 是权威；只有缺失 RP 的旧请求才退回包名维度（签发侧另有授权规则）
+        return if (rpBinding != RequestRpBinding.MISSING) domainMatch else packageMatch
     }
 
     /** 密码候选入选判定 */

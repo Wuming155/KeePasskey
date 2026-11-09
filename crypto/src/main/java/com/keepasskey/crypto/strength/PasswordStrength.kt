@@ -36,7 +36,7 @@ object PasswordStrengthFlags {
     /** 字符唯一率过低（< 50%）。 */
     const val LOW_UNIQUE_RATIO = 1 shl 7
 
-    /** 整串是短周期块的高次重复（如 `abcabcabc`）。 */
+    /** 整串是短周期块的重复（≥ 2 次，如 `passwordpassword` / `abcabcabc`）。 */
     const val PERIODIC_REPEAT = 1 shl 8
 }
 
@@ -91,6 +91,9 @@ data class PasswordStrength(
  * （口令字节不入 JVM 字符串、Rust 侧 `Zeroizing` 确定性擦除），**不是**吞吐。
  *
  * 调用方契约：`password` 为 UTF-8 字节，调用方持有清零点责任（本入口不克隆、不留存）。
+ *
+ * 字符计数单位：**Unicode 码点**（两侧一致，代理对算 1 个）。长度分档、`TOO_SHORT`、
+ * 截断与各模式判据均按码点计，故 7 个 emoji 与 7 个 ASCII 字符在长度语义上同值。
  */
 object PasswordStrengthEvaluator {
 
@@ -100,7 +103,7 @@ object PasswordStrengthEvaluator {
     /** 最高分档。 */
     const val SCORE_MAX = 4
 
-    /** 推荐的最短长度（对齐 NIST SP 800-63B 与既有健康检查的 `< 8` 判据）。 */
+    /** 推荐的最短长度（对齐 NIST SP 800-63B 与既有健康检查的 `< 8` 判据，按 Unicode 码点计）。 */
     const val MIN_RECOMMENDED_LEN = 8
 
     /** 唯一率惩罚阈值。 */

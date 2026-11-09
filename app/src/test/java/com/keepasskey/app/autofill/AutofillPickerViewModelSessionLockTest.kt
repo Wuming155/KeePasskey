@@ -112,4 +112,56 @@ class AutofillPickerViewModelSessionLockTest {
         assertEquals("", creds?.username)
         assertEquals("", creds?.password)
     }
+
+    /**
+     * `ENG-20261028-11`：缓存租约只覆盖**一代树快照**——会话树换代后缓存按新快照重载，
+     * 且锁定后不得被重载逻辑重新填满。
+     *
+     * 判别点：若没有「换树即重载」的重载器，或重载器不判锁定/空库，缓存会停在旧一代
+     * （换树后看不到新条目）或在锁定后回流活条目（锁后仍持有明文引用）。
+     */
+    @Test
+    fun `库树换代后缓存重载为新树内容且锁定后不回流`() {
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(databaseWithTitle("旧标题"))
+        val repo = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun getUsableKdbxEntries(): List<KdbxEntry> =
+                session.databaseFlow.value?.rootGroup?.allEntries().orEmpty()
+        }
+        val vm = MainDispatcherGuard.track(AutofillPickerViewModel(repo, session))
+        vm.loadEntries()
+        awaitEntries(vm) { it.singleOrNull()?.displayTitle() == "旧标题" }
+
+        // 会话树换代（模拟同步合并 / 批量导入后的整树替换）
+        session.setDatabaseForTesting(databaseWithTitle("新标题"))
+        awaitEntries(vm) { it.singleOrNull()?.displayTitle() == "新标题" }
+
+        // 锁定：缓存必须保持为空，重载器不得把活条目填回来
+        runBlocking { session.lock() }
+        Thread.sleep(50)
+        assertTrue("锁定后缓存必须保持为空（不得被重载器回流）", vm.entries.value.isEmpty())
+    }
+
+    private fun databaseWithTitle(title: String) = com.keepasskey.database.file.KdbxDatabase(
+        header = com.keepasskey.database.file.KdbxHeader.createDefault(),
+        rootGroup = com.keepasskey.core.model.KdbxGroup(
+            name = "Root",
+            entries = listOf(
+                KdbxEntry(fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString(title, false)))
+            )
+        )
+    )
+
+    private fun awaitEntries(vm: AutofillPickerViewModel, predicate: (List<KdbxEntry>) -> Boolean) {
+        runBlocking {
+            withContext(Dispatchers.IO) {
+                var waited = 0L
+                while (!predicate(vm.entries.value) && waited < 5_000) {
+                    Thread.sleep(10)
+                    waited += 10
+                }
+            }
+        }
+        assertTrue("等待选择器缓存进入预期状态超时", predicate(vm.entries.value))
+    }
 }

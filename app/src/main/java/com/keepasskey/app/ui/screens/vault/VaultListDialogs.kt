@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -68,6 +69,7 @@ internal fun VaultSortDialog(
         // ③ 选项显式 onSurfaceVariant：挪槽后 LocalContentColor 变为标题的 onSurface，
         //    显式着色保持原 text 槽观感（正文体色未写时会继承槽位颜色）。
         title = {
+            TrackDialogInteractionEffect()
             Column {
                 Text(
                     text = stringResource(R.string.cd_sort),
@@ -128,6 +130,7 @@ internal fun VaultCreateTypeDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.cd_create)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Surface(
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onAddEntry, role = Role.Button),
@@ -202,6 +205,7 @@ internal fun VaultTemplatePickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.vault_template_picker_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 templates.forEach { template ->
                     Surface(
@@ -249,7 +253,10 @@ internal fun VaultBindingTakeoverDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.sync_vault_takeover_title)) },
-        text = { Text(stringResource(R.string.sync_vault_takeover_message)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.sync_vault_takeover_message))
+        },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(
@@ -289,6 +296,7 @@ internal fun VaultBatchMoveDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(titleRes)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerLow,

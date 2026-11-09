@@ -61,6 +61,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 data class VaultIconItem(
     val id: String,
@@ -150,6 +151,7 @@ fun IconPickerDialog(
             )
         },
         text = {
+            TrackDialogInteractionEffect()
             Column(modifier = Modifier.fillMaxWidth()) {
                 // TASK-15：自定义图标区（库内 PNG 图标 + 系统相册上传入口）
                 if (customIcons.isNotEmpty() || onUploadClick != null) {

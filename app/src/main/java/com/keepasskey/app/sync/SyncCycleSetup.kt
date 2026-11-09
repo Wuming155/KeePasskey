@@ -128,12 +128,23 @@ internal suspend fun SyncCycleRunner.setupCycleContext(
             }
         }
     }
-    val syncEngine = SyncEngine(provider, syncCache, rollbackGuard, settlementStageObserverForTest)
+    val syncEngine = SyncEngine(
+        provider,
+        syncCache,
+        rollbackGuard,
+        settlementStageObserverForTest,
+        // ENG-20261028-42：凭据释放走工厂的统一收口（WebDAV 能力接口 + S3 显式清零），
+        // 引擎本身不感知协议。
+        credentialReleaser = { target -> providerResolver.releaseOwnedProvider(target) }
+    )
     // 离线开关联动：设置页开关传导至引擎决策树
     syncEngine.isOffline = session.isOfflineMode
     // ISSUE-P3-03 (43a)：关闭「同步前检查远程变更」= 上传前不比对方版本，本地修改直接覆盖远端
     syncEngine.overwriteRemoteWithoutPrecondition = !settings.checkRemoteChangesBeforeSave
-    session.lastSyncEngine = syncEngine
+    // ENG-20261028-42：登记新引擎并释放「已不再被待决冲突留存」的旧引擎凭据
+    session.replaceSyncEngine(syncEngine) { previous ->
+        conflicts.retainsEngine(previous)
+    }
 
     return buildCycleContext(
         provider = provider,

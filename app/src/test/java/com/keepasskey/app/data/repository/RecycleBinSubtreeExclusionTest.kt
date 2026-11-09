@@ -12,10 +12,18 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -231,5 +239,134 @@ class RecycleBinSubtreeExclusionTest {
             "credentialId 定位不得命中已删条目（否则删掉的凭据仍可被签名）",
             byCredId == null || byCredId.parentGroupId == liveGroupId
         )
+    }
+
+    /**
+     * `ENG-20261028-11` 回归：[VaultEntryQueryCoordinator.entriesFlow] 投影与并发改树。
+     *
+     * 消除先取旧 db 再登记的交接窗口：投影在读租约保护下获取活动库引用，即使并发线程在短时间内
+     * 频繁改树并下线擦除旧实例，活跃投影收集也绝不读到半路清零的垃圾字段，且全部快照消费完毕后
+     * 租约正常归零、下线实例确定性回收排空。
+     */
+    @Test
+    fun `entriesFlow投影在并发改树与保存期间完整可读且释放后回收`() = runBlocking {
+        val session = DatabaseSession()
+        try {
+            withTimeout(10_000) {
+                val entryCount = 50
+                val initialEntries = List(entryCount) { index ->
+                    KdbxEntry(
+                        id = KdbxUuid.random(),
+                        fields = mapOf(
+                            KdbxConstants.Fields.TITLE to ProtectedString("条目-$index", isProtected = false),
+                            KdbxConstants.Fields.USER_NAME to ProtectedString("user-$index", isProtected = false),
+                            KdbxConstants.Fields.PASSWORD to ProtectedString("pass-$index", isProtected = true),
+                            KdbxConstants.Fields.URL to ProtectedString("https://example.com/$index", isProtected = false)
+                        )
+                    )
+                }
+                val initialDb = KdbxDatabase(
+                    header = KdbxHeader.createDefault(),
+                    rootGroup = KdbxGroup(name = "Root", entries = initialEntries)
+                )
+                session.setDatabaseForTesting(initialDb)
+
+                // 从活动会话树抓取生产真实实例，而不是离线构造的 seed 树
+                val liveInitial = session.databaseFlow.value ?: error("数据库未初始化")
+                val oldLiveEntries = liveInitial.rootGroup.allEntries()
+                val idToIndex = HashMap<KdbxUuid, Int>(entryCount)
+                oldLiveEntries.forEachIndexed { idx, e -> idToIndex[e.id] = idx }
+
+                // 捕获前 10 个条目中即将被替换下线的真实 ProtectedString 实例
+                val targetOldTitles = (0 until 10).map { oldLiveEntries[it].fields[KdbxConstants.Fields.TITLE]!! }
+                val targetOldUserNames = (0 until 10).map { oldLiveEntries[it].fields[KdbxConstants.Fields.USER_NAME]!! }
+                val targetOldPasswords = (0 until 10).map { oldLiveEntries[it].fields[KdbxConstants.Fields.PASSWORD]!! }
+                val targetUntouchedTitle = oldLiveEntries[49].fields[KdbxConstants.Fields.TITLE]!!
+
+                val coordinator = query(session)
+
+                // 开始闸门：确保投影流已进入订阅并就绪，再触发并发改树
+                val projectionStarted = CompletableDeferred<Unit>()
+                val collectedSnapshots = mutableListOf<List<com.keepasskey.app.ui.model.UiVaultEntry>>()
+
+                // 确定性完成语义：StateFlow 具有合并特性，不得靠 take(固定次数) 傻等；
+                // 持续收集快照直到观测到包含最终更新标志（条目 9 变成 Updated-Title-9）的快照即刻完成
+                val projectionDeferred = async(Dispatchers.Default) {
+                    coordinator.entriesFlow()
+                        .onStart { projectionStarted.complete(Unit) }
+                        .takeWhile { snapshot ->
+                            collectedSnapshots.add(snapshot)
+                            val finalUpdated = snapshot.firstOrNull { it.id == oldLiveEntries[9].id.toHexString() }
+                            // 只要条目 9 尚未是最终更新值，就继续收集；一旦等于最终更新值，收集立即结束
+                            finalUpdated?.title != "Updated-Title-9"
+                        }
+                        .collect()
+                    collectedSnapshots
+                }
+
+                // 等待投影流真正连通并开始
+                projectionStarted.await()
+
+                // 并发改树：修改投影实际读取的 TITLE 与 USER_NAME，以及 PASSWORD
+                val mutationJob = launch(Dispatchers.Default) {
+                    for (i in 0 until 10) {
+                        val currentEntry = session.databaseFlow.value?.rootGroup?.findEntry(oldLiveEntries[i].id) ?: continue
+                        val updated = currentEntry
+                            .withField(KdbxConstants.Fields.TITLE, ProtectedString("Updated-Title-$i", isProtected = false))
+                            .withField(KdbxConstants.Fields.USER_NAME, ProtectedString("updated-user-$i", isProtected = false))
+                            .withField(KdbxConstants.Fields.PASSWORD, ProtectedString("updated-pass-$i", isProtected = true))
+                        session.saveEntry(updated)
+                    }
+                }
+
+                mutationJob.join()
+                val snapshots = projectionDeferred.await()
+
+                assertTrue("应至少采集到投影快照", snapshots.isNotEmpty())
+                for (snapshot in snapshots) {
+                    assertEquals("快照中条目数应完整", entryCount, snapshot.size)
+                    for (ui in snapshot) {
+                        val uuid = KdbxUuid.fromHexString(ui.id)
+                        val idx = idToIndex[uuid] ?: error("未知条目: ${ui.id}")
+                        val oldTitle = "条目-$idx"
+                        val newTitle = "Updated-Title-$idx"
+                        val oldUser = "user-$idx"
+                        val newUser = "updated-user-$idx"
+
+                        // 精确等值匹配一代完整值，杜绝 clear 降级空串或 startswith 掩盖受损
+                        assertTrue("标题必须是一代完整值而非降级空串: actual='${ui.title}'", ui.title == oldTitle || ui.title == newTitle)
+                        assertTrue("用户名必须是一代完整值而非降级空串: actual='${ui.username}'", ui.username == oldUser || ui.username == newUser)
+                    }
+                }
+
+                // 验证可观察行为：旧树中被并发替换下线的真实实例在读租约全部结束后已被确定性清零
+                for (oldTitle in targetOldTitles) {
+                    assertTrue("被替换下线的旧标题在读者结束后必须已清零", oldTitle.cleared)
+                }
+                for (oldUser in targetOldUserNames) {
+                    assertTrue("被替换下线的旧用户名在读者结束后必须已清零", oldUser.cleared)
+                }
+                for (oldPassword in targetOldPasswords) {
+                    assertTrue("被替换下线的旧密码在读者结束后必须已清零", oldPassword.cleared)
+                }
+
+                // 正向对照：新树上线的活跃字段与未修改的共享字段绝对不得被清零
+                val currentDb = session.databaseFlow.value ?: error("终态数据库为空")
+                for (i in 0 until 10) {
+                    val activeEntry = currentDb.rootGroup.findEntry(oldLiveEntries[i].id) ?: error("找不到活动条目 $i")
+                    assertEquals("Updated-Title-$i", activeEntry.title)
+                    assertEquals("updated-user-$i", activeEntry.userName)
+                    assertFalse("新上线的活跃标题不得被误清零", activeEntry.fields[KdbxConstants.Fields.TITLE]!!.cleared)
+                    assertFalse("新上线的活跃用户名不得被误清零", activeEntry.fields[KdbxConstants.Fields.USER_NAME]!!.cleared)
+                    assertFalse("新上线的活跃密码不得被误清零", activeEntry.fields[KdbxConstants.Fields.PASSWORD]!!.cleared)
+                }
+                val untouchedEntry = currentDb.rootGroup.findEntry(oldLiveEntries[49].id) ?: error("找不到未修改条目 49")
+                assertEquals("条目-49", untouchedEntry.title)
+                assertFalse("未修改的共享字段不得被误清零", untouchedEntry.fields[KdbxConstants.Fields.TITLE]!!.cleared)
+                assertEquals("未修改的共享字段实例必须完全同一", targetUntouchedTitle, untouchedEntry.fields[KdbxConstants.Fields.TITLE])
+            }
+        } finally {
+            session.close()
+        }
     }
 }

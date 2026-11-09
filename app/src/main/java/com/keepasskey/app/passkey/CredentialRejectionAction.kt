@@ -13,12 +13,15 @@ import com.keepasskey.app.R
  * `MISSING_REQUEST` / `INTERNAL_ERROR` 属系统或内部异常，用户无从下手。硬给所有原因配一个
  * 动作按钮只会把用户送进找不到答案的状态。
  *
- * ## 为什么只有「加入特权名单」一条路（产品裁决 PD-12）
+ * ## 两条受支持的补救路径（产品裁决 PD-12 与 `ENG-20261028-06`）
  *
- * `DAL_UNVERIFIED` 的成因是「调用应用未被站点声明授权」，DAL 校验正是防「任意应用冒充任意
- * 域名注册 Passkey」的核心防线。**不提供**「跳过 DAL 校验」的入口——那是一步削弱防线的
- * 捷径。唯一的受支持路径是把发起请求的浏览器**就地加入**特权浏览器白名单（浏览器路径本就
- * 豁免 DAL，与网络无关，故 `DAL_NETWORK_UNAVAILABLE` 同样由它治愈）。
+ * - **加入特权浏览器名单**：`DAL_UNVERIFIED` 的成因是「调用应用未被站点声明授权」，DAL 校验
+ *   正是防「任意应用冒充任意域名注册 Passkey」的核心防线。**不提供**「跳过 DAL 校验」的入口；
+ * - **登记调用方签名**：原生调用没有可推导的 RP，签发授权只能来自「系统背书的包名 + 签名」。
+ *   未登记时**不提供**「跳过签名校验」的入口，只允许把**本次系统背书的摘要**写入信任存储。
+ *
+ * 两者都只在「从未登记 / 从未授权」时出现；已登记而本次签名不符时一律不给重绑入口
+ * （那等于让顶替者自证身份）。
  *
  * ## 「就地」语义（与「跳转设置页」方案的区别）
  *
@@ -34,7 +37,17 @@ import com.keepasskey.app.R
 enum class CredentialRejectionAction(@StringRes val labelRes: Int) {
 
     /** 把发起请求的浏览器就地加入特权浏览器白名单（唯一受支持的补救路径） */
-    ADD_PRIVILEGED_BROWSER(R.string.cred_reject_action_add_browser);
+    ADD_PRIVILEGED_BROWSER(R.string.cred_reject_action_add_browser),
+
+    /**
+     * `ENG-20261028-06`：把**本次系统背书的调用方签名摘要**就地登记为 `android://` 维度的
+     * 授权参照（[CredentialManagerCallerTrustStore.trust]）。
+     *
+     * 只对「从未绑定」提供（[PasskeyRpVerdict.CALLER_UNBOUND]）。已绑定但签名不符时**不得**
+     * 出现本动作：那等于让顶替者自证身份。与 [ADD_PRIVILEGED_BROWSER] 同为窗口内闭环、
+     * 无跳转、且只影响**下一次**发起。
+     */
+    AUTHORIZE_CALLER_SIGNATURE(R.string.cred_reject_action_authorize_caller);
 
     companion object {
 
@@ -46,12 +59,17 @@ enum class CredentialRejectionAction(@StringRes val labelRes: Int) {
          * 浏览器走了普通应用 DAL 分支）与 `CALLER_BROWSER_NOT_TRUSTED`（`ISSUE-P2-530`，
          * 使用链路，同一条「非白名单浏览器无 web origin」成因）三者对
          * [ADD_PRIVILEGED_BROWSER] 都是正解。
+         *
+         * `ENG-20261028-06`：`CALLER_SIGNATURE_UNBOUND` 的唯一正解是**用户显式授权该签名**；
+         * `CALLER_SIGNATURE_MISMATCH` 刻意**没有**动作——就地重绑等于让顶替者自证身份。
          */
         fun forReason(reason: CredentialRejectionReason): CredentialRejectionAction? =
             when (reason) {
                 CredentialRejectionReason.DAL_UNVERIFIED,
                 CredentialRejectionReason.DAL_NETWORK_UNAVAILABLE,
                 CredentialRejectionReason.CALLER_BROWSER_NOT_TRUSTED -> ADD_PRIVILEGED_BROWSER
+
+                CredentialRejectionReason.CALLER_SIGNATURE_UNBOUND -> AUTHORIZE_CALLER_SIGNATURE
 
                 else -> null
             }

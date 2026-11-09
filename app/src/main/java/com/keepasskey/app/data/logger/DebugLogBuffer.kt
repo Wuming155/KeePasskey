@@ -75,7 +75,8 @@ class DebugLogBuffer(
         }
         if (logcatEchoEnabled) {
             // 取证桥（§411）：内容与缓冲同源（已受「仅非敏感事件」铁律约束）；
-            // 经统一包装器 AppLog 输出（LogHygieneTest 口径——生产源码不得直引平台 Log 类；
+            // 经统一包装器 AppLog 输出（生产源码不得直引平台 Log 类，由
+            // `tools/doc/check_message_not_in_user_text.py` 等静态扫描约束；
             // AppLog.safe 自带 JVM fail-safe）
             com.keepasskey.core.log.AppLog.i(LOGCAT_TAG, line)
         }

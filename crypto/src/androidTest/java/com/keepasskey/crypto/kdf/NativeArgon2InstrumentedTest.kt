@@ -3,6 +3,7 @@ package com.keepasskey.crypto.kdf
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.keepasskey.crypto.exception.CryptoException
 import org.bouncycastle.crypto.generators.Argon2BytesGenerator
 import org.bouncycastle.crypto.params.Argon2Parameters
 import org.junit.Assert.assertArrayEquals
@@ -10,6 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.BeforeClass
@@ -585,6 +587,59 @@ class NativeArgon2InstrumentedTest {
             bc.fill(0)
         }
     }
+
+    // ==================================================================================
+    // 4b) ENG-20261028-08：原生可用时公共接受域仍拒绝越界参数（不回落 JVM 重算）
+    // ==================================================================================
+
+    /**
+     * 设备侧补的是**原生可用环境**下的接受域结论：宿主机单测只能覆盖「无 .so → BC」，
+     * 而本条的缺陷正是「原生分支被排除后由 BC 继续派生」。越界判定发生在实现路由之前，
+     * 故本用例在真机上的期望与宿主机一致；样本全部在派生前拒绝，不产生 Argon2 工作量。
+     */
+    @Test
+    fun 越界参数在原生可用时仍由公共接受域拒绝() {
+        val engine = Argon2KdfEngine(KdfParameters.Argon2.Argon2Type.ARGON2ID)
+        val key = ByteArray(32)
+        val samples = listOf(
+            "并行度 65" to argon2Params(64L * 1024, 2L, 65),
+            "并行度 0" to argon2Params(64L * 1024, 2L, 0),
+            "迭代 0" to argon2Params(64L * 1024, 0L, 2),
+            "内存 8191B" to argon2Params(8191L, 2L, 2),
+            "内存 4GiB+1" to argon2Params(4L * 1024 * 1024 * 1024 + 1, 2L, 2),
+            "内存低于每通道下界" to argon2Params(8192L, 2L, 2)
+        )
+        try {
+            for ((label, params) in samples) {
+                val ex = assertThrows(
+                    "$label 必须由公共接受域拒绝（原生可用不得改变接受域）",
+                    CryptoException.KdfException::class.java
+                ) { engine.transform(key, params) }
+                assertTrue(
+                    "$label 的失败须指明边界: ${ex.message}",
+                    ex.message?.contains("拒绝派生") == true
+                )
+            }
+
+            // 对照：界内合法配置仍应派生成功（接受域未误收窄）
+            val derived = engine.transform(key, argon2Params(64L * 1024, 2L, 2))
+            assertEquals("界内配置应派生 ${OUT_LEN}B", OUT_LEN, derived.size)
+            assertFalse("界内配置派生结果不应为全零", derived.all { it == 0.toByte() })
+            derived.fill(0)
+        } finally {
+            key.fill(0)
+        }
+    }
+
+    private fun argon2Params(memoryInBytes: Long, iterations: Long, parallelism: Int) =
+        KdfParameters.Argon2(
+            type = KdfParameters.Argon2.Argon2Type.ARGON2ID,
+            salt = ByteArray(32) { 0x42 },
+            parallelism = parallelism,
+            memoryInBytes = memoryInBytes,
+            iterations = iterations,
+            version = KdfParameters.Argon2.ARGON2_VERSION_13
+        )
 
     // ==================================================================================
     // 5) 性能对照（验收标准 3 / R1 决策闸门）

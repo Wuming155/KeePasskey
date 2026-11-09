@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * 「移除密码库」确认对话框（`ISSUE-P1-241`；§246 自 `DatabasePickerScreen` 下沉，
@@ -44,6 +45,7 @@ internal fun VaultRemovalConfirmDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(confirmation.titleRes)) },
         text = {
+            TrackDialogInteractionEffect()
             Text(stringResource(confirmation.messageRes, *confirmation.messageArgs.toTypedArray()))
         },
         confirmButton = {

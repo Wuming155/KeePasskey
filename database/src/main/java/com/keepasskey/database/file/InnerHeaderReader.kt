@@ -15,6 +15,10 @@ import java.io.InputStream
  * 把原函数内的四个可变量（流算法 id / 流密钥 / 二进制池 / 池累计字节）收拢为实例状态，
  * 使每类字段的守卫（长度上限、条目数与累计字节封顶、落盘分流）各自成函数；
  * 判定口径、异常文案与读取时序与拆分前**逐字一致**。
+ *
+ * ENG-20261028-10：BINARY 字段长度 0（无 flags 字节）按格式错误拒绝——此前该形态被静默忽略，
+ * 后续池条目整体前移，XML 的整数 `Ref` 随即指向错误附件。长度 1 的 flags-only 空附件是合法形态，
+ * 仍正常入池。
  */
 internal class InnerHeaderReader(
     private val inputStream: InputStream,
@@ -104,7 +108,7 @@ internal class InnerHeaderReader(
         when (fieldId) {
             KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID -> acceptStreamId(fieldData)
             KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY -> acceptStreamKey(fieldData)
-            KdbxConstants.InnerHeaderFieldId.BINARY -> if (fieldData.isNotEmpty()) acceptInlineBinary(fieldData)
+            KdbxConstants.InnerHeaderFieldId.BINARY -> acceptInlineBinary(fieldData)
         }
     }
 
@@ -130,6 +134,14 @@ internal class InnerHeaderReader(
     }
 
     private fun acceptInlineBinary(fieldData: ByteArray) {
+        // ENG-20261028-10：BINARY 字段至少含 1 字节 flags；长度 0 是格式错误，不得静默跳过——
+        // 跳项会让其后的池条目整体前移，XML 按整数 Ref 引用时便错配到无关附件（静默数据错乱）。
+        // flags-only（长度 1、内容 0 字节）是合法空附件，继续正常入池。
+        if (fieldData.isEmpty()) {
+            throw KdbxCorruptFileException(
+                "BINARY 字段长度为 0（至少须含 1 字节 flags），疑似损坏文件"
+            )
+        }
         enforceBinaryPoolEntryLimit(binaries.size)
         val flag = fieldData[0]
         val data = fieldData.copyOfRange(1, fieldData.size)

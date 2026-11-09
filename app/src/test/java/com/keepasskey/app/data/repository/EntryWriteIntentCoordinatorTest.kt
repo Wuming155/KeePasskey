@@ -15,16 +15,23 @@ import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxHeader
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import kotlin.io.path.createTempDirectory
 
 /**
  * 条目写入意图的协调器级验收：分组落点（`ISSUE-P2-635`）与自定义字段删除 / 改名（`ISSUE-P2-634`）。
  *
- * 两件事共用同一条写入口（`VaultEntryWriteCoordinator.saveEntryInternal`），故同文件验收：
+ * 两件事共用同一条写入口（`VaultEntryWriteCoordinator.saveEntryWithEraseContract`），故同文件验收：
  * - 635：分组 chip 的 `null` 是「移动到根」，不是「保留原分组」；换址走会话单次变换
  *   （不再 `delete + save`，中间态不产生条目消失窗口）；目标失效一律拒绝写入。
  * - 634：载入基线里被移除 / 改名的旧键必须真的从库内消失；重名键与标准字段冲突被拒绝。
@@ -286,5 +293,168 @@ class EntryWriteIntentCoordinatorTest {
         assertEquals(KdbxError.ENTRY_CUSTOM_FIELD_INVALID, (result as KdbxResult.Failure).code)
         assertNotNull(session.loadedEntry())
         assertTrue("拒绝保存时不得写历史", session.loadedEntry().history.isEmpty())
+    }
+
+    // ---------------- 受理票据传播 ----------------
+
+    @Test
+    fun `受理后换库再保存不得写入后来会话`() = runTest {
+        val session = newSession()
+        val accepted = session.captureCredentialRequest()
+        session.lock()
+        session.setDatabaseForTesting(newDatabase())
+        val later = session.databaseFlow.first()
+        var persistCalls = 0
+        val writer = VaultEntryWriteCoordinator(strings, session, VaultEntryMapper(strings)) {
+            persistCalls++
+            KdbxResult.Success(Unit)
+        }
+
+        val result = withContext(accepted) {
+            writer.saveEntryWithEraseContract(
+                uiEntry(childGroupId.toHexString()),
+                passwordChars = null,
+                totpSecretChars = null,
+                protectedFieldChars = emptyMap()
+            )
+        }
+
+        assertTrue("换库后必须拒绝旧受理", result is KdbxResult.Failure)
+        assertEquals(KdbxError.SAVE_SESSION_CHANGED, (result as KdbxResult.Failure).code)
+        assertSame("后来会话的树不得被替换", later, session.databaseFlow.first())
+        assertEquals("拒绝路径不得落盘", 0, persistCalls)
+        assertEquals("旧候选不得写进后来会话", "Original", session.loadedEntry().title)
+        assertTrue("拒绝路径不得写历史", session.loadedEntry().history.isEmpty())
+    }
+
+    @Test
+    fun `受理后换密再保存不得写入且不覆盖文件`() = runBlocking {
+        val directory = createTempDirectory("accept-rotation-").toFile()
+        val file = File(directory, "vault.kdbx")
+        val oldPassword = "Old#Fake#2026".toCharArray()
+        val newPassword = "New#Fake#2026".toCharArray()
+        val session = DatabaseSession()
+        try {
+            assertTrue(session.create(file, "Vault", oldPassword, useArgon2 = false) is KdbxResult.Success)
+            val accepted = session.captureCredentialRequest()
+            assertTrue(session.changeCredentials(newPassword) is KdbxResult.Success)
+            val afterRotation = file.readBytes()
+            var persistCalls = 0
+            val writer = VaultEntryWriteCoordinator(strings, session, VaultEntryMapper(strings)) {
+                persistCalls++
+                KdbxResult.Success(Unit)
+            }
+
+            val result = withContext(accepted) {
+                writer.saveEntryWithEraseContract(
+                    uiEntry(groupId = null),
+                    passwordChars = null,
+                    totpSecretChars = null,
+                    protectedFieldChars = emptyMap(),
+                    groupIntent = EntryGroupIntent.Root
+                )
+            }
+
+            assertTrue("换密后必须拒绝旧受理", result is KdbxResult.Failure)
+            assertEquals(KdbxError.SAVE_SESSION_CHANGED, (result as KdbxResult.Failure).code)
+            assertEquals("拒绝路径不得落盘", 0, persistCalls)
+            assertArrayEquals("拒绝后正式文件必须保持换密后的内容", afterRotation, file.readBytes())
+            assertTrue(
+                "拒绝后不得把候选写进换密后的树",
+                session.databaseFlow.first()!!.rootGroup.allEntries().none { it.title == "Edited" }
+            )
+        } finally {
+            oldPassword.fill('0')
+            newPassword.fill('0')
+            session.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `受理后同路径重开再保存不得写入`() = runBlocking {
+        val directory = createTempDirectory("accept-reopen-").toFile()
+        val file = File(directory, "vault.kdbx")
+        val password = "Reopen#Fake#2026".toCharArray()
+        val session = DatabaseSession()
+        try {
+            assertTrue(session.create(file, "Vault", password.copyOf(), useArgon2 = false) is KdbxResult.Success)
+            val accepted = session.captureCredentialRequest()
+            session.close()
+            assertTrue(session.open(file, password.copyOf()) is KdbxResult.Success)
+            val reopened = session.databaseFlow.first()
+            var persistCalls = 0
+            val writer = VaultEntryWriteCoordinator(strings, session, VaultEntryMapper(strings)) {
+                persistCalls++
+                KdbxResult.Success(Unit)
+            }
+
+            val result = withContext(accepted) {
+                writer.saveEntryWithEraseContract(
+                    uiEntry(groupId = null),
+                    passwordChars = null,
+                    totpSecretChars = null,
+                    protectedFieldChars = emptyMap(),
+                    groupIntent = EntryGroupIntent.Root
+                )
+            }
+
+            assertTrue("同路径重开后必须拒绝旧受理", result is KdbxResult.Failure)
+            assertEquals(KdbxError.SAVE_SESSION_CHANGED, (result as KdbxResult.Failure).code)
+            assertSame("重开后的树不得被替换", reopened, session.databaseFlow.first())
+            assertEquals("拒绝路径不得落盘", 0, persistCalls)
+            assertTrue(
+                "拒绝后不得把候选写进重开后的树",
+                session.databaseFlow.first()!!.rootGroup.allEntries().none { it.title == "Edited" }
+            )
+        } finally {
+            password.fill('0')
+            session.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `受理后锁库再保存不得写入`() = runTest {
+        val session = newSession()
+        val accepted = session.captureCredentialRequest()
+        session.lock()
+        var persistCalls = 0
+        val writer = VaultEntryWriteCoordinator(strings, session, VaultEntryMapper(strings)) {
+            persistCalls++
+            KdbxResult.Success(Unit)
+        }
+
+        val result = withContext(accepted) {
+            writer.saveEntryWithEraseContract(
+                uiEntry(childGroupId.toHexString()),
+                passwordChars = null,
+                totpSecretChars = null,
+                protectedFieldChars = emptyMap()
+            )
+        }
+
+        assertTrue("锁库后必须拒绝旧受理", result is KdbxResult.Failure)
+        assertEquals(KdbxError.SAVE_SESSION_CHANGED, (result as KdbxResult.Failure).code)
+        assertNull(session.databaseFlow.first())
+        assertEquals("拒绝路径不得落盘", 0, persistCalls)
+    }
+
+    @Test
+    fun `同一次受理内的嵌套保存仍成功`() = runTest {
+        val session = newSession()
+        val accepted = session.captureCredentialRequest()
+
+        val result = withContext(accepted) {
+            coordinator(session).saveEntryWithEraseContract(
+                uiEntry(childGroupId.toHexString()),
+                passwordChars = null,
+                totpSecretChars = null,
+                protectedFieldChars = emptyMap()
+            )
+        }
+
+        assertTrue("同一次受理内的嵌套调用不得被误判为会话变化", result is KdbxResult.Success)
+        assertEquals("Edited", session.loadedEntry().title)
     }
 }

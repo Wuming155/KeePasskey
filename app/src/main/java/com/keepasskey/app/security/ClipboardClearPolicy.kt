@@ -6,13 +6,26 @@ package com.keepasskey.app.security
  *
  * 1. [resolveScheduledTimeoutSeconds]（ISSUE-P3-144）：本次敏感复制**是否调度**擦除、
  *    以及用几秒——含「用户关闭自动擦除时显式 `customTimeoutSeconds` 同样被否决」的语义；
- * 2. [shouldClearOnUnreadableClipboard]（ISSUE-P2-51 AC②）：后台读不到剪贴板时的清空裁决。
+ * 2. [shouldClearOnBackgroundSwitch]（ENG-20261028-03）：应用切到后台时是否立即清空；
+ * 3. [shouldClearOnUnreadableClipboard]（ISSUE-P2-51 AC②）：读不到剪贴板时的清空裁决。
  *
- * ## ISSUE-P2-51 AC②：空读分支不得误清
+ * ## ENG-20261028-03：后台不得早于设置清空
  *
- * Android 10+ 后台读不到主剪贴板（`primaryClip == null`），原实现仅凭「记录摘要 == 计划摘要」
- * 即 fail-safe 清空；但若期间已发生覆盖写（如 `copyPlainText`），该匹配命中的是**陈旧摘要**，
- * 清空会误伤他处内容。故此处显式要求「未发生覆盖写」。
+ * 原实现在进程进入后台（`ProcessLifecycleOwner` ON_STOP）时无条件物理清空，而「复制口令 → 切到
+ * 目标应用粘贴」是本功能唯一的使用路径：用户配置的保留时长被后台切换架空，粘贴时剪贴板已空。
+ * 现按 [shouldClearOnBackgroundSwitch] 裁决——已调度定时擦除时后台不清空，粘贴窗口由设置决定。
+ *
+ * ## 安全条件清理策略（ENG03）：后台不可读时不得物理清空
+ *
+ * Android 10+（API 29+）后台读不到主剪贴板（官方文档：`getPrimaryClip()` 在非默认输入法且无输入焦点时
+ * 返回 `null`）。此前曾假设后台 listener 仍能接收覆盖写变更；但 AOSP 官方实现
+ * （`com.android.server.clipboard.ClipboardService.sendClipChangedBroadcast`）在派发
+ * `dispatchPrimaryClipChanged` 前显式校验 `clipboardAccessAllowed(OP_READ_CLIPBOARD)`，
+ * 缺少窗口焦点的后台应用一律被抑制通知。
+ *
+ * 故后台在剪贴板不可读时无法证明剪贴板当前内容仍属本应用写入；若按陈旧摘要或无覆盖证据盲目清空，
+ * 会误删其它应用或用户新写入的内容。因此在剪贴板不可读时严禁物理清空，待清标记与截止期延后至回到
+ * 前台时核验。
  */
 internal object ClipboardClearPolicy {
 
@@ -31,11 +44,10 @@ internal object ClipboardClearPolicy {
      * ⚠ 若未来采纳「强制擦除」，须把本顺序改为「敏感路径**无条件**调度，仅把用户设置作为
      * **上限**（`min`）而非**开关**」，并同步更新 `ClipboardSecurityManager` 三个入口的 KDoc。
      *
-     * 顺序与语义均由 `ClipboardSecurityManagerScheduledClearTest` 锁定：该用例对第 1 步的
-     * **提前返回**做变异验证——把本行改为「与秒数共同裁决」（即用户开关不再否决非空
-     * `customTimeoutSeconds`）后，行为层用例即以
-     * `expected null, but was:<7>` 变红；仅把本行**移到**第 2 步之后（纯语句调序）则由该用例的
-     * 顺序守卫（`autoClearClipboard` 必须早于 `customTimeoutSeconds`）变红。
+     * 顺序与语义由 `ClipboardSecurityManagerScheduledClearTest` 的**行为用例**锁定：把第 1 步
+     * 改成「与秒数共同裁决」（开关不再否决非空 `customTimeoutSeconds`）后，用例即以
+     * `expected:<null> but was:<...>` 变红。纯语句调序（校验仍能否决、只是晚于秒数计算）不改变
+     * 结果，本仓不设源码文本守卫，由本契约与评审维持。
      *
      * @param customTimeoutSeconds 调用方显式指定的秒数（非 null 仍受第 1 步否决）
      * @param autoClearClipboard 用户设置：是否启用剪贴板自动擦除
@@ -54,18 +66,29 @@ internal object ClipboardClearPolicy {
     }
 
     /**
-     * @param recordedHash 记录的最后敏感值摘要（null=无待清敏感值）
-     * @param expectedHash 本次计划要清空的摘要
-     * @param superseded 自本次敏感复制以来是否已发生可观测的覆盖写
-     * @return 是否应执行清空
+     * ENG-20261028-03：应用切到后台时**是否**立即物理清空待清敏感值。
+     *
+     * - 本次敏感复制已调度定时擦除（用户配置了正数保留时长）⇒ 返回 false：可用的跨应用粘贴窗口
+     *   必须与设置一致，后台切换**不得**提前清空；到期清空由定时器负责，熄屏 / 会话锁定 /
+     *   冷启动对账仍按各自语义独立生效；
+     * - 本次敏感复制**没有**定时擦除计划（关闭「自动擦除剪贴板」，或保留时长选择「不清空」/ ≤0）
+     *   ⇒ 返回 true：沿用 ISSUE-P3-84 AC② 的补偿控制「敏感值只在前台窗口驻留」，与设置页
+     *   `sec_clipboard_risk_notice` 向用户告知的清空时机一致。
+     *
+     * @param pasteWindowScheduled 本次敏感复制是否已调度定时擦除
+     * @return 是否应在切到后台时立即清空
      */
-    fun shouldClearOnUnreadableClipboard(
-        recordedHash: ByteArray?,
-        expectedHash: ByteArray,
-        superseded: Boolean
-    ): Boolean {
-        if (superseded) return false
-        if (recordedHash == null) return false
-        return java.security.MessageDigest.isEqual(recordedHash, expectedHash)
-    }
+    fun shouldClearOnBackgroundSwitch(pasteWindowScheduled: Boolean): Boolean = !pasteWindowScheduled
+
+    /**
+     * 安全条件清理策略（ENG03）：剪贴板不可读时是否允许物理清空。
+     *
+     * 当应用退至后台且无输入焦点时（Android 10+），`getPrimaryClip()` 读回 `null`。
+     * 同时 AOSP `ClipboardService` 对无焦点的后台应用抑制剪贴板变更广播，应用无法掌握外部是否已写入新值。
+     * 无法证明当前剪贴板值仍属本应用时，绝不得物理清空剪贴板（避免误删他处内容）；
+     * 待清标记与截止期必须保留，延后至回到前台核验。
+     *
+     * @return 恒为 false：不可读即不可证明，严禁物理清空
+     */
+    fun shouldClearOnUnreadableClipboard(): Boolean = false
 }

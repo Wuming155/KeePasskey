@@ -23,8 +23,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
 import com.keepasskey.app.security.SecureDialogWindowEffect
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.theme.CapsuleShape
@@ -166,8 +169,16 @@ internal fun EntryEditIconPickerDialog(
  * Credential Manager 捞出并签名。现在它是一条**不可逆的真实写操作**，故必须先经确认，
  * 且正文要写清"删的是什么、留的是什么"。
  *
- * `FLAG_SECURE` 跟随设置开关（`PD-48` 裁决三，与通行密钥导入确认框同口径）；
- * 反 overlay 与点击劫持两层由 [SecureDialogWindowEffect] 始终施加。
+ * `FLAG_SECURE` 跟随设置开关（`PD-48` 裁决三，与 `PasskeyImportConfirmDialog` 同口径）：开关开 ⇒
+ * 调用点传 `SecureFlagPolicy.SecureOn` 强制遮罩，关 ⇒ `SecureOff` 显式不遮罩——对话框窗口该 flag 的
+ * 实际决定者是 `DialogProperties.securePolicy`（默认 `Inherit` 按宿主窗口求值，会清掉本窗的 flag，
+ * 见 `SecureDialog` KDoc）。
+ *
+ * 遮挡触摸过滤（反点击劫持）由 [SecureDialogWindowEffect] **恒常**施加、不随开关放宽。它与
+ * `FLAG_SECURE` 同为**窗口级**属性，不会从宿主 Activity 窗口传播，故该 effect 必须写在**本对话框
+ * 自身的内容槽位内**——写在 `AlertDialog(...)` 之外时 `LocalView` 属于宿主窗口，解析不到对话框窗口，
+ * 两层都会按 fail-safe 静默不动作。本包装**不**施加 overlay 抑制（`setHideOverlayWindows` 抑制
+ * overlay 绘制 / 可见性，与丢弃遮挡态触摸正交），该层只由宿主 Activity 窗口单独施加。
  */
 @Composable
 internal fun EntryEditUnbindPasskeyDialog(
@@ -175,11 +186,24 @@ internal fun EntryEditUnbindPasskeyDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    SecureDialogWindowEffect(flagSecure = flagSecureEnabled)
     AlertDialog(
         onDismissRequest = onDismiss,
+        // 跟随防截屏开关（同 PasskeyImportConfirmDialog 的 PD-48 裁决三）：开 ⇒ SecureOn 强制遮罩，
+        // 关 ⇒ SecureOff 显式不遮罩。对话框窗口 FLAG_SECURE 的实际决定者是本参数（默认 Inherit
+        // 会按宿主窗口清除），故两支都必须显式写出，不得回退为省略参数的 Inherit
+        properties = DialogProperties(
+            securePolicy = if (flagSecureEnabled) {
+                SecureFlagPolicy.SecureOn
+            } else {
+                SecureFlagPolicy.SecureOff
+            }
+        ),
         title = { Text(stringResource(R.string.edit_passkey_unbind_dialog_title)) },
-        text = { Text(stringResource(R.string.edit_passkey_unbind_dialog_body)) },
+        text = {
+            // 必须落在对话框自身的内容槽位内（窗口级副作用，见 SecureDialog KDoc）
+            SecureDialogWindowEffect(flagSecure = flagSecureEnabled)
+            Text(stringResource(R.string.edit_passkey_unbind_dialog_body))
+        },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(stringResource(R.string.edit_passkey_unbind_confirm))
@@ -197,7 +221,10 @@ internal fun EntryEditDiscardDialog(onDiscard: () -> Unit, onKeepEditing: () -> 
     AlertDialog(
         onDismissRequest = onKeepEditing,
         title = { Text(stringResource(R.string.edit_discard_title)) },
-        text = { Text(stringResource(R.string.edit_discard_desc)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.edit_discard_desc))
+        },
         confirmButton = {
             TextButton(onClick = onDiscard) {
                 Text(stringResource(R.string.btn_discard))

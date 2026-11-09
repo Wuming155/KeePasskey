@@ -59,13 +59,13 @@ class UnlockThrottleConfigProviderTest {
     @Test
     fun `冷启动窗口内既有锁定截止仍被强制执行`() {
         val store = FakeUnlockThrottleStore()
-        val manager = UnlockThrottleManager(store, UnlockThrottleConfigProvider(NeverEmittingSettings()))
-        val now = 70_000_000L
-        store.seed(dbId, UnlockThrottleRecord(failureCount = 7, lockoutUntilEpochMs = now + 600_000L))
+        val clock = FakeThrottleClock(wallStart = 70_000_000L)
+        val manager = UnlockThrottleManager(store, UnlockThrottleConfigProvider(NeverEmittingSettings()), clock)
+        store.seed(dbId, UnlockThrottleRecord(failureCount = 7, lockoutUntilEpochMs = clock.wall + 10_000L))
 
-        val gate = manager.gate(dbId, now)
+        val gate = manager.gate(dbId)
         assertTrue("设置流未抵达时不得放行已被锁定的用户", gate is ThrottleGate.Locked)
-        assertEquals(600_000L, (gate as ThrottleGate.Locked).remainingMs)
+        assertEquals(10_000L, (gate as ThrottleGate.Locked).remainingMs)
     }
 
     // ── ② 设置流抵达：按用户偏好收敛 ──────────────────────────────────
@@ -75,19 +75,19 @@ class UnlockThrottleConfigProviderTest {
         val settings = ControllableSettings()
         val provider = UnlockThrottleConfigProvider(settings)
         val store = FakeUnlockThrottleStore()
-        val manager = UnlockThrottleManager(store, provider)
-        val now = 80_000_000L
-        store.seed(dbId, UnlockThrottleRecord(failureCount = 7, lockoutUntilEpochMs = now + 600_000L))
+        val clock = FakeThrottleClock(wallStart = 80_000_000L)
+        val manager = UnlockThrottleManager(store, provider, clock)
+        store.seed(dbId, UnlockThrottleRecord(failureCount = 7, lockoutUntilEpochMs = clock.wall + 10_000L))
 
         // 抵达前（安全默认开启）：既有锁定截止 fail-closed
-        assertTrue(manager.gate(dbId, now) is ThrottleGate.Locked)
+        assertTrue(manager.gate(dbId) is ThrottleGate.Locked)
 
         // 抵达后（出厂默认关闭）：收敛为关闭态 ⇒ 忽略既有锁定截止（用户显式退出的既有语义）
         settings.emissions.tryEmit(UserSettings(unlockThrottleEnabled = false))
         awaitFalse { provider.current.enabled }
 
         assertFalse("设置流抵达后应交由用户偏好裁决", provider.current.enabled)
-        assertTrue(manager.gate(dbId, now) is ThrottleGate.Allowed)
+        assertTrue(manager.gate(dbId) is ThrottleGate.Allowed)
     }
 
     @Test

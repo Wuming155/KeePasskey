@@ -1,14 +1,18 @@
 package com.keepasskey.sync.webdav
 
+import com.keepasskey.sync.model.SyncException
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
-/** WebDAV Basic 认证中间缓冲的行为与生命周期契约。 */
+/** WebDAV Basic 认证中间缓冲与凭据载体的行为、生命周期契约（虚构凭据）。 */
 class WebDavAuthHeaderBufferWipeTest {
 
     @Test
@@ -133,5 +137,100 @@ class WebDavAuthHeaderBufferWipeTest {
         } finally {
             executor.shutdownNow()
         }
+    }
+
+    @Test
+    fun `认证载体独占复制口令且容忍调用方构造后立即擦除`() {
+        val borrowed = "fake-pass-中文-😀".toCharArray()
+        val original = borrowed.copyOf()
+
+        val credentials = WebDavAuthCredentials("虚构用户", borrowed)
+
+        val retained = checkNotNull(credentials.retainedPasswordBufferForTest())
+        assertNotSame("载体不得驻留调用方借用的数组", borrowed, retained)
+        assertArrayEquals("载体副本应保有原口令", original, retained)
+
+        // 既有收口：Provider 构造返回后调用方立即擦除借用数组，载体仍须能按请求出凭证
+        borrowed.fill('0')
+        val header = credentials.authorizationHeader()
+        assertEquals("虚构用户:fake-pass-中文-😀", decodeBasicCredentials(header))
+        assertEquals("按需生成不改变凭据内容", header, credentials.authorizationHeader())
+    }
+
+    @Test
+    fun `失效后副本确定性清零并拒绝继续构造认证头`() {
+        val credentials = WebDavAuthCredentials("fake-user", "fake-pass-密😀".toCharArray())
+        val retained = checkNotNull(credentials.retainedPasswordBufferForTest())
+
+        credentials.invalidate()
+
+        assertArrayEquals(
+            "失效必须确定性清零独占副本，不依赖 GC",
+            CharArray(retained.size) { '0' },
+            retained
+        )
+        assertNull("失效后不再持有任何口令副本", credentials.retainedPasswordBufferForTest())
+        org.junit.Assert.assertThrows(SyncException.AuthenticationError::class.java) {
+            credentials.authorizationHeader()
+        }
+
+        // 幂等：重复失效与 close 都不放大失败面
+        credentials.invalidate()
+        credentials.close()
+        assertNull(credentials.retainedPasswordBufferForTest())
+    }
+
+    @Test
+    fun `并发取头与失效之间只产出完整凭据或鉴权失败`() {
+        val credentials = WebDavAuthCredentials("fake-user", "fake-pass-密😀".toCharArray())
+        val retained = checkNotNull(credentials.retainedPasswordBufferForTest())
+        val executor = Executors.newFixedThreadPool(4)
+        val start = CountDownLatch(1)
+        val firstHeader = CountDownLatch(1)
+        try {
+            val readers = (0 until 6).map {
+                executor.submit<Int> {
+                    start.await()
+                    var validHeaders = 0
+                    repeat(200) {
+                        try {
+                            assertEquals(
+                                "fake-user:fake-pass-密😀",
+                                decodeBasicCredentials(credentials.authorizationHeader())
+                            )
+                            validHeaders++
+                            firstHeader.countDown()
+                        } catch (_: SyncException.AuthenticationError) {
+                            // 已失效后拒绝构造属预期结果
+                        }
+                    }
+                    validHeaders
+                }
+            }
+            val invalidator = executor.submit {
+                start.await()
+                // 先确保失效前确有请求在取头，失效才与取头形成真实交错
+                firstHeader.await()
+                credentials.invalidate()
+            }
+            start.countDown()
+
+            readers.forEach { future -> future.get() }
+            invalidator.get()
+
+            assertArrayEquals("并发失效不得留下明文残留", CharArray(retained.size) { '0' }, retained)
+            org.junit.Assert.assertThrows(SyncException.AuthenticationError::class.java) {
+                credentials.authorizationHeader()
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    private fun decodeBasicCredentials(header: String): String {
+        assertTrue("认证头必须以 Basic 前缀交付: $header", header.startsWith("Basic "))
+        return Base64.getDecoder()
+            .decode(header.removePrefix("Basic "))
+            .toString(Charsets.UTF_8)
     }
 }

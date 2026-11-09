@@ -38,14 +38,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.theme.CapsuleShape
 import com.keepasskey.app.ui.theme.passwordFieldStyle
 
 /**
  * 冲突页段落组件（§192 自 `ConflictResolutionScreen.kt` 下沉，窄参数、不读 UiState、不自持状态）。
  *
- * 页面根函数保留 `ApplyObscuredTouchFilter()` 首条语句与全部状态编排（`ObscuredTouchWiringTest`
- * 的锚点即在此），本文件只承载纯呈现段。
+ * 页面根函数保留 `ApplyObscuredTouchFilter()` 首条语句与全部状态编排（页面根的过滤施加
+ * 只在此处，搬进段落组件会与页面根脱离），本文件只承载纯呈现段。
  */
 
 /** 底部「稍后处理 / 合并并推送」操作条（原 `Scaffold.bottomBar` 内容原样搬移）。 */
@@ -321,7 +322,10 @@ internal fun ConflictActionConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(titleRes)) },
-        text = { Text(stringResource(messageRes, conflictCount)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(messageRes, conflictCount))
+        },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(stringResource(confirmRes))

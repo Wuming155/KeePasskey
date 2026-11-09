@@ -171,6 +171,27 @@ class SyncProviderResolverOwnershipTest {
         assertNull(fixture.factory.accessKeyClone)
     }
 
+    @Test
+    fun `作用域退出时被留存判定的Provider不释放而在判定撤销后释放`() = runTest {
+        // ENG-20261028-42：冲突待决期的 Provider 会被用户稍后裁决继续复用——周期作用域退出
+        // 时不得释放其凭据，否则裁决上传必然鉴权失败（S3 现状缺陷）。所有权转移给留存方。
+        val fixture = Fixture()
+        fixture.saveS3()
+        fixture.resolver.isProviderRetained = { true }
+
+        fixture.resolver.useProvider(testOverride = null) { "retained" }
+
+        assertEquals("被留存的 Provider 不得在作用域退出时释放", 0, fixture.factory.releaseCalls)
+
+        // 留存方丢弃该 Provider 后（判定撤销），后续作用域恢复即时释放
+        fixture.resolver.isProviderRetained = { false }
+        fixture.resolver.useProvider(testOverride = null) { "released" }
+
+        assertEquals("判定撤销后作用域退出即释放", 1, fixture.factory.releaseCalls)
+        assertAllZero(fixture.factory.accessKeyClone!!)
+        assertAllZero(fixture.factory.secretKeyClone!!)
+    }
+
     private class Fixture {
         val preferences = InMemorySharedPreferences()
         val store = SyncCredentialsStore(preferences.context(), keystoreManager = null)

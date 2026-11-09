@@ -54,7 +54,15 @@ internal class WebAuthnRequest private constructor(private val root: Map<String,
         val evalByCredentialPresent: Boolean
     )
 
-    /** 依赖方标识（创建请求在 `rp.id`，断言请求在顶层 `rpId`） */
+    /**
+     * 依赖方标识（创建请求在 `rp.id`，断言请求在顶层 `rpId`）；**缺失时为空白**。
+     *
+     * 缺失不是「任意 RP 均可」：WebAuthn 规定 `rpId` 缺省取调用方 origin 的有效域，浏览器
+     * 委派调用因此天然有锚（origin 由系统背书）；`android:apk-key-hash:` 形态的原生调用
+     * **没有**有效域，缺失 RP 即「无请求侧 RP 身份」，授权只能来自调用方签名绑定——
+     * 该判定不在解析层，见 [PasskeyRequestRpBinding] 与 [PasskeyRpAuthorization]。
+     * 本 getter 只如实投影「请求写了什么」，不代替任何授权判据。
+     */
     val rpId: String
         get() = SimpleJson.string(SimpleJson.objectAt(root, WebAuthnJson.RP), WebAuthnJson.ID)
             ?: SimpleJson.string(root, WebAuthnJson.RP_ID)

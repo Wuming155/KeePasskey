@@ -8,6 +8,11 @@ import java.net.IDN
  * 数据来源：`src/main/resources/publicsuffix/public_suffix_list.dat`（Mozilla 官方文件，
  * MPL-2.0 许可，许可声明保留于文件头）。线程安全。
  *
+ * 刷新入口：`python tools/publicsuffix/refresh_psl.py --check`（与官方当前版本比对）或
+ * `--apply`（校验通过后原子替换）。文件头的 `// VERSION:` / `// COMMIT:` 是随仓表的**版本身份**，
+ * 由 `PublicSuffixListResourceTest` 机检。表随 APK 版本发布，**不做**运行时在线更新；
+ * 离线表过期的影响边界见 `tools/publicsuffix/README.md`。
+ *
  * 算法对齐 publicsuffix.org 官方规范：
  * 1. 例外规则（`!` 前缀）优先命中，公共后缀 = 规则去掉最左标签（如 `!www.ck` → `ck`）；
  * 2. 否则取最长匹配规则为公共后缀；通配规则（`*.` 前缀）消耗一个任意标签（如 `*.ck` → `foo.ck`）；
@@ -15,6 +20,9 @@ import java.net.IDN
  *
  * 可注册域判定：`isRegistrableDomain(host)` = host 存在至少一个位于公共后缀之上的标签。
  * 涵盖私有段（PRIVATE DOMAINS，如 `github.io`），`github.io` 自身不可注册而 `foo.github.io` 可。
+ * **IP 字面量与单标签 `localhost` 不是域名**，按 [HostShape] 在查表前即判为不可注册 /
+ * 无可注册域（本类两个入口同口径）；本地 RP 的放行由 [DomainMatcher] 按「仅精确相等」单独处理，
+ * 不改写本表的 PSL 语义。
  *
  * IDN 处理：查询期将非 ASCII host 经 [IDN.toASCII] 归一为 punycode；**包含非 ASCII 标签的规则**
  * 在装入其所属「末标签桶」时同样归一（如 `公司.cn` → `xn--55qx5d.cn`）。
@@ -43,9 +51,11 @@ import java.net.IDN
  *
  * 1. 行分隔符为纯 `LF`（`CR` 仅在行末做防御性裁剪）；
  * 2. 规则行**已是小写** ⇒ 省掉每行一次 `lowercase()`；
- * 3. 规则行首尾无空白 ⇒ 省掉每行 `trim()`。
+ * 3. 规则行首尾无空白 ⇒ 省掉每行 `trim()`；
+ * 4. 保留官方文件头的 `// VERSION:` / `// COMMIT:` 与拉取地址说明 ⇒ 随仓表的来源与适用
+ *    版本可核对（刷新流程见 `tools/publicsuffix/README.md`）。
  *
- * 三条被破坏时该用例即红，**不会静默改变判定口径**（人工更新 `.dat` 时须同步复核）。
+ * 四条被破坏时对应用例即红，**不会静默改变判定口径**（更新 `.dat` 请走刷新工具而非手工编辑）。
  */
 object PublicSuffixList {
 
@@ -87,10 +97,15 @@ object PublicSuffixList {
      * 判断 host 是否为可注册域名（存在公共后缀之上的至少一个标签）。
      * host 需已归一化为主机名形式（小写、无 scheme、无端口）；尾部根点（"."）在此归一处理。
      *
+     * IP 字面量与单标签 `localhost` 不是域名，先于查表判为 `false`——与
+     * [registrableDomain] 保持同一口径（ENG-20261028-40 的缺陷正是本入口曾把点分数字
+     * 当分层域名，令 `168.1.1` 成为 `192.168.1.1` 的「后缀」）。
+     *
      * 读取失败（资源缺失）时返回 `false`（fail-closed）。
      */
     fun isRegistrableDomain(host: String): Boolean {
         val normalized = normalizeHost(host) ?: return false
+        if (HostShapes.of(normalized) != HostShape.Domain) return false
         val labels = normalized.split('.')
         if (labels.isEmpty() || labels.any { it.isEmpty() }) return false
         val rules = rulesFor(labels[labels.size - 1]) ?: return false
@@ -105,20 +120,19 @@ object PublicSuffixList {
      * （私有段规则下 `github.io` 是公共后缀，两侧兄弟域**不同**可注册域——这正是
      * 「按 eTLD+1 而非末两标签」计算的意义）。
      *
-     * 与 [isRegistrableDomain] 的两处口径差异（本函数服务「同站比较」消费方）：
-     * - **IP 字面量返回 null**（IPv4 四段纯数字 / IPv6 含冒号）——既有判定对多标签 IP
-     *   「一律放行」是历史行为，但 IP 不是域名，`192.168.1.1` 与 `192.168.1.2` 的
-     *   「末段剥离」相等**绝不**构成同站（基域档负例的判据来源）；
-     * - 不可注册域（公共后缀本身 / 单标签）与资源不可用同样返回 null（fail-closed）。
+     * 与 [isRegistrableDomain] 同口径拒绝非域名形态（[HostShape]）：IP 字面量
+     * （点分数字 / 含冒号）与单标签 `localhost` 一律返回 null——IP 不是域名，
+     * `192.168.1.1` 与 `192.168.1.2` 的「末段剥离」相等**绝不**构成同站
+     * （基域档负例的判据来源）。不可注册域（公共后缀本身 / 单标签）与资源不可用同样
+     * 返回 null（fail-closed）。
      *
      * @return 可注册域主机名；不可判定时 null
      */
     fun registrableDomain(host: String): String? {
         val normalized = normalizeHost(host) ?: return null
-        if (normalized.contains(':')) return null // IPv6 字面量
+        if (HostShapes.of(normalized) != HostShape.Domain) return null
         val labels = normalized.split('.')
         if (labels.isEmpty() || labels.any { it.isEmpty() }) return null
-        if (labels.all { label -> label.all { it.isDigit() } }) return null // IPv4 字面量
         val rules = rulesFor(labels[labels.size - 1]) ?: return null
         val publicSuffix = findPublicSuffix(rules, labels) ?: labels[labels.size - 1] // 默认规则 "*"
         val suffixSize = publicSuffix.split('.').size

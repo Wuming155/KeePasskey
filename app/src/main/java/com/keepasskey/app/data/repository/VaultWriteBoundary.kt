@@ -6,9 +6,10 @@ import com.keepasskey.app.security.VaultFileDriftGuard
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
+import com.keepasskey.database.exception.KdbxSessionChangedException
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
-import com.keepasskey.database.session.withCredentialRequestScope
+import com.keepasskey.database.session.withAcceptedRequest
 import java.io.File
 
 /**
@@ -91,7 +92,6 @@ internal class VaultWriteBoundary(
      * （漏配对会令挂锁永不恢复）；挂起期间的锁定触发延迟至保存结束补执行。
      */
     suspend fun persist(): KdbxResult<Unit> {
-        val request = databaseSession.captureCredentialRequest()
         autoLockGuard.beginLongTask()
         try {
             val draft = when (val captured = crashDrafts?.capture()) {
@@ -100,9 +100,9 @@ internal class VaultWriteBoundary(
                 null -> null
             }
             abortOnDrift()?.let { return it }
-            // 续用已受理的凭据请求：导入等批量路径会在同一次受理内多次调用本方法，
-            // 每次都新建 request 会命中 `withCredentialRequest` 的嵌套覆盖检查并让整批失败。
-            val result = databaseSession.withCredentialRequestScope(request) { databaseSession.save() }
+            // 续用受理点的票据：协调器受理后的改树与本次写盘必须同属一个会话代次；
+            // 无外层受理（内部/单测直接调用）时，本出口自行受理并固定当前票据。
+            val result = databaseSession.withAcceptedRequest { databaseSession.save() }
             afterPersist()
             when (result) {
                 is KdbxResult.Success -> {
@@ -121,42 +121,68 @@ internal class VaultWriteBoundary(
      * 库级元数据候选提交：漂移检查（不命中才应用）→ 应用 [transform] → 经 [persist] 落盘。
      *
      * [transform] 必须为纯函数式拷贝（`db.copy(...)`），不得原地改动传入树。
+     *
+     * 与 [persist] 同口径：提交前经 `withAcceptedRequest` 固定本次受理票据，并在
+     * `DatabaseMetaCommitter` 的会话临界区内复核（`ENG-20261028-25`）——受理后换密 / 换库 / 锁库
+     * 与提交交错时返回 [KdbxError.SAVE_SESSION_CHANGED]，不把候选落进后来会话。
      */
-    suspend fun commitMeta(transform: (KdbxDatabase) -> KdbxDatabase): KdbxResult<Unit> {
-        val snapshot = databaseSession.writeIntents.captureSnapshot() ?: return KdbxResult.Failure(
-            IllegalStateException("活动数据库为空"), code = KdbxError.SAVE_NO_DATABASE
-        )
-        fun switched(): KdbxResult.Failure = KdbxResult.Failure(
-            IllegalStateException("提交期间活动数据库已切换"),
-            code = KdbxError.SAVE_SESSION_CHANGED
-        )
-        fun snapshotStillActive(): Boolean =
-            databaseSession.databaseFlow.value === snapshot.database &&
-                databaseSession.currentPathIdentifier == snapshot.pathIdentifier &&
-                databaseSession.currentFile == snapshot.file
+    suspend fun commitMeta(transform: (KdbxDatabase) -> KdbxDatabase): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance {
+            val snapshot = databaseSession.writeIntents.captureSnapshot() ?: return@withWriteAcceptance KdbxResult.Failure(
+                IllegalStateException("活动数据库为空"), code = KdbxError.SAVE_NO_DATABASE
+            )
+            fun switched(): KdbxResult.Failure = KdbxResult.Failure(
+                IllegalStateException("提交期间活动数据库已切换"),
+                code = KdbxError.SAVE_SESSION_CHANGED
+            )
+            fun snapshotStillActive(): Boolean =
+                databaseSession.databaseFlow.value === snapshot.database &&
+                    databaseSession.currentPathIdentifier == snapshot.pathIdentifier &&
+                    databaseSession.currentFile == snapshot.file
 
-        if (!snapshotStillActive()) return switched()
-        abortOnDrift(snapshot.pathIdentifier, snapshot.file)?.let { return it }
-        autoLockGuard.beginLongTask()
-        try {
-            if (!snapshotStillActive()) return switched()
-            // 第二次写前检查与 `persist()` 的普通保存路径同口径；命中漂移时不构造或发布候选。
-            abortOnDrift(snapshot.pathIdentifier, snapshot.file)?.let { return it }
-            if (!snapshotStillActive()) return switched()
-            val result = databaseSession.writeIntents.commitDatabaseMeta(snapshot.database, transform)
-            when (result) {
-                is KdbxResult.Success -> {
-                    afterPersist()
-                    driftGuard.captureAfterPersist(
-                        snapshot.pathIdentifier.orEmpty(),
-                        snapshot.file
-                    )
+            if (!snapshotStillActive()) return@withWriteAcceptance switched()
+            abortOnDrift(snapshot.pathIdentifier, snapshot.file)?.let { return@withWriteAcceptance it }
+            autoLockGuard.beginLongTask()
+            try {
+                if (!snapshotStillActive()) return@withWriteAcceptance switched()
+                // 第二次写前检查与 `persist()` 的普通保存路径同口径；命中漂移时不构造或发布候选。
+                abortOnDrift(snapshot.pathIdentifier, snapshot.file)?.let { return@withWriteAcceptance it }
+                if (!snapshotStillActive()) return@withWriteAcceptance switched()
+                // 续用受理点的票据：在受理入口已固定本次会话票据，供
+                // `DatabaseMetaCommitter` 的会话临界区内复核（同票据续用）。
+                val result = databaseSession.withAcceptedRequest {
+                    databaseSession.writeIntents.commitDatabaseMeta(snapshot.database, transform)
                 }
-                is KdbxResult.Failure -> logPersistFailure(result)
+                when (result) {
+                    is KdbxResult.Success -> {
+                        afterPersist()
+                        driftGuard.captureAfterPersist(
+                            snapshot.pathIdentifier.orEmpty(),
+                            snapshot.file
+                        )
+                    }
+                    is KdbxResult.Failure -> logPersistFailure(result)
+                }
+                result
+            } finally {
+                autoLockGuard.endLongTask()
             }
-            return result
-        } finally {
-            autoLockGuard.endLongTask()
         }
-    }
+}
+
+/**
+ * 普通写协调器的**受理点**：在读取候选之前固定本次会话票据，并把该请求传播到改树与
+ * [VaultWriteBoundary.persist]；同一次受理内的嵌套调用沿用外层请求。
+ *
+ * 会话在受理后换密、同路径重开、换库或锁库时，改树与写盘边界的票据复核会拒绝本次写入，
+ * 并以 [KdbxError.SAVE_SESSION_CHANGED] 如实上浮，而不是把候选落进后来活动库。
+ *
+ * 无请求上下文的内部/同步入口不走本函数；它们的放行契约见 `SessionRequestGuard`。
+ */
+internal suspend fun <T> DatabaseSession.withWriteAcceptance(
+    block: suspend () -> KdbxResult<T>
+): KdbxResult<T> = try {
+    withAcceptedRequest { block() }
+} catch (changed: KdbxSessionChangedException) {
+    KdbxResult.Failure(changed, code = KdbxError.SAVE_SESSION_CHANGED)
 }

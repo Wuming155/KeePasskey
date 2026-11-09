@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.screens.settings.ConflictResolution
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 
@@ -271,6 +272,7 @@ internal fun SyncIntervalDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.sync_interval_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 intervalOptions.forEach { (mins, label) ->
                     val isSelected = currentIntervalMinutes == mins
@@ -307,6 +309,7 @@ internal fun ConflictResolutionDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.sync_conflict_dialog_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ConflictResolution.entries.forEach { res ->
                     val isSelected = currentResolution == res

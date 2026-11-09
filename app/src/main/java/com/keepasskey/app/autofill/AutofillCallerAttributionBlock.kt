@@ -28,9 +28,9 @@ import com.keepasskey.app.R
  * **如实标注而不以占位冒充**、目标域为归属校验后的值；且**首次出现的显式授权勾选**门控确认按钮
  * （`trustChecked` 由宿主传入，本组件不自持该状态，避免门控条件在两处漂移）。
  *
- * 原为同文件 `private`，本批放宽为 `internal`（仅同模块可见）。宿主侧三处安全接线判据
- * （`AutofillAuthResultWiringTest` 读目标框 id / `AutofillConfirmDeliveryLockTest` 交付锁 /
- * `ObscuredTouchWiringTest` 窗口遮挡）均锚在 Activity 本体，不随本组件搬家 ⇒ 无需扩任何扫描清单。
+ * 原为同文件 `private`，本批放宽为 `internal`（仅同模块可见）。宿主侧安全接线判据
+ * （目标框 id、交付锁、窗口遮挡过滤）均锚在 Activity 本体，不随本组件搬家；真实确认页的
+ * 交付与遮挡行为由设备用例覆盖，本组件无需扩任何扫描清单。
  */
 /**
  * 确认页的调用方归属信息块（ISSUE-P1-24 AC①）。

@@ -52,7 +52,15 @@ class NativePasswordStrengthDeviceTest {
         "abcabcabc",
         "aB3\$kLmQ7#xZ9!",
         "tR7#kL9@mQ2!xZ4&vB6*",
-        "口令密码测试"
+        "口令密码测试",
+        // ENG-20261028-07：补充平面字符（按码点计数）、日期各布局、二次重复组合
+        "🔐🔑🧩🛡🔒🔓🚀",
+        "🔐🔐🔐🔐🔐🔐🔐",
+        "260131",
+        "013126",
+        "01012026",
+        "31122026",
+        "QwertyQwerty"
     )
 
     @Test

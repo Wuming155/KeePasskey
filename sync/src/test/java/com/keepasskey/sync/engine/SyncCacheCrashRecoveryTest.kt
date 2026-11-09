@@ -615,6 +615,92 @@ class SyncCacheCrashRecoveryTest {
     }
 
     // ------------------------------------------------------------------
+    // 5. 基准内容与版本标记的读侧一致性（ENG-20261028-02）
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `基线内容与版本摘要一致时读取交出内容且新实例一致`() {
+        val dir = cacheDir()
+        val a = "accepted-A".toByteArray()
+
+        SyncCache(dir).apply {
+            writeCache(remotePath, a)
+            updateBase(remotePath, sha(a), "etag-a")
+            writeBaseContent(remotePath, a)
+        }
+
+        assertArrayEquals("正常基线组合必须可读", a, SyncCache(dir).readBaseContent(remotePath))
+        assertEquals("基线身份即内容摘要", sha(a), baseVersionFile(dir).readText().trim())
+    }
+
+    @Test
+    fun `标记先行中断后新实例不得把旧内容当作可信基线`() {
+        val dir = cacheDir()
+        val a = "accepted-A".toByteArray()
+        val b = "accepted-B".toByteArray()
+
+        SyncCache(dir).apply {
+            writeCache(remotePath, a)
+            updateBase(remotePath, sha(a), "etag-a")
+            writeBaseContent(remotePath, a)
+        }
+        // 崩溃注入：B 的缓存与版本标记已交付、基准内容尚未重写
+        // （等价于 advanceBaseAndPersist 的 updateBase 之后、writeBaseContent 之前被杀）
+        SyncCache(dir).apply {
+            writeCache(remotePath, b)
+            updateBase(remotePath, sha(b), "etag-b")
+        }
+        assertArrayEquals("前置：内容文件仍是旧基线（真实崩溃形态）", a, baseCacheFile(dir).readBytes())
+        assertEquals("前置：标记已前移到 B", sha(b), baseVersionFile(dir).readText().trim())
+
+        assertNull(
+            "摘要不符的组合不得作为可信基线交出（应回退空库并集）",
+            SyncCache(dir).readBaseContent(remotePath)
+        )
+    }
+
+    @Test
+    fun `缺少版本标记的基线内容不作为可信基线`() {
+        val dir = cacheDir()
+        val a = "accepted-A".toByteArray()
+
+        SyncCache(dir).writeBaseContent(remotePath, a)
+
+        assertTrue("前置：内容文件存在", baseCacheFile(dir).isFile)
+        assertNull("没有身份标记就无法自证，不得交出", SyncCache(dir).readBaseContent(remotePath))
+    }
+
+    @Test
+    fun `标记先行中断后下一轮成功同步重写基线内容并恢复可信`() = runTest {
+        val dir = cacheDir()
+        val a = "accepted-A".toByteArray()
+        val b = "accepted-B".toByteArray()
+        val c = "local-C".toByteArray()
+        val provider = RecordingProvider().apply { remoteFiles[remotePath] = a to "etag-a" }
+
+        SyncCache(dir).apply {
+            writeCache(remotePath, a)
+            updateBase(remotePath, sha(a), "etag-a")
+            writeBaseContent(remotePath, a)
+        }
+        // 崩溃残留：B 已上传、标记已前移、基准内容仍是 A
+        SyncCache(dir).apply {
+            writeCache(remotePath, b)
+            updateBase(remotePath, sha(b), "etag-b")
+        }
+        provider.remoteFiles[remotePath] = b to "etag-b"
+        assertNull("前置：崩溃组合不可信", SyncCache(dir).readBaseContent(remotePath))
+
+        // 冷启动后继续编辑为 C，远端仍为 B ⇒ 本地赢自动上传并重写基准内容
+        SyncCache(dir).writeCache(remotePath, c)
+        val opened = SyncEngine(provider, SyncCache(dir)).openRemote(remotePath)
+        assertTrue("远端未变且本地有修改必须本地赢，实际: $opened", opened is SyncOpenResult.LocalWinAutoUploaded)
+
+        assertArrayEquals("下一轮成功同步必须重写基准内容", c, SyncCache(dir).readBaseContent(remotePath))
+        assertEquals("基线标记与内容必须同源", sha(c), baseVersionFile(dir).readText().trim())
+    }
+
+    // ------------------------------------------------------------------
     // 测试替身：只记录上传/元数据次数，行为对齐生产契约（条件写 + 流式下载）
     // ------------------------------------------------------------------
 

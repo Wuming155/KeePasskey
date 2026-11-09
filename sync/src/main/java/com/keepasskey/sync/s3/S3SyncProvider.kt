@@ -110,7 +110,7 @@ class S3SyncProvider private constructor(
 
     // Wave 12/14 传输安全：默认经 TLS-only 工厂构建（排除 CLEARTEXT + 显式超时 + 系统 CA 链验证），
     // 仅 HTTP 回环测试需显式注入明文客户端。生产路径在 init 中随构造期校验一并构建：
-    // 已配置端点主机传入工厂登记连接期豁免（ISSUE-P2-425，见 createSyncClient KDoc）
+    // **实际请求主机**传入工厂登记连接期豁免（ISSUE-P2-425 / ENG-20261028-22，见 createSyncClient KDoc）
     private val httpClient: OkHttpClient
 
     // SigV4 签名协作单元：与 Provider 共享同一凭据 CharArray 实例（借用语义），
@@ -137,10 +137,14 @@ class S3SyncProvider private constructor(
                 )
             }
             // ISSUE-P1-05（ZT-05）构造期防线（ISSUE-P2-425 放宽）：拒绝 userinfo 注入与云元数据
-            // 字面量；自建 / 内网 HTTPS 端点放行，其连接期豁免经返回的规范化主机登记进工厂
-            // （重定向 / 重绑定跳到的非预期内网地址仍被 SsrfGuardDns / SsrfGuardSocketFactory 拦截）
-            val endpointHost = SyncEndpointGuard.validateEndpointHost(endpoint, networkOptions.ssrfAllowedHosts)
-            httpClient = SyncHttpClientFactory.createSyncClient(networkOptions, endpointHost)
+            // 字面量；自建 / 内网 HTTPS 端点放行（其连接期可达性由下方实际请求主机的豁免保障，
+            // 重定向 / 重绑定跳到的非预期内网地址仍被 SsrfGuardDns / SsrfGuardSocketFactory 拦截）
+            SyncEndpointGuard.validateEndpointHost(endpoint, networkOptions.ssrfAllowedHosts)
+            // ENG-20261028-22：连接期豁免必须授给**实际请求主机**——virtual-host 风格访问的是
+            // `bucket.端点主机`（桶名已按 S3 正则校验，无 authority 分隔符），只登记端点主机会让
+            // 桶主机落入普通阻断分支，自建内网虚拟主机端点因此不可用；路径风格仍是端点主机本身。
+            val requestHost = S3KeyCodec.requestHost(endpoint, bucketName, usePathStyle)
+            httpClient = SyncHttpClientFactory.createSyncClient(networkOptions, requestHost)
         } else {
             httpClient = client
         }

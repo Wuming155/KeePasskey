@@ -30,7 +30,11 @@ class SyncSessionState @Inject constructor() {
         internal set
 
     // 最近一次同步周期使用的引擎实例，用于事后抽取事件 replayCache（每次 syncNow 都会创建新引擎）
+    // ENG-20261028-42：新引擎登记一律经 replaceSyncEngine——替换时按「是否仍被待决冲突留存」
+    // 决定是否释放旧引擎的 Provider 凭据。读侧仍可直接读取本属性。
     var lastSyncEngine: SyncEngine? = null
+        private set
+
     /** 本轮周期的缓存视图；仅用于在周期结束时持久化已确认的 ETag，锁定时随会话释放。 */
     @Volatile
     var lastSyncCache: SyncCache? = null
@@ -77,17 +81,67 @@ class SyncSessionState @Inject constructor() {
      * ISSUE-P1-07：会话终止（锁定/关闭/换库前置释放）时释放协调器持有的周期产物引用。
      * 回调在会话锁内同步触发，此处仅置空引用，不做任何阻塞操作。
      *
-     * `ISSUE-P3-235` G2：本方法**不做**擦除——[lastSyncedDb] 是会话活动树的引用（见其字段注释），
+     * `ISSUE-P3-235` G2：本方法**不做**树擦除——[lastSyncedDb] 是会话活动树的引用（见其字段注释），
      * 擦除由 `DatabaseSession` 对活动树的那一次 `clearSensitiveData()` 承担；
      * 冲突待决期的解析树由 [com.keepasskey.app.sync.SyncConflictController.clearPendingConflictSession]
      * 按身份集合判定擦除。
+     *
+     * ENG-20261028-42：本方法**是**引擎所用 Provider 凭据的确定性失效点——置空
+     * [lastSyncEngine] 之前先经 [SyncEngine.releaseProviderCredentials] 释放（幂等）。
+     * 会话终止后待决冲突随会话结束丢弃（`SyncCoordinator.onSessionLocked` 紧接着调用
+     * `clearPendingConflictSession`），因此此处释放不会切断任何后续裁决上传。
+     * 借用来的测试 Provider 不属本会话所有，跳过。
      */
     fun clear() {
+        // 会话终止：活动树已被 DatabaseSession 擦除，待决冲突随会话丢弃（随后由
+        // SyncCoordinator.onSessionLocked 的 clearPendingConflictSession 收口），
+        // 因此此处释放不会切断任何后续裁决上传。
+        releaseProviderCredentials()
         lastSyncedDb = null
         checkpointDatabase = null
         lastSyncEngine = null
         lastSyncCache = null
         lastRemoteEtag = ""
         probeBaselineTargetIdentity = null
+    }
+
+    /**
+     * ENG-20261028-42：确定性释放本会话最近周期引擎所用 Provider 的凭据副本（幂等）。
+     *
+     * 与 [clear] 分开暴露，因为「配置撤销」只需失效凭据，不需要一并丢弃
+     * [lastSyncedDb] / [lastRemoteEtag] 等会话产物语义（那些由 [clear] 负责）。
+     * 待决冲突引擎（另一个实例）由 `SyncConflictController` 的同一能力收口。
+     */
+    fun releaseProviderCredentials() {
+        releaseEngineCredentials(lastSyncEngine)
+    }
+
+    /**
+     * 登记新周期的引擎，并在旧引擎不再被任何人使用时释放其 Provider 凭据（ENG-20261028-42）。
+     *
+     * 每次同步周期都会新建引擎与 Provider；旧引擎若只被本字段引用，替换后即不可达，
+     * 其凭据副本不该继续驻留到会话结束。
+     *
+     * @param isRetained 旧引擎是否仍被其它存活消费者持有（生产接线为「冲突待决期的引擎」——
+     *   该引擎会在用户稍后裁决时继续发网络写，提前失效会让裁决上传以鉴权失败告终）。
+     *   判定为 true 时**不释放**，由持有方在丢弃该引擎时收口。
+     */
+    fun replaceSyncEngine(engine: SyncEngine, isRetained: (SyncEngine) -> Boolean = { false }) {
+        val previous = lastSyncEngine
+        lastSyncEngine = engine
+        if (previous != null && previous !== engine && !isRetained(previous)) {
+            releaseEngineCredentials(previous)
+        }
+    }
+
+    /**
+     * 释放引擎的 Provider 凭据。测试注入的 Provider 是**借用**依赖（由测试自己持有与复用），
+     * 不属本会话所有，故跳过——与 `SyncProviderResolver.useProvider` 对 testOverride 的既有口径一致。
+     */
+    private fun releaseEngineCredentials(engine: SyncEngine?) {
+        if (engine == null) return
+        val borrowed = testSyncProvider
+        if (borrowed != null && engine.ownsProvider(borrowed)) return
+        engine.releaseProviderCredentials()
     }
 }

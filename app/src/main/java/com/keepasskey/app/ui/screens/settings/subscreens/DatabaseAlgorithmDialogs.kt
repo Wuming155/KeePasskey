@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.screens.settings.CipherLabels
 import com.keepasskey.app.ui.screens.settings.KdfLabels
 
@@ -87,6 +88,7 @@ private fun AlgorithmOptionDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(titleRes)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 options.forEach { (name, desc) ->
                     val selected = isSelected(name)

@@ -23,7 +23,7 @@ import com.keepasskey.database.file.InnerHeader
  *    整改前按**整库累计**计费。设池内各条目尺寸 `sᵢ`、被引用次数 `nᵢ`，旧判据为
  *
  *     ```
- *     拒绝 ⟺ Σᵢ nᵢ·sᵢ > 2·Σⱼ sⱼ + BUDGET_SLACK_BYTES                     … (旧)
+ *     拒绝 ⟺ Σᵢ nᵢ·sᵢ > 2·Σⱼ sⱼ + 1 MiB                                 … (旧)
  *     ```
  *
  *    单条目（`sᵢ = s`，`Σⱼ sⱼ = s`）时代数化简为 `s·(N − 2) > 1 MiB` ⇒ `N = 4` 需
@@ -34,26 +34,29 @@ import com.keepasskey.database.file.InnerHeader
  *    （本仓产物被自己的解析器判为损坏）。多条目不组合成安全：两个 1 MiB 内联附件各带
  *    2 条历史时 `6 MiB > 2×2 MiB + 1 MiB` 同样触发。
  *
- *    ### 新判据（ISSUE-P1-276 定版：三面并存，同为 fail-closed）
+ *    ### 现判据（ISSUE-P1-276 定版，两面并存，同为 fail-closed）
  *
  *    ```
- *     ① 去重计费：Σ_{i ∈ 去重引用集} sᵢ ≤ 2·Σⱼ sⱼ + BUDGET_SLACK_BYTES   … (新①)
- *     ② 单条目引用次数：nᵢ ≤ MAX_REFERENCES_PER_POOL_ITEM                  … (新②)
- *     ③ 单条目物化字节：nᵢ·sᵢ ≤ MAX_POOL_ITEM_MATERIALIZED_BYTES           … (新③)
- *     ```
+ *    ① 单条目引用次数：nᵢ ≤ MAX_REFERENCES_PER_POOL_ITEM                … (①)
+ *    ② 单条目物化字节：nᵢ·sᵢ ≤ MAX_POOL_ITEM_MATERIALIZED_BYTES         … (②)
+ *    ```
  *
- *    ① **同一池条目被引 N 次只计 1 份整尺寸**（AC① 的去重口径）。该式在去重口径下
- *    **恒真**（被引用集合 ⊆ 池集合 ⇒ 左 ≤ 右 ≤ 右式），故它承载的是**记账不变量**
- *    （去重计费绝不可能覆盖池外字节，亦不会因引用倍数而虚增），**不承担拦截**；
- *    保留它是为了让「去重」口径在代码与判据中都显式存在，并捕获记账实现漂移。
- *    ②③ 是真正的拦截面：② 封放大**倍数**，③ 封单条目**内存**。旧消息措辞「累计物化字节
- *    超出预算」在 ③ 中原样保留，作用域由「整库累计」收窄为「单条目累计」（refIndex 落在消息里）。
+ *    ① 封放大**倍数**，② 封单条目**内存**。旧消息措辞「累计物化字节超出预算」在 ② 中原样
+ *    保留，作用域由「整库累计」收窄为「单条目累计」（refIndex 落在消息里）。
  *
- *    **取舍留痕（本批显式接受的残余）**：②③ 只封「**单个池条目**被海量引用」这一放大面，
+ *    **池级去重累计面已删除**：定版时另设第三面「去重引用集字节
+ *    `Σ_{i∈去重引用集} sᵢ ≤ 2·Σⱼ sⱼ + 1 MiB`」，用于把「同一池条目被引 N 次只计 1 份」的
+ *    口径写进代码。但去重引用集 ⊆ 池集合，左式上界就是池总字节，而由池派生的生产预算
+ *    （2 倍池总字节再加余量）必定大于它 ⇒ 该式在任何生产预算下都不可能越界；直接构造方
+ *    也只有 [unlimited] 与显式内联预算两种，无人注入更小的池预算，故该判据的累计字段与
+ *    分支从未拦截过输入，已连同构造参数一并删除。单条目 ①② 才是有效拦截面，删除前后的
+ *    总放大上界相同。
+ *
+ *    **取舍留痕（本批显式接受的残余）**：①② 只封「**单个池条目**被海量引用」这一放大面，
  *    总放大倍数因此从旧口径的「≤ 3× 池字节」放宽为「≤ MAX_REFERENCES_PER_POOL_ITEM × 池字节」——
- *    这是去重口径的必然代价：把引用**分散**到多个池条目的构造不再被整库字节判据拦下，
- *    但其虚构样本必须自带与大池等量的文件字节，放大倍数与合法大库同阶。边界与重开条件
- *    登记于 `docs/architecture/已知工程限界.md` §29。
+ *    这是放弃整库字节判据的必然代价：把引用**分散**到多个池条目的构造不再被整库字节判据
+ *    拦下，但其虚构样本必须自带与大池等量的文件字节，放大倍数与合法大库同阶。边界与重开
+ *    条件见 `docs/architecture/已知工程限界.md` 的「内存与缓存」节。
  *
  * 2. **内联压缩附件解压放大**（ISSUE-P2-200 落点①）：`Compressed="True"` 的内联
  *    `<Value>` 一节点即可用 ~170 KiB 文本换出巨量字节。整改前判据是**每次 gunzip 调用**
@@ -71,30 +74,25 @@ import com.keepasskey.database.file.InnerHeader
  * 超限一律抛 [KdbxCorruptFileException]（fail-closed），视同文件损坏 / 疑似放大攻击。
  */
 internal class AttachmentBudget(
-    private val maxPoolReferenceBytes: Long,
     private val maxInlineMaterializedBytes: Long = MAX_INLINE_MATERIALIZED_BYTES,
     private val maxInlineCompressedNodes: Int = MAX_INLINE_COMPRESSED_NODES,
     private val maxReferencesPerPoolItem: Int = MAX_REFERENCES_PER_POOL_ITEM,
     private val maxPoolItemMaterializedBytes: Long = MAX_POOL_ITEM_MATERIALIZED_BYTES
 ) {
 
-    /** 已计费（去重后）的池索引集合——同一池条目被引 N 次只计 1 份整尺寸（新①）。 */
-    private val countedPoolItems = HashSet<Int>()
-
-    /** 每个池索引的引用次数 `nᵢ`（新②的判据来源）。 */
+    /** 每个池索引的引用次数 `nᵢ`（判据①的来源）。 */
     private val poolItemReferenceCounts = HashMap<Int, Int>()
 
-    /** 每个池索引已物化的字节 `nᵢ·sᵢ`（新③的判据来源）。 */
+    /** 每个池索引已物化的字节 `nᵢ·sᵢ`（判据②的来源）。 */
     private val poolItemMaterializedBytes = HashMap<Int, Long>()
 
-    private var accountedPoolReferenceBytes = 0L
     private var accountedInlineBytes = 0L
     private var inlineCompressedNodes = 0
 
     /**
      * 计入本次池引用的物化开销（**在 `copyOf()` 之前**调用）。
      *
-     * 三面判据与封闭公式见类 KDoc；任一越界即抛 [KdbxCorruptFileException]。
+     * 两面判据与封闭公式见类 KDoc；任一越界即抛 [KdbxCorruptFileException]。
      *
      * @param refIndex 池索引（[BinaryNode] 仅在**池内命中**时才保留该索引，故恒落在池范围内）
      * @param bytes 该池条目尺寸 `sᵢ`（每个引用者都会物化同样多的一份）
@@ -105,27 +103,18 @@ internal class AttachmentBudget(
         val materialized = (poolItemMaterializedBytes[refIndex] ?: 0L) + bytes
         poolItemMaterializedBytes[refIndex] = materialized
 
-        // ③ 单条目物化字节（旧措辞保留：作用域由「整库累计」收窄为「单条目累计」）
+        // ② 单条目物化字节（旧措辞保留：作用域由「整库累计」收窄为「单条目累计」）
         if (materialized > maxPoolItemMaterializedBytes) {
             throw KdbxCorruptFileException(
                 "附件池引用累计物化字节超出预算（refIndex=$refIndex 单条目累计 $materialized > " +
                         "$maxPoolItemMaterializedBytes，共被引用 $references 次），疑似引用放大攻击"
             )
         }
-        // ② 单条目引用次数（放大倍数维度）
+        // ① 单条目引用次数（放大倍数维度）
         if (references > maxReferencesPerPoolItem) {
             throw KdbxCorruptFileException(
                 "单池条目被引用次数超出上限（refIndex=$refIndex 引用 $references 次 > " +
                         "$maxReferencesPerPoolItem），疑似引用放大攻击"
-            )
-        }
-        // ① 去重计费：同一池条目被引 N 次只计 1 份整尺寸（该式在去重口径下恒真，见类 KDoc）
-        if (!countedPoolItems.add(refIndex)) return
-        accountedPoolReferenceBytes += bytes
-        if (accountedPoolReferenceBytes > maxPoolReferenceBytes) {
-            throw KdbxCorruptFileException(
-                "附件池引用去重后累计字节超出预算（$accountedPoolReferenceBytes > $maxPoolReferenceBytes），" +
-                        "疑似引用放大攻击"
             )
         }
     }
@@ -162,14 +151,6 @@ internal class AttachmentBudget(
     internal companion object {
 
         /**
-         * 池引用余量：覆盖极小池与边界用例，避免误拒合法文件。
-         *
-         * ISSUE-P1-276 后它只出现在去重判据（新①）里，而该式恒真，故本常量对拦截无影响、
-         * 仅参与去重不变量的记账口径。
-         */
-        const val BUDGET_SLACK_BYTES: Long = 1L * 1024 * 1024
-
-        /**
          * 内联附件（含解压产物）的**本次解析累计**字节上限：64 MiB − 1（由
          * [AttachmentSizeLimits.MAX_ATTACHMENT_BYTES] 派生；`ISSUE-P2-311` AC① 起该值
          * 同源自写侧单字段上限，故由 `const` 放宽为 `val`）。
@@ -181,7 +162,7 @@ internal class AttachmentBudget(
         const val MAX_INLINE_COMPRESSED_NODES: Int = 1024
 
         /**
-         * **单个池条目**的引用次数上限（ISSUE-P1-276 新②）：`nᵢ ≤ 本值`。
+         * **单个池条目**的引用次数上限（ISSUE-P1-276 判据①）：`nᵢ ≤ 本值`。
          *
          * 取值依据（1024）：
          * - 合法库中单个池条目的引用数 `nᵢ` = 1（宿主条目）+ 其历史快照数 + 跨条目共享数
@@ -201,13 +182,13 @@ internal class AttachmentBudget(
          * ③ 默认 Meta 下单个条目贡献 ≤ 11 次引用，1024 仅约等于 93 个共享条目的额度——
          *    已不宽裕，进一步收紧会对「多条目共享同一附件（去重）」的合法大库造成
          *    `ISSUE-P1-276` 同型的自伤型误拒。
-         * ⇒ 结论：**维持 1024**。放宽仍被限界表 §29 边界 ① 禁止；限界表 §29 的
-         * 「解除条件」已随本条落地改为「部分兑现、上限不可据此收紧」。
+         * ⇒ 结论：**维持 1024**。放宽仍被限界表的边界约束禁止，该表的「解除条件」已随本条
+         * 落地改为「部分兑现、上限不可据此收紧」。
          */
         const val MAX_REFERENCES_PER_POOL_ITEM = 1024
 
         /**
-         * **单个池条目**因被反复引用而允许物化的总字节上限（ISSUE-P1-276 新③）：
+         * **单个池条目**因被反复引用而允许物化的总字节上限（ISSUE-P1-276 判据②）：
          * `nᵢ·sᵢ ≤ 本值`。
          *
          * 取值依据：与内联通道的**单节点物化上界** [MAX_INLINE_MATERIALIZED_BYTES] 同量级
@@ -219,16 +200,9 @@ internal class AttachmentBudget(
          */
         val MAX_POOL_ITEM_MATERIALIZED_BYTES: Long = MAX_INLINE_MATERIALIZED_BYTES
 
-        /** 依池内容构造预算：去重判据的预算为 `2 × 池总字节 + 余量`（见类 KDoc 新①）。 */
-        fun forParse(pool: List<InnerHeader.BinaryItem>): AttachmentBudget {
-            val poolTotal = pool.sumOf { it.size }
-            return AttachmentBudget(2 * poolTotal + BUDGET_SLACK_BYTES)
-        }
-
         /** 不设上限（仅供不经 [KdbxXmlParser] 的直接构造 / 单测）。 */
         fun unlimited(): AttachmentBudget =
             AttachmentBudget(
-                maxPoolReferenceBytes = Long.MAX_VALUE / 2,
                 maxInlineMaterializedBytes = Long.MAX_VALUE / 2,
                 maxInlineCompressedNodes = Int.MAX_VALUE,
                 maxReferencesPerPoolItem = Int.MAX_VALUE,

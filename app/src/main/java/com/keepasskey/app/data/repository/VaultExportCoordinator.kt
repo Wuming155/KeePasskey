@@ -95,7 +95,10 @@ internal class VaultExportCoordinator(
      * 幂等分两种形态：模板组已在（Meta 命中或同名分组）且 Meta 已登记 ⇒ 直接失败不重复安装；
      * 模板组已在但 Meta 未登记（存量库 / 第三方库）⇒ **回填** Meta 后视为安装完成。
      */
-    suspend fun installEntryTemplates(): KdbxResult<Unit> {
+    suspend fun installEntryTemplates(): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { installEntryTemplatesInternal() }
+
+    private suspend fun installEntryTemplatesInternal(): KdbxResult<Unit> {
         val currentDb = databaseSession.databaseFlow.first()
             ?: return KdbxResult.Failure(
                 IllegalStateException("活动数据库为空"),

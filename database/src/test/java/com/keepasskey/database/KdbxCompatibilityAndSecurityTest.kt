@@ -31,6 +31,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.util.Base64
 import java.util.zip.GZIPOutputStream
 
 /**
@@ -557,6 +558,147 @@ class KdbxCompatibilityAndSecurityTest {
         HmacBlockStream.writeAll(encryptedPayload, out, hmacKey64)
         return out.toByteArray()
     }
+
+    // ================= ENG-20261028-10：内层 BINARY 零长度字段（完整文件读取） =================
+
+    /**
+     * 完整文件反例：内层 Header 出现零长度 BINARY 字段（不含 flags 字节）时，`KdbxFile.load`
+     * 必须以 [KdbxCorruptFileException] 拒绝整库。旧实现以 `isNotEmpty()` 静默跳过该字段，
+     * 其后的池条目整体前移，XML 的整数 `Ref` 便错配到无关附件——把错误附件交付给用户而非报错。
+     */
+    @Test
+    fun testZeroLengthInnerBinaryFieldRejectsWholeFile() {
+        val password = "{{SECRET_x2sspo4s}}".toCharArray()
+        val header = KdbxHeader.createDefault(useArgon2 = false)
+        val inner = ByteArrayOutputStream()
+        writeInnerField(
+            inner, KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID,
+            LittleEndianUtil.intTo4Bytes(KdbxConstants.InnerRandomStream.CHACHA20)
+        )
+        writeInnerField(inner, KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY, ByteArray(64))
+        // 池首：零长度 BINARY（无 flags 字节）
+        writeInnerField(inner, KdbxConstants.InnerHeaderFieldId.BINARY, ByteArray(0))
+        writeInnerField(inner, KdbxConstants.InnerHeaderFieldId.END, ByteArray(0))
+
+        val file = assembleKdbxFile(
+            header, password, inner.toByteArray(),
+            attachmentXml("empty.bin" to 0)
+        )
+
+        val error = assertThrows(KdbxCorruptFileException::class.java) {
+            KdbxFile.load(ByteArrayInputStream(file), password)
+        }
+        assertTrue(
+            "异常须指向零长度 BINARY 字段，实际为: ${error.message}",
+            error.message!!.contains("BINARY")
+        )
+    }
+
+    /**
+     * 合法库对照：flags-only 空附件（字段长度 1、内容 0 字节）是合法形态，必须完整入池并
+     * 保持自己的索引——新增的零长度拒绝不得误伤它，其后的附件也仍按 XML 的 `Ref` 正确对应；
+     * 重新保存 / 打开后索引不错位。
+     */
+    @Test
+    fun testFlagsOnlyEmptyAttachmentKeepsIndexOnFullRoundTrip() {
+        val password = "{{SECRET_zklm4g3n}}".toCharArray()
+        val header = KdbxHeader.createDefault(useArgon2 = false)
+        val realData = byteArrayOf(0x41, 0x42, 0x43, 0x44)
+        val inner = ByteArrayOutputStream()
+        writeInnerField(
+            inner, KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_ID,
+            LittleEndianUtil.intTo4Bytes(KdbxConstants.InnerRandomStream.CHACHA20)
+        )
+        writeInnerField(inner, KdbxConstants.InnerHeaderFieldId.INNER_RANDOM_STREAM_KEY, ByteArray(64))
+        // 池 0：flags-only 空附件；池 1：真实附件
+        writeInnerField(inner, KdbxConstants.InnerHeaderFieldId.BINARY, byteArrayOf(0))
+        writeInnerField(inner, KdbxConstants.InnerHeaderFieldId.BINARY, byteArrayOf(0) + realData)
+        writeInnerField(inner, KdbxConstants.InnerHeaderFieldId.END, ByteArray(0))
+
+        val file = assembleKdbxFile(
+            header, password, inner.toByteArray(),
+            attachmentXml("empty.bin" to 0, "real.bin" to 1)
+        )
+
+        val loaded = KdbxFile.load(ByteArrayInputStream(file), password)
+        assertEquals("两条 BINARY 字段都必须入池", 2, loaded.binaries.size)
+        val attachments = loaded.rootGroup.entries.single().attachments
+        assertEquals("Ref=0 必须仍指向池首空附件", 0, attachments[0].refIndex)
+        assertTrue("Ref=0 不得错配到其后的真实附件内容", attachments[0].data.isEmpty())
+        assertEquals("Ref=1 必须仍指向池内第二条", 1, attachments[1].refIndex)
+        assertArrayEquals(realData, attachments[1].data)
+
+        val resaved = ByteArrayOutputStream()
+            .also { KdbxFile.save(it, loaded, password) }
+            .toByteArray()
+        val reloaded = KdbxFile.load(ByteArrayInputStream(resaved), password)
+        val byName = reloaded.rootGroup.entries.single().attachments.associateBy { it.name }
+        assertEquals(2, byName.size)
+        assertTrue("空附件重新保存后必须仍为空字节附件", byName.getValue("empty.bin").data.isEmpty())
+        assertArrayEquals(realData, byName.getValue("real.bin").data)
+    }
+
+    /** 逐字写出内层 Header 字段：1 字节 ID + 小端 Int32 长度 + 内容（与生产写出侧同构）。 */
+    private fun writeInnerField(out: ByteArrayOutputStream, fieldId: Byte, data: ByteArray) {
+        out.write(fieldId.toInt())
+        LittleEndianUtil.writeInt(out, data.size)
+        out.write(data)
+    }
+
+    /** 构造只含附件的极简库 XML；[binaries] 为「附件名 → 池索引」的有序对。 */
+    private fun attachmentXml(vararg binaries: Pair<String, Int>): String {
+        val uuid = Base64.getEncoder().encodeToString(ByteArray(16))
+        val blocks = binaries.joinToString("\n            ") { (name, ref) ->
+            "<Binary><Key>$name</Key><Value Ref=\"$ref\"/></Binary>"
+        }
+        return """
+            <KeePassFile>
+                <Root>
+                    <Group>
+                        <UUID>$uuid</UUID>
+                        <Name>G</Name>
+                        <Entry>
+                            <UUID>$uuid</UUID>
+                            $blocks
+                        </Entry>
+                    </Group>
+                </Root>
+            </KeePassFile>
+        """.trimIndent()
+    }
+
+    /**
+     * 以给定的内层 Header 字节与 XML 组装完整 KDBX v4 文件（GZip + 官方派生 + HMAC 块流），
+     * 用于验证「读侧对畸形内层 Header 的处置」，不经过写侧序列化器的内层 Header 生成。
+     */
+    private fun assembleKdbxFile(
+        header: KdbxHeader,
+        password: CharArray,
+        innerHeaderBytes: ByteArray,
+        xml: String
+    ): ByteArray {
+        val payloadBos = ByteArrayOutputStream()
+        GZIPOutputStream(payloadBos).use { gzip ->
+            gzip.write(innerHeaderBytes)
+            gzip.write(xml.encodeToByteArray())
+        }
+
+        val (cipherKey, hmacKey64) = KdbxFile.deriveKeys(header, password, null, isLegacy = false)
+        val encryptedPayload = CipherFactory.getEngine(header.cipherUuid)
+            .encrypt(cipherKey, header.encryptionIv, payloadBos.toByteArray())
+
+        val outputStream = ByteArrayOutputStream()
+        val headerBytes = header.serialize(ByteArrayOutputStream())
+        outputStream.write(headerBytes)
+        outputStream.write(HashUtil.sha256(headerBytes))
+        val headerHmacKey = HashUtil.sha512(
+            LittleEndianUtil.longTo8Bytes(0xFFFFFFFFFFFFFFFFUL.toLong()), hmacKey64
+        )
+        outputStream.write(HashUtil.hmacSha256(headerHmacKey, headerBytes))
+        HmacBlockStream.writeAll(encryptedPayload, outputStream, hmacKey64)
+        return outputStream.toByteArray()
+    }
+
     private fun writeLegacyKdbx(outputStream: ByteArrayOutputStream, db: KdbxDatabase, password: CharArray) {
         val innerHeader = InnerHeader.createDefault()
         val innerCipher = InnerRandomStreamCipher(

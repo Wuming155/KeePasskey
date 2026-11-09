@@ -91,6 +91,11 @@ class KeePasskeyAutofillService : AutofillService() {
     @Inject
     lateinit var callerTrustStore: AutofillCallerTrustStore
 
+    // ENG-20261028-21：锁定态保存载荷的受控临时载体——口令不再随 PendingIntent 交给系统，
+    // 系统句柄只携带一次性令牌；载体覆盖成功 / 取消 / 超时 / 进程重建四类终态。
+    @Inject
+    lateinit var lockedSavePayloadStore: LockedSavePayloadStore
+
     private val serviceScope = guardedScope(Dispatchers.Default, "KeePasskeyAutofillService")
 
     override fun onFillRequest(
@@ -423,32 +428,55 @@ class KeePasskeyAutofillService : AutofillService() {
     }
 
     /**
-     * 库锁定时唤起 PasswordSaveActivity 解锁并承接保存（ISSUE-P1-224）。
+     * 库锁定时把保存请求交给落地页解锁承接（ISSUE-P1-224）。
+     *
+     * `ENG-20261028-21`：口令不再进 `PendingIntent`。载荷先由 [LockedSavePayloadStore] 以
+     * AndroidKeyStore 封印记录承载，系统句柄只携带一次性令牌与调用方归属；封存失败即如实
+     * 向框架报失败，绝不在句柄里回退为明文交付。
      */
-    private fun dispatchLockedSave(
+    private suspend fun dispatchLockedSave(
         callingPkg: String,
         extracted: ExtractedSaveCredentials,
         callback: SaveCallback
     ) {
-        AppLog.i(TAG, "密码库当前处于锁定状态，向系统返回解锁保存 IntentSender")
         // ISSUE-P2-603：每请求唯一身份（令牌入 Intent.data，参与 filterEquals）——原固定 requestCode
         // + 仅 extras 不同，配合 UPDATE_CURRENT 会让后一请求改写前一请求已交付的 extras（保存串单）。
         val requestToken = java.util.UUID.randomUUID().toString()
-        // ISSUE-P2-549：`FLAG_MUTABLE` 在此处**无任何 fillIn 需求**（全仓 fillIn 仅用于
-        // 自动填充数据集与 Credential Manager 的回传注入，见 `AutofillDatasetBuilders` /
-        // `CredentialPendingIntents`），却让承载**明文口令**的 extras 可被接收方改写 ⇒ 收紧为
-        // `FLAG_IMMUTABLE`。已核实 `PasswordSaveActivity`（`AndroidManifest.xml:190` exported=false）
-        // 不读任何 fillIn 注入的 extras。
-        // ISSUE-P2-603：requestCode 改由进程级单调分配器给出，配合唯一 data ⇒ 每请求独立 PendingIntent。
-        val pendingIntent = LockedSaveRequestPendingIntent.create(
-            context = this,
-            requestCode = saveRequestCodeAllocator.getAndIncrement(),
-            requestToken = requestToken,
-            callingPackage = callingPkg,
-            webDomain = extracted.webDomain,
-            username = extracted.username,
-            password = extracted.password
-        )
+        // 与落库分支同口径：平台 String 到数组的副本即取即用，本函数内用毕清零
+        val passwordChars = extracted.password.toCharArray()
+        val sealed = try {
+            lockedSavePayloadStore.seal(requestToken, extracted.username, passwordChars)
+        } finally {
+            passwordChars.fill('0')
+        }
+        if (!sealed) {
+            AppLog.e(TAG, "锁定态保存载荷封存失败，未下发保存入口")
+            callback.onFailure(getString(R.string.autofill_save_failed))
+            return
+        }
+        // ISSUE-P2-549 / ENG-20261028-21：`FLAG_IMMUTABLE` 由 [LockedSaveRequestPendingIntent.create]
+        // 固化——本入口无任何 fillIn 需求（全仓 fillIn 仅用于自动填充数据集与 Credential Manager 的
+        // 回传注入），而承载保存请求身份的句柄不应被接收方改写。
+        // ISSUE-P2-603：requestCode 由进程级单调分配器给出，配合唯一 data ⇒ 每请求独立 PendingIntent。
+        val pendingIntent = try {
+            LockedSaveRequestPendingIntent.create(
+                context = this,
+                requestCode = saveRequestCodeAllocator.getAndIncrement(),
+                requestToken = requestToken,
+                callingPackage = callingPkg,
+                webDomain = extracted.webDomain
+            )
+        } catch (c: CancellationException) {
+            // 句柄未交出即取消 ⇒ 载荷不会被任何落地页消费，即刻丢弃
+            lockedSavePayloadStore.discard(requestToken)
+            throw c
+        } catch (t: Throwable) {
+            lockedSavePayloadStore.discard(requestToken)
+            AppLog.e(TAG, "锁定态保存入口构造失败", t)
+            callback.onFailure(getString(R.string.autofill_save_failed))
+            return
+        }
+        AppLog.i(TAG, "密码库当前处于锁定状态，向系统返回解锁保存 IntentSender")
         callback.onSuccess(pendingIntent.intentSender)
     }
 

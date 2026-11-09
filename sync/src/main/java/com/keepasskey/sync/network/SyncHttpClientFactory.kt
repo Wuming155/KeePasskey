@@ -27,8 +27,10 @@ import java.util.concurrent.TimeUnit
  *    显式配置的自建 / 内网 HTTPS 端点须在连接期同样可达，否则放宽只是纸面的——
  *    [configuredEndpointHost] 即为此而设：主机名端点登记进 Dns 豁免（其解析地址经
  *    [SsrfAddressApprovals] 获批），IP 字面量端点直接预登记（OkHttp 对字面量短路、
- *    不经自定义 Dns）。**云元数据网段（169.254.0.0/16）两种路径都不放行**；重定向 /
- *    DNS 重绑定跳到的**其他**地址不在豁免之列，仍按网段复核拦截。
+ *    不经自定义 Dns）。豁免对象是**实际请求主机**而非配置字符串（S3 virtual-host 风格
+ *    访问 `bucket.端点主机`，见 [createSyncClient]）。**云元数据网段（169.254.0.0/16，
+ *    含映射拼写）两种路径都不放行**；重定向 / DNS 重绑定跳到的**其他**地址不在豁免之列，
+ *    仍按网段复核拦截。
  */
 object SyncHttpClientFactory {
 
@@ -42,10 +44,12 @@ object SyncHttpClientFactory {
      * 构建同步专用客户端。
      *
      * @param options 传输安全与超时配置
-     * @param configuredEndpointHost 用户显式配置的端点主机（ISSUE-P2-425；由 Provider 经
-     *   [SyncEndpointGuard.validateEndpointHost] 的返回值传入，可为 null = 未配置/不豁免）。
-     *   主机名端点：登记进 Dns 豁免，解析地址经豁免分支获批（云元数据除外）；
-     *   IP 字面量端点：直接预登记进 [SsrfAddressApprovals]（OkHttp 路由层对字面量短路，
+     * @param configuredEndpointHost 用户显式配置端点的**实际请求主机**（ISSUE-P2-425；
+     *   可为 null = 未配置/不豁免）。WebDAV 即端点主机；S3 virtual-host 风格为
+     *   `bucket.端点主机`（由 `S3KeyCodec.requestHost` 按寻址模式推导，ENG-20261028-22）——
+     *   只有真正会被访问的那台主机才获授权，端点主机本身在 virtual-host 模式下不额外放行。
+     *   主机名：登记进 Dns 豁免，解析地址经豁免分支获批（云元数据除外）；
+     *   IP 字面量：直接预登记进 [SsrfAddressApprovals]（OkHttp 路由层对字面量短路，
      *   Dns 层豁免对字面量天然不生效）。仅此一台主机豁免——重定向 / 重绑定跳到的其他地址
      *   仍被连接期复核拦截。
      */

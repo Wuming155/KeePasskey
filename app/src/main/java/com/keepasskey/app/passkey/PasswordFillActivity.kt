@@ -9,11 +9,13 @@ import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.security.ProtectedStringReclamation
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 import dagger.hilt.android.AndroidEntryPoint
@@ -34,6 +36,9 @@ import javax.inject.Inject
  *    设备无可用认证器时退化为受保护窗口内（FLAG_SECURE + 反 overlay）的显式手动确认；
  * 4. 仅当验证结果被 [CredentialFillVerifier.isSatisfied] 判为通过时才回传明文密码，
  *    其余路径（未验证 / 失败 / 取消）一律 `RESULT_CANCELED`，绝不返回 `RESULT_OK`。
+ * 5. ENG-20261028-05：进入与最终提交前各复核一次 CM 通道总开关——候选呈现后用户关闭通道
+ *    即不再交付；口令通道只受总开关约束，不受「通行密钥支持」开关影响
+ *    （判定表见 [CredentialDeliveryChannelGate]）。
  *
  * 门控自持于 Activity 内而非挂在 entry 上的理由见 [CredentialFillVerifier] KDoc：
  * `androidx.credentials:1.6.0` 未向提供方暴露 `BiometricPromptResult` 读取入口，
@@ -69,6 +74,10 @@ class PasswordFillActivity : BaseCredentialActivity() {
     @Inject
     lateinit var credentialLastUsedStore: CredentialLastUsedStore
 
+    /** ENG-20261028-05：交付边界的通道开关复核来源（口令只受 CM 通道总开关约束） */
+    @Inject
+    lateinit var settingsStore: ExtendedSettingsStore
+
     private var settled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,6 +104,13 @@ class PasswordFillActivity : BaseCredentialActivity() {
         // 候选组装侧已拦截一次；此处对回传路径再校验，杜绝「组装后被加入黑名单」的窗口被利用。
         if (autofillBlocklistStore.isBlocked(request.context.expectedPackage)) {
             AppLog.w(TAG, "调用应用已列入自动填充黑名单，拒绝回传密码")
+            failAndFinish()
+            return
+        }
+        // ENG-20261028-05：通道开关前置复核（代价最低）——通道已关闭就不该再拉用户验证弹窗。
+        // 口令交付只认 CM 总开关，「通行密钥支持」开关不得拦截密码请求；交付落点另有同判据
+        // 复核（见 [deliverPassword]），覆盖验证挂起期间关闭通道的时序。
+        if (channelClosed()) {
             failAndFinish()
             return
         }
@@ -173,6 +189,20 @@ class PasswordFillActivity : BaseCredentialActivity() {
         return false
     }
 
+    /**
+     * ENG-20261028-05：口令交付的通道开关复核。
+     *
+     * 只消费 CM 通道总开关：设置页「通行密钥支持」关闭的是公钥通道，密码填充与保存
+     * 必须照旧可用（误接会把「关掉通行密钥」变成「关掉全部密码」）。
+     */
+    private fun channelClosed(): Boolean {
+        val closed = !CredentialDeliveryChannelGate.allowsPasswordDelivery(
+            settingsStore.isCredentialProviderEnabled()
+        )
+        if (closed) AppLog.w(TAG, "凭据管理器通道已在设置中关闭，拒绝回传密码")
+        return closed
+    }
+
     /** 使用当前白名单重新派生最终系统请求身份，覆盖用户验证期间的白名单变更。 */
     private fun isCurrentAttestedCaller(request: FillRequest): Boolean {
         val callingAppInfo = request.providerReq.callingAppInfo ?: return false
@@ -241,6 +271,10 @@ class PasswordFillActivity : BaseCredentialActivity() {
     /**
      * 验证前后都从当前会话重读活动库和可用条目，不能沿用验证前捕获的 KdbxEntry。
      * 入口身份过期、进程重建、锁库、换库、黑名单变化或 URL/package 绑定变化均取消。
+     *
+     * `ENG-20261028-11`：调用方（[deliverPassword]）在块内已持读租约，故本函数返回的条目
+     * 在后续读取（`userName` / `password` / `url`）期间不会被会话整树替换擦除。
+     * 本函数自身不登记租约——它只返回条目引用，撤租会立刻失效。
      */
     private suspend fun findCurrentlyBoundEntry(request: FillRequest): KdbxEntry? {
         if (vaultRepository.isLocked()) return null
@@ -283,66 +317,80 @@ class PasswordFillActivity : BaseCredentialActivity() {
         settled = true
 
         lifecycleScope.launch {
+            // ENG-20261028-11：「定位条目 → 读用户名 / 口令 → {REF:} 展开 → 回传」整段处于一条读租约内。
+            // 本路径是**交付面**，字段读取是 fail-fast 语义（读不到即失败）；租约保证这些读取不会
+            // 因为会话在此期间替换整树、把本条目下线擦除而变成「凭据读取失败」。
+            // 块内不触发任何写（写回只记 `credentialLastUsedStore`，与库树无关）。
+            // `Closeable.use` 是 inline，块内 `return@launch` 会正常释放租约；异常路径由外层 catch 收尾。
             try {
-                // ISSUE-P2-620：验证完成后重新确认请求、库、会话和条目，覆盖用户交互期间的状态变化。
-                val entryBeforeExpansion = findCurrentlyBoundEntry(request)
-                if (entryBeforeExpansion == null) {
-                    AppLog.w(TAG, "验证后凭据请求或目标状态已变化，拒绝回填密码")
-                    failAndFinish()
-                    return@launch
-                }
-                // ISSUE-P3-371 ①：CM 回传两通道补 {REF:} 展开（与 Autofill DatasetBuilders
-                // 消费点同口径）。用户名走 USER_NAME 面（非口令通道，{REF:P@…} 掩码输出）；
-                // 密码走 PASSWORD 面（口令消费点按 KDBX 语义展开）。条目 / 会话不可用时
-                // resolveFieldReferences 返回 null ⇒ 回退原文，与既有消费点兜底一致。
-                val entryIdHex = entryBeforeExpansion.id.toHexString()
-                val rawUsername = entryBeforeExpansion.userName
-                val username = vaultRepository.resolveFieldReferences(
-                    entryIdHex, rawUsername, RefField.USER_NAME
-                ) ?: rawUsername
-                // 用户名 REF 展开可能挂起；取密前用当前库重新定位并复核同一条目及调用方绑定。
-                val entryBeforePassword = findCurrentlyBoundEntry(request)
-                if (entryBeforePassword == null || entryBeforePassword.id.toHexString() != entryIdHex) {
-                    AppLog.w(TAG, "取密前凭据请求或目标状态已变化，拒绝回填密码")
-                    failAndFinish()
-                    return@launch
-                }
-                val rawPassword = entryBeforePassword.password?.readString().orEmpty()
-                val password = vaultRepository.resolveFieldReferences(
-                    entryIdHex, rawPassword, RefField.PASSWORD
-                ) ?: rawPassword
+                ProtectedStringReclamation.acquireReadLease().use {
+                    // ISSUE-P2-620：验证完成后重新确认请求、库、会话和条目，覆盖用户交互期间的状态变化。
+                    val entryBeforeExpansion = findCurrentlyBoundEntry(request)
+                    if (entryBeforeExpansion == null) {
+                        AppLog.w(TAG, "验证后凭据请求或目标状态已变化，拒绝回填密码")
+                        failAndFinish()
+                        return@launch
+                    }
+                    // ISSUE-P3-371 ①：CM 回传两通道补 {REF:} 展开（与 Autofill DatasetBuilders
+                    // 消费点同口径）。用户名走 USER_NAME 面（非口令通道，{REF:P@…} 掩码输出）；
+                    // 密码走 PASSWORD 面（口令消费点按 KDBX 语义展开）。条目 / 会话不可用时
+                    // resolveFieldReferences 返回 null ⇒ 回退原文，与既有消费点兜底一致。
+                    val entryIdHex = entryBeforeExpansion.id.toHexString()
+                    val rawUsername = entryBeforeExpansion.userName
+                    val username = vaultRepository.resolveFieldReferences(
+                        entryIdHex, rawUsername, RefField.USER_NAME
+                    ) ?: rawUsername
+                    // 用户名 REF 展开可能挂起；取密前用当前库重新定位并复核同一条目及调用方绑定。
+                    val entryBeforePassword = findCurrentlyBoundEntry(request)
+                    if (entryBeforePassword == null || entryBeforePassword.id.toHexString() != entryIdHex) {
+                        AppLog.w(TAG, "取密前凭据请求或目标状态已变化，拒绝回填密码")
+                        failAndFinish()
+                        return@launch
+                    }
+                    val rawPassword = entryBeforePassword.password?.readString().orEmpty()
+                    val password = vaultRepository.resolveFieldReferences(
+                        entryIdHex, rawPassword, RefField.PASSWORD
+                    ) ?: rawPassword
 
-                // 密码解析可能挂起；结果提交前再次确认请求与绑定仍有效。
-                val entryBeforeDelivery = findCurrentlyBoundEntry(request)
-                if (entryBeforeDelivery == null || entryBeforeDelivery.id.toHexString() != entryIdHex) {
-                    AppLog.w(TAG, "回传前凭据请求或目标状态已变化，拒绝回填密码")
-                    failAndFinish()
-                    return@launch
+                    // 密码解析可能挂起；结果提交前再次确认请求与绑定仍有效。
+                    val entryBeforeDelivery = findCurrentlyBoundEntry(request)
+                    if (entryBeforeDelivery == null || entryBeforeDelivery.id.toHexString() != entryIdHex) {
+                        AppLog.w(TAG, "回传前凭据请求或目标状态已变化，拒绝回填密码")
+                        failAndFinish()
+                        return@launch
+                    }
+
+                    // ENG-20261028-05：用户验证 / 取密期间通道仍可能被关闭——提交前按本次值复核，
+                    // 关闭即按失败收尾（不记录使用时刻、不回传明文）。
+                    if (channelClosed()) {
+                        failAndFinish()
+                        return@launch
+                    }
+
+                    val sessionTicket = request.context.sessionTicket
+                    if (sessionTicket == null || vaultRepository.isLocked() ||
+                        !databaseSession.isCredentialTicketCurrent(sessionTicket) ||
+                        CredentialPendingIntents.requestContext(
+                            intent,
+                            CredentialEntryRequestType.PASSWORD_FILL
+                        ) != request.context ||
+                        autofillBlocklistStore.isBlocked(request.context.expectedPackage) ||
+                        !isCurrentAttestedCaller(request)
+                    ) {
+                        AppLog.w(TAG, "最终提交前会话代次变化，拒绝回填密码")
+                        failAndFinish()
+                        return@launch
+                    }
+
+                    // ISSUE-P3-298 ⑥：进入唯一成功回传路径后记录本次真实使用。
+                    credentialLastUsedStore.record(entryIdHex)
+
+                    val response = GetCredentialResponse(PasswordCredential(username, password))
+                    val resultIntent = Intent()
+                    PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
+                    setResult(RESULT_OK, resultIntent)
+                    finish()
                 }
-
-                val sessionTicket = request.context.sessionTicket
-                if (sessionTicket == null || vaultRepository.isLocked() ||
-                    !databaseSession.isCredentialTicketCurrent(sessionTicket) ||
-                    CredentialPendingIntents.requestContext(
-                        intent,
-                        CredentialEntryRequestType.PASSWORD_FILL
-                    ) != request.context ||
-                    autofillBlocklistStore.isBlocked(request.context.expectedPackage) ||
-                    !isCurrentAttestedCaller(request)
-                ) {
-                    AppLog.w(TAG, "最终提交前会话代次变化，拒绝回填密码")
-                    failAndFinish()
-                    return@launch
-                }
-
-                // ISSUE-P3-298 ⑥：进入唯一成功回传路径后记录本次真实使用。
-                credentialLastUsedStore.record(entryIdHex)
-
-                val response = GetCredentialResponse(PasswordCredential(username, password))
-                val resultIntent = Intent()
-                PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
-                setResult(RESULT_OK, resultIntent)
-                finish()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 AppLog.e(TAG, "密码回传组装失败", t)

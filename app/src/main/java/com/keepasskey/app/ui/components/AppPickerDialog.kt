@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.apps.InstalledAppOption
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.apps.InstalledAppsCatalog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -106,6 +107,7 @@ internal fun AppPickerDialogContent(
             )
         },
         text = {
+            TrackDialogInteractionEffect()
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = query,

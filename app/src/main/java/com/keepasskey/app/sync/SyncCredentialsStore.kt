@@ -437,12 +437,32 @@ class SyncCredentialsStore @Inject constructor(
      *
      * `ISSUE-P2-465`：本方法刻意保持「整文件清空」语义（含各库命名空间与绑定登记）——
      * 它服务的是「终止全部同步关系」这一类整体动作；**单库**清理走 [clearFor]。
+     *
+     * ENG-20261028-42：配置撤销同时**确定性失效**已构造的 Provider 凭据（[credentialRevocationHook]）。
+     * 已发起、尚未返回的请求无法撤销（见 hook KDoc），但撤销后不会再以旧口令构造新请求。
      */
     @Synchronized
     fun clear() {
         prefs.edit().clear().apply()
+        credentialRevocationHook?.invoke()
         syncCacheEvictor?.evictAll()
     }
+
+    /**
+     * ENG-20261028-42：同步配置撤销（退出同步 / 换服务器）时对**已构造** Provider 的凭据失效钩子。
+     *
+     * 由 `SyncCoordinator` 在构造后接上（转调 `SyncSessionState.releaseProviderCredentials` 与
+     * `SyncConflictController.releasePendingEngineCredentials`，只失效凭据、不丢弃会话产物）：
+     * 撤销配置后，仍在会话内驻留的引擎及其 Provider 不该继续持有可用的口令副本。
+     *
+     * **边界（无法消除）**：已经进入网络栈的那一次请求不会被撤回——它的 `Authorization` 头
+     * 早已以 String 形式交给 OkHttp，撤销只影响其后构造的请求。这与「配置撤销」的用户预期一致
+     * （撤销的是后续访问权），但不得把它描述成「在飞请求也被取消」。
+     *
+     * 未接线（既有单测构造点）时为 null，行为与整改前一致。
+     */
+    @Volatile
+    internal var credentialRevocationHook: (() -> Unit)? = null
 
     /**
      * `ISSUE-P2-465`：清除**该库**的同步配置（删库时调用，与按库密钥文件副本 / 记忆同批）。
@@ -453,11 +473,17 @@ class SyncCredentialsStore @Inject constructor(
      * 同步会在任何网络写之前以 `VaultBindingMismatch` 中止，绝不会静默错传。
      *
      * [dbId] 与读写面同口径：裸文件名（沙盒扫描条目）归一为沙盒内绝对路径。
+     *
+     * ENG-20261028-42：删库即撤销该库的同步关系，若被删的正是**当前活动库**（唯一可能仍有
+     * 存活 Provider 的库），与 [clear] 同口径失效其凭据；删其它库时不动当前会话的 Provider。
      */
     @Synchronized
     fun clearFor(dbId: String) {
         val scope = vaultNamespace.idFor(dbId) ?: return
         SyncCredentialKeys.removeScoped(prefs, scope)
+        if (scope == vaultNamespace.currentId()) {
+            credentialRevocationHook?.invoke()
+        }
     }
 
     /**

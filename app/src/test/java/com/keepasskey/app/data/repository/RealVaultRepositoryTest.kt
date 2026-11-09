@@ -125,6 +125,54 @@ class RealVaultRepositoryTest {
     )
 
     /**
+     * `ENG-20261028-11`：**证明当前没有在册读租约**的可观察判据（不触碰 core internal 计数器）。
+     *
+     * 判据：无租约时，下线实例必须**当场**擦除（协调器只在有租约时延后）。故构造一对
+     * 「旧树 / 新树」，走生产擦除路径（`clearSupersededSensitiveData`）后立刻检查旧实例：
+     * 已擦 ⇒ 无在册租约；仍可读 ⇒ 有租约泄漏。比读计数器更直接地验证了「泄漏的后果」。
+     */
+    private fun assertNoReadLeaseRegistered(context: String) {
+        val probe = ProtectedString("lease-probe", isProtected = true)
+        val oldRoot = KdbxGroup(
+            name = "probe",
+            entries = listOf(
+                KdbxEntry(fields = mapOf(KdbxConstants.Fields.PASSWORD to probe))
+            )
+        )
+        val newRoot = oldRoot.copy(
+            entries = listOf(
+                oldRoot.entries.single().withField(
+                    KdbxConstants.Fields.PASSWORD,
+                    ProtectedString("lease-probe-2", isProtected = true)
+                )
+            )
+        )
+        oldRoot.clearSupersededSensitiveData(newRoot)
+        assertTrue("$context：仍有在册读租约（下线实例未被当场擦除）", probe.cleared)
+    }
+
+    /**
+     * `ENG-20261028-11`：不依赖 `TestScope` 的仓库构造（并发用例用 `runBlocking`，
+     * 需要真实线程才能让「写线程 vs 读线程」交错；虚拟时间下 `Thread.join` 不可用）。
+     */
+    private fun newRepositoryOffTestScope(
+        session: DatabaseSession,
+        projectionDispatcher: CoroutineDispatcher = Dispatchers.Unconfined
+    ): RealVaultRepository = RealVaultRepository(
+        createMockContext(tempFolder.root),
+        session,
+        com.keepasskey.app.data.logger.DebugLogBuffer(),
+        createTestStrings(),
+        projectionDispatcher,
+        TotpPreferencesSource { TotpPreferences.DEFAULT },
+        com.keepasskey.app.security.AutoLockSessionGuard(
+            session,
+            FakeSettingsRepository(),
+            com.keepasskey.app.data.logger.DebugLogBuffer()
+        )
+    )
+
+    /**
      * ISSUE-P3-154：记录型调度器——只统计「被派发次数」，执行委托给测试调度器，
      * 故断言完全落在虚拟时间轴上（不依赖真实线程池、无跨线程竞态）。
      *
@@ -999,5 +1047,167 @@ class RealVaultRepositoryTest {
     @Test
     fun `生产投影调度器绑定落在 Default 而非 Main`() {
         assertSame(Dispatchers.Default, VaultProjectionModule.provideVaultProjectionDispatcher())
+    }
+
+    // ===== ENG-20261028-11：生产消费面的读租约（行为契约，非源码断言） =====
+
+    /**
+     * 租约作用域读口把「取快照 → 读字段」放进同一个租约：块内会话替换整树时，下线实例只登记、
+     * 不擦除，块内读到的仍是完整旧值；块结束后确定性擦除。
+     *
+     * 判别点：若 `withUsableKdbxEntries` 没登记租约，块内的 `oldPassword.readString()` 会抛
+     * `IllegalStateException`（fail-fast）——本用例即红。
+     */
+    @Test
+    fun `租约作用域读口在块内保留旧值并在块后确定性擦除`() = kotlinx.coroutines.runBlocking {
+        val oldPassword = ProtectedString("old-secret", isProtected = true)
+        val oldEntry = KdbxEntry(
+            id = KdbxUuid.random(),
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("title", false),
+                KdbxConstants.Fields.PASSWORD to oldPassword
+            )
+        )
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(
+            KdbxDatabase(
+                header = KdbxHeader.createDefault(),
+                rootGroup = KdbxGroup(name = "Root", entries = listOf(oldEntry))
+            )
+        )
+        val repository = newRepositoryOffTestScope(session)
+
+        val oldRoot = session.databaseFlow.first()!!.rootGroup
+        val readInLease = repository.withUsableKdbxEntries { entries ->
+            // 模拟「块内会话替换整树」：新树替换了该条目的口令实例
+            val replacement = oldEntry.withField(
+                KdbxConstants.Fields.PASSWORD,
+                ProtectedString("new-secret", isProtected = true)
+            )
+            val newRoot = oldRoot.copy(entries = listOf(replacement))
+            session.setDatabaseForTesting(
+                KdbxDatabase(header = KdbxHeader.createDefault(), rootGroup = newRoot)
+            )
+            // 旧树发布下线：与生产同路径（`clearSupersededSensitiveData` → 协调器 retire）
+            oldRoot.clearSupersededSensitiveData(newRoot)
+
+            assertFalse("块内（租约在册）不得擦除旧实例", oldPassword.cleared)
+            assertEquals("块内必须读到完整旧值", "old-secret", entries.single().password?.readString())
+            entries.single().password?.readString()
+        }
+
+        assertEquals("old-secret", readInLease)
+        assertTrue("租约释放后必须确定性擦除（登记的下线实例已排空）", oldPassword.cleared)
+        assertNoReadLeaseRegistered("租约释放后")
+    }
+
+    /**
+     * 并发替换整树期间，租约内的读取不产生异常、也不出现「半份明文 / 空值」。
+     *
+     * 形态：外层持一条读租约（＝投影体的使用期），块内由另一线程反复「发布新树 + 走生产擦除路径
+     * （`clearSupersededSensitiveData` → 协调器 retire）」，同时本线程反复读取旧树的条目字段。
+     * 判别点：若读口没有登记租约，`retire` 会当场擦除旧实例 ⇒ 读取抛 `IllegalStateException`
+     * 或读到空串——本用例即红。
+     */
+    @Test
+    fun `并发整树替换期间租约内读取不抛异常也不返回半份明文`() = kotlinx.coroutines.runBlocking {
+        val entryCount = 20
+        val originals = (0 until entryCount).map { i ->
+            KdbxEntry(
+                id = KdbxUuid.random(),
+                fields = mapOf(
+                    KdbxConstants.Fields.TITLE to ProtectedString("title-$i", false),
+                    KdbxConstants.Fields.PASSWORD to ProtectedString("secret-$i", isProtected = true)
+                )
+            )
+        }
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(
+            KdbxDatabase(
+                header = KdbxHeader.createDefault(),
+                rootGroup = KdbxGroup(name = "Root", entries = originals)
+            )
+        )
+        val repository = newRepositoryOffTestScope(session)
+
+        val failures = java.util.concurrent.atomic.AtomicInteger()
+        val blanks = java.util.concurrent.atomic.AtomicInteger()
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        val outcome = repository.withUsableKdbxEntries { snapshot ->
+            val oldRoot = session.databaseFlow.first()!!.rootGroup
+            val writer = kotlin.concurrent.thread {
+                var round = 0
+                while (!stop.get()) {
+                    val rewritten = oldRoot.entries.map { entry ->
+                        entry.copy(
+                            fields = mapOf(
+                                KdbxConstants.Fields.TITLE to ProtectedString("t-$round", false),
+                                KdbxConstants.Fields.PASSWORD to ProtectedString("p-$round", isProtected = true)
+                            )
+                        )
+                    }
+                    val newRoot = oldRoot.copy(entries = rewritten)
+                    session.setDatabaseForTesting(
+                        KdbxDatabase(header = KdbxHeader.createDefault(), rootGroup = newRoot)
+                    )
+                    // 与生产同路径：发布新树后回收下线实例（无租约时会当场擦除旧树实例）
+                    oldRoot.clearSupersededSensitiveData(newRoot)
+                    round++
+                }
+            }
+            try {
+                repeat(200) {
+                    for (entry in snapshot) {
+                        try {
+                            val title = entry.displayTitle()
+                            val password = entry.password?.readString()
+                            reads.incrementAndGet()
+                            if (title.isBlank() || password.isNullOrBlank()) blanks.incrementAndGet()
+                        } catch (t: Throwable) {
+                            if (t is kotlinx.coroutines.CancellationException) throw t
+                            failures.incrementAndGet()
+                        }
+                    }
+                }
+            } finally {
+                stop.set(true)
+                writer.join()
+            }
+            reads.get()
+        }
+
+        assertTrue("必须实际完成过读取", outcome > 0)
+        assertEquals("租约内不得出现读取异常", 0, failures.get())
+        assertEquals("租约内不得读到半份明文 / 空值", 0, blanks.get())
+        assertNoReadLeaseRegistered("并发用例结束后")
+    }
+
+    /**
+     * 写路径**不**自行登记读租约：无其它读者在册时，保存触发的定点擦除当场生效。
+     *
+     * 判别点：若写路径（会话 `saveEntry` → `eraseSupersededSensitiveData` → 协调器 `retire`）
+     * 自己登记了租约，下线实例会被登记为待回收而非当场擦除——`oldPassword.cleared` 为 false，
+     * 本用例即红；用例末尾的探针同时证明没有租约被留在注册表里。
+     */
+    @Test
+    fun `写路径不登记读租约时下线实例当场擦除`() = kotlinx.coroutines.runBlocking {
+        val (database, initialEntry) = createInitialDatabase()
+        val oldPassword = requireNotNull(initialEntry.password)
+        val session = DatabaseSession()
+        session.setDatabaseForTesting(database)
+
+        assertNoReadLeaseRegistered("前置检查")
+        // 只替换口令字段：旧口令实例因此下线（替换标题不会让口令实例下线，无法观察擦除）
+        session.saveEntry(
+            initialEntry.withField(
+                KdbxConstants.Fields.PASSWORD,
+                ProtectedString("changed-secret", isProtected = true)
+            )
+        )
+
+        assertTrue("无读者在册时写路径必须当场擦除下线实例", oldPassword.cleared)
+        assertNoReadLeaseRegistered("写路径结束后")
     }
 }

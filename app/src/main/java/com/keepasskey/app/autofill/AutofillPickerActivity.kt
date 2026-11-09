@@ -176,8 +176,11 @@ class AutofillPickerActivity : FragmentActivity() {
         lifecycleScope.launch {
             // ISSUE-P3-201：进入交付链路前锁定复核（凭据解密之前）——与确认页 ISSUE-P3-95 同口径：
             // 锁定即终止本次填充，绝不在此之后继续解密与交付
-            if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
-                AppLog.w(TAG, "会话已锁定，放弃本次选择器填充")
+            // ENG-20261028-05：Autofill 通道开关同口径——选择器在开关关闭前已下发，关闭即不再解密交付。
+            if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked()) ||
+                !settingsStore.isAutofillServiceEnabled()
+            ) {
+                AppLog.w(TAG, "会话已锁定或自动填充通道已关闭，放弃本次选择器填充")
                 finish()
                 return@launch
             }
@@ -247,8 +250,11 @@ class AutofillPickerActivity : FragmentActivity() {
         completed = true
         // ISSUE-P3-201：交付入口锁定复核（同确认页 ISSUE-P3-95 口径）——锁定即丢弃未决响应，
         // 且**不**发生任何副作用（首次绑定写入、TOTP 动作、会话授权写入均不得在锁定态进行）
-        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
-            AppLog.w(TAG, "会话已锁定，丢弃本次未决响应")
+        // ENG-20261028-05：Autofill 通道开关同口径——关闭即丢弃，同样不产生任何副作用。
+        if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked()) ||
+            !settingsStore.isAutofillServiceEnabled()
+        ) {
+            AppLog.w(TAG, "会话已锁定或自动填充通道已关闭，丢弃本次未决响应")
             discardPendingResult()
             return
         }
@@ -266,58 +272,80 @@ class AutofillPickerActivity : FragmentActivity() {
             // ISSUE-P3-201：**回传前再次校验**——TOTP 二次动作（含超时等待）期间会话可能刚被
             // 自动锁定（AutoLockManager 延迟锁 / 熄屏即时锁均可在页面存活期点火）；锁定即丢弃
             // 未决响应，否则框架仍会把凭据值写入目标表单（与确认页 deliverAuthResult 同口径）
-            if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
-                AppLog.w(TAG, "会话在交付过程中被锁定，丢弃未决响应（不回传 RESULT_OK）")
+            // ENG-20261028-05：同一窗口内通道开关也可能被关闭，判定与锁定同口径。
+            if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked()) ||
+                !settingsStore.isAutofillServiceEnabled()
+            ) {
+                AppLog.w(TAG, "会话在交付过程中被锁定或通道已关闭，丢弃未决响应（不回传 RESULT_OK）")
                 discardPendingResult()
                 return@launch
             }
-            // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
-            // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
-            val (otpId, otpCode) = resolveOtpIfDeclared(entryId)
-            // ISSUE-P3-330 A3：标题/副行分工——用户名为首选行；副行只在用户名非空且能取到
-            // 条目标题时展示标题（用户名为空时标题行即条目标题，副行留空），杜绝两行同文
-            val entryTitle = runCatching { vaultRepository.getKdbxEntry(entryId)?.title.orEmpty() }
-                .onFailure { if (it is CancellationException) throw it }.getOrDefault("")
-            val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
-            // ISSUE-P2-384 AC①：认证回传构造 Dataset 前复检字段级屏蔽（fail-closed）。
-            // 屏蔽写入可发生在「onFillRequest 下发 → 用户打开选择器」之间的任意时刻；
-            // 缓存响应重放 / 再次确认同样走本闸门，被屏蔽字段不出现在回传数据集里。
+            // ENG-20261028-11：**读段**（TOTP 现算 + 条目标题 + 数据集构造）整体处于一条读租约内。
+            // 本页在「用户选中 → 回传」窗口里反复从会话现读条目；会话在此期间替换整树会把本条目
+            // 下线擦除，标题读成空串（菜单副行丢失）或 TOTP 现算返回 null（OTP 框被静默跳过）。
+            // 租约在写回段（`updateEntryUrl`）之前**显式释放**——写路径不得被自己的租约推迟清理。
             val callingPackage = intent.getStringExtra(EXTRA_CALLING_PACKAGE).orEmpty()
             val formDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)?.takeIf { it.isNotBlank() }
-            val deliverable = AutofillAuthDeliveryBlockPolicy.filter(
-                usernameId = intent.readAutofillId(EXTRA_USERNAME_ID),
-                passwordId = intent.readAutofillId(EXTRA_PASSWORD_ID)
-            ) { role ->
-                autofillFieldBlocklistStore.isBlocked(callingPackage, formDomain, role)
+            val lease = vaultRepository.acquireEntriesReadLease()
+            val (entryTitle, dataset) = try {
+                // 载荷构造已收敛到 [buildAuthenticationResultDataset]（与二次确认页共用同一份，
+                // 避免同语义两处实现再次漂移成「只回传成功、不回传数据集」）
+                val (otpId, otpCode) = resolveOtpIfDeclared(entryId)
+                // ISSUE-P3-330 A3：标题/副行分工——用户名为首选行；副行只在用户名非空且能取到
+                // 条目标题时展示标题（用户名为空时标题行即条目标题，副行留空），杜绝两行同文
+                val title = runCatching { vaultRepository.getKdbxEntry(entryId)?.title.orEmpty() }
+                    .onFailure { if (it is CancellationException) throw it }.getOrDefault("")
+                val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
+                // ISSUE-P2-384 AC①：认证回传构造 Dataset 前复检字段级屏蔽（fail-closed）。
+                // 屏蔽写入可发生在「onFillRequest 下发 → 用户打开选择器」之间的任意时刻；
+                // 缓存响应重放 / 再次确认同样走本闸门，被屏蔽字段不出现在回传数据集里。
+                val deliverable = AutofillAuthDeliveryBlockPolicy.filter(
+                    usernameId = intent.readAutofillId(EXTRA_USERNAME_ID),
+                    passwordId = intent.readAutofillId(EXTRA_PASSWORD_ID)
+                ) { role ->
+                    autofillFieldBlocklistStore.isBlocked(callingPackage, formDomain, role)
+                }
+                if (deliverable.blocksEntireForm) {
+                    // 日志不携带包名/域/角色外的用户数据（ISSUE-P1-10）
+                    AppLog.w(TAG, "认证回传复检：字段已被屏蔽，按取消回传（不交付被屏蔽字段）")
+                    setResult(RESULT_CANCELED, authenticationCanceledIntent())
+                    finish()
+                    return@launch
+                }
+                val dataset = buildAuthenticationResultDataset(
+                    packageName = packageName,
+                    menuTitle = credentials.username.ifBlank {
+                        title.ifBlank { localizedContext.getString(R.string.autofill_picker_title) }
+                    },
+                    menuSubtitle = if (credentials.username.isNotBlank()) title else "",
+                    username = credentials.username,
+                    password = credentials.password,
+                    usernameId = deliverable.usernameId,
+                    passwordId = deliverable.passwordId,
+                    otpId = otpId,
+                    otpCode = otpCode
+                )
+                if (dataset == null) {
+                    // 无可写字段（无目标框 / 凭据为空）：如实取消，绝不回传空数据集谎报成功
+                    AppLog.w(TAG, "选中条目没有任何可交付字段，按取消回传")
+                    setResult(RESULT_CANCELED, authenticationCanceledIntent())
+                    finish()
+                    return@launch
+                }
+                title to dataset
+            } finally {
+                lease.close()
             }
-            if (deliverable.blocksEntireForm) {
-                // 日志不携带包名/域/角色外的用户数据（ISSUE-P1-10）
-                AppLog.w(TAG, "认证回传复检：字段已被屏蔽，按取消回传（不交付被屏蔽字段）")
-                setResult(RESULT_CANCELED, authenticationCanceledIntent())
-                finish()
-                return@launch
-            }
-            val dataset = buildAuthenticationResultDataset(
-                packageName = packageName,
-                menuTitle = credentials.username.ifBlank {
-                    entryTitle.ifBlank { localizedContext.getString(R.string.autofill_picker_title) }
-                },
-                menuSubtitle = if (credentials.username.isNotBlank()) entryTitle else "",
-                username = credentials.username,
-                password = credentials.password,
-                usernameId = deliverable.usernameId,
-                passwordId = deliverable.passwordId,
-                otpId = otpId,
-                otpCode = otpCode
-            )
-            if (dataset == null) {
-                // 无可写字段（无目标框 / 凭据为空）：如实取消，绝不回传空数据集谎报成功
-                AppLog.w(TAG, "选中条目没有任何可交付字段，按取消回传")
-                setResult(RESULT_CANCELED, authenticationCanceledIntent())
-                finish()
+            // ENG-20261028-05：数据集构造、条目读取与字段复检均为挂起点，通道可能在期间被关闭——
+            // 交付前再按本次值判定一次。此判定之后只剩同步的授权/记忆写入与 setResult，不存在
+            // 「已判过、又挂起、再交付」的窗口；同时避免为已关闭的通道做条目 URL 写回。
+            if (!settingsStore.isAutofillServiceEnabled()) {
+                AppLog.w(TAG, "交付前自动填充通道已关闭，丢弃未决响应（不回传 RESULT_OK）")
+                discardPendingResult()
                 return@launch
             }
             // ISSUE-P3-571 方案A：询问是否把应用关联写进条目 URL（锁定丢弃口径见 VM 方法 KDoc）
+            // ENG-20261028-11：本段含条目 URL 写回，**刻意不套租约**——写路径的定点擦除不得被推迟。
             if (!viewModel.offerAppBindingWriteBack(callerDigests, callingPackage, formDomain, entryId, entryTitle)) {
                 discardPendingResult()
                 return@launch

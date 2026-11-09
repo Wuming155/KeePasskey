@@ -133,7 +133,9 @@ class MainApplication : Application(), Configuration.Provider {
         fileBinaryStore.clear()
         // ISSUE-P2-51：剪贴板冷启动对账——若上一次进程在敏感值驻留窗口内被 kill / force-stop，
         // 自动擦除协程未执行，此处按跨进程布尔待清标记 fail-safe 清空（无明文 / 摘要留存）。
-        // ISSUE-P3-84：同时注册熄屏广播与「切到后台即清空」观察者（主线程冷启动点，幂等）。
+        // ISSUE-P3-84 / ENG-20261028-03：同时注册熄屏广播、剪贴板变更监听与前后台观察者
+        //（主线程冷启动点，幂等）——切到后台是否立即清空取决于本次复制有没有定时擦除计划：
+        // 有计划则后台不清空（粘贴窗口由用户设置决定），无计划才沿用「只在前台驻留」的补偿控制。
         clipboardSecurityManager.initialize()
         clipboardSecurityManager.reconcileOnColdStart()
         // ISSUE-P3-438：会话开合标记——必须在任何 StateFlow 采集启动前同步取走持久化值

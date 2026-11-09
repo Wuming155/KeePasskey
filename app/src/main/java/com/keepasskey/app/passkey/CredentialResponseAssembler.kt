@@ -84,6 +84,19 @@ class CredentialResponseAssembler @Inject constructor(
      * 按 Passkey rpId / 密码域名或包名严格匹配输出候选条目。
      */
     suspend fun buildUnlockedGetResponse(request: BeginGetCredentialRequest): BeginGetCredentialResponse {
+        // ENG-20261028-05：CM 通道总开关在**候选出口**复核，与调用方包名无关、代价最低，故最先裁决。
+        // 本类是直查（服务）与链式解锁（[CredentialUnlockActivity]）共用的唯一候选出口，
+        // 服务入口处的求值不覆盖「解锁页 / 用户验证挂起期间用户关闭通道」的时序。
+        // 总开关关闭即口令与公钥两路都关闭（公钥另受通行密钥开关收敛），故整段返回空响应：
+        // 不产出候选、解锁引导与「就地新建」Action。
+        if (!CredentialDeliveryChannelGate.allowsPasswordDelivery(
+                settingsStore.isCredentialProviderEnabled()
+            )
+        ) {
+            AppLog.i(TAG, "凭据管理器通道已在设置中关闭，拒绝组装凭据候选")
+            return BeginGetCredentialResponse.Builder().build()
+        }
+
         val callingAppInfo = request.callingAppInfo
         val callingPackage = callingAppInfo?.packageName.orEmpty()
         val callingOrigin = extractOrigin(callingAppInfo)
@@ -124,26 +137,44 @@ class CredentialResponseAssembler @Inject constructor(
             return responseBuilder.build()
         }
 
-        // ISSUE-P2-341：候选装配必须走「可用条目」读口——回收站子树内的凭据是用户已删除的凭据，
-        // 整树读口会让它继续被列进 CM 候选并被选中签名。
-        val allEntries = vaultRepository.getUsableKdbxEntries()
-        if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) {
-            AppLog.w(TAG, "组装期间会话代次变化，拒绝发布凭据候选")
-            return BeginGetCredentialResponse.Builder().build()
-        }
+        // ENG-20261028-11：「取候选 → 逐选项匹配 / 装配」整段处于一条读租约内。
+        // 候选是**活的** `KdbxEntry`：rpId / 凭据 ID / 绑定包名分别在 `CredentialCandidateMatcher`
+        // 与口令通道里读取，会话在此期间替换整树会把下线实例擦除 ⇒ 候选会凭空消失
+        // （对 Credential Manager 表现为「刚还列着的通行密钥/密码不见了」）。
+        // 本段**不含用户等待**（只建候选与 PendingIntent），故整段持有不构成长期推迟回收；
+        // 会话代次 / 通道开关的提前返回都由 try/finally 统一释放租约。
+        val lease = vaultRepository.acquireEntriesReadLease()
+        try {
+            // ISSUE-P2-341：候选装配必须走「可用条目」读口——回收站子树内的凭据是用户已删除的凭据，
+            // 整树读口会让它继续被列进 CM 候选并被选中签名。
+            val allEntries = vaultRepository.getUsableKdbxEntries()
+            if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) {
+                AppLog.w(TAG, "组装期间会话代次变化，拒绝发布凭据候选")
+                return BeginGetCredentialResponse.Builder().build()
+            }
 
-        // ISSUE-P2-199：requestCode 一律取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
-        // 不再在本响应内新建分配器——「每响应复位」会与后续响应碰撞同一 PendingIntent 记录。
-        // ISSUE-P3-345 / PD-51：无匹配「就地新建」Action——只服务口令维度（公钥零候选不产出，
-        // 本应用造不出对某 rpId 有效的凭据）；只读会话不产出（PD-51 裁决 4）。
-        // 锁库 / 总开关 / 黑名单路径在上游已先行返回，不会走到这里。
-        assembleOptions(
-            request, callingOrigin, callingPackage, packageDimensionAllowed,
-            activeDatabaseId, sessionTicket, allEntries, responseBuilder
-        )
+            // ISSUE-P2-199：requestCode 一律取自 [CredentialPendingIntents.nextRequestCode]（进程级单调），
+            // 不再在本响应内新建分配器——「每响应复位」会与后续响应碰撞同一 PendingIntent 记录。
+            // ISSUE-P3-345 / PD-51：无匹配「就地新建」Action——只服务口令维度（公钥零候选不产出，
+            // 本应用造不出对某 rpId 有效的凭据）；只读会话不产出（PD-51 裁决 4）。
+            // 锁库 / 总开关 / 黑名单路径在上游已先行返回，不会走到这里。
+            assembleOptions(
+                request, callingOrigin, callingPackage, packageDimensionAllowed,
+                activeDatabaseId, sessionTicket, allEntries, responseBuilder
+            )
+        } finally {
+            lease.close()
+        }
 
         if (vaultRepository.isLocked() || !databaseSession.isCredentialTicketCurrent(sessionTicket)) {
             AppLog.w(TAG, "候选组装结束前会话代次变化，拒绝发布凭据候选")
+            return BeginGetCredentialResponse.Builder().build()
+        }
+
+        // ENG-20261028-05：组装期间（含条目读口这一挂起点）通道开关也可能被关闭——发布前按
+        // 本次值再判一次，与上面的会话代次复核同口径：关闭即整段空响应，绝不交出已关闭通道的候选。
+        if (!CredentialDeliveryChannelGate.allowsPasswordDelivery(settingsStore.isCredentialProviderEnabled())) {
+            AppLog.w(TAG, "候选组装结束前凭据管理器通道已关闭，拒绝发布凭据候选")
             return BeginGetCredentialResponse.Builder().build()
         }
 

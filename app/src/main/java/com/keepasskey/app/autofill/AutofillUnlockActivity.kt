@@ -21,6 +21,7 @@ import com.keepasskey.app.ui.localizedContextOf
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.security.ProtectedStringReclamation
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
@@ -168,13 +169,22 @@ class AutofillUnlockActivity : FragmentActivity() {
         }
         routeStarted = true
         lifecycleScope.launch {
-            val routing = resolveRouting(hasTargetField = usernameId != null || passwordId != null)
-            when (val route = routing.route) {
-                is AutofillUnlockRouter.Route.Confirm ->
-                    launchConfirm(route.entry, usernameId, passwordId, otpId, routing.verifiedWebDomain)
+            // ENG-20261028-11：路由判据 → 链入确认页的整段处于一条读租约内。
+            // 候选是**活的** `KdbxEntry`，`Route.Confirm` 把条目带出 `resolveRouting`，
+            // 随后 `launchConfirm` 还要读它的标题 / 用户名；会话在此期间替换整树会把下线实例
+            // 就地清零，展示面读口就会降级成空串（归属展示缺失）。租约延到本段结束即覆盖该窗口。
+            val lease = ProtectedStringReclamation.acquireReadLease()
+            try {
+                val routing = resolveRouting(hasTargetField = usernameId != null || passwordId != null)
+                when (val route = routing.route) {
+                    is AutofillUnlockRouter.Route.Confirm ->
+                        launchConfirm(route.entry, usernameId, passwordId, otpId, routing.verifiedWebDomain)
 
-                AutofillUnlockRouter.Route.Picker ->
-                    launchPicker(usernameId, passwordId, otpId)
+                    AutofillUnlockRouter.Route.Picker ->
+                        launchPicker(usernameId, passwordId, otpId)
+                }
+            } finally {
+                lease.close()
             }
         }
     }
@@ -193,6 +203,9 @@ class AutofillUnlockActivity : FragmentActivity() {
      * 不可验证即按 null（fail-closed）、包名维度经 [AndroidPackageBindingPolicy] 首次绑定门。
      *
      * 任何不确定分支（异常）一律回落 PICKER——绝不静默直达确认页。
+     *
+     * `ENG-20261028-11`：本函数返回的 [Routing] 可能携带活的 `KdbxEntry`（`Route.Confirm`），
+     * 故租约由**调用方**（`chainToPicker` 的 `lifecycleScope.launch` 块）持有，不在此处登记。
      */
     private suspend fun resolveRouting(hasTargetField: Boolean): Routing = try {
         val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE).orEmpty()

@@ -61,7 +61,7 @@ data class UnlockUiState(
     // 见 [BiometricAutoPrompt]，UI 仅在 LaunchedEffect 中透传一次性意图，不自行判断业务条件。
     val biometricAutoPrompt: BiometricAutoPrompt = BiometricAutoPrompt.IDLE,
 
-    // ISSUE-P1-04：主密码解锁失败节流状态（反暴力破解）
+    // ISSUE-P1-04：主密码解锁失败节流状态（界面重试节流）
     // 连续失败次数（成功解锁后归零，供 UI 呈现「剩余尝试」等提示）
     val throttleFailureCount: Int = 0,
     // 距锁定解除的剩余毫秒数（0 表示当前未锁定）

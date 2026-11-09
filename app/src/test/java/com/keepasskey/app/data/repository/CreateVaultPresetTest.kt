@@ -26,8 +26,7 @@ import java.io.File
  *    与 KDF，标签唯一，未登记标签一律 fail-closed；
  * 2. **接线层（静态源码比对）**：落盘调用必须**逐字**把 `preset.cipherUuid` / `preset.useArgon2`
  *    传给会话层，且不得残留旧的 `preset.contains(` 字符串启发式——本项防护的失效形态
- *    **不是判定错，而是接线被静默改回硬编码**，JVM 无法构造完整 Hilt 图来观测，
- *    故沿用本仓既有静态接线守卫先例（[com.keepasskey.app.security.ObscuredTouchWiringTest]）。
+ *    **不是判定错，而是接线被静默改回硬编码**，JVM 无法构造完整 Hilt 图来观测。
  *
  * 端到端行为（写入真实 `.kdbx` 后读回文件头算法）由 database 模块的
  * `VaultCreationCipherTest` 覆盖。

@@ -28,6 +28,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.IconPickerDialog
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.app.ui.components.rememberMaybeHaptic
@@ -71,6 +72,7 @@ internal fun CreateGroupDialog(
             }
         },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = groupName,
@@ -135,6 +137,7 @@ internal fun VaultRenameGroupDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.vault_folder_rename)) },
         text = {
+            TrackDialogInteractionEffect()
             OutlinedTextField(
                 value = newName,
                 onValueChange = { newName = it },
@@ -189,7 +192,10 @@ internal fun VaultDeleteGroupDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
         title = { Text(stringResource(R.string.vault_folder_delete)) },
-        text = { Text(stringResource(R.string.vault_folder_delete_desc)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.vault_folder_delete_desc))
+        },
         confirmButton = {
             Button(
                 onClick = {
@@ -222,7 +228,10 @@ internal fun VaultEmptyRecycleBinDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
         title = { Text(stringResource(R.string.vault_empty_recycle_bin)) },
-        text = { Text(stringResource(R.string.vault_empty_recycle_bin_confirm)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.vault_empty_recycle_bin_confirm))
+        },
         confirmButton = {
             Button(
                 onClick = {

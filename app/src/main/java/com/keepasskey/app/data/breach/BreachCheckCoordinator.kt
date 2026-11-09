@@ -43,8 +43,23 @@ class BreachCheckCoordinator(
      * @param entries 参与比对的条目（密码为空的条目跳过，不计入泄露）
      * @return [BreachCheckOutcome]；无可用密码时返回 [BreachCheckStatus.CLEAN]（确实无从比对）
      */
-    suspend fun check(entries: List<KdbxEntry>): BreachCheckOutcome {
-        val candidatesByPrefix = collectCandidates(entries)
+    suspend fun check(entries: List<KdbxEntry>): BreachCheckOutcome =
+        checkCandidates(prepareCandidates(entries))
+
+    /**
+     * 本地提炼参与比对的候选列表（纯 CPU 计算，读取口令计算 SHA-1 前缀与后缀）。
+     * 允许健康度扫描在瞬时读租约内完成口令读取与哈希，将读租约与网络外联彻底解耦。
+     * 遍历间隙检查协程取消（[ensureActive]），避免大库循环丧失协作取消能力。
+     */
+    internal suspend fun prepareCandidates(entries: List<KdbxEntry>): Map<String, List<BreachCandidate>> =
+        collectCandidates(entries)
+
+    /**
+     * 仅按已提炼的候选前缀执行网络查询与本地比对（全程不触碰任何 ProtectedString 实例）。
+     */
+    internal suspend fun checkCandidates(
+        candidatesByPrefix: Map<String, List<BreachCandidate>>
+    ): BreachCheckOutcome {
         if (candidatesByPrefix.isEmpty()) return BreachCheckOutcome(BreachCheckStatus.CLEAN)
 
         val breachedEntryIds = LinkedHashSet<String>()
@@ -69,9 +84,10 @@ class BreachCheckCoordinator(
     /**
      * 本地计算各条目密码的 SHA-1，按 5 位前缀聚合——同前缀只产生一次网络查询。
      */
-    private fun collectCandidates(entries: List<KdbxEntry>): Map<String, List<Candidate>> {
-        val grouped = LinkedHashMap<String, MutableList<Candidate>>()
+    private suspend fun collectCandidates(entries: List<KdbxEntry>): Map<String, List<BreachCandidate>> {
+        val grouped = LinkedHashMap<String, MutableList<BreachCandidate>>()
         for (entry in entries) {
+            coroutineContext.ensureActive()
             val password = entry.password
             if (password == null || password.length == 0) continue
             val passwordBytes = password.readUtf8()
@@ -81,7 +97,7 @@ class BreachCheckCoordinator(
                 // 摘要字节由 BreachHasher 内部 finally 清零（密码明文字节由本方法 finally 清零）
                 val (prefix, suffix) = BreachHasher.splitPrefixSuffixOfSha1(passwordBytes)
                 grouped.getOrPut(prefix) { mutableListOf() }.add(
-                    Candidate(entryId = entry.id.toHexString(), suffix = suffix)
+                    BreachCandidate(entryId = entry.id.toHexString(), suffix = suffix)
                 )
             } finally {
                 passwordBytes.fill(0)
@@ -90,5 +106,5 @@ class BreachCheckCoordinator(
         return grouped
     }
 
-    private data class Candidate(val entryId: String, val suffix: String)
+    internal data class BreachCandidate(val entryId: String, val suffix: String)
 }

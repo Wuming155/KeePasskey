@@ -13,6 +13,7 @@ import androidx.credentials.provider.PendingIntentHandler
 import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetPasswordOption
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 import com.keepasskey.app.data.repository.VaultEntryWriteCoordinator
 import com.keepasskey.app.data.repository.VaultRepository
@@ -70,6 +71,13 @@ class PasswordDraftActivity : BaseCredentialActivity() {
     /** ISSUE-P3-298 ⑥：新建后随即完成本次填充 = 真实使用点（与 PasswordFill 同口径） */
     @Inject
     lateinit var credentialLastUsedStore: CredentialLastUsedStore
+
+    /**
+     * ENG-20261028-05：CM 交付边界的通道开关复核来源。口令交付只认 CM 通道总开关，
+     * 「通行密钥支持」开关不得拦截（判定表见 [CredentialDeliveryChannelGate]）。
+     */
+    @Inject
+    lateinit var settingsStore: ExtendedSettingsStore
 
     /** CM 通道原始请求（null = 选择器拉起路径） */
     private var beginRequest: BeginGetCredentialRequest? = null
@@ -243,6 +251,16 @@ class PasswordDraftActivity : BaseCredentialActivity() {
         if (settled) return
         settled = true
         if (beginRequest != null) {
+            // ENG-20261028-05：候选装配到保存完成之间用户可能关闭通道——回传前按本次开关值
+            // 复核；口令交付只认 CM 通道总开关（「通行密钥支持」开关不得拦截）。
+            if (!CredentialDeliveryChannelGate.allowsPasswordDelivery(
+                    settingsStore.isCredentialProviderEnabled()
+                )
+            ) {
+                AppLog.w(TAG, "凭据管理器通道已在设置中关闭，拒绝交付新建口令")
+                failAndFinish()
+                return
+            }
             val resultIntent = Intent()
             PendingIntentHandler.setGetCredentialResponse(
                 resultIntent,
@@ -252,11 +270,23 @@ class PasswordDraftActivity : BaseCredentialActivity() {
                     PasswordCredential(userName.trim(), String(draftPassword))
                 )
             )
-            if (!credentialSessionGate.complete {
+            // ENG-20261028-05：交付在票据窄锁内完成；通道开关在锁内最后再判一次，覆盖
+            // 「等待窄锁期间用户关闭通道」的挂起窗口（块内只有同步代码，判定紧邻 setResult）。
+            var delivered = false
+            val accepted = credentialSessionGate.complete {
+                if (!CredentialDeliveryChannelGate.allowsPasswordDelivery(
+                        settingsStore.isCredentialProviderEnabled()
+                    )
+                ) {
+                    AppLog.w(TAG, "交付前凭据管理器通道已关闭，拒绝交付新建口令")
+                    return@complete
+                }
+                delivered = true
                 credentialLastUsedStore.record(entryId)
                 setResult(RESULT_OK, resultIntent)
                 finish()
-            }) failAndFinish()
+            }
+            if (!accepted || !delivered) failAndFinish()
         } else {
             credentialLastUsedStore.record(entryId)
             setResult(RESULT_OK, Intent().putExtra(EXTRA_DRAFT_ENTRY_ID, entryId))

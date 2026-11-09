@@ -25,7 +25,10 @@ internal class RecycleBinCoordinator(
 ) {
 
     /** 删除条目：回收站启用且未在回收站内→移入回收站；否则物理删除并记录墓碑 */
-    suspend fun deleteEntry(id: String): KdbxResult<Unit> {
+    suspend fun deleteEntry(id: String): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { deleteEntryInternal(id) }
+
+    private suspend fun deleteEntryInternal(id: String): KdbxResult<Unit> {
         val uuid = parseKdbxUuidOrNull(id)
             ?: return KdbxResult.Failure(
                 IllegalArgumentException(strings.get(R.string.repo_invalid_entry_id)),
@@ -72,7 +75,10 @@ internal class RecycleBinCoordinator(
     }
 
     /** 删除分组：整组（含子内容）移入回收站或物理删除+墓碑；回收站组自身删除为无操作 */
-    suspend fun deleteGroup(id: String): KdbxResult<Unit> {
+    suspend fun deleteGroup(id: String): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { deleteGroupInternal(id) }
+
+    private suspend fun deleteGroupInternal(id: String): KdbxResult<Unit> {
         val uuid = parseKdbxUuidOrNull(id)
             ?: return KdbxResult.Failure(
                 IllegalArgumentException(strings.get(R.string.repo_invalid_group_id)),
@@ -127,7 +133,10 @@ internal class RecycleBinCoordinator(
     }
 
     /** 还原条目：移回 previousParentGroup（父组已被删时回退根组），并清空回退标记 */
-    suspend fun restoreEntry(id: String): KdbxResult<Unit> {
+    suspend fun restoreEntry(id: String): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { restoreEntryInternal(id) }
+
+    private suspend fun restoreEntryInternal(id: String): KdbxResult<Unit> {
         val uuid = parseKdbxUuidOrNull(id)
             ?: return KdbxResult.Failure(
                 IllegalArgumentException(strings.get(R.string.repo_invalid_entry_id)),
@@ -162,7 +171,10 @@ internal class RecycleBinCoordinator(
      * 清空回收站：断点9 整改——必须覆盖其子分组——递归收集子树内全部条目，
      * 子分组本身物理删除并记录墓碑（KeePassDX 语义：回收站清空即整棵清空）
      */
-    suspend fun emptyRecycleBin(): KdbxResult<Unit> {
+    suspend fun emptyRecycleBin(): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { emptyRecycleBinInternal() }
+
+    private suspend fun emptyRecycleBinInternal(): KdbxResult<Unit> {
         val db = databaseSession.databaseFlow.first()
             ?: return KdbxResult.Failure(
                 IllegalStateException(strings.get(R.string.repo_db_locked)),
@@ -207,7 +219,10 @@ internal class RecycleBinCoordinator(
     }
 
     /** 批量删除：逐条按回收站语义分流（移入回收站 / 物理删除+墓碑），最后统一落盘 */
-    suspend fun batchDeleteEntries(entryIds: Set<String>): KdbxResult<Unit> {
+    suspend fun batchDeleteEntries(entryIds: Set<String>): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { batchDeleteEntriesInternal(entryIds) }
+
+    private suspend fun batchDeleteEntriesInternal(entryIds: Set<String>): KdbxResult<Unit> {
         val db = databaseSession.databaseFlow.first()
             ?: return KdbxResult.Failure(
                 IllegalStateException(strings.get(R.string.repo_db_locked)),

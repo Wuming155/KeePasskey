@@ -26,6 +26,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -339,11 +340,11 @@ class VaultFileDriftCancellationTest {
     }
 
     /**
-     * 收口专项：**候选树已采用（adopt）后写回失败**的原子性。
+     * `ENG-20261028-19`：**写盘确认成功才发布**的漂移合并提交原子性与失败恢复。
      *
-     * 排除的静默一致性风险：「内存显示新值、磁盘仍旧值、dirty 却被清除」。
-     * 期望：写回失败 ⇒ 会话状态仍为 `DIRTY`、基线修订不前移、正式文件逐字节未变、
-     * 内存树保留合并产物（不丢用户修改）、再次提交可成功（可重试）。
+     * 排除的静默一致性风险：「写盘失败时内存已显示合并新值、旧实例被擦除、dirty 被清、基线前移」。
+     * 期望：写回失败 ⇒ 保留采纳前完整树实例、旧字段仍可读、会话保持 DIRTY、基线不前移、
+     * 正式文件逐字节未变、密文缓冲清零；待决材料可重试；重试成功后发布完整合并产物并前移基线。
      */
     @Test
     fun `写回失败不得清dirty不得前移基线且可重试`() = runBlocking {
@@ -359,6 +360,9 @@ class VaultFileDriftCancellationTest {
         localEdit(session)
         val fileBytesBefore = file.readBytes()
         val revisionBefore = revisionOf(session)
+        val treeBefore = session.databaseFlow.value!!
+        val passwordsBefore = treeBefore.rootGroup.allEntries()
+            .associate { it.id to it.fields.getValue(CANCEL_PWD_FIELD).readString() }
         val coordinator = VaultFileDriftCoordinator(VaultFileBaselineHolder(session), session)
         val resolver = VaultFileDriftResolve(session, CANCEL_STRINGS, coordinator)
 
@@ -371,13 +375,23 @@ class VaultFileDriftCancellationTest {
         )
         assertEquals("写回失败后基线修订不得前移", revisionBefore, revisionOf(session))
         assertTrue("写回失败不得改动正式文件", fileBytesBefore.contentEquals(file.readBytes()))
-        val inMemory = session.databaseFlow.value!!.rootGroup.allEntries()
-            .map { it.fields.getValue(CANCEL_PWD_FIELD).readString() }
-            .toSet()
-        assertTrue(
-            "写回失败后内存树必须保留合并产物（不丢用户修改，实测=$inMemory）",
-            inMemory.containsAll(setOf("Disk#1", "LocalOnly#1"))
+
+        val currentTree = session.databaseFlow.value!!
+        assertSame(
+            "写回失败后内存树必须保留采纳前完整树实例（写盘后发布契约）",
+            treeBefore,
+            currentTree
         )
+        val inMemory = currentTree.rootGroup.allEntries()
+            .associate { it.id to it.fields.getValue(CANCEL_PWD_FIELD).readString() }
+        assertEquals(
+            "写回失败后旧字段必须仍可读且未被擦除或篡改",
+            passwordsBefore,
+            inMemory
+        )
+        assertEquals("A", inMemory[CANCEL_EDITED])
+        assertEquals("LocalOnly#1", inMemory[CANCEL_LOCAL_ONLY])
+
         assertTrue("写回失败不得把整库密文缓冲留在堆上（writer 未收到即失败）", written[0] == null)
 
         // 可重试：同一会话再次提交必须成功且状态回到 OPENED
@@ -393,6 +407,16 @@ class VaultFileDriftCancellationTest {
             "重试成功后状态必须回到 OPENED",
             DatabaseSession.SessionState.OPENED,
             session.state.value
+        )
+        val inMemoryAfterSuccess = session.databaseFlow.value!!.rootGroup.allEntries()
+            .associate { it.id to it.fields.getValue(CANCEL_PWD_FIELD).readString() }
+        assertEquals(
+            "重试成功后会话树必须发布完整合并产物（含磁盘修改与本地修改）",
+            mapOf(
+                CANCEL_EDITED to "Disk#1",
+                CANCEL_LOCAL_ONLY to "LocalOnly#1"
+            ),
+            inMemoryAfterSuccess
         )
         session.close()
     }

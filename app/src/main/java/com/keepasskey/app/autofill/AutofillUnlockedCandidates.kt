@@ -21,6 +21,12 @@ internal data class UnlockedCandidates(
 
 /**
  * 解析本轮可用候选（域归属校验 + 包名维度首次绑定校验 + 打分排序）。
+ *
+ * `ENG-20261028-11`：本函数返回的 [UnlockedCandidates.ranked] 携带**活的** `KdbxEntry`，
+ * 调用方在后续装配（值解析 / TOTP 直填 / 结构化字段）中还要读它们的字段。因此租约**必须由调用方**
+ * 跨「解析 → 装配」整段持有（见 [appendUnlockedDatasets] 与
+ * `AutofillUnlockActivity.resolveRouting` 的调用点）；本函数自身不登记租约，
+ * 以免在返回时就把保护撤掉。
  */
 internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
     callingPkg: String,
@@ -64,6 +70,8 @@ internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
         // 只记事实（不含条目名 / 包名 / 摘要等标识）
         AppLog.d(TAG, "调用方关联记忆命中，本条候选含该条目")
     }
+    // ENG-20261028-11：候选条目在返回后仍要被逐条读取（值解析 / TOTP / 结构化字段），
+    // 故读租约由**调用方**跨「解析 → 装配」整段持有；此处保持裸读口，不自行登记再在返回时撤销。
     return UnlockedCandidates(
         webDomain = webDomain,
         ranked = AutofillCandidateRanker.rank(

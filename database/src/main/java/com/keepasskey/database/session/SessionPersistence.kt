@@ -27,8 +27,9 @@ import kotlin.coroutines.CoroutineContext
  * 故共享 [serializeToBytes] 单一实现（原为三处逐字重复的同一段代码）。
  *
  * 可见性与锁语义：类为 `internal`，由 [DatabaseSession] 门面持有；`save` / `changeCredentials`
- * 仍在 [mutex] 临界区内执行（与拆分前 `DatabaseSession` 自持该锁的覆盖范围逐行等价），
- * 只读态判定、失败回滚顺序与凭据擦除时机一律未改。
+ * 仍在 [mutex] 临界区内执行（与拆分前 `DatabaseSession` 自持该锁的覆盖范围逐行等价）。
+ * 只读态判定与凭据擦除时机未变；**提交顺序**按 `ENG-20261028-19` 改为「序列化 → 写盘确认 →
+ * 发布候选 / 前移基线」，写盘失败或取消时活动树与基线保持提交前状态。
  */
 
 internal class SessionPersistence(
@@ -79,13 +80,12 @@ internal class SessionPersistence(
     }
 
     /**
-     * `ISSUE-P1-631`（原子采纳 + 落盘）：[save] 的**无锁内核**（已在会话临界区内调用）。
+     * [save] 的**无锁内核**（已在会话临界区内调用；`Mutex` 不可重入，带锁版在锁内再调即自锁）。
      *
-     * 抽出原因同 `SessionContentMutations.adoptDatabaseIfUnchangedLocked`：采纳与落盘必须在
-     * **同一次**会话临界区内完成，否则窗口内的换库会让 `save()` 把「后来会话」的内容写到
-     * 「后来会话」的目标上，而调用方据返回值误判「本次合并已保存」。
-     *
-     * 语义与 [save] **逐字相同**，仅去掉取锁（`Mutex` 不可重入，带锁版在锁内再调即自锁）。
+     * 提交顺序（`ENG-20261028-19`）：修剪候选 → 序列化 → **写盘确认 → 发布修剪树 → 擦除下线实例
+     * → 前移持久化基线**。写盘失败或取消时不发布、不擦除、不前移基线，内存与磁盘同处提交前状态
+     * （历史修剪在下一轮保存时重试）。采纳与落盘仍在**同一次**会话临界区内完成，否则窗口内的
+     * 换库会让 `save()` 把「后来会话」的内容写到「后来会话」的目标上。
      */
     internal suspend fun saveLocked(): KdbxResult<Unit> {
         requireCurrentSessionRequest(core.credentialTicket)
@@ -127,36 +127,38 @@ internal class SessionPersistence(
                 // （官方 KeePass DatabaseOperationsForm「删除 N 天前的历史条目」语义），
                 // 使该 Meta 字段真实生效；仅在确有修剪时重建内存树，避免每次保存无谓拷贝。
                 val prunedRoot = HistoryManager.pruneGroupHistoryByAge(db.rootGroup, db.maintenanceHistoryDays)
-                val dbToSave = if (prunedRoot !== db.rootGroup) {
-                    // ISSUE-P0-531：与 SessionContentMutations 同口径——**先发布修剪后的树、再擦下线历史**。
-                    // 整改前「先擦 → 再发布」时，`db` 仍是发布中的活动树，而 UI 投影链正读它的历史
-                    // 条目（`VaultEntryMapper` 的 `h.userName`，即真机崩溃堆栈命中点）⇒ 读到已清零实例 ⇒ 闪退。
-                    val pruned = db.copy(rootGroup = prunedRoot)
-                    core.database.value = pruned
-                    // ISSUE-P2-06：修剪下线了超期历史快照，**发布后**定点擦除其密文（身份集合判定不变）
-                    db.rootGroup.clearSupersededSensitiveData(prunedRoot)
-                    pruned
-                } else {
-                    db
-                }
+                // ENG-20261028-19：修剪候选只用于本次序列化，**不发布**。
+                // 整改前此处先发布修剪树、再擦除下线历史实例，最后才序列化 / 写盘——写盘失败或
+                // 取消时内存已少掉历史、旧实例已清零，而磁盘仍是旧版本，留下不可恢复的半步状态。
+                val dbToSave = if (prunedRoot !== db.rootGroup) db.copy(rootGroup = prunedRoot) else db
 
                 // TASK-42 整改（P2-2）：Argon2 派生与流加密为 CPU 密集，序列化走 Default；
                 // 仅字节落盘（writeAtomic + fsync）走 IO——对齐 exportToBytes 的既有调度先例
                 val serialized = serializeToBytes(dbToSave, pwd, credentials.currentKeyFile(), progress)
+                // ENG-20261028-18：写盘确认后把这份缓冲**移交**给持久化基线（不再克隆整库密文）
+                var baselineOwned = false
                 try {
                     writer(serialized)
-                    // ISSUE-P1-631：写盘确认成功 ⇒ 登记本版本为持久化基线（漂移合并的真实共同基线；
-                    // 克隆归会话，序列化缓冲由下方 finally 照常清零）。失败 / 取消路径不前移基线。
-                    core.retainPersistedBaselineBestEffort(serialized, core.activePathIdentifier)
+                    // ENG-20261028-19：**写盘成功之后**才发布修剪候选，发布之后才擦除下线的旧历史实例。
+                    // 顺序仍是「先发布、后擦除」（ISSUE-P0-531 / ISSUE-P2-534：读取者与临界区不共享锁，
+                    // 先擦会让仍持旧树的投影读到已清零实例）。
+                    if (dbToSave !== db) {
+                        core.database.value = dbToSave
+                        db.rootGroup.clearSupersededSensitiveData(prunedRoot)
+                    }
+                    // ISSUE-P1-631：写盘确认成功 ⇒ 登记本版本为持久化基线（漂移合并的真实共同基线）；
+                    // 失败 / 取消路径不前移基线。移交后缓冲由基线持有，finally 不再清零。
+                    core.retainPersistedBaselineOwned(serialized, core.activePathIdentifier)
+                    baselineOwned = true
                     // ISSUE-P3-368：落盘完成即终态 1.0（序列化侧进度已在 KdbxFile.save 内发到 0.9）
                     progress(KdbxProgress.DONE)
                     core.state.value = DatabaseSession.SessionState.OPENED
                     KdbxResult.Success(Unit)
                 } finally {
                     // ISSUE-P3-551：序列化缓冲即整库密文（头部外全加密），
-                    // **写盘异常路径同样必须清零**——整改前 `fill(0)` 在 `try` 体内，
-                    // `writer` 抛异常时整库密文副本滞留堆上等 GC（同文件换密路径同型）。
-                    serialized.fill(0)
+                    // **写盘异常路径同样必须清零**——未移交基线时（失败 / 取消 / 登记未发生）
+                    // 由本行收口，不留整库密文副本等 GC。
+                    if (!baselineOwned) serialized.fill(0)
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
@@ -253,15 +255,22 @@ internal class SessionPersistence(
     }
 
     /**
-     * 提交预备保存：在会话锁内强制核对凭据代次与基线，核对通过后原子采纳并写盘。
+     * 提交预备保存：在会话锁内强制核对凭据代次与基线，核对通过后**先写盘、成功后才发布**。
      * 若在预备与提交之间会话票据已改变或失效，fail-closed 拒绝且不触碰活动树与磁盘。
+     *
+     * `ENG-20261028-19` 提交边界：采纳资格（只读态 / 基线修订 / 会话树实例身份 / 票据代次）
+     * 在**同一临界区**内先判定，随后写预备密文；**writer 正常返回之后**才发布候选、擦除下线实例、
+     * 前移基线。写盘失败或取消 ⇒ 活动树、状态、基线与磁盘保持提交前的一致状态，仅预备密文被清零。
+     *
+     * @return 成功时携带**已发布的活动树实例**（即与上传密文严格对应的那一版，含本次修剪结果）。
+     *   调用方据此结算「本轮已同步的版本」，不得改用提交时刻重读的活动树（窗口内可能已换版本）。
      */
     suspend fun commitPreparedSave(
         expectedAtCycleStart: KdbxDatabase,
         candidate: KdbxDatabase,
         prepared: PreparedSerializedSave,
         expectedPersistedBaselineRevision: Long? = null
-    ): KdbxResult<Unit> = mutex.withLock {
+    ): KdbxResult<KdbxDatabase> = mutex.withLock {
         try {
             try {
                 requireCurrentSessionRequest(core.credentialTicket)
@@ -304,10 +313,10 @@ internal class SessionPersistence(
             val mutated = requireNotNull(mutations) {
                 "commitPreparedSave 需要 SessionContentMutations（构造器注入），不得在无 mutations 的实例上调用"
             }
-            val prunedCandidate = candidate.copy(rootGroup = prepared.prunedRoot)
-            if (!mutated.adoptDatabaseIfUnchangedLocked(
+            val committed = candidate.copy(rootGroup = prepared.prunedRoot)
+            // 采纳资格：与发布拆成两半，写盘失败时一律不发布（ENG-20261028-19）
+            if (!mutated.canAdoptDatabaseIfUnchangedLocked(
                     expectedAtCycleStart,
-                    prunedCandidate,
                     expectedPersistedBaselineRevision
                 )
             ) {
@@ -317,11 +326,12 @@ internal class SessionPersistence(
                 )
             }
             progress(null)
+            // 写盘失败 / 取消直接抛出：活动树、状态与基线均未被触碰
             writer(prepared.bytes)
+            mutated.publishPersistedAdoptionLocked(expectedAtCycleStart, committed)
             core.retainPersistedBaselineBestEffort(prepared.bytes, core.activePathIdentifier)
             progress(KdbxProgress.DONE)
-            core.state.value = DatabaseSession.SessionState.OPENED
-            KdbxResult.Success(Unit)
+            KdbxResult.Success(committed)
         } finally {
             prepared.wipe()
         }

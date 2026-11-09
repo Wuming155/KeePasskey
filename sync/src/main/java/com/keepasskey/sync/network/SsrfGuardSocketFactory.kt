@@ -5,7 +5,6 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketAddress
-import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import javax.net.SocketFactory
 
@@ -36,6 +35,9 @@ import javax.net.SocketFactory
  * 故由 [SsrfGuardDns] 在豁免时把解析结果登记进 [SsrfAddressApprovals]，已配置端点为
  * IP 字面量时由 [SyncHttpClientFactory] 直接预登记（OkHttp 对字面量短路、不经 Dns）；
  * 未登记的地址（含一切 IP 字面量重定向目标）一律按 [SyncEndpointGuard.isBlockedAddress] 复核。
+ *
+ * **豁免不覆盖云元数据红线**（ENG-20261028-41）：`169.254.0.0/16` 的判定先于豁免查询执行，
+ * 且 [SsrfAddressApprovals.approveAll] 不登记该网段地址——登记表里不存在能放行元数据的键。
  */
 class SsrfGuardSocketFactory(
     private val approvals: SsrfAddressApprovals = SsrfAddressApprovals()
@@ -90,6 +92,14 @@ private class SsrfGuardedSocket(
         // 未解析的地址（`InetSocketAddress` 的 hostname 形式解析失败）没有可复核的目标，
         // 交由底层 `connect` 抛 `UnknownHostException`——不在此处伪造结论
         val target = (endpoint as? InetSocketAddress)?.address ?: return
+        // ENG-20261028-41：云元数据红线**先于**豁免批准复核——即便该地址曾被登记（或豁免主机
+        // 解析到映射形态的元数据），连接期也一律拒绝；映射形态按内嵌 IPv4 判定
+        if (SyncEndpointGuard.isCloudMetadataAddress(target)) {
+            throw IOException(
+                "SSRF 防护：连接目标 \"${target.hostAddress}\" 属云元数据网段（169.254.0.0/16），" +
+                    "已在建立 TCP 之前拒绝（红线不随豁免放行）"
+            )
+        }
         if (approvals.isApproved(target)) return
         if (SyncEndpointGuard.isBlockedAddress(target)) {
             throw IOException(
@@ -113,20 +123,25 @@ class SsrfAddressApprovals {
 
     private val approvedAddresses = ConcurrentHashMap.newKeySet<String>()
 
-    /** 登记一批「已被显式白名单豁免」的解析结果 */
+    /** 登记一批「已被显式白名单豁免」的解析结果（云元数据网段不登记，红线先于豁免批准） */
     fun approveAll(addresses: List<InetAddress>) {
-        addresses.forEach { approvedAddresses.add(key(it)) }
+        addresses.forEach { address ->
+            if (!SyncEndpointGuard.isCloudMetadataAddress(address)) {
+                approvedAddresses.add(key(address))
+            }
+        }
     }
 
     /** 该地址是否已被显式白名单豁免 */
     fun isApproved(address: InetAddress): Boolean = approvedAddresses.contains(key(address))
 
     /**
-     * 地址键：`hostAddress` 的规范化文本。
+     * 地址键：承载的 IPv4 归一为点分十进制文本，其余用 `hostAddress` 的规范化文本。
      *
      * 用文本而非 `InetAddress` 本身作键——`InetAddress` 的 `equals` 按二进制地址比较，
-     * 但不同 `InetAddress` 子类实例（如 IPv4-mapped 形态）在同一目标上可能不互等；
-     * 文本形态对同一地址稳定（`hostAddress` 不做反向解析）。
+     * 但同一目标的 4 字节与 IPv4-mapped 16 字节实例**互不相等**；文本形态对同一地址稳定
+     * （`hostAddress` 不做反向解析），[SyncEndpointGuard.addressKey] 再把映射拼写收敛到
+     * 同一键，使「DNS 解析结果」与「连接目标」的形态差异不致误伤已豁免的自建端点。
      */
-    private fun key(address: InetAddress): String = address.hostAddress.lowercase(Locale.US)
+    private fun key(address: InetAddress): String = SyncEndpointGuard.addressKey(address)
 }

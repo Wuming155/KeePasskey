@@ -1,9 +1,12 @@
 package com.keepasskey.app.security
 
+import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.biometric.BiometricManager
+import java.security.KeyStore
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.RealSettingsRepository
 import com.keepasskey.app.ui.screens.unlock.BiometricEnrollmentCoordinator
@@ -247,6 +250,380 @@ class QuickUnlockSealDowngradeDeviceTest {
         }
     }
 
+    /**
+     * ENG-20261028-44 设备侧实测：
+     * 1. 不传 KeystoreManager 时无法清理硬件别名，不得错误标记全清（fail-closed），
+     *    且必须保留遗留断言 prefs 键作为重试索引，绝不提前丢 ID；
+     * 2. 多库场景下真实硬件别名删除失败注入：仅成功者清理 prefs 键，失败库的硬件别名与
+     *    prefs 键均完整保留，不标全清；
+     * 3. 故障恢复后重试：沿保留的重试索引成功完成剩余硬件别名删除，两步皆确认成功后落完成标记；
+     * 4. 完成标记置位后，第二实例或重启不再重复 Keystore 扫描与删除操作。
+     *
+     * 行为证据：断言使用真实的 `com.keepasskey.biometric_credentials` prefs 与平台 `AndroidKeyStore`
+     * 别名存在性（containsAlias），不使用生产全局计数器或源码结构锁定；使用虚构库 ID 与测试别名并在 finally 清理。
+     */
+    @Test
+    fun `生物迁移生命周期在设备侧闭环`() {
+        val prefs = context.getSharedPreferences("com.keepasskey.biometric_credentials", Context.MODE_PRIVATE)
+        val originalDone = if (prefs.contains("legacy_migration_done")) prefs.getBoolean("legacy_migration_done", false) else null
+        val keystoreManager = KeystoreManager(context, DebugLogBuffer())
+        val keyStore = KeyStore.getInstance(KeystoreManager.ANDROID_KEY_STORE).apply { load(null) }
+
+        val testPasskeyAlias = KeystoreManager.legacyUnlockPasskeyAliasFor(MIGRATION_TEST_DB_ID)
+        val testFailDbId = "${MIGRATION_TEST_DB_ID}_fail"
+        val testFailPasskeyAlias = KeystoreManager.legacyUnlockPasskeyAliasFor(testFailDbId)
+        val testQuickUnlockAlias = KeystoreManager.LEGACY_QUICK_UNLOCK_KEY_ALIAS
+
+        val pubKey = "${MIGRATION_TEST_DB_ID}_passkey_pub"
+        val macKey = "${MIGRATION_TEST_DB_ID}_passkey_mac"
+        val failPubKey = "${testFailDbId}_passkey_pub"
+
+        try {
+            // ── 段 1：不传 KeystoreManager 时不能错误标全清，且不得提前删除 prefs 重试索引 ───────
+            prefs.edit()
+                .putString(pubKey, "legacy_pub_data")
+                .putString(macKey, "legacy_mac_data")
+                .remove("legacy_migration_done")
+                .apply()
+
+            // 构造未提供 KeystoreManager 的实例（JVM 桩调用或缺省注入场景）
+            BiometricCredentialStorage(context, keystoreManager = null)
+            assertFalse(
+                "未传入 KeystoreManager 时无法操作硬件密钥库，不得错误标记迁移完成（ENG-20261028-44）",
+                prefs.getBoolean("legacy_migration_done", false)
+            )
+            assertTrue(
+                "未传入 KeystoreManager 时必须完整保留遗留断言 prefs 键，不得提前丢失重试索引",
+                prefs.contains(pubKey) && prefs.contains(macKey)
+            )
+
+            // ── 段 2：真实硬件删除失败时保留失败库的重试索引，故障恢复后重试全清 ───────
+            // 播种两个库的硬件密钥与遗留 prefs 键
+            keystoreManager.getOrCreateKey(testPasskeyAlias, false, false)
+            keystoreManager.getOrCreateKey(testFailPasskeyAlias, false, false)
+            keystoreManager.getOrCreateKey(testQuickUnlockAlias, false, false)
+
+            prefs.edit()
+                .putString(pubKey, "legacy_pub_data")
+                .putString(macKey, "legacy_mac_data")
+                .putString(failPubKey, "legacy_pub_fail")
+                .remove("legacy_migration_done")
+                .apply()
+
+            assertTrue(keyStore.containsAlias(testPasskeyAlias))
+            assertTrue(keyStore.containsAlias(testFailPasskeyAlias))
+            assertTrue(keyStore.containsAlias(testQuickUnlockAlias))
+
+            // 注入故障：仅对 testFailPasskeyAlias 抛出异常，其余正常调用 keystoreManager.deleteKey
+            var failInjected = true
+            val failingStorage = BiometricCredentialStorage(
+                context = context,
+                keystoreManager = keystoreManager,
+                keyDeleter = { alias ->
+                    if (failInjected && alias == testFailPasskeyAlias) {
+                        throw RuntimeException("Injected hardware Keystore failure for $alias")
+                    }
+                    keystoreManager.deleteKey(alias)
+                }
+            )
+
+            // 验证故障下的安全状态：
+            // 1. 成功库的硬件别名已删，失败库的硬件别名依然在 AndroidKeyStore 中
+            assertFalse("成功库别名必须已从 AndroidKeyStore 删除", keyStore.containsAlias(testPasskeyAlias))
+            assertTrue("失败库别名必须依然保留在 AndroidKeyStore 中", keyStore.containsAlias(testFailPasskeyAlias))
+            // 2. 成功库的 prefs 键已清理，失败库的 prefs 键必须保留作为重试索引（未丢 ID！）
+            assertFalse("成功库 prefs 键必须已清除", prefs.contains(pubKey))
+            assertTrue("失败库 prefs 键必须保留作为重试索引（绝对未丢失 ID）", prefs.contains(failPubKey))
+            // 3. 不得标记完成
+            assertFalse("硬件删除未全部成功前不得写入完成标记", prefs.getBoolean("legacy_migration_done", false))
+
+            // 恢复无故障状态（模拟下次启动重试）
+            failInjected = false
+            val retryStorage = BiometricCredentialStorage(
+                context = context,
+                keystoreManager = keystoreManager,
+                keyDeleter = { alias -> keystoreManager.deleteKey(alias) }
+            )
+
+            // 验证重试后全清：
+            assertFalse("重试后失败库别名必须已从 AndroidKeyStore 删除", keyStore.containsAlias(testFailPasskeyAlias))
+            assertFalse("重试后失败库 prefs 键必须被清除", prefs.contains(failPubKey))
+            assertFalse("QuickUnlock 别名也已从 AndroidKeyStore 删除", keyStore.containsAlias(testQuickUnlockAlias))
+            assertTrue("所有步骤确认成功后必须写入完成标记", prefs.getBoolean("legacy_migration_done", false))
+
+            // ── 段 3：第二实例 / 重启不重复 Keystore 扫描 ────────────────────────
+            // 重新在 Keystore 播种测试别名：若第二实例重复扫描，该别名会被再次删除
+            keystoreManager.getOrCreateKey(
+                alias = testQuickUnlockAlias,
+                requireUserAuth = false,
+                invalidateOnBiometricEnrollment = false
+            )
+            assertTrue("播种别名以检验跳过逻辑", keyStore.containsAlias(testQuickUnlockAlias))
+
+            val secondStorage = BiometricCredentialStorage(context, keystoreManager)
+
+            assertTrue(
+                "完成标记已为 true 时，第二实例构造不得重复扫描或删除 Keystore 别名",
+                keyStore.containsAlias(testQuickUnlockAlias)
+            )
+        } finally {
+            runCatching { keystoreManager.deleteKey(testPasskeyAlias) }
+            runCatching { keystoreManager.deleteKey(testFailPasskeyAlias) }
+            runCatching { keystoreManager.deleteKey(testQuickUnlockAlias) }
+            runCatching {
+                prefs.edit()
+                    .remove(pubKey)
+                    .remove(macKey)
+                    .remove(failPubKey)
+                    .apply()
+            }
+            if (originalDone != null) {
+                prefs.edit().putBoolean("legacy_migration_done", originalDone).apply()
+            } else {
+                prefs.edit().remove("legacy_migration_done").apply()
+            }
+        }
+    }
+
+    /**
+     * ENG-20261028-44 主线程构造成本量化：
+     * 测量三种典型场景下主线程单次构造实际耗时（仅度量 constructor 瞬时耗时，不计测试脚手架）：
+     * 1. 无遗留初次：无遗留数据且未标记完成时的首次构造；
+     * 2. 含真实测试别名首次：含遗留硬件别名与 prefs 键的首次真实迁移构造；
+     * 3. 已标记后再次实例：完成标记已置位后的快速路径构造。
+     * 多次采样输出 min/max/median/mean 并写入证据文件。
+     */
+    @Test
+    fun `主线程构造实际耗时量化`() {
+        val prefs = context.getSharedPreferences("com.keepasskey.biometric_credentials", Context.MODE_PRIVATE)
+        val originalDone = if (prefs.contains("legacy_migration_done")) prefs.getBoolean("legacy_migration_done", false) else null
+        val keystoreManager = KeystoreManager(context, DebugLogBuffer())
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        val perfPasskeyAlias = KeystoreManager.legacyUnlockPasskeyAliasFor(MIGRATION_PERF_DB_ID)
+        val perfPubKey = "${MIGRATION_PERF_DB_ID}_passkey_pub"
+        val sampleCount = 10
+
+        val samplesCleanFirst = ArrayList<Double>(sampleCount)
+        val samplesMigratingFirst = ArrayList<Double>(sampleCount)
+        val samplesAlreadyMarked = ArrayList<Double>(sampleCount)
+
+        try {
+            // ── 场景 1：无遗留初次构造 ───────────────────────────────────────────
+            repeat(sampleCount) {
+                prefs.edit().remove("legacy_migration_done").apply()
+                var durationMs = 0.0
+                instrumentation.runOnMainSync {
+                    val t0 = System.nanoTime()
+                    val storage = BiometricCredentialStorage(context, keystoreManager)
+                    val t1 = System.nanoTime()
+                    durationMs = (t1 - t0) / 1_000_000.0
+                }
+                samplesCleanFirst.add(durationMs)
+            }
+
+            // ── 场景 2：含真实测试别名首次迁移构造 ───────────────────────────────
+            repeat(sampleCount) {
+                prefs.edit()
+                    .putString(perfPubKey, "perf_legacy_pub")
+                    .remove("legacy_migration_done")
+                    .apply()
+                keystoreManager.getOrCreateKey(perfPasskeyAlias, false, false)
+
+                var durationMs = 0.0
+                instrumentation.runOnMainSync {
+                    val t0 = System.nanoTime()
+                    val storage = BiometricCredentialStorage(context, keystoreManager)
+                    val t1 = System.nanoTime()
+                    durationMs = (t1 - t0) / 1_000_000.0
+                }
+                samplesMigratingFirst.add(durationMs)
+            }
+
+            // ── 场景 3：已标记后再次构造（单例再次解析/重启快速路径） ───────────
+            prefs.edit().putBoolean("legacy_migration_done", true).apply()
+            repeat(sampleCount) {
+                var durationMs = 0.0
+                instrumentation.runOnMainSync {
+                    val t0 = System.nanoTime()
+                    val storage = BiometricCredentialStorage(context, keystoreManager)
+                    val t1 = System.nanoTime()
+                    durationMs = (t1 - t0) / 1_000_000.0
+                }
+                samplesAlreadyMarked.add(durationMs)
+            }
+
+            fun stats(list: List<Double>): String {
+                val sorted = list.sorted()
+                val min = sorted.first()
+                val max = sorted.last()
+                val median = if (sorted.size % 2 == 1) sorted[sorted.size / 2] else (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2.0
+                val mean = sorted.average()
+                return "min=${String.format(java.util.Locale.US, "%.3f", min)}ms, " +
+                    "max=${String.format(java.util.Locale.US, "%.3f", max)}ms, " +
+                    "median=${String.format(java.util.Locale.US, "%.3f", median)}ms, " +
+                    "mean=${String.format(java.util.Locale.US, "%.3f", mean)}ms"
+            }
+
+            val report = buildString {
+                appendLine("=== ENG-44 生物凭据存储主线程构造成本测量 ===")
+                appendLine("设备型号: ${Build.MODEL} (${Build.PRODUCT}), API: ${Build.VERSION.SDK_INT}")
+                appendLine("采样次数: 每场景 $sampleCount 次")
+                appendLine("1. 无遗留初次构造: ${stats(samplesCleanFirst)}")
+                appendLine("2. 含真实别名首次迁移: ${stats(samplesMigratingFirst)}")
+                appendLine("3. 已标记后再次实例（快速路径）: ${stats(samplesAlreadyMarked)}")
+            }
+            println(report)
+
+            // 写出到应用文件目录以便提取证据
+            runCatching {
+                val evidenceDir = context.getExternalFilesDir(null) ?: context.filesDir
+                val file = java.io.File(evidenceDir, "eng44_migration_cost.txt")
+                file.writeText(report)
+            }
+        } finally {
+            runCatching { keystoreManager.deleteKey(perfPasskeyAlias) }
+            runCatching { prefs.edit().remove(perfPubKey).apply() }
+            if (originalDone != null) {
+                prefs.edit().putBoolean("legacy_migration_done", originalDone).apply()
+            } else {
+                prefs.edit().remove("legacy_migration_done").apply()
+            }
+        }
+    }
+
+    /**
+     * ENG-20261028-37 设备侧实测：
+     * 1. 证实生产 elapsedRealtime 进程内倒计时不受墙钟前拨/回拨影响；
+     * 2. 真实系统调时若平台/AVD 不支持（SET_TIME 需要签名级权限），生产时钟注入模拟与平台 clock 实测分开如实标注；
+     * 3. 跨进程墙钟恢复截断不产生异常长等待（回拨截断至策略上限，前移正常过期放行）。
+     *
+     * 行为证据：使用生产 `SharedPrefsUnlockThrottleStore` 验证真实 SharedPreferences 持久化往返，
+     * 使用虚构独立的库 ID 并在 finally 中 reset 清理，不读取真实用户数据。
+     */
+    @Test
+    fun `解锁节流单调推进与跨进程恢复截断在设备侧闭环`() {
+        // ── 平台 clock 实测与系统调时能力探测 ─────────────────────────────────
+        val realElapsedBefore = SystemClock.elapsedRealtime()
+        assertTrue("Android 平台 elapsedRealtime 必须有效且大于 0", realElapsedBefore > 0L)
+
+        val originalWallTime = System.currentTimeMillis()
+        var systemTimeAdjustSupported = false
+        try {
+            // 探测真实系统调时能力：普通应用/测试无 SET_TIME 权限通常会抛 SecurityException
+            val canSet = SystemClock.setCurrentTimeMillis(originalWallTime)
+            if (canSet) {
+                systemTimeAdjustSupported = true
+            }
+        } catch (_: SecurityException) {
+            systemTimeAdjustSupported = false
+        }
+        println(
+            "[ENG-20261028-37 平台 clock 实测] elapsedRealtime=$realElapsedBefore, " +
+                "真实系统调时支持=$systemTimeAdjustSupported (无 SET_TIME 签名权限属预期平台安全边界)"
+        )
+
+        val store = SharedPrefsUnlockThrottleStore(context)
+        try {
+            // 确保测试前初始状态干净
+            store.reset(THROTTLE_TEST_DB_ID)
+
+            // ── 段 1：生产 elapsedRealtime 进程内不受墙钟前拨 / 回拨影响 ──────────
+            var wallShiftMs = 0L
+            val testClock = object : ThrottleClock() {
+                override fun wallMillis(): Long = System.currentTimeMillis() + wallShiftMs
+                override fun monotonicMillis(): Long = SystemClock.elapsedRealtime()
+            }
+            val manager = UnlockThrottleManager(store, clock = testClock)
+
+            // 连续失败达到阈值（5 次），触发 30 秒锁定
+            val elapsedBeforeLock = SystemClock.elapsedRealtime()
+            repeat(UnlockThrottlePolicy.FAILURE_THRESHOLD) {
+                manager.registerFailure(THROTTLE_TEST_DB_ID)
+            }
+            val initialGate = manager.gate(THROTTLE_TEST_DB_ID)
+            val elapsedAfterGate = SystemClock.elapsedRealtime()
+
+            assertTrue("达到阈值必须触发锁定", initialGate is ThrottleGate.Locked)
+            val initialRemaining = (initialGate as ThrottleGate.Locked).remainingMs
+            val maxElapsedLock = (elapsedAfterGate - elapsedBeforeLock).coerceAtLeast(1L)
+            assertTrue(
+                "首次退避剩余时间必须处于 [基准 - 调用耗时, 基准] 紧确边界内，实测 $initialRemaining ms (耗时 ${maxElapsedLock}ms)",
+                initialRemaining <= UnlockThrottlePolicy.BASE_BACKOFF_MS &&
+                    initialRemaining >= UnlockThrottlePolicy.BASE_BACKOFF_MS - maxElapsedLock
+            )
+
+            // 模拟墙钟前拨 2 小时：进程内倒计时必须不受影响，不得提前解锁
+            wallShiftMs = 2L * 60L * 60L * 1000L
+            val elapsedBeforeForward = SystemClock.elapsedRealtime()
+            val forwardGate = manager.gate(THROTTLE_TEST_DB_ID)
+            val elapsedAfterForward = SystemClock.elapsedRealtime()
+
+            assertTrue("锁定期内墙钟前移 2 小时不得提前解锁（由 elapsedRealtime 隔离）", forwardGate is ThrottleGate.Locked)
+            val forwardRemaining = (forwardGate as ThrottleGate.Locked).remainingMs
+            val maxElapsedForward = (elapsedAfterForward - elapsedBeforeLock).coerceAtLeast(1L)
+            assertTrue(
+                "前拨后剩余等待仅受 elapsedRealtime 推进，实测 $forwardRemaining ms (初始 $initialRemaining ms)",
+                forwardRemaining <= initialRemaining &&
+                    forwardRemaining >= UnlockThrottlePolicy.BASE_BACKOFF_MS - maxElapsedForward
+            )
+
+            // 模拟墙钟回拨 2 小时：进程内倒计时必须不受影响，不得延长等待
+            wallShiftMs = -2L * 60L * 60L * 1000L
+            val elapsedBeforeBackward = SystemClock.elapsedRealtime()
+            val backwardGate = manager.gate(THROTTLE_TEST_DB_ID)
+            val elapsedAfterBackward = SystemClock.elapsedRealtime()
+
+            assertTrue("锁定期内墙钟回拨 2 小时不得延长锁定", backwardGate is ThrottleGate.Locked)
+            val backwardRemaining = (backwardGate as ThrottleGate.Locked).remainingMs
+            val maxElapsedBackward = (elapsedAfterBackward - elapsedBeforeLock).coerceAtLeast(1L)
+            assertTrue(
+                "回拨后剩余等待不受回拨虚增，实测 $backwardRemaining ms (前拨后 $forwardRemaining ms)",
+                backwardRemaining <= forwardRemaining &&
+                    backwardRemaining >= UnlockThrottlePolicy.BASE_BACKOFF_MS - maxElapsedBackward
+            )
+
+            // ── 段 2：新实例读取持久记录时的墙钟恢复截断（冷启动读取未产生异常长等待） ────
+            // 模拟冷启动新实例：进程死亡期间墙钟被回拨 7 天
+            // 磁盘记录中的 lockoutUntilEpochMs 距当前回拨后的墙钟差距达到 7 天 + 30 秒
+            val rewindClock = object : ThrottleClock() {
+                override fun wallMillis(): Long = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
+                override fun monotonicMillis(): Long = SystemClock.elapsedRealtime()
+            }
+            val restartedManager = UnlockThrottleManager(store, clock = rewindClock)
+            val recoveredGate = restartedManager.gate(THROTTLE_TEST_DB_ID)
+            assertTrue("新实例读取持久记录时必须继续维持节流", recoveredGate is ThrottleGate.Locked)
+            val recoveredRemaining = (recoveredGate as ThrottleGate.Locked).remainingMs
+            val policyCeiling = UnlockThrottlePolicy.backoffMillisFor(UnlockThrottlePolicy.FAILURE_THRESHOLD)
+            assertTrue(
+                "跨进程墙钟回拨导致的虚增截止必须截断到策略上限（上限 $policyCeiling ms，实测 $recoveredRemaining ms），杜绝异常长等待",
+                recoveredRemaining <= policyCeiling && recoveredRemaining > 0L
+            )
+
+            // 模拟冷启动新实例：正常流逝并越过截止时间
+            val expiredClock = object : ThrottleClock() {
+                override fun wallMillis(): Long = System.currentTimeMillis() + 60_000L
+                override fun monotonicMillis(): Long = SystemClock.elapsedRealtime()
+            }
+            val expiredManager = UnlockThrottleManager(store, clock = expiredClock)
+            val expiredGate = expiredManager.gate(THROTTLE_TEST_DB_ID)
+            assertTrue("持久截止到期后新实例放行", expiredGate is ThrottleGate.Allowed)
+
+            // ── 段 3：真实平台调时权限探测与恢复 ──────────────────────────────────
+            if (systemTimeAdjustSupported) {
+                try {
+                    SystemClock.setCurrentTimeMillis(originalWallTime + 5000L)
+                    val afterShiftElapsed = SystemClock.elapsedRealtime()
+                    assertTrue("平台调时后 elapsedRealtime 保持单调推进", afterShiftElapsed >= realElapsedBefore)
+                } finally {
+                    SystemClock.setCurrentTimeMillis(originalWallTime)
+                }
+            }
+        } finally {
+            store.reset(THROTTLE_TEST_DB_ID)
+        }
+    }
+
     private companion object {
         const val DB_ID = "db_p1_22_device_test"
         const val TIMEOUT_MS = 10_000L
@@ -254,6 +631,13 @@ class QuickUnlockSealDowngradeDeviceTest {
         // 落位探测用：与封印密钥同一别名规则（KEY_ALIAS + "_" + dbId），dbId 专用于本用例
         const val PROBE_DB_ID = "db_p1_22_probe"
         const val PROBE_ALIAS = "${KeystoreManager.BIOMETRIC_KEY_ALIAS}_$PROBE_DB_ID"
+
+        // ENG-20261028-44 设备侧实测虚构测试库 ID 与基准库 ID
+        const val MIGRATION_TEST_DB_ID = "db_eng44_device_test"
+        const val MIGRATION_PERF_DB_ID = "db_eng44_perf_test"
+
+        // ENG-20261028-37 设备侧实测虚构节流库 ID
+        const val THROTTLE_TEST_DB_ID = "db_eng37_device_throttle"
 
         /**
          * 判定当前是否为「软件 Keystore 环境」（模拟器 / 无硬件密钥库）：决定落位断言分支。

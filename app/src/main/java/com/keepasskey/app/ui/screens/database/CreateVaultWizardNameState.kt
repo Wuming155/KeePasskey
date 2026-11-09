@@ -42,7 +42,7 @@ internal class CreateVaultWizardState {
         selectedKeyFilePath.isNotBlank()
     // ISSUE-P2-288 AC①：主口令长度下限硬阻断（单一判据 MasterPasswordPolicy，与改密共用）
     val isFormValid get() = vaultName.isNotBlank() && nameError == null && !checkingName &&
-        passwordChars.size >= MasterPasswordPolicy.MIN_LENGTH &&
+        MasterPasswordPolicy.meetsMinLength(passwordChars) &&
         passwordChars.contentEquals(confirmChars) && isKeyFileValid && isLocationValid
 
     fun wipePasswords() {

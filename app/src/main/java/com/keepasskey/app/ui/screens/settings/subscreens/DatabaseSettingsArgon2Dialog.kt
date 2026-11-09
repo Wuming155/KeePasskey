@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.screens.settings.KdfBenchmarkUiState
 import com.keepasskey.app.ui.screens.settings.SettingsUiState
 import com.keepasskey.crypto.kdf.KdfParameters
@@ -66,6 +67,7 @@ internal fun Argon2ParametersDialog(
             }
         },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 // ISSUE-P3-136：说明文案与标题同列，步进器独占右侧（段落组件见同包 *Sections.kt）
                 Argon2IterationsStepper(

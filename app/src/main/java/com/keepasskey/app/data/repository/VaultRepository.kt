@@ -344,6 +344,47 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWrit
      */
     suspend fun getKdbxEntry(entryId: String): com.keepasskey.core.model.KdbxEntry?
 
+    /**
+     * `ENG-20261028-11`：[getKdbxEntries] 的**租约作用域**读口——快照在 [block] 执行期间受
+     * 「读租约」保护（`ProtectedStringReclamation`）：会话在块内替换整树时，本快照里被替换下线的
+     * 受保护实例只登记、不擦除，块结束（含异常）释放租约后统一确定性擦除。
+     *
+     * 为何需要它：裸读口把条目交回调用方时租约边界已经结束，调用方随后的字段读取撞上并发整树
+     * 替换仍可能读到已擦实例（fail-fast 抛 / 展示读口降级）。凡「取回条目后还要读它的字段」的
+     * 消费面（凭据交付、检索排序、`{REF:}` 展开、TOTP 出码、健康检查）一律改用本读口，
+     * 把**整个使用期**放进同一个租约。
+     *
+     * 默认实现仅供测试替身：直接委托裸读口（替身没有回收协调器，无需租约）。
+     */
+    suspend fun <R> withAllKdbxEntries(
+        block: suspend (List<com.keepasskey.core.model.KdbxEntry>) -> R
+    ): R = block(getKdbxEntries())
+
+    /** [withAllKdbxEntries] 的可用条目版（排除回收站子树，语义见 [getUsableKdbxEntries]）。 */
+    suspend fun <R> withUsableKdbxEntries(
+        block: suspend (List<com.keepasskey.core.model.KdbxEntry>) -> R
+    ): R = block(getUsableKdbxEntries())
+
+    /** [withAllKdbxEntries] 的单条版（按 id 定位，语义与成本面同 [getKdbxEntry]）。 */
+    suspend fun <R> withKdbxEntry(
+        entryId: String,
+        block: suspend (com.keepasskey.core.model.KdbxEntry?) -> R
+    ): R = block(getKdbxEntry(entryId))
+
+    /**
+     * `ENG-20261028-11`：登记一次「条目快照读租约」，返回的句柄**必须成对 `close`**（幂等）。
+     *
+     * 用途：消费面要把一份条目快照**跨多个挂起调用长期持有**（如自动填充选择器页的整库缓存）时，
+     * 由持有者自己表达快照使用期——租约在册期间，会话替换整树下线的受保护实例只登记不擦除，
+     * 最后一个租约释放时才擦除。只做「取一次、当次读完」的场合请改用 [withUsableKdbxEntries] 等
+     * 作用域读口，不必手工管理句柄。
+     *
+     * 边界（与核心协调器一致）：**锁定 / 会话终止的直接擦除不等租约**，锁定后旧快照按既有语义
+     * 不可读；租约泄漏会推迟回收，由核心的待回收实例上限（`MAX_PENDING_RETIREMENTS`）兜底。
+     */
+    fun acquireEntriesReadLease(): java.io.Closeable =
+        com.keepasskey.core.security.ProtectedStringReclamation.acquireReadLease()
+
     // ISSUE-P3-305：原位于此处的敏感值读取通道（单条/批量取码、HOTP 推进、TOTP 配置原文、
     // 附件字节，以及 String 语义的下线通道）已整体迁往 [VaultSecretAccess]；本接口继承之，
     // 故既有调用点（`vaultRepository.getEntryPasswordChars(...)` 等）零改动。

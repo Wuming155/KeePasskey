@@ -25,6 +25,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
 import com.keepasskey.app.data.importer.ImportOutcome
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.data.importer.ImportWarning
 import com.keepasskey.app.data.importer.ImportWarningReason
@@ -69,6 +70,7 @@ private fun ImportMergeCredentialPrompt(
         onDismissRequest = {},
         title = { Text(stringResource(R.string.kdbx_merge_credential_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = stringResource(
@@ -98,6 +100,7 @@ private fun ImportProgressDialog(state: ImportUiState.Parsing, onCancel: () -> U
         onDismissRequest = {},
         title = { Text(stringResource(R.string.dbset_import_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(IMPORT_PROGRESS_ROW_GAP.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(PROGRESS_SIZE.dp))
@@ -148,6 +151,7 @@ private fun ImportResultDialog(outcome: ImportOutcome, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.import_report_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 ImportOutcomeReport(outcome)
             }
@@ -164,7 +168,10 @@ private fun ImportFailureDialog(@StringRes reasonRes: Int, onDismiss: () -> Unit
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_import_title)) },
-        text = { Text(text = stringResource(reasonRes), color = MaterialTheme.colorScheme.error) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(text = stringResource(reasonRes), color = MaterialTheme.colorScheme.error)
+        },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.btn_close)) }
         }

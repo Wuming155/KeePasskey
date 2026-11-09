@@ -44,7 +44,7 @@ internal object PasskeyAssertionRequestParser {
         val attestedPackage = CallingOriginResolver.systemAttestedPackageName(providerReq?.callingAppInfo)
         val cachedOrigin = intent.getStringExtra(PasskeyAssertionActivity.EXTRA_ORIGIN).orEmpty()
         // ISSUE-P2-199：origin 由**本次** CallingAppInfo 派生；派生不出（签名不可读等）时
-        // 保留组装期副本，使降级路径的既有行为不变（该降级在 `passesOriginBinding` 处仍受门控）。
+        // 保留组装期副本，使降级路径的既有行为不变（该降级在签发侧授权裁决处仍受门控）。
         val attestedOrigin = providerReq?.callingAppInfo
             ?.let { CallingOriginResolver.resolveTrustedOrigin(it, browserAllowlistJson) }
             .orEmpty()

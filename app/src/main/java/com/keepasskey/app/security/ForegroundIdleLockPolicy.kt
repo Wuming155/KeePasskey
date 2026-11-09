@@ -10,7 +10,9 @@ import java.time.Instant
  * 裁决（批次留痕）：
  * - 与既有熄屏 / 后台超时**并列**的独立安全网；
  * - 默认 **开启**，默认闲置 **300 秒**（5 分钟）——超出系统息屏之外的兜底；
- * - 交互刷新语义：`onUserInteraction` 类事件重置前台闲置计时（触摸 / 键盘 / 焦点）；
+ * - 交互刷新语义：`onUserInteraction` 类事件重置前台闲置计时——由
+ *   [AutoLockInteractionTracker] 统一接入各 Activity / 独立对话框窗口的触摸与按键，
+ *   以及软键盘 [InputConnection] 真实编辑；纯阅读查询与锁定态不刷新；
  * - 与自动填充会话、剪贴板清理口径一致：**闲置锁定后一律锁库**，不出现
  *   「一边判活一边已锁」——锁定态下交互不再重启计时，须重新解锁；
  * - 时钟回拨 fail-closed（对齐 §354 AutofillActivePromptThrottle）：

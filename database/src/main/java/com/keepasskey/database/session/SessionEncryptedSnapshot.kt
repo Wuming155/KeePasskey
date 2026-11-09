@@ -73,6 +73,29 @@ class PreparedSerializedSave internal constructor(
     private var wiped = false
     val isWiped: Boolean get() = wiped
 
+    /**
+     * `ENG-20261028-31`：**借用**预备密文执行只读消费（典型：把与本地落盘完全相同的那一份字节
+     * 上传云端，免除第二遍整库序列化）。
+     *
+     * 契约与 `SessionEncryptedSnapshot.borrowEncryptedBytes` 同形：闭包内消费，**严禁修改、清零、
+     * 驻留或跨协程传递**；借用期即本产物生命周期。已清零（提交完成 / 放弃 / 失败）时 fail-closed
+     * 拒绝，绝不把全零字节当成有效密文推上云端。
+     */
+    suspend fun <T> borrowBytes(block: suspend (ByteArray) -> T): T {
+        check(!wiped) { "预备密文已清零，不可再借用" }
+        return block(bytes)
+    }
+
+    /**
+     * `ENG-20261028-31`：为「上传 412 后重入」交付一份**独立拥有**的密文副本
+     * （调用方负责用毕清零）。重入侧必须在本产物 [wipe] 之后仍能解析该版本，
+     * 故只在该分支付出一次整库拷贝——常规成功路径不产生额外副本。
+     */
+    fun copyBytesForHandoff(): ByteArray {
+        check(!wiped) { "预备密文已清零，不可再交付" }
+        return bytes.copyOf()
+    }
+
     fun wipe() {
         wiped = true
         bytes.fill(0)

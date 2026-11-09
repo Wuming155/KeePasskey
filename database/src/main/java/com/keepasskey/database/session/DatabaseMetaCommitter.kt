@@ -3,6 +3,7 @@ package com.keepasskey.database.session
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.crypto.kdf.KdfParameters
+import com.keepasskey.database.exception.KdbxSessionChangedException
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxProgress
 import com.keepasskey.database.history.HistoryManager
@@ -27,11 +28,23 @@ internal class DatabaseMetaCommitter(
         ((Float?) -> Unit)?
     ) -> ByteArray
 ) {
-    /** 候选在 writer 确认之前不会发布到活动会话。 */
+    /**
+     * 候选在 writer 确认之前不会发布到活动会话。
+     *
+     * 与 [SessionPersistence.save] 同口径：在**同一会话临界区内**先复核受理票据（`ENG-20261028-25`），
+     * 换密 / 换库 / 锁库与提交交错时如实返回 [KdbxError.SAVE_SESSION_CHANGED]，候选不落进后来会话。
+     * 受理票据由调用边界经 `withAcceptedRequest` 传播；无请求上下文（同步合并、导入续用等内部入口）
+     * 按 `SessionRequestGuard` 的缺省放行契约处理，不在此改为拒绝。
+     */
     suspend fun commit(
         expectedDatabase: KdbxDatabase,
         transform: (KdbxDatabase) -> KdbxDatabase
     ): KdbxResult<Unit> = mutex.withLock {
+        try {
+            requireCurrentSessionRequest(core.credentialTicket)
+        } catch (changed: KdbxSessionChangedException) {
+            return@withLock KdbxResult.Failure(changed, code = KdbxError.SAVE_SESSION_CHANGED)
+        }
         if (core.credentialWriteUncertain.value) return@withLock failure(
             KdbxError.SAVE_WRITE_UNCERTAIN, "数据库写入结果不确定，须先核实或恢复文件"
         )

@@ -48,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
 import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.model.resolveText
@@ -253,7 +254,10 @@ internal fun SyncStatusCard(
         AlertDialog(
             onDismissRequest = { showKeepLocalRecoveryDialog = false },
             title = { Text(stringResource(R.string.sync_recovery_keep_local_title)) },
-            text = { Text(stringResource(R.string.sync_recovery_keep_local_message)) },
+            text = {
+                TrackDialogInteractionEffect()
+                Text(stringResource(R.string.sync_recovery_keep_local_message))
+            },
             confirmButton = {
                 Button(onClick = {
                     showKeepLocalRecoveryDialog = false

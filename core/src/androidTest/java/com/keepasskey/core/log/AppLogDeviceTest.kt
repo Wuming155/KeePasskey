@@ -19,7 +19,7 @@ import java.util.UUID
  *
  * `AppLog` 的 fail-safe（`safe` 吞 `android.util.Log` 未 mock 异常）在宿主上「通过」的方式
  * 是**输出从未发生**——「日志真的进了 logcat」「debugEnabled 门控在真实 `Log.v/d` 上生效」
- * 「release 脱敏输出只落异常类名」均为 `android.util.Log` 真实存在时的平台行为，只有
+ * 「release 脱敏输出的实际落盘内容（类型 + 栈帧、无 message）」均为 `android.util.Log` 真实存在时的平台行为，只有
  * androidTest 源集可证（AGENTS.md §5）。本用例经 instrumentation 的 UiAutomation（shell 特权）
  * 读回真实 logcat 缓冲，以一次性标记（nonce）验证写入结果。
  *
@@ -40,8 +40,13 @@ import java.util.UUID
  * ## 覆盖与不覆盖（如实声明）
  *
  * - **覆盖**：i 级别真实落 logcat；`debugEnabled` 门控（关 → 不落，开 → 落在平台保留的通道上）；
- *   `debugEnabled=false` 时 e 级别脱敏（异常 message / 堆栈不外传，只落全限定类名）。
- * - **不覆盖**：logcat 环形缓冲溢出后的历史行丢失（平台自身行为，与 AppLog 无关）；
+ *   `debugEnabled=false` 时 e 级别「保定位、不外传」——保留异常类型、cause 类型与
+ *   `类.方法(文件:行号)` 栈帧，异常 message / cause message / suppressed message 一律不外传
+ *   （ENG-20261028-27：release 需可定位，但不得回退成未经筛选的 `printStackTrace`），
+ *   且 cause 链与帧数有上限、截断有显式标记（防环状 cause 刷爆 logcat）。
+ * - **不覆盖**：release 包中栈帧的**混淆后**形态与 `retrace` 还原（本用例跑 debug 包，
+ *   类名未混淆；R8 侧另按「混淆后仍可定位」的发布构建步骤验收，见 ENG-20261028-27 整改说明）；
+ *   logcat 环形缓冲溢出后的历史行丢失（平台自身行为，与 AppLog 无关）；
  *   平台**整体丢弃**的级别（如 MIUI 上的 v）在该平台不可作为判据通道——这是本用例刻意降级的边界。
  * - **历史名（`ISSUE-P2-517` 前）**：`debugEnabled 为 true 时 v 级别真实落 logcat` →
  *   现为 `debugEnabled 为 true 时门控在平台保留的通道上真实落 logcat`，覆盖**不减反增**
@@ -186,26 +191,99 @@ class AppLogDeviceTest {
     }
 
     @Test
-    fun `debug 关闭时 e 级别脱敏为异常类名不含 message 与堆栈`() {
+    fun `debug 关闭时 e 级别保留栈帧但不透出 message cause 与 suppressed`() {
         val marker = "SENSITIVE-DETAIL-${UUID.randomUUID()}"
         val nonce = "E-SANITIZED-${UUID.randomUUID()}"
         AppLog.debugEnabled = false
 
-        AppLog.e(tag, "$nonce $marker", IllegalStateException("raw-$marker"))
+        AppLog.e(tag, "$nonce $marker", sanitizationProbe(marker))
+        AppLog.i(tag, "END-$nonce")
 
-        val dump = waitUntilLogged(nonce)
-        assertTrue("脱敏输出必须包含标记行", nonce in dump)
-        assertFalse(
-            "脱敏输出不得包含异常 message 明文",
-            "raw-$marker" in dump
-        )
-        assertFalse(
-            "脱敏输出不得包含堆栈帧（\\tat <fqcn> 形态；tag 行头同名不算堆栈）",
-            "\tat com.keepasskey" in dump
+        val dump = waitUntilLogged("END-$nonce")
+        val section = diagnosticSection(dump, nonce)
+        assertTrue("调用方 message 必须保留（故障入口信息）", section.contains(nonce))
+        // 三类不可信内容一律不外传（marker 为一次性随机串，历史日志不可能撞上）
+        assertFalse("顶层异常 message 不得外传", "raw-$marker" in section)
+        assertFalse("cause 异常 message 不得外传", "cause-$marker" in section)
+        assertFalse("suppressed 异常 message 不得外传", "suppressed-$marker" in section)
+
+        assertTrue(
+            "必须保留异常全限定类名（分型依据；实际片段：$section）",
+            section.contains("java.lang.IllegalStateException")
         )
         assertTrue(
-            "脱敏输出必须包含异常全限定类名",
-            "java.lang.IllegalStateException" in dump
+            "必须保留 cause 类型（仅类名，不含 message；实际片段：$section）",
+            section.contains("Caused by: java.lang.IllegalArgumentException")
         )
+        // 栈帧是定位信息：类名 + 方法名 + 文件 + 行号，不含局部变量与业务数据。
+        // debug 包未混淆，可直接断言真实方法名与行号；release 的混淆形态由发布构建步骤另行验收。
+        val frames = FRAME_PATTERN.findAll(section).toList()
+        assertTrue(
+            "必须保留 `at 类.方法(文件:行号)` 栈帧（实际片段：$section）",
+            frames.size >= 2
+        )
+        assertTrue(
+            "栈帧必须带行号，否则无法定位（实际片段：$section）",
+            frames.all { it.value.substringAfterLast(':').trimEnd(')').toIntOrNull() != null }
+        )
+    }
+
+    @Test
+    fun `debug 关闭时 cause 链与帧数受上限约束且截断有标记`() {
+        AppLog.debugEnabled = false
+        val marker = "CHAIN-DETAIL-${UUID.randomUUID()}"
+        // 环状 cause（A→B→A）：若无上限，日志会被无限展开
+        val cyclic = IllegalStateException("cycle-a-$marker")
+        val cyclePeer = IllegalArgumentException("cycle-b-$marker")
+        cyclic.initCause(cyclePeer)
+        cyclePeer.initCause(cyclic)
+
+        val nonce = "E-CHAIN-${UUID.randomUUID()}"
+        AppLog.e(tag, nonce, cyclic)
+        AppLog.i(tag, "END-$nonce")
+
+        val dump = waitUntilLogged("END-$nonce")
+        val section = diagnosticSection(dump, nonce)
+        assertFalse("cause 链内 message 不得外传", marker in section)
+
+        val causedBy = Regex("Caused by: ").findAll(section).count()
+        assertTrue(
+            "cause 链输出必须有上限（策略上限 $MAX_DIAGNOSTIC_CAUSES 层；实际 $causedBy 层，片段：$section）",
+            causedBy <= MAX_DIAGNOSTIC_CAUSES
+        )
+        assertTrue(
+            "被截断时必须有显式标记，避免把截断输出误读成完整链（实际片段：$section）",
+            "cause chain truncated" in section
+        )
+    }
+
+    /** 构造带 cause 与 suppressed 的探针异常；构造点即栈顶帧，便于断言帧的可定位形态 */
+    private fun sanitizationProbe(marker: String): Throwable {
+        val cause = IllegalArgumentException("cause-$marker")
+        val e = IllegalStateException("raw-$marker", cause)
+        e.addSuppressed(UnsupportedOperationException("suppressed-$marker"))
+        return e
+    }
+
+    /**
+     * 取本次日志调用（含 [nonce] 标记行）到结束标记（`END-<nonce>`）之间的内容。
+     *
+     * 用结束标记而非解析行首前缀界定范围：平台会把换行拆成多条记录并各自加 `E AppLogDeviceTest: `
+     * 前缀，前缀格式随 ROM 的 logcat 默认格式变化；直接对整份 dump 计数则会把同 tag 的历史输出算进来，
+     * 使上限类断言失真。
+     */
+    private fun diagnosticSection(dump: String, nonce: String): String {
+        val start = dump.indexOf(nonce)
+        if (start < 0) return ""
+        val end = dump.indexOf("END-$nonce", start + nonce.length)
+        return dump.substring(start, if (end < 0) dump.length else end)
+    }
+
+    private companion object {
+        /** `at 类.方法(文件:行号)`：release 诊断栈保留的可定位形态 */
+        val FRAME_PATTERN = Regex("""at com\.keepasskey\.core\.log\.AppLogDeviceTest\.sanitizationProbe\(AppLogDeviceTest\.kt:\d+\)""")
+
+        /** 与 `AppLog` 的 cause 链深度上限同值：这里是隐私/防洪策略边界，改上限须同步本断言 */
+        const val MAX_DIAGNOSTIC_CAUSES = 4
     }
 }

@@ -45,3 +45,22 @@ internal fun settleSyncedVersion(
     }
     return UploadSettlement.LOCAL_DIVERGED
 }
+
+/**
+ * `ENG-20261028-09` / `ENG-20261028-31`：合并产物**已上传云端、但本地落盘失败**时的进程内基线收口。
+ *
+ * 为什么必须作废而不是留着：上传成功后引擎已把合并内容写入同步工作缓存
+ * （`SyncEngine.markResolvedAndUpload` 的 `cache.writeCache`），而本地会话树与正式文件仍是
+ * 采纳前版本。此时若保留旧的进程内基线（`lastSyncedDb`），下一轮装配会据「本地内容未变」
+ * 直接复用缓存字节充当本地侧，并在与远端内容的下一次比对中判为「两端一致」
+ * ⇒ 云端已合并的版本被记为已收敛，却从未落到本地；用户之后的一次普通编辑再上传时，
+ * 会以缺少该合并内容的本地树整库覆盖远端（对端改动静默丢失）。
+ *
+ * 置空后 `SyncContentChangeDetector` 退回「解析缓存快照做内容比较」的保守路径：
+ * 会话树与缓存内容不同即判有变化，下一轮重新按冲突合并收敛，不产生假的已同步结论。
+ * `checkpointDatabase` 一并清空（该身份的本地文件检查点同样不成立）。
+ */
+internal fun invalidateSyncedBaselineAfterLocalFailure(session: SyncSessionState) {
+    session.lastSyncedDb = null
+    session.checkpointDatabase = null
+}

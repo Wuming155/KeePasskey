@@ -11,7 +11,7 @@ import com.keepasskey.core.log.AppLog
  *
  * 本文件承载「按认证 Intent 下发的目标字段 id 与条目标识取回凭据，构造待回传数据集」；
  * 锁定门控与 `setResult` 仍留在 Activity 本体（`deliverAuthResult` / `discardPendingResult`），
- * 故 `AutofillConfirmDeliveryLockTest` 的接线判据不受本次搬运影响。
+ * 交付前的锁定与通道复核因此仍锚在 Activity 本体，不受本次搬运影响。
  */
 
 private const val TAG = "AutofillConfirm"
@@ -66,55 +66,60 @@ internal suspend fun resolveConfirmAuthResultIntent(
     // （formDomain 非空）要求条目命中当前域或经 `android://` 显式绑定调用包名，否则按取消回传；
     // 纯 App 表单（formDomain 为空）无域约束。合法候选恒通过，不改变任何放行语义。
     // 条目取数走展示面读口（已擦除即空串 ⇒ 复检不通过 ⇒ 取消，与交付面既有口径一致）。
-    val deliveryEntry = vaultRepository.getKdbxEntry(entryId) ?: return null
-    if (!entryMatchesDeliveryOrigin(
-            deliveryEntry,
-            deliveryEntry.displayUrl(),
-            formDomain,
-            callingPackage
-        )
-    ) {
-        AppLog.w(TAG, "确认页交付复检：条目与当前来源不匹配，按取消回传")
-        return null
-    }
+    //
+    // ENG-20261028-11：本条目在复检之后还要被 `buildStructuredFieldValues` 逐字段读取，
+    // 故整个使用期放进一条读租约（块内完成复检 + 结构化取值），避免并发整树替换把字段擦成半份。
+    return vaultRepository.withKdbxEntry(entryId) { entry ->
+        entry ?: return@withKdbxEntry null
+        if (!entryMatchesDeliveryOrigin(
+                entry,
+                entry.displayUrl(),
+                formDomain,
+                callingPackage
+            )
+        ) {
+            AppLog.w(TAG, "确认页交付复检：条目与当前来源不匹配，按取消回传")
+            return@withKdbxEntry null
+        }
 
-    val credentials = pickerViewModel.resolveCredentials(entryId) ?: return null
-    val credentialTitle = intent.getStringExtra(AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE).orEmpty()
-    // ISSUE-P3-298 ⑤：回传时刻现算 TOTP（值新鲜度以交付时刻为准）；仅 TOTP 参与
-    // 直填——HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值
-    val otpCode = if (otpId != null) {
-        vaultRepository.calculateEntryTotp(entryId)
-            ?.takeIf { !it.isHotp }?.code.orEmpty()
-    } else {
-        ""
+        val credentials = pickerViewModel.resolveCredentials(entryId) ?: return@withKdbxEntry null
+        val credentialTitle = intent.getStringExtra(AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE).orEmpty()
+        // ISSUE-P3-298 ⑤：回传时刻现算 TOTP（值新鲜度以交付时刻为准）；仅 TOTP 参与
+        // 直填——HOTP 当前码不推进计数器，直填会给出与服务端不同步的旧值
+        val otpCode = if (otpId != null) {
+            vaultRepository.calculateEntryTotp(entryId)
+                ?.takeIf { !it.isHotp }?.code.orEmpty()
+        } else {
+            ""
+        }
+        // ISSUE-P3-375 AC③：结构化字段值只在确认成功后按条目取回（实现拆至 AutofillConfirmStructuredTargets）
+        // 条目复用交付复检已取回的实例，不二次查询
+        val structuredValues: Map<AutofillId, String> = if (structured.isEmpty()) emptyMap() else {
+            buildStructuredFieldValues(structured, entry)
+        }
+        val dataset = AutofillConfirmAuthDelivery.build(
+            packageName = packageName,
+            // ISSUE-P3-330：用户名为空时标题行即条目标题，副行留空——避免两行同文
+            menuTitle = credentials.username.ifBlank { credentialTitle },
+            menuSubtitle = if (credentials.username.isNotBlank()) credentialTitle else "",
+            username = credentials.username,
+            password = credentials.password,
+            deliverable = deliverable,
+            otpId = otpId,
+            otpCode = otpCode,
+            structuredFields = structuredValues
+        ) ?: return@withKdbxEntry null
+        // 只记录「哪些字段真的有值」，不含任何凭据内容 / 用户名 / 条目名 / 包名
+        AutofillConfirmAuthDelivery.logDelivery(
+            tag = TAG,
+            usernameHasValue = credentials.username.isNotEmpty(),
+            passwordHasValue = credentials.password.isNotEmpty(),
+            otpHasValue = otpCode.isNotEmpty(),
+            structuredCount = structuredValues.size,
+            usernameIdPresent = deliverable.usernameId != null,
+            passwordIdPresent = deliverable.passwordId != null,
+            otpIdPresent = otpId != null
+        )
+        authenticationResultIntent(dataset)
     }
-    // ISSUE-P3-375 AC③：结构化字段值只在确认成功后按条目取回（实现拆至 AutofillConfirmStructuredTargets）
-    // 条目复用交付复检已取回的实例，不二次查询
-    val structuredValues: Map<AutofillId, String> = if (structured.isEmpty()) emptyMap() else {
-        buildStructuredFieldValues(structured, deliveryEntry)
-    }
-    val dataset = AutofillConfirmAuthDelivery.build(
-        packageName = packageName,
-        // ISSUE-P3-330：用户名为空时标题行即条目标题，副行留空——避免两行同文
-        menuTitle = credentials.username.ifBlank { credentialTitle },
-        menuSubtitle = if (credentials.username.isNotBlank()) credentialTitle else "",
-        username = credentials.username,
-        password = credentials.password,
-        deliverable = deliverable,
-        otpId = otpId,
-        otpCode = otpCode,
-        structuredFields = structuredValues
-    ) ?: return null
-    // 只记录「哪些字段真的有值」，不含任何凭据内容 / 用户名 / 条目名 / 包名
-    AutofillConfirmAuthDelivery.logDelivery(
-        tag = TAG,
-        usernameHasValue = credentials.username.isNotEmpty(),
-        passwordHasValue = credentials.password.isNotEmpty(),
-        otpHasValue = otpCode.isNotEmpty(),
-        structuredCount = structuredValues.size,
-        usernameIdPresent = deliverable.usernameId != null,
-        passwordIdPresent = deliverable.passwordId != null,
-        otpIdPresent = otpId != null
-    )
-    return authenticationResultIntent(dataset)
 }

@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.TAG
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.security.ProtectedStringReclamation
 import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 
 /**
@@ -184,60 +185,70 @@ internal suspend fun KeePasskeyAutofillService.appendUnlockedDatasets(
     otpId: AutofillId? = null,
     structuredTargetIds: Map<StructuredFieldRole, AutofillId> = emptyMap()
 ) {
-    val candidates = resolveUnlockedCandidates(callingPkg, scanResult)
-    val context = UnlockedDatasetContext(
-        callingPkg = callingPkg,
-        webDomain = candidates.webDomain,
-        usernameId = usernameId,
-        passwordId = passwordId,
-        inlineRequest = inlineRequest,
-        otpId = otpId,
-        // ISSUE-P2-88：官方契约（`Dataset.Builder#setAuthentication` 原文）对认证数据集有**两条**强制要求：
-        // ① 认证 PendingIntent 不得不可变（平台要注入认证参数）⇒ `FLAG_MUTABLE`；
-        // ② 认证结束后必须经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传「fully populated
-        //    dataset」，框架才会「replace the authenticated dataset and immediately fill in」。
-        // 本路径原先两条都违反（IMMUTABLE + 确认页只回传成功而不回传数据集）⇒ 真机恒不写入。
-        // 现与选择器入口（[buildPickerDataset]，真机实测可用）**同构造**：无 activity flag +
-        // 随认证 Intent 下发目标字段 id，供确认页确认后按条目取回凭据并构造真实 Dataset 回传。
-        // ISSUE-P3-375：结构化目标角色与框 id 同批下发（确认页据此把卡 / 地址字段写入回传数据集）
-        confirmIntent = attachAutofillRequestIdentity(
-            Intent(this, AutofillConfirmActivity::class.java).apply {
-                putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
-                putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
-                // ISSUE-P3-298 ⑤：OTP 框 id 随认证 Intent 下发，确认页回传时把当前 TOTP 值填入
-                putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
-                putExtra(
-                    EXTRA_TARGET_STRUCTURED_ROLES,
-                    ArrayList(structuredTargetIds.keys.map { it.name })
-                )
-                putExtra(
-                    EXTRA_TARGET_STRUCTURED_IDS,
-                    ArrayList(structuredTargetIds.values)
-                )
-            }
-        ),
-        // ISSUE-P3-577：敏感值判据须同时统计候选 TOTP 直填值，故 OTP 框 id 一并传入
-        // （passwordId / otpId 同为 AutofillId?，用命名参数防位置对调静默错接）
-        skipRepeatConfirmation = unlockedConfirmationPolicy(
+    // ENG-20261028-11：本段从「取候选」到「装配完数据集」整段处于一条读租约内。
+    // 候选是**活的** `KdbxEntry`：检索、敏感值判据、值解析 / `{REF:}` 展开 / TOTP 直填 / 结构化字段
+    // 分属多个挂起点，会话在此期间替换整树会把下线实例就地清零 ⇒ 候选要么被跳过、要么交付半份。
+    // 租约延到本请求装配结束，交付面拿到的始终是完整条目。
+    // 显式 try/finally（不用 `withReadLease`）：块内含挂起调用，租约释放必须落在同一 suspend 帧内。
+    val lease = ProtectedStringReclamation.acquireReadLease()
+    try {
+        val candidates = resolveUnlockedCandidates(callingPkg, scanResult)
+        val context = UnlockedDatasetContext(
             callingPkg = callingPkg,
-            candidates = candidates,
+            webDomain = candidates.webDomain,
+            usernameId = usernameId,
             passwordId = passwordId,
-            otpId = otpId
+            inlineRequest = inlineRequest,
+            otpId = otpId,
+            // ISSUE-P2-88：官方契约（`Dataset.Builder#setAuthentication` 原文）对认证数据集有**两条**强制要求：
+            // ① 认证 PendingIntent 不得不可变（平台要注入认证参数）⇒ `FLAG_MUTABLE`；
+            // ② 认证结束后必须经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传「fully populated
+            //    dataset」，框架才会「replace the authenticated dataset and immediately fill in」。
+            // 本路径原先两条都违反（IMMUTABLE + 确认页只回传成功而不回传数据集）⇒ 真机恒不写入。
+            // 现与选择器入口（[buildPickerDataset]，真机实测可用）**同构造**：无 activity flag +
+            // 随认证 Intent 下发目标字段 id，供确认页确认后按条目取回凭据并构造真实 Dataset 回传。
+            // ISSUE-P3-375：结构化目标角色与框 id 同批下发（确认页据此把卡 / 地址字段写入回传数据集）
+            confirmIntent = attachAutofillRequestIdentity(
+                Intent(this, AutofillConfirmActivity::class.java).apply {
+                    putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
+                    putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
+                    // ISSUE-P3-298 ⑤：OTP 框 id 随认证 Intent 下发，确认页回传时把当前 TOTP 值填入
+                    putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
+                    putExtra(
+                        EXTRA_TARGET_STRUCTURED_ROLES,
+                        ArrayList(structuredTargetIds.keys.map { it.name })
+                    )
+                    putExtra(
+                        EXTRA_TARGET_STRUCTURED_IDS,
+                        ArrayList(structuredTargetIds.values)
+                    )
+                }
+            ),
+            // ISSUE-P3-577：敏感值判据须同时统计候选 TOTP 直填值，故 OTP 框 id 一并传入
+            // （passwordId / otpId 同为 AutofillId?，用命名参数防位置对调静默错接）
+            skipRepeatConfirmation = unlockedConfirmationPolicy(
+                callingPkg = callingPkg,
+                candidates = candidates,
+                passwordId = passwordId,
+                otpId = otpId
+            )
         )
-    )
 
-    // ISSUE-P2-73 AC③：设备侧核对「已解锁分支命中了几个自动匹配候选」的调试留痕
-    // （仅 debug 构建输出；只记数量，不含条目名 / 域名 / 包名等标识）
-    AppLog.d(TAG, "已解锁分支候选数据集数量=${candidates.ranked.size}")
+        // ISSUE-P2-73 AC③：设备侧核对「已解锁分支命中了几个自动匹配候选」的调试留痕
+        // （仅 debug 构建输出；只记数量，不含条目名 / 域名 / 包名等标识）
+        AppLog.d(TAG, "已解锁分支候选数据集数量=${candidates.ranked.size}")
 
-    for (ranked in candidates.ranked) {
-        // ISSUE-P2-534：候选在「检索 → 下发」窗口内被并发擦除时 `buildCandidateDataset` 返回 null
-        // （交付面拒绝把已清零字段读成空串填给目标应用），此处如实跳过该候选
-        buildCandidateDataset(context, ranked)?.let { responseBuilder.addDataset(it) }
+        for (ranked in candidates.ranked) {
+            // ISSUE-P2-534：候选在「检索 → 下发」窗口内被并发擦除时 `buildCandidateDataset` 返回 null
+            // （交付面拒绝把已清零字段读成空串填给目标应用），此处如实跳过该候选
+            buildCandidateDataset(context, ranked)?.let { responseBuilder.addDataset(it) }
+        }
+
+        // ISSUE-P3-375 AC②：结构化数据集（卡 / 地址）——与登录候选正交追加
+        appendStructuredDatasets(responseBuilder, context, structuredTargetIds)
+    } finally {
+        lease.close()
     }
-
-    // ISSUE-P3-375 AC②：结构化数据集（卡 / 地址）——与登录候选正交追加
-    appendStructuredDatasets(responseBuilder, context, structuredTargetIds)
 }
 
 /** 本轮请求内对所有候选恒定的建集入参（域 / 字段 id / 内联请求 / 认证 Intent / 确认策略） */

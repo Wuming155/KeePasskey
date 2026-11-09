@@ -11,11 +11,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.io.File
 
 /**
  * `ISSUE-P3-643`：**离页丢弃确认与全局脏表单登记读数必须一致**。
@@ -28,8 +25,13 @@ import java.io.File
  * - 自动锁定路径的 `UnsavedEditRegistry.hasUnsavedEdits()`（读同一 `_uiState.value.isDirty`）。
  *
  * 用例覆盖整改方案 §4 矩阵的三种序列 + 一个负对照，并在每条序列后同时断言
- * `uiState.isDirty`、登记表读数与「返回是否会弹确认」三者一致；另附一条源码守卫，
- * 钉住 UI 的确认谓词确实以 `isDirty` 为唯一开关（改读别的字段即红）。
+ * `uiState.isDirty` 与登记表读数一致。
+ *
+ * ENG-20261028-12 整改：原附带的源码守卫（逐字匹配 `EntryEditScreen.kt` 的
+ * `if (isDirty) showDiscardDialog = true else onBackClick()` 等实现串）已删除——它锁的是
+ * 整改当时的写法，提取谓词 / 改行即误红；该判据的行为面由设备用例
+ * `EntryEditDirtyConfirmationDeviceTest`（驱动生产编辑页真实点返回、断言确认框出现 / 不出现）
+ * 承担，本件只保留可脱离平台的「三读一致」行为读数。
  *
  * 不修改既有 `EntryEditViewModelTest`：那份用例的断言是本项前半环的既有证据，
  * 本件只做增量（AGENTS「测试资产纪律」）。
@@ -130,38 +132,6 @@ class EntryEditDirtyConfirmationConsistencyTest {
     }
 
     /**
-     * 源码守卫：离页确认谓词只能以 `isDirty` 为开关（与登记表同一字段），
-     * 且**不得**改成 `userMessage` / `title` 之类的旁证。
-     */
-    @Test
-    fun `离页确认谓词以同一脏位为唯一开关`() {
-        val screen = readSource(EDIT_SCREEN)
-        assertTrue(
-            "离页丢弃确认必须由 isDirty 驱动（与 UnsavedEditRegistry 同一字段）",
-            screen.contains("if (isDirty) showDiscardDialog = true else onBackClick()")
-        )
-        // 两处返回入口（系统返回键 + 顶栏返回）必须共用同一谓词，不得各写一份
-        assertTrue(
-            "系统返回键必须走 requestBack 谓词",
-            screen.contains("BackHandler(onBack = requestBack)")
-        )
-        assertTrue(
-            "顶栏返回必须走同一 requestBack 谓词（不得各自判脏）",
-            screen.contains("requestBack = requestBack")
-        )
-        assertEquals(
-            "requestBack 谓词只允许有一处定义（多处定义即可能漂移成两套判据）",
-            1,
-            Regex("val requestBack: \\(\\) -> Unit =").findAll(screen).count()
-        )
-        val viewModel = readSource(EDIT_VIEW_MODEL)
-        assertTrue(
-            "登记表提供者必须读同一 isDirty",
-            viewModel.contains("unsavedEditRegistry?.register(this) { _uiState.value.isDirty }")
-        )
-    }
-
-    /**
      * 三读一致：编辑页会弹确认（`isDirty`）、锁定路径会报有草稿（登记表）、
      * 且两者必须相等——任一为真另一为假即是本项要防的漂移。
      */
@@ -181,18 +151,7 @@ class EntryEditDirtyConfirmationConsistencyTest {
         )
     }
 
-    private fun readSource(path: String): String {
-        val root = generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
-            .first { File(it, "settings.gradle.kts").isFile }
-        return File(root, path).readText()
-    }
-
     private companion object {
         const val NEW_ICON_ID = "new-icon"
-
-        const val EDIT_SCREEN =
-            "app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditScreen.kt"
-        const val EDIT_VIEW_MODEL =
-            "app/src/main/java/com/keepasskey/app/ui/screens/edit/EntryEditViewModel.kt"
     }
 }

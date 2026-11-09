@@ -1,5 +1,6 @@
 package com.keepasskey.database.file
 
+import com.keepasskey.crypto.kdf.Argon2KdfLimits
 import com.keepasskey.crypto.kdf.KdfParameters
 
 /**
@@ -15,27 +16,18 @@ import com.keepasskey.crypto.kdf.KdfParameters
  * - **写侧**：`KdbxFile.save` 在写任何目标字节 / 进行 KDF 之前调用 [requireAcceptableOrThrow]（fail-closed）；
  * - **UI / 设置控制器**：提交前调用 [memoryBytesFromMbOrNull] + [argon2Rejection] 拒绝非法组合。
  *
+ * **ENG-20261028-16 分层**：内存 / 迭代 / 并行度的逐项上下界与每通道下界属 Argon2 算法的
+ * 基础约束，唯一定义在 crypto 的 [Argon2KdfLimits]（依赖方向 database → crypto），由
+ * [argon2Rejection] 首段委托；本对象只保留**数据库独有**的裁决——`I × M` 联合工作量、
+ * Argon2 版本取值集与设备堆预算。基础内核与 JNI 自身的 `memoryKib ≥ 8 × parallelism` 闸门
+ * 各自独立保留（见 [Argon2KdfLimits] 类 KDoc），不因本处委托而移除。
+ *
  * 判据取值与「规范 / 官方语义 vs 本仓封顶」的逐项对照见 `KdbxKdfParameterCodec` 的类 KDoc 表。
  * **不放宽任何既有防 DoS 门槛**（本判据即既有边界的原样抽取），也不保证任意低内存设备都能打开
  * 高预算库——设备预算（JVM 堆一半）作为**设备能力限制**参与裁决（见 [deviceMemoryBudgetBytes]），
  * 非 KDBX 格式标准上限。
  */
 object KdbxKdfAcceptance {
-
-    /** Argon2 内存下界：对齐官方 `Argon2Kdf.MinMemory`（8192 字节），属规范语义**不得上调**。 */
-    const val ARGON2_MIN_MEMORY_BYTES = 8192L
-
-    /** 每通道内存下界（8 × 1024）——`memory ≥ p × 本值`，与原生内核 `memoryKib ≥ 8×p` 同值。 */
-    const val ARGON2_MIN_MEMORY_PER_LANE_BYTES = 8L * 1024
-
-    /** Argon2 内存上界（4 GiB，本仓更严封顶，防恶意文件分配期 OOM）。 */
-    const val ARGON2_MAX_MEMORY_BYTES = 4L * 1024 * 1024 * 1024
-
-    /** Argon2 迭代上界（2^24，本仓更严封顶）。 */
-    const val ARGON2_MAX_ITERATIONS = 1L shl 24
-
-    /** Argon2 并行度上界（64，本仓更严封顶）。 */
-    const val ARGON2_MAX_PARALLELISM = 64
 
     /** Argon2 盐长下界：对齐官方 `MinSalt = 8`。 */
     const val ARGON2_MIN_SALT_BYTES = 8
@@ -76,8 +68,10 @@ object KdbxKdfAcceptance {
     /**
      * Argon2 参数接受域判据：返回 `null` = 可接受；否则返回**用户可读的拒绝原因**。
      *
-     * 判定次序与读侧逐项一致（逐项 → 交叉 → 版本 → 联合预算 → 设备预算）；
-     * 联合预算以**除法**判定规避乘法溢出（`memoryInBytes ≥ 8192 > 0` 已由首项保证，除数安全）。
+     * 判定次序与读侧逐项一致（逐项 → 交叉 → 版本 → 联合预算 → 设备预算）；逐项与交叉约束
+     * 委托 [Argon2KdfLimits.outOfBoundsReason]（与派生入口同源，文案不变）。
+     * 联合预算以**除法**判定规避乘法溢出（`memoryInBytes ≥ Argon2KdfLimits.MIN_MEMORY_BYTES > 0`
+     * 已由首段保证，除数安全）。
      *
      * [deviceBudgetBytes] 可注入，供确定性测试固定堆预算。
      */
@@ -88,17 +82,8 @@ object KdbxKdfAcceptance {
         version: Int,
         deviceBudgetBytes: Long = deviceMemoryBudgetBytes()
     ): String? {
-        if (memoryInBytes < ARGON2_MIN_MEMORY_BYTES || memoryInBytes > ARGON2_MAX_MEMORY_BYTES) {
-            return "Argon2 内存参数越界: $memoryInBytes 字节（允许 $ARGON2_MIN_MEMORY_BYTES ~ $ARGON2_MAX_MEMORY_BYTES）"
-        }
-        if (iterations < 1 || iterations > ARGON2_MAX_ITERATIONS) {
-            return "Argon2 迭代参数越界: $iterations（允许 1 ~ $ARGON2_MAX_ITERATIONS）"
-        }
-        if (parallelism < 1 || parallelism > ARGON2_MAX_PARALLELISM) {
-            return "Argon2 并行度越界: $parallelism（允许 1 ~ $ARGON2_MAX_PARALLELISM）"
-        }
-        if (memoryInBytes < parallelism.toLong() * ARGON2_MIN_MEMORY_PER_LANE_BYTES) {
-            return "Argon2 内存参数低于每通道下界: $memoryInBytes 字节 < 8 × $parallelism × 1024（memory 须 ≥ 8 × parallelism × 1024）"
+        Argon2KdfLimits.outOfBoundsReason(memoryInBytes, iterations, parallelism)?.let {
+            return it
         }
         if (version != KdfParameters.Argon2.ARGON2_VERSION_10 && version != KdfParameters.Argon2.ARGON2_VERSION_13) {
             // V 由 UInt32 窄化到 Int，高位非零时为负数；按无符号 32 位渲染，避免 "0x-1" 这类不可读消息

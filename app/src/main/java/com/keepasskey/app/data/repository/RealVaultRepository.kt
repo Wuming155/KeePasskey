@@ -324,6 +324,20 @@ class RealVaultRepository @Inject constructor(
     /** ISSUE-P3-148 / ISSUE-P3-305：单条查询下沉 [VaultEntryQueryCoordinator]（深度优先短路）。 */
     override suspend fun getKdbxEntry(entryId: String): KdbxEntry? = queries.entryById(entryId)
 
+    /**
+     * `ENG-20261028-11`：三个**租约作用域**读口下沉 [VaultEntryQueryCoordinator] 的对应实现。
+     * 与上面三个裸读口的唯一差别是租约边界——块内（＝快照的整个使用期）会话替换整树时，
+     * 本快照的受保护实例只登记不擦除，块结束才统一回收。
+     */
+    override suspend fun <R> withAllKdbxEntries(block: suspend (List<KdbxEntry>) -> R): R =
+        queries.withAllEntries(block)
+
+    override suspend fun <R> withUsableKdbxEntries(block: suspend (List<KdbxEntry>) -> R): R =
+        queries.withUsableEntries(block)
+
+    override suspend fun <R> withKdbxEntry(entryId: String, block: suspend (KdbxEntry?) -> R): R =
+        queries.withEntryById(entryId, block)
+
     override suspend fun findEntriesForRpId(rpId: String): List<KdbxEntry> =
         passkeyEntries.findEntriesForRpId(rpId)
 

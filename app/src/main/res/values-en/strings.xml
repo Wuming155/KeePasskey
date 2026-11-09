@@ -879,7 +879,7 @@
     <string name="dbset_meta_edit_hint">Name / description / default username are written to KDBX Meta and saved immediately. On merge these fields stay local (PD-35)</string>
     <string name="dbset_new_entry_prefill_hint">New entries prefill the username from the database default</string>
     <string name="sec_throttle_title">Unlock retry throttling</string>
-    <string name="sec_throttle_sub">Temporarily lock the vault after repeated wrong master passwords to resist brute force (turn off for unlimited retries)</string>
+    <string name="sec_throttle_sub">Temporarily lock the vault after repeated wrong master passwords to raise the cost of guessing through the unlock screen (no protection against offline brute force; turn off for unlimited retries)</string>
     <string name="sec_throttle_time_title">Maximum lockout duration</string>
     <string name="sec_throttle_minutes_value">%1$d min</string>
     <string name="sec_throttle_dialog_desc">Lockout grows with consecutive failures, capped at the duration chosen here.</string>
@@ -1772,6 +1772,8 @@
     <string name="passkey_reject_caller_browser_not_trusted">The browser that started this request is not on the privileged browser allowlist; using this passkey was refused.</string>
     <!-- ISSUE-P1-590: persistence failure (disk full / drift refusal / read-only) refuses signing or success -->
     <string name="passkey_reject_persistence_failed">The passkey could not be written to the vault (save failed); this operation was rolled back. Check storage space or the vault file, then retry.</string>
+    <!-- ENG-20261028-05: the credential channel was turned off during user verification; registration was not continued -->
+    <string name="passkey_reject_channel_disabled">The Credential Manager channel is turned off in Settings; this registration was not continued.</string>
     <!-- ISSUE-P1-590: edit-page import / unbind save-failure notice (distinct from the "entry not found" strings) -->
     <string name="passkey_write_failed">The passkey could not be written to the vault (save failed); nothing was changed</string>
     <!-- ISSUE-P3-221：拒绝原因页的就地补救（窗口内授权、无跳转）；%1$s = 系统背书包的应用展示名 -->
@@ -1780,6 +1782,15 @@
     <string name="cred_reject_browser_not_allowed">%1$s is not on the privileged browser allowlist. Add it, then start the request again from the browser.</string>
     <string name="cred_reject_browser_added">%1$s was added. Start the request again from the browser.</string>
     <string name="cred_reject_browser_add_failed">Could not add it: the app\'s signature could not be read. Try again later under Settings → Autofill.</string>
+    <!-- ENG-20261028-06: registering the native caller's signature (no interpolation — arbitrary
+         native callers are outside package visibility, and writing a package name into user text
+         would violate ISSUE-P1-10) -->
+    <string name="cred_reject_action_authorize_caller">Register this app\'s signature</string>
+    <string name="cred_reject_caller_unbound">This app has not been registered on this device. Register it, then start the request again from that app to use this passkey.</string>
+    <string name="cred_reject_caller_authorized">This app\'s signature was registered. Start the request again from that app.</string>
+    <string name="cred_reject_caller_authorize_failed">Could not register it: the app\'s signature could not be read. Nothing was changed.</string>
+    <string name="passkey_reject_caller_signature_unbound">This app has not been registered on this device, so no passkey was released. Confirm to register it, then retry from that app.</string>
+    <string name="passkey_reject_caller_signature_mismatch">This app\'s signature does not match the one on record. The passkey was withheld to prevent app spoofing.</string>
 
     <!-- 来源：values/strings_ui_messages.xml（53 条） -->
     <string name="picker_open_vault_title">Open an existing KDBX vault</string>

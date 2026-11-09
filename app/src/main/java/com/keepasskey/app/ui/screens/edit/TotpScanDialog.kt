@@ -97,8 +97,9 @@ import kotlin.coroutines.resumeWithException
  *   统一施加（遮挡态下丢弃整棵视图子树的触摸，反点击劫持）——**不随开关变化**（`flagSecure=false`
  *   只跳过 `FLAG_SECURE`，过滤照常）。
  *
- * 静态守卫：`SensitiveWindowHardeningTest` 锁定「`securePolicy` 由 `flagSecureEnabled` 条件驱动」
- * 与「设置值经 `EntryEditViewModel` → `EntryEditPickers` → 本对话框的上行链路」，回退无条件 `SecureOn` 即报红。
+ * 判据落点：`securePolicy` 由本组件的 `flagSecureEnabled` 条件驱动；纯裁决内核由
+ * `SecureDialogFlagPolicyTest` 覆盖，真实对话框窗口的 flag、遮挡触摸过滤与「跟随开关」两态
+ * 由设备用例 `DialogWindowHardeningDeviceTest` 覆盖（回退无条件 `SecureOn` 会在该用例的设置关闭态报红）。
  *
  * 原 CaptureActivity 的 `sensorLandscape` 方向锁**不再保留**：方向锁是 zxing 全屏
  * 取景 UX 的产物，本对话框嵌入编辑页流内、跟随 Activity 既有方向行为（裁决登记见

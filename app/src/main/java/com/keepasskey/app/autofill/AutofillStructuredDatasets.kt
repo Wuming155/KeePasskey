@@ -11,6 +11,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.TAG
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
+import com.keepasskey.core.security.ProtectedStringReclamation
 
 /**
  * 结构化数据集装配（ISSUE-P3-375 AC②③，自 [AutofillDatasetBuilders] 按职责拆出——
@@ -32,12 +33,20 @@ internal suspend fun KeePasskeyAutofillService.appendStructuredDatasets(
     structuredTargetIds: Map<StructuredFieldRole, AutofillId>
 ) {
     if (structuredTargetIds.isEmpty()) return
-    val entries = vaultRepository.getUsableKdbxEntries()
-    val candidates = StructuredFieldPolicy.selectCandidates(entries, structuredTargetIds.keys)
-    // 只记数量（调试留痕与登录候选同口径）
-    AppLog.d(TAG, "结构化候选数据集数量=${candidates.size}")
-    for (entry in candidates) {
-        buildStructuredDataset(ctx, entry, structuredTargetIds)?.let { responseBuilder.addDataset(it) }
+    // ENG-20261028-11：从「取条目」到「逐条取值装配」整段处于一条读租约内——
+    // 会话在「取条目 → 取值」之间替换整树会让卡 / 地址只读到部分字段（半份交付）。
+    // 本函数由 [appendUnlockedDatasets] 在同一租约下调用时只是嵌套一层，代价为零。
+    val lease = ProtectedStringReclamation.acquireReadLease()
+    try {
+        val entries = vaultRepository.getUsableKdbxEntries()
+        val candidates = StructuredFieldPolicy.selectCandidates(entries, structuredTargetIds.keys)
+        // 只记数量（调试留痕与登录候选同口径）
+        AppLog.d(TAG, "结构化候选数据集数量=${candidates.size}")
+        for (entry in candidates) {
+            buildStructuredDataset(ctx, entry, structuredTargetIds)?.let { responseBuilder.addDataset(it) }
+        }
+    } finally {
+        lease.close()
     }
 }
 

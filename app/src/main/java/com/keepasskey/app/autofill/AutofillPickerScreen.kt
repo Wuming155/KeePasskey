@@ -43,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.getVaultIcon
 import com.keepasskey.core.model.KdbxEntry
 
@@ -283,7 +284,10 @@ fun AutofillPickerScreen(
         AlertDialog(
             onDismissRequest = { pendingBlockRole = null },
             title = { Text(stringResource(R.string.autofill_picker_block_confirm_title)) },
-            text = { Text(stringResource(R.string.autofill_picker_block_confirm_desc)) },
+            text = {
+                TrackDialogInteractionEffect()
+                Text(stringResource(R.string.autofill_picker_block_confirm_desc))
+            },
             confirmButton = {
                 TextButton(onClick = {
                     pendingBlockRole = null

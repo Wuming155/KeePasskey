@@ -725,6 +725,88 @@ class PasskeyEntryCoordinatorSignCountTest {
         assertEquals("未命中一律无写入（库内终态不变）", 0, storedSignCount(session))
     }
 
+    /**
+     * `ENG-20261028-11`：凭据检索（`findPasskeyByCredentialId` / `findEntriesForRpId` /
+     * `findExistingCredentialIds`）的**整个读取期**处于读租约内。
+     *
+     * 判别点：检索期间由另一线程反复「发布新树 + 走生产擦除路径」，若检索未持租约，
+     * 读到的通行密钥字段会因下线实例被当场擦除而解析失败（`fromCustomFields` 返回 null ⇒
+     * 查不到凭据）。本用例断言检索恒定命中，且结束后租约计数归零。
+     */
+    @Test
+    fun `并发整树替换期间凭据检索仍能命中且不泄漏租约`() = runBlocking {
+        val session = newSession(signCountText = "1")
+        val coordinator = coordinatorOf(session)
+        val oldRoot = session.databaseFlow.value!!.rootGroup
+
+        val misses = java.util.concurrent.atomic.AtomicInteger()
+        val failures = java.util.concurrent.atomic.AtomicInteger()
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val writer = kotlin.concurrent.thread {
+            var round = 0
+            while (!stop.get()) {
+                val rewritten = oldRoot.entries.map { entry ->
+                    entry.copy(
+                        // 只换 credentialId 的值（保持 rpId 不变），使检索条件仍成立
+                        customFields = entry.customFields.map { cf ->
+                            if (cf.key == PasskeyData.FIELD_CREDENTIAL_ID) {
+                                KdbxCustomField(cf.key, ProtectedString("cred-id-$round", cf.isProtected))
+                            } else {
+                                KdbxCustomField(cf.key, cf.value)
+                            }
+                        },
+                        times = entry.times.withModified()
+                    )
+                }
+                val newRoot = oldRoot.copy(entries = rewritten)
+                session.setDatabaseForTesting(
+                    KdbxDatabase(header = KdbxHeader.createDefault(useArgon2 = false), rootGroup = newRoot)
+                )
+                oldRoot.clearSupersededSensitiveData(newRoot)
+                round++
+            }
+        }
+        try {
+            repeat(60) {
+                try {
+                    // credentialId 每轮都在变，故只校验「检索本身不因擦除而失败」
+                    coordinator.findEntriesForRpId("example.com").ifEmpty { misses.incrementAndGet() }
+                    coordinator.findExistingCredentialIds(setOf("never-matches"))
+                } catch (t: Throwable) {
+                    if (t is kotlinx.coroutines.CancellationException) throw t
+                    failures.incrementAndGet()
+                }
+            }
+        } finally {
+            stop.set(true)
+            writer.join()
+        }
+
+        assertEquals("租约内检索不得抛异常", 0, failures.get())
+        assertEquals("租约内检索不得因擦除而漏掉条目", 0, misses.get())
+
+        // `ENG-20261028-11`：检索结束后必须没有在册租约。判据用行为而非 core internal 计数器：
+        // 无租约时下线的受保护实例必须当场擦除，仍可读即说明检索把租约留在了注册表里。
+        val probe = ProtectedString("lease-probe", isProtected = true)
+        val probeRoot = KdbxGroup(
+            id = KdbxUuid.random(),
+            name = "probe",
+            entries = listOf(
+                KdbxEntry(fields = mapOf(KdbxConstants.Fields.PASSWORD to probe))
+            )
+        )
+        val probeNewRoot = probeRoot.copy(
+            entries = listOf(
+                probeRoot.entries.single().withField(
+                    KdbxConstants.Fields.PASSWORD,
+                    ProtectedString("lease-probe-2", isProtected = true)
+                )
+            )
+        )
+        probeRoot.clearSupersededSensitiveData(probeNewRoot)
+        assertTrue("检索结束后仍有在册读租约（下线实例未被当场擦除）", probe.cleared)
+    }
+
     private companion object {
         /** 合法 secp256r1 标量（< n，故可真实签名）的 64 字符 hex 文本：32 个 0x11 */
         val HEX_SCALAR_64 = "1".repeat(64)

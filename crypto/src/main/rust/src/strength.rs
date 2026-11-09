@@ -56,10 +56,11 @@ pub const FLAG_DATE_LIKE: i32 = 1 << 5;
 pub const FLAG_SINGLE_CHAR_CLASS: i32 = 1 << 6;
 /// 字符唯一率过低（< 50%）。
 pub const FLAG_LOW_UNIQUE_RATIO: i32 = 1 << 7;
-/// 整串是短周期块的高次重复（如 `abcabcabc` / `xyxyxy`）。
+/// 整串是短周期块的重复（≥ 2 次，如 `passwordpassword` / `abcabcabc` / `xyxy`）。
 pub const FLAG_PERIODIC_REPEAT: i32 = 1 << 8;
 
-/// 建议的最短长度（对齐 NIST SP 800-63B 下限与既有 `HealthCheckEngine` 的 `< 8` 判据）。
+/// 建议的最短长度（对齐 NIST SP 800-63B 下限与既有 `HealthCheckEngine` 的 `< 8` 判据；
+/// 按 **Unicode 码点**计，代理对算 1 个）。
 pub const MIN_RECOMMENDED_LEN: usize = 8;
 
 /// 「足够长」阈值：达到该长度才允许评到最高档（见 [`length_cap`]）。
@@ -72,7 +73,10 @@ const SEQUENCE_RUN_MIN: usize = 3;
 /// 键盘行走段的判定阈值。
 const KEYBOARD_WALK_MIN: usize = 4;
 /// 周期重复块的最小重复次数。
-const PERIODIC_MIN_REPEATS: usize = 3;
+///
+/// 取 2：整串为「同一单元重复两次」与重复更多次在猜测成本上同阶——攻击者猜中单元后
+/// 再套用重复即可，故 `passwordpassword` 一类二次重复必须按单元重估，不能因长度翻倍而升档。
+const PERIODIC_MIN_REPEATS: usize = 2;
 /// 唯一率惩罚阈值。
 const LOW_UNIQUE_RATIO: f64 = 0.5;
 
@@ -242,11 +246,11 @@ fn estimate_str(text: &str) -> Estimate {
     if let Some((unit_bytes, repeats)) = minimal_period_bytes(text.as_bytes()) {
         if repeats >= PERIODIC_MIN_REPEATS && text.is_char_boundary(unit_bytes) {
             let unit_str = &text[..unit_bytes];
-            let unit_len_chars = unit_str.chars().count();
-            if unit_len_chars > 0 {
-                let unit_charset = charset_profile_str(unit_str).0;
-                let unit_log10 =
-                    (unit_len_chars as f64) * (unit_charset as f64).log2() / LOG2_10;
+            if !unit_str.is_empty() {
+                // 整串按「一个单元」重估：单元自身也走完整判据（常见口令 / 模式 / 日期），
+                // 再按重复次数折算。只取单元的字符集熵会把 `passwordpassword` 抬到最高档。
+                // 递归实参严格缩短（整周期恒有 `p ≤ len / 2`），层级 `O(log len)`，耗时上界不变。
+                let unit_log10 = estimate_str(unit_str).guesses_log10_x100 as f64 / 100.0;
                 flags |= FLAG_PERIODIC_REPEAT;
                 log10 = (unit_log10 + (repeats as f64).log10()).min(log10);
             }
@@ -554,31 +558,14 @@ fn keyboard_index(c: char) -> Option<(usize, usize)> {
 
 /// 日期/年份形状的惩罚权重；不呈日期形状返回 `None`。
 ///
-/// - 整串为 4/6/8 位数字且可解释为年份或 `YYYYMMDD` / `YYMMDD` / `MMDDYYYY` → 权重 `4.0`；
+/// - 整串为已声明的日期 / 年份形状（见 [`whole_date_shape`]）→ 权重 `4.0`；
 /// - 仅**内含**一个 `1900..=2099` 的四位年份 → 权重 `2.0`。
 ///
 /// ISSUE-P2-468：直接消费 `&str` / 字节视图，零分配；数字串恒为 ASCII，
 /// 字节长度即字符长度，与原 `String` 物化版逐分支等价。
 fn date_like_weight_str(chars: &str) -> Option<f64> {
-    if !chars.is_empty() && chars.bytes().all(|b| b.is_ascii_digit()) {
-        let ok = match chars.len() {
-            4 => is_year(chars),
-            6 => {
-                let mm: u32 = chars[0..2].parse().unwrap_or(0);
-                let dd: u32 = chars[2..4].parse().unwrap_or(0);
-                (1..=12).contains(&mm) && (1..=31).contains(&dd)
-            }
-            8 => {
-                let (y, m, d) = (&chars[0..4], &chars[4..6], &chars[6..8]);
-                is_year(y)
-                    && (1..=12).contains(&m.parse().unwrap_or(0))
-                    && (1..=31).contains(&d.parse().unwrap_or(0))
-            }
-            _ => false,
-        };
-        if ok {
-            return Some(4.0);
-        }
+    if !chars.is_empty() && chars.bytes().all(|b| b.is_ascii_digit()) && whole_date_shape(chars) {
+        return Some(4.0);
     }
     // 内含四位年份
     let bytes = chars.as_bytes();
@@ -598,6 +585,46 @@ fn is_year(text: &str) -> bool {
         Ok(y) => (1900..=2099).contains(&y),
         Err(_) => false,
     }
+}
+
+/// 整串是否恰为已声明的日期 / 年份形状（调用方保证为 ASCII 数字串，字节长度即字符长度）。
+///
+/// 已声明格式（月 `1..=12`、日 `1..=31`，不校验月末与闰年，两位年份不设范围）：
+/// - 4 位：`YYYY`（[`is_year`]）；
+/// - 6 位：`YYMMDD` / `MMDDYY` / `DDMMYY`；
+/// - 8 位：`YYYYMMDD` / `MMDDYYYY` / `DDMMYYYY`。
+///
+/// 末两位必须参与判定：旧实现只把 6 位串的前四位当月日、丢掉末两位，与声明的 `YYMMDD` 语义不符。
+fn whole_date_shape(digits: &str) -> bool {
+    match digits.len() {
+        4 => is_year(digits),
+        6 => {
+            let (first, second, third) = (&digits[0..2], &digits[2..4], &digits[4..6]);
+            (is_month(second) && is_day(third))
+                || (is_month(first) && is_day(second))
+                || (is_day(first) && is_month(second))
+        }
+        8 => {
+            let (first, second) = (&digits[0..2], &digits[2..4]);
+            let (third, last) = (&digits[4..6], &digits[6..8]);
+            let head_year = &digits[0..4];
+            let tail_year = &digits[4..8];
+            (is_year(head_year) && is_month(third) && is_day(last))
+                || (is_month(first) && is_day(second) && is_year(tail_year))
+                || (is_day(first) && is_month(second) && is_year(tail_year))
+        }
+        _ => false,
+    }
+}
+
+/// 两位数字是否为合法月份（`1..=12`）。
+fn is_month(two: &str) -> bool {
+    (1..=12).contains(&two.parse::<u32>().unwrap_or(0))
+}
+
+/// 两位数字是否为合法日期（`1..=31`，不校验月末）。
+fn is_day(two: &str) -> bool {
+    (1..=31).contains(&two.parse::<u32>().unwrap_or(0))
 }
 
 /// 不同字符个数（**O(n)**，ISSUE-P2-58 AC③）。

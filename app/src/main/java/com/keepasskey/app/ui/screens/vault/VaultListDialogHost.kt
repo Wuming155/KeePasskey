@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.stringResource
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.rememberMaybeHaptic
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.model.VaultGroup
@@ -328,7 +329,10 @@ internal fun VaultBatchDeleteConfirmDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
         title = { Text(stringResource(R.string.vault_batch_delete_confirm_title)) },
-        text = { Text(stringResource(R.string.vault_batch_delete_confirm_message, selectedCount)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.vault_batch_delete_confirm_message, selectedCount))
+        },
         confirmButton = {
             Button(
                 onClick = {
@@ -363,7 +367,10 @@ internal fun VaultPurgeEntryConfirmDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
         title = { Text(stringResource(R.string.vault_purge_entry_confirm_title)) },
-        text = { Text(stringResource(R.string.vault_purge_entry_confirm_message, entryTitle)) },
+        text = {
+            TrackDialogInteractionEffect()
+            Text(stringResource(R.string.vault_purge_entry_confirm_message, entryTitle))
+        },
         confirmButton = {
             Button(
                 onClick = {

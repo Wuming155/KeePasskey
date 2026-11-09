@@ -2,6 +2,7 @@ package com.keepasskey.sync.engine
 
 import com.keepasskey.sync.model.SyncException
 import com.keepasskey.sync.model.cleanEtag
+import com.keepasskey.sync.provider.CredentialReleasingProvider
 import com.keepasskey.sync.provider.SyncProvider
 import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.Dispatchers
@@ -30,12 +31,51 @@ class SyncEngine(
      */
     internal val rollbackGuard: SyncRollbackGuard? = null,
     @VisibleForTesting
-    private val settlementStageObserver: ((SyncAdoptionSettlementStage) -> Unit)? = null
+    private val settlementStageObserver: ((SyncAdoptionSettlementStage) -> Unit)? = null,
+    /**
+     * ENG-20261028-42：Provider 凭据的**协议无关**释放入口（app 层注入，通常是
+     * `SyncProviderFactory.releaseOwned`）。为 null 时退回按可选能力
+     * [CredentialReleasingProvider] 释放，未实现该能力的协议因而无操作——所以生产装配
+     * 必须注入本入口，才能让 S3 这类尚未迁移到该接口的协议在同一生命周期点被擦除。
+     * 引擎本身不感知任何具体协议。
+     */
+    private val credentialReleaser: ((SyncProvider) -> Unit)? = null
 ) {
 
     internal fun reportSettlementStageForTest(stage: SyncAdoptionSettlementStage) {
         settlementStageObserver?.invoke(stage)
     }
+
+    /**
+     * ENG-20261028-42：确定性释放本引擎所用 Provider 的凭据副本。
+     *
+     * 优先走注入的 [credentialReleaser]（生产接线为 `SyncProviderFactory.releaseOwned`，
+     * 覆盖 WebDAV 与 S3 两种凭据形态）；未注入时按可选能力 [CredentialReleasingProvider]
+     * 释放，未实现该能力的协议**无操作**——本引擎保持协议无关，不为某个协议的凭据形态开洞。
+     * 实现者失效后按该接口契约 fail-closed：后续取头抛
+     * [com.keepasskey.sync.model.SyncException.AuthenticationError]，不会以空口令降级。
+     *
+     * 调用点（生命周期而非请求级）：会话终止（`SyncSessionState.clear`）、换引擎
+     * （`SyncSessionState.replaceSyncEngine`）与待决冲突会话丢弃
+     * （`SyncConflictController.clearPendingConflictSession`，传 `keepEngine` 的重入路径除外）。
+     * 幂等；**不得**在仍可能发请求的窗口内调用——同一引擎会被冲突裁决继续复用。
+     */
+    fun releaseProviderCredentials() {
+        val releaser = credentialReleaser
+        if (releaser != null) {
+            releaser(provider)
+        } else {
+            (provider as? CredentialReleasingProvider)?.releaseCredentials()
+        }
+    }
+
+    /**
+     * 该引擎是否正持有 [candidate] 这个 Provider（身份比较，不看协议类型）。
+     *
+     * 供持有方判定「作用域退出时能否释放」：引擎仍被会话/待决冲突引用时，其 Provider
+     * 的凭据所有权已归引擎，作用域提前释放会让稍后的裁决上传以鉴权失败告终。
+     */
+    fun ownsProvider(candidate: SyncProvider): Boolean = provider === candidate
 
     /**
      * Resolve a persisted adoption quarantine after the user explicitly chooses the current local vault.

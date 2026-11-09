@@ -100,13 +100,20 @@ class OpenVaultEntryActivity : FragmentActivity() {
      * 故不得静默执行——确认后登记并进入解锁流程；取消 / 返回只回落主界面、不改任何状态。
      */
     private fun confirmThenImport(uri: Uri, displayName: String) {
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.external_open_confirm_title)
             .setMessage(getString(R.string.external_open_confirm_message, displayName))
             .setPositiveButton(R.string.external_open_confirm_ok) { _, _ -> performImport(uri, displayName) }
             .setNegativeButton(R.string.external_open_confirm_cancel) { _, _ -> launchMainAndFinish() }
             .setOnCancelListener { launchMainAndFinish() }
             .show()
+        val tracker = (applicationContext as? MainApplication)?.autoLockManager?.interactionTracker
+        dialog.window?.let { window ->
+            tracker?.attachWindow(window)
+            dialog.setOnDismissListener {
+                tracker?.detachWindow(window)
+            }
+        }
     }
 
     /** 用户已确认：登记外部库（既有链路）并回落主界面。 */

@@ -361,18 +361,34 @@ class SettingsDatabaseWriteFeedbackTest {
 
         // 第二次：放开替身并提交新值——失败事务不得把会话回滚成更旧的状态
         repo.failNext = false
+        // 先清上一次（失败）回执：以下等待的是本次提交的回执，避免旧值即刻满足。
+        controller.clearDatabaseConfigWriteFeedback()
         controller.setEncryptionAlgorithm(CipherLabels.TWOFISH_CBC)
 
-        // 以**磁盘外层头**确认第二次保存已完成（会话内存头先变、落盘后头才落定）
-        awaitCondition("第二次提交已落盘") {
-            if (!file.isFile || file.length() == 0L) return@awaitCondition false
-            val (header, rawHeader) = file.inputStream().use { KdbxHeader.deserialize(it) }
-            try {
-                header.cipherUuid == KdbxConstants.Cipher.TWOFISH &&
-                    session.state.value == DatabaseSession.SessionState.OPENED
-            } finally {
-                rawHeader.fill(0)
-            }
+        // 先等本次提交回执落定，再**单次**读盘。不要在写盘在途时轮询目标文件：
+        // 宿主 Windows 下读句柄会让原子 move / rename 均 AccessDenied，AtomicFileWriter 按
+        // ENG-20261028-17 拒绝非原子覆盖并如实失败——轮询读文件会把测试自身变成写盘竞争者
+        // （曾致 AlgorithmSelectionApplyTest 60s 超时）。
+        awaitCondition("第二次提交回执到达") {
+            val state = controller.databaseConfigWriteState.value
+            !state.isSaving && state.feedback != null
+        }
+        val feedback = controller.databaseConfigWriteState.value.feedback
+        assertTrue("第二次提交应成功，实际回执 resId=${feedback?.resId}", feedback != null && !feedback.isError)
+        assertEquals(
+            "第二次提交完成后会话须回到 OPENED",
+            DatabaseSession.SessionState.OPENED,
+            session.state.value
+        )
+        val (header, rawHeader) = file.inputStream().use { KdbxHeader.deserialize(it) }
+        try {
+            assertEquals(
+                "磁盘外层头应为第二次提交的新值",
+                KdbxConstants.Cipher.TWOFISH,
+                header.cipherUuid
+            )
+        } finally {
+            rawHeader.fill(0)
         }
         val reopened = DatabaseSession()
         runBlocking {

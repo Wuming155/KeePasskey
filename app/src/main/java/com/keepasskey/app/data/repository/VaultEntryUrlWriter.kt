@@ -27,7 +27,10 @@ internal class VaultEntryUrlWriter(
     private val persistSession: suspend () -> KdbxResult<Unit>
 ) {
 
-    suspend fun updateUrl(entryId: String, url: String): KdbxResult<Unit> {
+    suspend fun updateUrl(entryId: String, url: String): KdbxResult<Unit> =
+        databaseSession.withWriteAcceptance { updateUrlInternal(entryId, url) }
+
+    private suspend fun updateUrlInternal(entryId: String, url: String): KdbxResult<Unit> {
         val entry = when (
             val resolved = resolveExistingEntryForFieldWrite(databaseSession, strings, entryId)
         ) {

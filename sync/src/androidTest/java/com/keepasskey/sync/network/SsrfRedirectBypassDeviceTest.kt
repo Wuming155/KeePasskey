@@ -15,7 +15,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.IOException
+import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.UnknownHostException
 import java.util.Collections
 import javax.net.ssl.SSLException
@@ -189,6 +191,42 @@ class SsrfRedirectBypassDeviceTest {
         }
     }
 
+    @Test
+    fun `Android 上 IPv4-mapped 元数据的归一形态与建连拒绝`() {
+        // 平台归一形态：不预设 4/16 字节，只要求归一前后都命中红线
+        val normalized = InetAddress.getByName("::ffff:169.254.169.254")
+        assertTrue(
+            "映射字面量经平台解析后（${normalized.address.size} 字节）必须命中元数据红线",
+            SyncEndpointGuard.isCloudMetadataAddress(normalized)
+        )
+
+        // 显式构造映射形态（InetAddress.getByAddress 会归一为 4 字节，故用 Inet6Address）：
+        // 平台是否保留 16 字节由本例接受（JVM 单测已按 16 字节分支确定性覆盖），
+        // 此处只要求「无论何种形态都命中红线、且建连前被拒」
+        val mapped = Inet6Address.getByAddress(null, mappedIpv6(169, 254, 169, 254), -1)
+        assertTrue(
+            "显式映射形态（${mapped.address.size} 字节）必须命中元数据红线",
+            SyncEndpointGuard.isCloudMetadataAddress(mapped)
+        )
+
+        val failure = runCatching {
+            SsrfGuardSocketFactory().createSocket()
+                .connect(InetSocketAddress(mapped, METADATA_PORT), CONNECT_TIMEOUT_MS)
+        }.exceptionOrNull()
+        assertTrue(
+            "映射形态的元数据必须在建立 TCP 之前被拒，实际=$failure",
+            failure is IOException && failure.message.orEmpty().contains("SSRF 防护")
+        )
+
+        // 合法私网对照：映射的私网地址按内网处理，判据不得扩大为「映射即元数据」
+        assertFalse(
+            "映射的 192.168.1.1 不是元数据地址",
+            SyncEndpointGuard.isCloudMetadataAddress(
+                Inet6Address.getByAddress(null, mappedIpv6(192, 168, 1, 1), -1)
+            )
+        )
+    }
+
     /** 记录 `lookup` 入参并委托给真实 `[SsrfGuardDns]`（与工厂装配同构） */
     private class RecordingDns(
         private val delegate: Dns = SsrfGuardDns(Dns.SYSTEM, emptySet())
@@ -254,5 +292,21 @@ class SsrfRedirectBypassDeviceTest {
     private companion object {
         val LOOPBACK: InetAddress = InetAddress.getByName("127.0.0.1")
         const val REDIRECT_REACHED = "redirect-reached"
+
+        /** 元数据探测端口（守卫在建连前拒绝，端口只用于构造目标地址） */
+        const val METADATA_PORT = 80
+
+        /** 建连超时（毫秒）：守卫在建连前抛出，故不依赖真实网络 */
+        const val CONNECT_TIMEOUT_MS = 500
+
+        /** 构造 16 字节 IPv4-mapped 地址（`::ffff:a.b.c.d`） */
+        fun mappedIpv6(a: Int, b: Int, c: Int, d: Int): ByteArray = ByteArray(16).apply {
+            this[10] = 0xFF.toByte()
+            this[11] = 0xFF.toByte()
+            this[12] = a.toByte()
+            this[13] = b.toByte()
+            this[14] = c.toByte()
+            this[15] = d.toByte()
+        }
     }
 }

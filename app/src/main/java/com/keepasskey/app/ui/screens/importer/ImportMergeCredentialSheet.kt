@@ -21,7 +21,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
+import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.ui.components.SecurePasswordField
 
 /**
@@ -32,6 +35,12 @@ import com.keepasskey.app.ui.components.SecurePasswordField
  * `onSubmit` 转移；本组件不再持有、也不再清零交出的那一份）。**交出的数组由宿主提交链收口清零**——
  * 生产链首环 `SettingsImportPresenter.submitMergeCredentials` 在提交返回后统一 `fill(0)`。
  * 密钥文件只上行 **Uri**，字节读取与清零同在宿主侧该收口点完成。
+ *
+ * 窗口保护：本窗承载第二库主密码（`SecurePasswordField`，可切明文显示），属**凭据类对话框**，
+ * 故 `securePolicy` 恒为 `SecureOn`，并由 [SecureDialogWindowEffect] 在本窗内容槽位内施加遮挡触摸
+ * 过滤，**不读**用户防截屏开关——与 `SecureDialog` KDoc 列出的其余始终保护对话框同口径。
+ * 两者都作用于**本对话框自己的窗口**（Compose `AlertDialog` 由 `Dialog` 另建窗口，宿主 Activity
+ * 的 flag 与触摸过滤都不会传播），故 effect 必须在内容槽位内调用。
  */
 @Composable
 fun ImportMergeCredentialSheet(
@@ -47,8 +56,14 @@ fun ImportMergeCredentialSheet(
 
     AlertDialog(
         onDismissRequest = {},
+        // 本窗承载第二库主密码，属**始终保护**的凭据类对话框：不读用户防截屏开关，显式 SecureOn。
+        // 对话框窗口 FLAG_SECURE 的实际决定者是本参数（默认 Inherit 会按宿主窗口清除）
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = { Text(stringResource(R.string.kdbx_merge_credential_title)) },
         text = {
+            // FLAG_SECURE 与遮挡触摸过滤都是窗口级属性，不会从宿主 Activity 窗口传播；
+            // 必须在对话框自身内容槽位内施加（在 AlertDialog(...) 之外调用解析不到本窗）
+            SecureDialogWindowEffect()
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = stringResource(

@@ -71,6 +71,20 @@ class DomainMatcherAndroidRuntimeTest {
     }
 
     @Test
+    fun `IP 与 localhost 的判定与宿主一致`() {
+        // ENG-20261028-40：点分数字形态只做精确比较；localhost 仅放行同一本地主机
+        assertTrue(DomainMatcher.isDomainMatch("192.168.1.1", "https://192.168.1.1:8443/"))
+        assertFalse(DomainMatcher.isDomainMatch("168.1.1", "https://192.168.1.1/"))
+        assertFalse(
+            "IP 不是可注册域名（两入口同口径）",
+            PublicSuffixList.isRegistrableDomain("192.168.1.1")
+        )
+        assertTrue(DomainMatcher.isDomainMatch("localhost", "https://localhost:8443/"))
+        assertFalse(DomainMatcher.isDomainMatch("localhost", "https://app.localhost/"))
+        assertTrue(DomainMatcher.isRpIdTrustedForCreation("localhost", "https://localhost"))
+    }
+
+    @Test
     fun `webDomain 归一化在小写化后仍满足主机形态校验`() {
         assertEquals(
             "www.example.com",

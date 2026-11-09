@@ -23,14 +23,22 @@ import java.io.File
  * 维护内存中活动密码库的生命周期：CLOSED ↔ LOCKED ↔ OPENED ↔ DIRTY
  * 实现下沉同包协作类；会话建立见 [SessionOpener]，持久化见 [SessionPersistence]。
  */
-class DatabaseSession(
+class DatabaseSession @androidx.annotation.VisibleForTesting internal constructor(
     /**
      * ISSUE-P2-24：大附件落盘存储（可选）。非空时，超过阈值的附件在解析期即落盘，
      * 内层二进制池只保留引用，不再整批常驻内存；为空时行为与既往逐字一致。
      * 由 app 侧 DI 注入（`cacheDir/attachments`），并同时注册为 [SessionLockObserver]。
      */
-    private val binaryStore: BinaryStore? = null
+    private val binaryStore: BinaryStore?,
+    private val core: SessionCore
 ) {
+    /** 公开构造入口：保持与既有调用点及 DI 逐字一致，默认装配生产级 [SessionCore]。 */
+    constructor(binaryStore: BinaryStore? = null) : this(binaryStore, SessionCore())
+
+    /** 仅供测试使用：支持注入自定义 [SessionCore]（如受控的基线复制策略）。 */
+    @androidx.annotation.VisibleForTesting
+    internal constructor(core: SessionCore) : this(null, core)
+
     enum class SessionState {
         CLOSED,
         LOCKED,
@@ -38,7 +46,6 @@ class DatabaseSession(
         DIRTY
     }
 
-    private val core = SessionCore()
     val state: StateFlow<SessionState> = core.state.asStateFlow()
     val databaseFlow: StateFlow<KdbxDatabase?> = core.database.asStateFlow()
     /** 流式/降级写入结果不确定：当前会话禁止继续保存，须重新打开核实或恢复文件。 */
@@ -324,6 +331,9 @@ class DatabaseSession(
      *
      * 返回的 [PreparedSerializedSave] 由调用方拥有：提交消耗或放弃后
      * 必须 [PreparedSerializedSave.wipe] 清零（整库密文不得滞留）。
+     * `ENG-20261028-31`：需要「同一产物既上传云端又本地落盘」时，经
+     * [PreparedSerializedSave.borrowBytes] 只读借用后交给 [commitPreparedSave]，
+     * 不得另做一次整库序列化。
      */
     suspend fun prepareSerializedSave(
         candidate: KdbxDatabase
@@ -331,16 +341,21 @@ class DatabaseSession(
 
     /**
      * `ISSUE-P1-631`（生命周期收口）：**最小提交临界区**（调用方包在其 `NonCancellable` 内）——
-     * 同一会话锁内「复检 → 校验实例身份与基线修订 → 采用 → 写预备密文 → 基线前移 → 终态」。
+     * 同一会话锁内「复检 → 校验实例身份与基线修订 → 写预备密文 → 发布采纳 → 基线前移 → 终态」。
      * 取代原 `adoptAndSaveIfUnchanged`（序列化已移至 [prepareSerializedSave] 可取消段），
      * 语义等价性论证见 [SessionPersistence.commitPreparedSave] 的 KDoc。
+     *
+     * `ENG-20261028-19`：写盘在**发布之前**。失败 / 取消时活动树、状态、持久化基线与磁盘保持
+     * 提交前的一致状态（仅预备密文被清零），调用方不得据失败结果推断「已采纳」。
+     *
+     * @return 成功时携带**已发布的活动树实例**——与 [prepared] 密文严格对应的版本（含本次修剪结果）。
      */
     suspend fun commitPreparedSave(
         expectedAtCycleStart: KdbxDatabase,
         candidate: KdbxDatabase,
         prepared: PreparedSerializedSave,
         expectedPersistedBaselineRevision: Long? = null
-    ): KdbxResult<Unit> = persistence.commitPreparedSave(
+    ): KdbxResult<KdbxDatabase> = persistence.commitPreparedSave(
         expectedAtCycleStart,
         candidate,
         prepared,

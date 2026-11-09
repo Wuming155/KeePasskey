@@ -1,5 +1,7 @@
 package com.keepasskey.core.model
 
+import com.keepasskey.core.security.ProtectedStringReclamation
+
 /**
  * 分组（文件夹）领域模型，树状结构。
  */
@@ -97,10 +99,15 @@ data class KdbxGroup(
      * 递归擦除会造成存活数据丢失。
      *
      * 调用约定（`ISSUE-P2-534` 起，**改前必读**）：**先把新树发布上线（换下旧树），再调用**
-     * `oldRoot.clearSupersededSensitiveData(newRoot)`。理由：擦除是**就地清零**，而发布面
-     * （`DatabaseSession.databaseFlow`）的读取者与擦除点**不共享锁**——先擦会让「仍持旧树快照」
-     * 的读取者读到已清零实例（真机闪退根因见 `docs/RESOLVED_LOG.md` §473）。发布在前把窗口压到最小；
-     * 残余调度窗口由消费面的展示读口（`KdbxEntry.displayTitle` 等 / `ProtectedString.readStringForDisplay`）兜底。
+     * `oldRoot.clearSupersededSensitiveData(newRoot)`。理由：回收是**就地清零**，而发布面
+     * （`DatabaseSession.databaseFlow`）的读取者与回收点**不共享锁**——先擦会让「仍持旧树快照」
+     * 的读取者读到已清零实例（真机闪退根因见 `docs/RESOLVED_LOG.md` §473）。
+     *
+     * `ENG-20261028-11` 起，回收时序由 [ProtectedStringReclamation] 的读租约协议决定：
+     * 旧树消费面在消费快照期间持有读租约时，本方法只**登记**下线实例，最后一个租约释放后才擦除；
+     * 无租约在册时立即擦除（与整改前一致）。因此「先发布、后调用」仍是**必要**顺序——发布之后
+     * 才可能已没有读者能拿到旧树，但租约把「擦除撞上在途读取」的窗口从投影全程收窄为
+     * 未按协议登记的迟到读取，这类读取仍由 [ProtectedString] 的 fail-closed 判据与展示面降级兜底。
      * 新旧根为同一实例（无替换）时直接返回。
      */
     fun clearSupersededSensitiveData(surviving: KdbxGroup) {
@@ -112,21 +119,21 @@ data class KdbxGroup(
     }
 
     /**
-     * ISSUE-P3-156 定点擦除（增量）：**本实例为替换后的新树根**，擦除 [replaced]
-     * （本次被替换下线的旧节点）中在本树不可达的敏感实例；[replacement] 为同位置上线的
+     * ISSUE-P3-156 定点擦除（增量）：**本实例为替换后的新树根**，回收 [replaced]
+     * （本次被替换下线的旧节点）中在本树不可达的受保护实例；[replacement] 为同位置上线的
      * 新节点（新增 / 无替换场景为 null）。
      *
      * 与 [clearSupersededSensitiveData] 的等价性依据是**路径复制契约**（树变换只重建从根到目标的
      * 分组链）：新树除 [replaced] 所在位置外与旧树按同一对象引用共享全部子树，故「旧树中下线、
-     * 新树中存活」的敏感实例**只可能来自 [replaced]**。候选集合规模 = [replaced] 规模，
-     * **不随全库规模增长**；[clearSupersededSensitiveData] 需为整棵新树建身份集合（O(全库)），
-     * 只保留给无法定位替换位置的调用方（任意整库变换 / 历史修剪）。
+     * 新树中存活」的敏感实例**只可能来自 [replaced]**。**候选集合**规模 = [replaced] 规模；
+     * 但存活判定（第 3 步）仍需遍历存活树做引用比较，因此单次调用的总工作量仍是 O(全库)，
+     * 只有 [replacement] 与 [replaced] 共享全部承载容器的快速路径才是零遍历。
      *
      * 判定逐级收窄，任一阶段候选清空即返回：
      * 1. [replacement] 与 [replaced] 共享全部承载容器（`copy` 仅改元数据）⇒ 旧实例必然存活，零成本返回；
      * 2. [replaced] 可达实例中被 [replacement] 覆盖者仍在树上 ⇒ 移出候选；
      * 3. 余下候选在本树任意位置可达者仍在树上 ⇒ 移出候选（**只做引用比较、不插入集合**）；
-     * 4. 仍留存的候选即真正下线的实例，逐个清零。
+     * 4. 仍留存的候选即真正下线的实例，逐个交付回收（[ProtectedStringReclamation]：无读租约时立即擦除）。
      */
     fun eraseSupersededSensitiveData(replaced: KdbxEntry, replacement: KdbxEntry?) = eraseSuperseded(
         collect = replaced::collectSensitiveIdentities,

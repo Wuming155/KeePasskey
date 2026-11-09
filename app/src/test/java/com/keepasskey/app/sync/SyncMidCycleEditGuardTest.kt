@@ -382,7 +382,7 @@ class SyncMidCycleEditGuardTest {
             }
             // ETag 必须随内容变化（内容增长时 size 变化，保证引擎能观测到「远端已更新」）
             val etag = "etag_${data.size}_${data.fold(0) { acc, b -> (acc + b) and 0x7FFF }}"
-            remote[remotePath] = Pair(data, etag)
+            remote[remotePath] = Pair(data.copyOf(), etag)
             onNextUpload?.let { hook ->
                 onNextUpload = null
                 hook()

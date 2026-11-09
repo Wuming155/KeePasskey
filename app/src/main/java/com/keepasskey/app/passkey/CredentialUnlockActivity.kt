@@ -12,6 +12,7 @@ import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
@@ -59,6 +60,10 @@ class CredentialUnlockActivity : FragmentActivity() {
     @Inject
     lateinit var responseAssembler: CredentialResponseAssembler
 
+    /** ENG-20261028-05：链式响应的通道开关复核来源（与候选组装同一份持久化开关）。 */
+    @Inject
+    lateinit var settingsStore: ExtendedSettingsStore
+
     @Inject
     lateinit var flagSecureGuard: FlagSecureGuard
 
@@ -70,6 +75,18 @@ class CredentialUnlockActivity : FragmentActivity() {
         flagSecureGuard.attach(this, lifecycleScope)
         // 官方反 overlay 攻击加固：屏蔽其它应用悬浮窗覆盖解锁窗口
         window.setHideOverlayWindows(true)
+
+        // ENG-20261028-05：通道开关在链式响应入口复核。解锁 Action 下发之后，用户完全可能
+        // 已到设置页关闭「凭据管理器」通道——此时既不该再要主密码，也不该回传任何候选。
+        // 收尾语义与服务入口关闭时的空响应一致：不报错、不产出凭据。
+        if (!CredentialDeliveryChannelGate.allowsPasswordDelivery(
+                settingsStore.isCredentialProviderEnabled()
+            )
+        ) {
+            AppLog.i(TAG, "凭据管理器通道已关闭，跳过解锁页并返回空响应")
+            completeWithEmptyResponse()
+            return
+        }
 
         val originalRequest = try {
             PendingIntentHandler.retrieveBeginGetCredentialRequest(intent)
@@ -121,6 +138,10 @@ class CredentialUnlockActivity : FragmentActivity() {
 
     /**
      * 解锁成功后的链式收尾：重新组装凭据候选并作为 Activity 结果回传给系统 Credential Manager。
+     *
+     * ENG-20261028-05：解锁页存活期间通道仍可能被关闭，故本路径的开关复核落在候选出口
+     * [CredentialResponseAssembler.buildUnlockedGetResponse]（与直查同一处判定，不在此重复求值）：
+     * 关闭即组装出空响应，本 Activity 据此回传「无凭据」，不会把候选交给已关闭的通道。
      */
     private fun completeChainedResponse(originalRequest: BeginGetCredentialRequest?) {
         if (completed) return
@@ -149,6 +170,22 @@ class CredentialUnlockActivity : FragmentActivity() {
                 failAndFinish()
             }
         }
+    }
+
+    /**
+     * 以**空响应**收尾（ENG-20261028-05）：语义与 [KeePasskeyCredentialProviderService] 在通道
+     * 关闭时返回的空 `BeginGetCredentialResponse` 一致——本通道不产出任何凭据，但不向系统报错。
+     *
+     * 调用方负责 `completed` 幂等（[completeChainedResponse] 进入时即已置位）。
+     */
+    private fun completeWithEmptyResponse() {
+        val resultIntent = Intent()
+        PendingIntentHandler.setBeginGetCredentialResponse(
+            resultIntent,
+            BeginGetCredentialResponse.Builder().build()
+        )
+        setResult(RESULT_OK, resultIntent)
+        finish()
     }
 
     private fun failAndFinish() {

@@ -891,7 +891,7 @@
     <string name="dbset_meta_edit_hint">修改库名 / 描述 / 默认用户名后立即写入 KDBX Meta 并落盘。合并时这些字段以本地为准（PD-35）</string>
     <string name="dbset_new_entry_prefill_hint">新建条目时用户名将预填为库默认用户名</string>
     <string name="sec_throttle_title">解锁失败重试限制</string>
-    <string name="sec_throttle_sub">连续多次输错主密码后临时锁定，抵御暴力破解（关闭后可无限次重试）</string>
+    <string name="sec_throttle_sub">连续多次输错主密码后临时锁定，增加界面重试的猜解成本（不防离线爆破；关闭后可无限次重试）</string>
     <string name="sec_throttle_time_title">最长锁定时长</string>
     <string name="sec_throttle_minutes_value">%1$d 分钟</string>
     <string name="sec_throttle_dialog_desc">连续输错次数越多锁定越久，至多不超过此处选择的时长。</string>

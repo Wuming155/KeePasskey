@@ -34,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.sync.RemoteBrowsePaths
 import com.keepasskey.app.sync.RemoteBrowseUiState
 import com.keepasskey.sync.model.RemoteListEntry
@@ -67,6 +68,7 @@ fun RemoteBrowseDialog(
         onDismissRequest = onClose,
         title = { Text(stringResource(R.string.sync_browse_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (state) {
                     RemoteBrowseUiState.Idle -> Unit

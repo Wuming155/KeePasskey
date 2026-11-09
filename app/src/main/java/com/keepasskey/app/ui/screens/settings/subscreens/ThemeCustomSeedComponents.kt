@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.theme.SeedSchemeGenerator
 
 /**
@@ -200,6 +201,7 @@ internal fun SeedColorPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.theme_seed_picker_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(4),

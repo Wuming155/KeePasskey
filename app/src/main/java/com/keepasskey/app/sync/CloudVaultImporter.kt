@@ -9,6 +9,7 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.core.security.SecureFileWrite
 import com.keepasskey.sync.network.SyncNetworkOptions
+import com.keepasskey.sync.provider.CredentialReleasingProvider
 import com.keepasskey.sync.provider.SyncProvider
 import com.keepasskey.sync.s3.S3SyncProvider
 import com.keepasskey.sync.webdav.WebDavSyncProvider
@@ -181,8 +182,13 @@ class RealCloudVaultImporter @Inject constructor(
                     tmp.delete()
                 }
             } finally {
-                // S3 Provider 持有凭据 clone 用于签名，导入结束即擦（同 SyncCycleRunner 收口口径）
-                (provider as? S3SyncProvider)?.clearCredentials()
+                // Provider 持有凭据副本用于认证 / 签名，导入结束即擦（同同步周期收口口径）。
+                // ENG-20261028-42：WebDAV 的按请求现算载体同样在此确定性失效（能力优先，
+                // 未实现该可选能力的协议按既有显式类型收口）。
+                when (provider) {
+                    is CredentialReleasingProvider -> provider.releaseCredentials()
+                    is S3SyncProvider -> provider.clearCredentials()
+                }
             }
         } finally {
             wipeCredentials(request)

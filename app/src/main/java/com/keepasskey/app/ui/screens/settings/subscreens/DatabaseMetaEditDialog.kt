@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * ISSUE-P3-385：库级 Meta 编辑对话框（库名 / 描述 / 默认用户名）。
@@ -40,6 +41,7 @@ internal fun DatabaseMetaEditDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.dbset_meta_edit_title)) },
         text = {
+            TrackDialogInteractionEffect()
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = stringResource(R.string.dbset_meta_edit_hint),

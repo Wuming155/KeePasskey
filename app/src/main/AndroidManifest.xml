@@ -220,6 +220,14 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
 
+        <!-- 传统自动填充「库锁定态保存」落地 Activity（ENG-20261028-21：仅本应用 PendingIntent
+             拉起；系统句柄只携带一次性令牌与调用方归属，口令经 Keystore 封存载体按令牌取回，
+             exported=false 且不读任何 fillIn 注入的 extras） -->
+        <activity
+            android:name=".autofill.AutofillLockedSaveActivity"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+
         <!-- Android 16+ Credential Manager 系统凭据提供者服务 -->
         <service
             android:name=".passkey.KeePasskeyCredentialProviderService"

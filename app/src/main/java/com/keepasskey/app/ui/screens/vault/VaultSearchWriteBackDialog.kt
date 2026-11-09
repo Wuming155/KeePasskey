@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
  * 「把搜索词写入该条目 URL？」询问对话框（`ISSUE-P3-442` AC①）。
@@ -51,6 +52,7 @@ internal fun VaultSearchWriteBackDialog(
             Text(text = stringResource(R.string.search_write_back_title))
         },
         text = {
+            TrackDialogInteractionEffect()
             // 内容槽整体自包 Column（M3 对话框槽内多节点的叠放风险，见工程规则「框架内容槽同为 Box」）
             Column {
                 Text(

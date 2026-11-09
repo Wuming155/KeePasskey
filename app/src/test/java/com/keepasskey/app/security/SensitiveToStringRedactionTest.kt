@@ -10,7 +10,6 @@ import com.keepasskey.app.ui.screens.detail.EntryDetailUiState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 /**
  * ISSUE-P2-68（审计 M6）回归：**数据类默认 `toString()` 的明文泄漏面**。
@@ -24,9 +23,12 @@ import java.io.File
  * 从而在编译与运行两层锁住「只出结构摘要」这一契约（对齐 `KdbxEntry` / `ProtectedString`
  * 既有做法）。
  *
- * 覆盖说明（如实声明）：`ParsedAutofillNode` 持有 Android `AutofillId`（JVM 单测无法构造
- * 真实实例），其 `toString()` 由 [静态源码断言][`ParsedAutofillNode 的 toString 不得插值字段内容`]
- * 守护——该文件不得出现对 `text` / `label` / `htmlName` 的插值。
+ * 覆盖分工（ENG-20261028-12 行为化整改）：
+ * 1. JVM 纯对象层面：对 [UiVaultEntry]、[EntryDetailUiState]、[AutofillPickerViewModel.Credentials]
+ *    三类数据结构通过哨兵注入执行可观测行为验证；
+ * 2. 依赖 Android 平台 `AutofillId` 的 [com.keepasskey.app.autofill.ParsedAutofillNode]：
+ *    已由设备用例 `AutofillPlatformContractsDeviceTest` 在真实运行时构造主线程 `AutofillId`
+ *    实例验证其不泄漏哨兵且包含结构摘要，原有的源码字符串检索守卫已退役。
  */
 class SensitiveToStringRedactionTest {
 
@@ -98,65 +100,5 @@ class SensitiveToStringRedactionTest {
             "摘要应如实体现「已重写为长度描述」：$rendered",
             rendered.contains("redacted")
         )
-    }
-
-    @Test
-    fun `四个类型均覆写 toString 且 ParsedAutofillNode 不得插值字段内容`() {
-        val files = mapOf(
-            "UiVaultEntry" to "app/src/main/java/com/keepasskey/app/ui/model/UiModels.kt",
-            "EntryDetailUiState" to "app/src/main/java/com/keepasskey/app/ui/screens/detail/EntryDetailUiState.kt",
-            "Credentials" to "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerViewModel.kt",
-            "ParsedAutofillNode" to "app/src/main/java/com/keepasskey/app/autofill/AutofillStructureScan.kt",
-        )
-        for ((typeName, path) in files) {
-            val source = readSource(path)
-            assertTrue(
-                "$typeName 所在文件必须覆写 toString()（ISSUE-P2-68）",
-                source.contains("override fun toString(): String")
-            )
-        }
-
-        // ParsedAutofillNode：text（页面字段当前值）/ label / htmlName 一律不得插值
-        val scanSource = readSource(files.getValue("ParsedAutofillNode"))
-        val marker = "override fun toString(): String"
-        val start = scanSource.indexOf(marker)
-        assertTrue("未找到 ParsedAutofillNode.toString 定义", start >= 0)
-        // 取定义后的固定窗口（体内含 `${...}` 花括号，不能按 `}` 截断）
-        val toStringBody = scanSource.substring(start, minOf(start + 800, scanSource.length))
-        for (forbidden in listOf("\${text}", "\$text", "\${label}", "\$label", "\${htmlName}", "\$htmlName")) {
-            assertFalse(
-                "ParsedAutofillNode.toString() 不得插值 $forbidden（页面字段内容可能为明文）",
-                toStringBody.contains(forbidden)
-            )
-        }
-        assertTrue(
-            "ParsedAutofillNode.toString() 应以长度替代内容（textLength）",
-            toStringBody.contains("textLength=")
-        )
-    }
-
-    private fun readSource(path: String): String {
-        val file = File(repositoryRoot, path)
-        assertTrue("源码文件不存在（是否被重命名/移动）：$path", file.isFile)
-        return file.readText()
-    }
-
-    private companion object {
-        /** 仓库根：同时具备 app 与 core 模块源码目录的最近祖先 */
-        val repositoryRoot: File by lazy {
-            var dir: File? = File(System.getProperty("user.dir").orEmpty()).absoluteFile
-            repeat(ROOT_SEARCH_DEPTH) {
-                val candidate = dir ?: return@repeat
-                if (File(candidate, "app/src/main/java").isDirectory &&
-                    File(candidate, "core/src/main/java").isDirectory
-                ) {
-                    return@lazy candidate
-                }
-                dir = candidate.parentFile
-            }
-            error("未能定位仓库根（自 ${System.getProperty("user.dir")} 向上 ${ROOT_SEARCH_DEPTH} 层）")
-        }
-
-        const val ROOT_SEARCH_DEPTH = 6
     }
 }

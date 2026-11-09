@@ -3,6 +3,9 @@
 
     <uses-permission android:name="android.permission.CREDENTIAL_MANAGER_SET_ORIGIN" />
     <uses-permission android:name="android.permission.CREDENTIAL_MANAGER_QUERY_CANDIDATE_CREDENTIALS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!--
       ISSUE-P2-73 AC③（设备侧实测自动填充认证链路）。
@@ -87,13 +90,6 @@
             android:exported="true"
             android:process=":p2_620_prepare" />
 
-        <!-- 系统 PendingIntent A/B 身份验收专用；只接收应用生成的合成令牌与假数据。 -->
-        <activity
-            android:name="com.keepasskey.app.autofill.LockedSaveRequestProbeActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
-
         <provider
             android:name="com.keepasskey.app.autofill.LockedSaveRequestHolderProvider"
             android:authorities="${applicationId}.p2_603_holder"
@@ -104,6 +100,12 @@
             android:excludeFromRecents="true"
             android:exported="true"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+
+        <service
+            android:name="com.keepasskey.app.security.TestOverlayService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:process=":test_overlay" />
     </application>
 
 </manifest>

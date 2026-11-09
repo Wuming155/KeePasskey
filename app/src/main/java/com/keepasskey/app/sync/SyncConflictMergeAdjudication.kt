@@ -40,25 +40,34 @@ internal data class SyncConflictBaseSnapshot(
 )
 
 /**
- * F2 修复：base 快照的**三重可信检验**——存在、可解析、且内容与本地字节不同
- * （本地工作副本污染判定：KDBX4 随机 IV 使同一内容的两次序列化字节必然不同，
- * 字节级 contentEquals 命中相同即证明 base 已被本地内容顶替）。
+ * base 快照的**可信检验**：存在且可解析。
+ *
+ * **基线身份不由本地字节推断**（ENG-20261028-01）：原判据
+ * `!baseSnapshotBytes.contentEquals(localBytes)` 把「base 与本地字节相等」当作
+ * 「base 已被本地内容顶替」的证据，理由是 KDBX4 随机 IV 使同一内容的两次序列化必然不同。
+ * 该理由不成立——同步收敛时 `.cache` 与 `.basecache` 由**同一个数组**写出，本地内容未变时
+ * 又会直接复用缓存字节，故「字节相等」是正常收敛形态，不是污染证据；而随机化只能说明
+ * 「两次独立序列化不同」，推不出「任何相等的两份快照必属顶替」。按该判据会拒绝合法基线、
+ * 回退并集合并（远端删除被复活、基线判断整体失效）。
+ *
+ * 现在基线的**内容身份**由读口自证：`SyncCache.readBaseContent` 在协调锁内核对
+ * `.basecache` 的实际字节摘要与 `.baseversion` 标记，不符或缺失即返回 `null`（ENG-20261028-02）。
+ * 因此本函数只判「拿到的是否是一份可解析的 KDBX」；解析失败才视为不可信。
  *
  * 不可信时严禁以本地充当 base——那会把「本地新建」误判为「远端已删除且本地未修改」
  * 而确认删除且不留墓碑，同时远端修改全胜；改为以空库充当 base，
  * 三方合并退化为双方并集语义：单侧新建保留、同 UUID 条目字段级合并、
  * 同字段分叉进入冲突清单交用户决策（宁多冲突不静默丢数据）。
+ *
+ * @param localBytes **已不参与可信判定**，保留形参只为生产调用点（`SyncConflictController`）
+ *   的签名兼容；下次修改该调用点时一并删除本参数。
  */
 internal suspend fun resolveTrustedBase(
     codec: SyncDatabaseCodec,
     baseSnapshotBytes: ByteArray?,
-    localBytes: ByteArray
+    @Suppress("UNUSED_PARAMETER") localBytes: ByteArray
 ): SyncConflictBaseSnapshot {
-    val parsedBase = baseSnapshotBytes?.let { codec.parseKdbxBytes(it) }
-    val trustedBase = parsedBase?.takeIf { !baseSnapshotBytes.contentEquals(localBytes) }
-    // ISSUE-P3-119：被判为「不可信 base」的解析产物随即被丢弃（baseSnapshotBytes 已被本地
-    // 内容顶替），不再被任何存活对象引用 → 显式擦除。
-    if (parsedBase != null && trustedBase == null) wipeDiscarded(parsedBase)
+    val trustedBase = baseSnapshotBytes?.let { codec.parseKdbxBytes(it) }
     return SyncConflictBaseSnapshot(
         trusted = trustedBase,
         // ISSUE-P2-280：base 镜像同样带图标池（合并为双向并集，base 图标池不直接参与，

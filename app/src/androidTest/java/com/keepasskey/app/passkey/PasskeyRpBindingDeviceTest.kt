@@ -27,8 +27,9 @@ import org.junit.runner.RunWith
  *
  * ## 边界
  *
- * - 只证明「候选是否发布」这一层，不驱动选择器点选与签名（签名前的 RP 复校另由
- *   `PasskeyAssertionActivity` 承担，`PasskeyRequestRpBindingTest` 覆盖其判据）。
+ * - 只证明「候选是否发布」这一层，不驱动选择器点选与签名（签名前的授权裁决另由
+ *   `PasskeyAssertionActivity` 承担：`PasskeyRequestRpBindingTest` / `PasskeyRpAuthorizationTest`
+ *   覆盖纯判据，`PasskeyCallerSignatureDeviceTest` 覆盖真实 CM 的候选→签发矩阵）。
  * - 本机（API 36 隔离 AVD）`cmd credential` 无实现，故不经 ADB 构造请求；
  *   请求一律由真实客户端 Activity 发起。
  */
@@ -105,7 +106,11 @@ class PasskeyRpBindingDeviceTest {
     @Test
     fun `请求缺RP时按已绑定包名回退并发布候选`() {
         fixture.prepare()
-        // PD-77：仅 RP 缺失才允许包名维度回退；凭据 URL 为 android://<测试客户端包名>
+        // PD-77：仅 RP 缺失才允许包名维度回退；凭据 URL 为 android://<测试客户端包名>。
+        // ENG-20261028-06：本用例只证明**候选发布**这一层——缺 RP 时候选仍要发布（收紧即零候选，
+        // 用户失去授权入口）。夹具 `prepare()` 登记的是测试客户端**真实**签名，故这一行同时是
+        // 「有签名参照 → 可签发」的前置；「未登记 / 异签名 → 拒签」的签发侧矩阵见
+        // PasskeyCallerSignatureDeviceTest。
         fixture.client(
             CredentialSaveClientActivity.MODE_GET_PASSKEY_PREPARE,
             fixture.request(rp = null)

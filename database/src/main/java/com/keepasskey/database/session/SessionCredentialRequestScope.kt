@@ -35,6 +35,22 @@ suspend fun DatabaseSession.currentRequest(): SessionCredentialRequest? =
     coroutineContext[SessionCredentialRequest]
 
 /**
+ * 普通用户写操作的**受理点**：在第一处挂起前固定票据，使读取候选、改树与落盘共用同一
+ * [SessionCredentialRequest]；已在同一次受理的上下文中（导入批量、凭据流程嵌套调用）则
+ * 沿用外层请求实例，不再重新捕获。
+ *
+ * 重新捕获会把「受理后会话已换」悄悄改写为「此刻的新会话」，改树与写盘便落到后来活动库；
+ * 本入口只捕获一次，后续 `requireCurrentSessionRequest` 按实例身份复核。无请求上下文的
+ * 内部入口仍由调用方自行保证票据，见 `SessionRequestGuard.kt`。
+ */
+suspend fun <T> DatabaseSession.withAcceptedRequest(
+    block: suspend (SessionCredentialRequest) -> T
+): T {
+    val request = coroutineContext[SessionCredentialRequest] ?: captureCredentialRequest()
+    return withCredentialRequestScope(request) { block(request) }
+}
+
+/**
  * 在 [request] 的票据范围内执行 [block]，**允许**调用方已在同一上下文受理同一票据的请求。
  *
  * 语义仍是 fail-closed：上下文里存在**另一个**票据代次的请求时照常拒绝。

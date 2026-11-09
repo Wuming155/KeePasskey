@@ -238,12 +238,12 @@ internal class VaultFileDriftResolve(
 
     /**
      * `ISSUE-P1-631`：提交侧——复核「读取版本钉扎」后，在**同一次会话临界区**内完成
-     * 「校验实例身份 + 持久化基线修订 → 采用合并产物 → 落盘」（`adoptAndSaveIfUnchanged`）。
+     * 「校验实例身份 + 持久化基线修订 → 写预备密文 → 写盘确认后发布采纳合并产物」（`commitPreparedSave`）。
      *
-     * **`NonCancellable` 边界**：只包「钉扎复核 → 采用 → 落盘」这一极小临界区——读盘、解析、
+     * **`NonCancellable` 边界**：只包「钉扎复核 → 校验 → 落盘 → 发布」这一极小临界区——读盘、解析、
      * 三方合并、裁决与 `mergeCommitGate` 均在**区外**（取消照常生效）。钉扎复核由区外移入区内，
      * 是因为「进 `withContext` 前的调度切换」会给「窗口内再次外部改写」留缝。
-     * 采纳与落盘合成一次取锁，消除「adopt 后释放锁 → 换库 → save 写到后来会话」的窗口。
+     * 校验与落盘合成一次取锁，消除「校验后释放锁 → 换库 → save 写到后来会话」的窗口。
      * 区内的写盘使**取消被推迟到写回返回**（无安全中断中点，有意取舍，与 `SessionOpener.createNew`
      * 同口径）；临界区跑完后取消才传播，此调用可能以 `CancellationException` 收场，
      * 但磁盘与内存已同处合并后状态，提示按成败清除 / 重建，不产生分叉。
@@ -312,7 +312,7 @@ internal class VaultFileDriftResolve(
     }
 
     /**
-     * 提交临界区（`ISSUE-P1-631`）：`NonCancellable` 内的元数据复核 → 采用 → 落盘，失败按
+     * 提交临界区（`ISSUE-P1-631`）：`NonCancellable` 内的元数据复核 → 校验资格 → 落盘 → 发布采纳，失败按
      * 「会话已变 / 落盘失败」分型如实上报。边界论证见 [adoptAndPersist] 的 KDoc。
      */
     private suspend fun commitPreparedMerge(
@@ -347,9 +347,8 @@ internal class VaultFileDriftResolve(
                         )
                     )
                 }
-                // 最小提交临界区：校验实例身份 + 持久化基线修订 → 采用候选 → 写预备密文 → 基线
-                // （同一临界区校验：窗口内确认写盘 / 会话变化 ⇒ fail-closed；预备与提交之间
-                // 会话发生任何确认变更同样 fail-closed，预备密文整份作废清零）
+                // 最小提交临界区：校验实例身份 + 持久化基线修订 → 写预备密文 → 写盘确认后发布采纳候选与基线前移
+                // （ENG-20261028-19 写盘后发布契约：写盘失败不发布采纳、不擦除旧实例、不前移基线）
                 val persist = databaseSession.commitPreparedSave(
                     expectedAtCycleStart = localDb,
                     candidate = replacement,
@@ -360,7 +359,7 @@ internal class VaultFileDriftResolve(
             if (persist is KdbxResult.Success) {
                 driftCoordinator?.clearMergeConflictPrompt()
                 refreshBaseline(pathId, localFile)
-                return@withContext persist
+                return@withContext KdbxResult.Success(Unit)
             }
             restorePromptsAfterCommitFailure(policy, pathId)
             // 校验未通过（实例身份 / 基线修订 / 只读 / 无活动库）与落盘失败要区分如实上报：
@@ -375,7 +374,13 @@ internal class VaultFileDriftResolve(
                     persist.code
                 )
             } else {
-                persist
+                // 落盘失败 / 只读 / 无通道 / 凭据丢失 / 写不确定：原样透出错误对象与错误码
+                // （UI 侧按码映射文案；`commitPreparedSave` 不产生 userText）
+                persist as? KdbxResult.Failure
+                    ?: KdbxResult.Failure(
+                        IllegalStateException("合并提交未成功"),
+                        code = KdbxError.SAVE_FAILED
+                    )
             }
             }
         } finally {
