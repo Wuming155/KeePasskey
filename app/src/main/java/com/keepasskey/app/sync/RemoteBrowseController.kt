@@ -175,7 +175,7 @@ class RemoteBrowseController @Inject constructor(
         val result = provider.listRemoteDirectory(browsePath, cursor = cursor, pageSize = PAGE_SIZE)
         // 配置路径列举失败且非分页续拉时：回退端点根（默认路径），避免「设了远程路径后浏览打不开」
         val effective = if (result.isFailure && cursor == null && browsePath.isNotEmpty()) {
-            debugLog.warn(TAG, "列举 $browsePath 失败，回退默认路径（端点根）")
+            debugLog.warn(TAG, "列举配置路径失败，回退默认路径（端点根）")
             provider.listRemoteDirectory("", cursor = null, pageSize = PAGE_SIZE)
         } else {
             result

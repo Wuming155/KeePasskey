@@ -1,6 +1,8 @@
 package com.keepasskey.app.data.repository
 
+import com.keepasskey.app.testutil.InMemorySharedPreferences
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -16,8 +18,10 @@ class ExtendedSettingsStoreSingleKeyTest {
     private val store = ExtendedSettingsStore(null)
 
     @Test
-    fun `诊断日志默认关闭`() {
-        assertFalse(store.isDiagnosticLogEnabled())
+    fun `诊断日志默认开启`() {
+        assertTrue("稳定版必须默认记录脱敏诊断日志，用户遇到故障才可直接导出", store.isDiagnosticLogEnabled())
+        val emptyPrefs = ExtendedSettingsStore(InMemorySharedPreferences().context())
+        assertTrue("有持久化层但键缺失时同样回落开启", emptyPrefs.isDiagnosticLogEnabled())
     }
 
     @Test

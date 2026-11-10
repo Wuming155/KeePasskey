@@ -241,7 +241,7 @@ internal class BiometricResealCoordinator(
                 null
             }
             is BiometricResult.Error -> {
-                debugLog.warn(TAG, "重封印授权失败: ${authResult.errString}")
+                debugLog.warn(TAG, "重封印授权失败: code=${authResult.errorCode}")
                 null
             }
             is BiometricResult.Failed -> {

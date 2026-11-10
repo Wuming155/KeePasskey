@@ -86,7 +86,11 @@ fun DebugSettingsScreen(
 ) {
     var showExportConfirmDialog by remember { mutableStateOf(false) }
 
-    // 真实进程内调试日志快照（SyncCoordinator / Unlock 等运行时事件），不再使用硬编码演示数据
+    // 进入页面即取一次最新缓冲快照：缓冲只在刷新动作时投影到 UI，若沿用构造期空快照，
+    // 稳定版即使已有日志也会把「导出日志」按钮禁用（导出读的是实时缓冲，按钮是唯一闸门）
+    LaunchedEffect(Unit) { onRefreshLogs() }
+
+    // 真实进程内诊断日志快照（SyncCoordinator / Unlock 等运行时事件），不再使用硬编码演示数据
     val logLines = uiState.debugLogLines
 
     // 断点整改：SAF 另存为——选择目标后交给 ViewModel 真实写盘（此前仅弹假 Snackbar）
@@ -243,7 +247,11 @@ fun DebugSettingsScreen(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(
-                            onClick = { showExportConfirmDialog = true },
+                            onClick = {
+                                // 打开确认框前再刷新一次，按钮的启用判定与导出内容都取最新缓冲
+                                onRefreshLogs()
+                                showExportConfirmDialog = true
+                            },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {

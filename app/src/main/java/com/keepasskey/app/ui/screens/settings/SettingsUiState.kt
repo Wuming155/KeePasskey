@@ -248,7 +248,7 @@ data class SettingsUiState(
     val duplicateIssues: List<HealthIssueUi> = emptyList(),
 
     // 8. 调试日志与系统诊断 (Debug & Diagnostics)
-    val debugLogEnabled: Boolean = false, // KP2A: 启用调试日志
+    val debugLogEnabled: Boolean = true, // 诊断日志默认开启（写入即脱敏）；首帧与持久化缺省一致
     val debugLogLines: List<String> = emptyList(), // KP2A: 进程内真实调试日志环形缓冲快照
     val verboseSyncLog: Boolean = false, // KP2A: 详细同步与网络日志
     // ISSUE-P3-512（照 ISSUE-P3-126③ 先例）：此处原有 `debugLogRecordsCount: Int = 128`

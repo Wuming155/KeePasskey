@@ -251,7 +251,7 @@ internal class BiometricEnrollmentCoordinator(
                 null
             }
             is BiometricResult.Error -> {
-                debugLog.warn(TAG, "生物识别登记失败: ${authResult.errString}")
+                debugLog.warn(TAG, "生物识别登记失败: code=${authResult.errorCode}")
                 null
             }
             is BiometricResult.Failed -> {

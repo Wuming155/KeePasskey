@@ -7,8 +7,11 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * DebugLogBuffer 脱敏导出单元测试（断点整改：导出真实化）。
- * 兑现设置页 UI 承诺：导出前自动移除账号名与网址字段。
+ * [DebugLogBuffer] 写入即脱敏的行为用例。
+ *
+ * 稳定版也会把运行事件写入可导出的缓冲，因此脱敏不再只是「导出前的清理」：缓冲快照、
+ * 设置页预览、logcat 直出与导出文件必须同源，全部只含脱敏文本。导出边界的二次脱敏
+ * 是幂等的第二道防线。
  */
 class DebugLogBufferTest {
 
@@ -52,9 +55,69 @@ class DebugLogBufferTest {
     }
 
     @Test
-    fun `exportText 不做脱敏仅进程内预览使用`() {
+    fun `写入时即脱敏，快照与预览均不含网址与账号`() {
+        buffer.info(
+            "SyncCoordinator",
+            "同步完成: https://dav.example.com/remote.php/file.kdbx，账号 user.name@example.com"
+        )
+        val line = buffer.snapshot().single()
+        assertFalse("缓冲内不得残留 URL 主机", line.contains("dav.example.com"))
+        assertFalse("缓冲内不得残留邮箱", line.contains("user.name@example.com"))
+        assertTrue(line.contains("<redacted-url>"))
+        assertTrue(line.contains("<redacted-account>"))
+        assertFalse("进程内预览同源", buffer.exportText().contains("dav.example.com"))
+    }
+
+    @Test
+    fun `进程内预览文本同样是脱敏文本`() {
         buffer.info("T", "host https://keep.example.com")
-        assertTrue(buffer.exportText().contains("https://keep.example.com"))
+        assertFalse(buffer.exportText().contains("keep.example.com"))
+        assertTrue(buffer.exportText().contains("<redacted-url>"))
+    }
+
+    @Test
+    fun `审计通道同样写入即脱敏`() {
+        buffer.audit("ExportAudit", "导出审计: 目标=https://dav.example.com/vault.kdbx")
+        assertFalse(buffer.exportText().contains("dav.example.com"))
+        assertTrue(buffer.exportText().contains("<redacted-url>"))
+    }
+
+    @Test
+    fun `结构化标识在写入时统一移除`() {
+        val cases = listOf(
+            RedactionCase(
+                "SAF 目标 Uri",
+                "读取失败: content://com.android.providers.downloads.documents/document/我的工作库.kdbx",
+                listOf("com.android.providers", "我的工作库.kdbx"),
+                "<redacted-url>"
+            ),
+            RedactionCase("裸主机名", "探测 nas.example.com 超时", listOf("nas.example.com"), "<redacted-host>"),
+            RedactionCase("IPv4", "连接 192.168.1.10 失败", listOf("192.168.1.10"), "<redacted-host>"),
+            RedactionCase("库文件名", "打开 私人库.kdbx 失败", listOf("私人库.kdbx"), "<redacted-file>"),
+            RedactionCase("密钥文件名", "密钥文件 vault.keyx 不可读", listOf("vault.keyx"), "<redacted-file>"),
+            RedactionCase("密值赋值", "请求失败 token=abc123def", listOf("abc123def"), "<redacted-secret>")
+        )
+        cases.forEach { case ->
+            val caseBuffer = DebugLogBuffer()
+            caseBuffer.info("T", case.message)
+            val line = caseBuffer.snapshot().single()
+            case.leaked.forEach { leaked ->
+                assertFalse("${case.name} 不得残留 $leaked：$line", line.contains(leaked))
+            }
+            assertTrue("${case.name} 应带脱敏占位符：$line", line.contains(case.marker))
+        }
+    }
+
+    @Test
+    fun `异常类型等定位信息不被脱敏规则误伤`() {
+        buffer.error(
+            "Unlock",
+            "解锁失败: java.lang.IllegalStateException, KdbxInvalidCredentialsException, invalidCreds=true"
+        )
+        val line = buffer.snapshot().single()
+        assertTrue(line.contains("java.lang.IllegalStateException"))
+        assertTrue(line.contains("KdbxInvalidCredentialsException"))
+        assertTrue(line.contains("invalidCreds=true"))
     }
 
     @Test
@@ -74,9 +137,20 @@ class DebugLogBufferTest {
     }
 
     @Test
-    fun `脱敏导出后缓冲本体不受影响`() {
+    fun `导出二次脱敏幂等且不改写缓冲本体`() {
         buffer.info("T", "https://keep.example.com/path")
-        buffer.exportSanitizedText()
-        assertTrue("缓冲内原始行应保留（脱敏仅作用于导出副本）", buffer.exportText().contains("https://keep.example.com/path"))
+        val before = buffer.exportText()
+        val exported = buffer.exportSanitizedText()
+        assertEquals("导出不得改写缓冲", before, buffer.exportText())
+        assertEquals(before, exported)
+        assertEquals(exported, buffer.exportSanitizedText())
+        assertTrue(exported.contains("<redacted-url>"))
     }
+
+    private data class RedactionCase(
+        val name: String,
+        val message: String,
+        val leaked: List<String>,
+        val marker: String
+    )
 }

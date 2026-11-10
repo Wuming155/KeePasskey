@@ -28,7 +28,7 @@ import org.junit.Test
  * 现口径收敛为「异常类名 + 布尔判定」，与仓内其它调用点一致
  * （例：`SafKeyFileAccess`「仅留痕异常类名，不外传 Uri / 异常 message」）。
  *
- * 断言直接面向 [DebugLogBuffer.exportText]（导出文本），即缺陷的实际暴露面。
+ * 断言直接面向 [DebugLogBuffer.exportText]（缓冲文本，写入时即已脱敏），即缺陷的实际暴露面。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class UnlockFailureLogSanitizationTest {
@@ -79,9 +79,9 @@ class UnlockFailureLogSanitizationTest {
         )
     }
 
-    /** 导出前脱敏通道同样不得含库 id（URL/邮箱脱敏不覆盖库 id，故须源头不写入） */
+    /** 写入时与导出时的脱敏都不覆盖库 id，故须源头不写入 */
     @Test
-    fun `导出脱敏文本同样不含库 id`() = runTest {
+    fun `脱敏导出文本同样不含库 id`() = runTest {
         val debugLog = DebugLogBuffer()
         val viewModel = createFailingViewModel(debugLog)
 

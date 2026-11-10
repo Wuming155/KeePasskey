@@ -156,7 +156,8 @@ class ExportConfirmationPolicyTest {
     fun `目标脱敏只保留 scheme 与 authority 并剥离文件名`() {
         val marker = ExportAuditSanitizer.targetMarker(SENSITIVE_TARGET)
 
-        assertTrue(marker.startsWith("content://$DOWNLOAD_PROVIDER"))
+        assertTrue(marker.startsWith("content:$DOWNLOAD_PROVIDER"))
+        assertFalse("脱敏标识不得写成可导航 URI（会被通用脱敏规则整体吞掉）", marker.contains("://"))
         assertTrue(marker.contains("#"))
         assertFalse("脱敏标识不得包含文件名", marker.contains("MySecretVault"))
         assertFalse("脱敏标识不得包含目录名", marker.contains("Download"))

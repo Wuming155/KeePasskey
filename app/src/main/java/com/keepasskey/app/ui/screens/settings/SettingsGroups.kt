@@ -19,7 +19,6 @@ import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
-import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.theme.LocalSecurityColors
 
@@ -55,8 +54,7 @@ internal class SettingsGroupRow(val content: @Composable () -> Unit)
 /**
  * 一个设置分组：分组标题资源（**可空**，`null` 表示不渲染分组标题）+ 行列表。
  *
- * `ISSUE-P3-468` F 项：release 构建下「开发者调试」隐藏、「系统」组仅剩「关于」单条目时，
- * 不渲染分组标题，让「关于」独立成卡（Material 指南不建议单条目分组）。
+ * 标题可空是渲染能力（单条目分组可不显示标题），当前所有分组都带标题。
  */
 internal class SettingsGroupSpec(
     @StringRes val headerRes: Int?,
@@ -78,10 +76,7 @@ internal fun SettingsGroup(@StringRes headerRes: Int?, rows: List<SettingsGroupR
     }
 }
 
-/**
- * 全部分组（顺序＝渲染顺序）；`BuildConfig.DEBUG` 只决定系统组是否含「调试」行、
- * 以及是否渲染「系统」组标题（`ISSUE-P3-468` F 项：release 下仅「关于」时标题省略、独立成卡）。
- */
+/** 全部分组（顺序＝渲染顺序）；诊断日志入口对所有构建类型可见，稳定版同样可导出脱敏日志。 */
 @Composable
 internal fun settingsGroups(uiState: SettingsUiState, actions: SettingsActions): List<SettingsGroupSpec> =
     listOf(
@@ -247,24 +242,20 @@ private fun displayGroup(actions: SettingsActions): SettingsGroupSpec = Settings
 private fun systemGroup(uiState: SettingsUiState, actions: SettingsActions): SettingsGroupSpec {
     val securityColors = LocalSecurityColors.current
     return SettingsGroupSpec(
-        // ISSUE-P3-468 F：release 构建「调试」行隐藏后本组仅剩「关于」单条目 —— 不渲染组标题，
-        // 「关于」独立成卡（Material 不建议单条目分组）；debug 构建维持「系统」标题 + 两行
-        headerRes = if (BuildConfig.DEBUG) R.string.set_section_system else null,
+        headerRes = R.string.set_section_system,
         rows = buildList {
-            // ISSUE-P3-413：诊断日志入口仅 debug 构建露出（release 日志缓冲恒空、导出恒禁用）
-            if (BuildConfig.DEBUG) {
-                add(
-                    SettingsGroupRow {
-                        ModernSettingsRow(
-                            icon = Icons.Default.BugReport,
-                            iconTint = securityColors.warning,
-                            title = stringResource(R.string.debug_title),
-                            subtitle = stringResource(R.string.set_debug_entry_sub),
-                            onClick = actions.onNavigateToDebug
-                        )
-                    }
-                )
-            }
+            // 稳定版同样露出：诊断日志默认开启且写入即脱敏，用户可导出日志反馈问题
+            add(
+                SettingsGroupRow {
+                    ModernSettingsRow(
+                        icon = Icons.Default.BugReport,
+                        iconTint = securityColors.warning,
+                        title = stringResource(R.string.debug_title),
+                        subtitle = stringResource(R.string.set_debug_entry_sub),
+                        onClick = actions.onNavigateToDebug
+                    )
+                }
+            )
             add(
                 SettingsGroupRow {
                     ModernSettingsRow(

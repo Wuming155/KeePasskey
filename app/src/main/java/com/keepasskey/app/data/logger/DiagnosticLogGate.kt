@@ -1,6 +1,5 @@
 package com.keepasskey.app.data.logger
 
-import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import dagger.Module
 import dagger.Provides
@@ -19,6 +18,10 @@ import javax.inject.Singleton
  * - **普通诊断事件**（info/warn/error/debug）受本闸门约束，关闭后不进入环形缓冲；
  * - **导出审计**（[DebugLogBuffer.audit]）不受约束——「导出治理」验收基线要求审计留痕
  *   必须可核验，不能因用户关闭诊断日志而静默丢失，故走独立通道。
+ *
+ * 稳定版同样记录：日志在写入时即经 [DiagnosticLogRedactor] 脱敏，且缓冲只驻留内存，
+ * 故不再以构建类型禁用记录（原 release 恒关会让用户无法导出任何故障信息）。开关默认开启，
+ * 用户可在设置页随时关闭；v/d 级 logcat 调试输出仍由 `AppLog.debugEnabled` 与 R8 独立门控。
  */
 fun interface DiagnosticLogGate {
     /** true = 允许记录诊断事件 */
@@ -42,22 +45,20 @@ fun interface DiagnosticLogGate {
  * 注：`verboseSyncLog`（详细同步日志）不需要独立闸门——它是**同步编排器私有**的
  * 日志详细度，由 `SyncCoordinator` 直接从 [ExtendedSettingsStore] 单键读取即可，
  * 少一层间接依赖。
- *
- * ISSUE-P3-56 子项 1：**release 下强制关闭**。诊断事件可能承载子库别名 / 异常 message 等
- * 非凭据 PII，释放版不得落盘，故闸门恒以 [BuildConfig.DEBUG] 为前提；release 下用户偏好开关
- * 不再具备开启能力（debug 版保留原有偏好语义与可观测性）。
  */
 @Module
 @InstallIn(SingletonComponent::class)
 object DiagnosticLogModule {
 
+    /** 唯一消费点就是用户的诊断日志偏好；不区分构建类型，稳定版与调试版行为一致。 */
     @Provides
     @Singleton
     fun provideDiagnosticLogGate(store: ExtendedSettingsStore): DiagnosticLogGate =
-        DiagnosticLogGate { BuildConfig.DEBUG && store.isDiagnosticLogEnabled() }
+        DiagnosticLogGate { store.isDiagnosticLogEnabled() }
 
     /**
      * §411 取证桥：生产 DebugLogBuffer 开启 logcat 直出（真机取证 `adb logcat -s KpLog`）。
+     * 稳定版同样开启——输出的是写入时已脱敏的行，且 release 的 R8 只剥离 v/d，i 级保留。
      * 由 @Provides 承载（构造器拒绝 Boolean 依赖——与 KeyFileVaultCopyStore 的 Hilt 教训同源）；
      * 纯 JVM 单测的便捷构造不走此提供方法，echo 恒 false。
      */

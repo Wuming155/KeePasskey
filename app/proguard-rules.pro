@@ -190,6 +190,8 @@
 # 12. 日志剥离（ISSUE-P1-10 / ZT-10；ISSUE-P3-98 修正签名；ENG-20261028-27 诊断栈）
 #     release 直接剥离 verbose/debug 日志调用点（AppLog.v/d 与框架 Log.v/d 双重剥离），
 #     因此**只剥 v/d，不剥 i/w/e**——剥掉 i/w/e 会让 release 包在故障时彻底失声。
+#     `DebugLogBuffer` 的 logcat 取证桥也经 `AppLog.i` 输出**写入时已脱敏**的诊断行，
+#     稳定版同样依赖该级别；不得把 i 加入剥离列表。
 #     e/w 的 release 形态由 `AppLog`（core/log/AppLog.kt 的 `diagnostic`）统一产出：调用方
 #     message + 异常**类型**（含 cause 链的类型行）+ **有界栈帧**（`at 类.方法(文件:行号)`，
 #     帧预算 32、cause 链上限 4 层，超出分别标注 `... N more` / `... cause chain truncated`）；

@@ -46,8 +46,8 @@ internal class SettingsExportController(
     val debugExportFeedback: StateFlow<UiMessage?> = debugExportFeedbackFlow.asStateFlow()
 
     /**
-     * 断点整改：真实导出调试日志——内容经脱敏（移除网址与账号字段）后写入 SAF 目标 Uri。
-     * [targetUri] 由 Screen 层 CreateDocument 选择器产生；此前导出仅弹 Snackbar，从未落盘。
+     * 真实导出诊断日志——写入 SAF 目标 Uri。缓冲行在记录时已脱敏，导出边界再脱敏一次；
+     * 稳定版与调试版内容同源，[targetUri] 由 Screen 层 CreateDocument 选择器产生。
      */
     fun exportDebugLogs(targetUri: Uri) {
         val resolver = appContext?.contentResolver
@@ -425,6 +425,8 @@ internal object ExportAuditSanitizer {
     private const val DIGEST_HEX_LENGTH = 8
     private const val UNKNOWN_TARGET = "<unknown>"
     private const val SCHEME_SEPARATOR = "://"
+    /** 输出标识用单冒号：刻意不构成合法 URI，避免被诊断日志的通用 URI 脱敏规则当成待清洗目标 */
+    private const val MARKER_SCHEME_SEPARATOR = ":"
     private const val MARKER_SEPARATOR = "#"
     private const val HEX_DIGITS = "0123456789abcdef"
     private const val NIBBLE_BITS = 4
@@ -433,7 +435,7 @@ internal object ExportAuditSanitizer {
     /** 无符号字节掩码：取字节的**全部 8 bit**（ISSUE-P3-89，替代原先的低 4 bit 截断） */
     private const val BYTE_MASK = 0xFF
 
-    /** 生成形如 content://provider.authority#1a2b3c4d 的脱敏标识 */
+    /** 生成形如 content:provider.authority#1a2b3c4d 的脱敏标识（刻意不写成 `://`） */
     fun targetMarker(rawTarget: String): String {
         val trimmed = rawTarget.trim()
         if (trimmed.isEmpty()) return UNKNOWN_TARGET
@@ -441,7 +443,7 @@ internal object ExportAuditSanitizer {
         val authority = trimmed.substringAfter(SCHEME_SEPARATOR, "")
             .substringBefore('/')
             .substringBefore('?')
-        val prefix = if (scheme.isEmpty()) "" else "$scheme$SCHEME_SEPARATOR"
+        val prefix = if (scheme.isEmpty()) "" else "$scheme$MARKER_SCHEME_SEPARATOR"
         return "$prefix$authority$MARKER_SEPARATOR${shortDigest(trimmed)}"
     }
 

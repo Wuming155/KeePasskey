@@ -1,5 +1,8 @@
 package com.keepasskey.app.data.logger
 
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
+import com.keepasskey.app.testutil.InMemorySharedPreferences
+import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,6 +13,7 @@ import org.junit.Test
  *
  * 验收要点：设置页「诊断日志」开关必须**真实生效**——关闭后普通诊断事件不再进入缓冲；
  * 同时导出审计留痕（ISSUE-P2-10 治理要求）不得被该用户偏好静默关闭。
+ * 生产闸门不得再按构建类型把稳定版恒关，否则用户无法导出任何故障信息。
  */
 class DiagnosticLogGateTest {
 
@@ -75,5 +79,15 @@ class DiagnosticLogGateTest {
         assertEquals(2, buffer.snapshot().size)
         assertFalse(buffer.snapshot().first().contains("[AUDIT]"))
         assertTrue(buffer.snapshot().last().contains("[AUDIT]"))
+    }
+
+    @Test
+    fun `生产闸门跟随用户偏好且不受构建类型限制`() {
+        val store = ExtendedSettingsStore(InMemorySharedPreferences().context())
+        val gate = DiagnosticLogModule.provideDiagnosticLogGate(store)
+
+        assertTrue("默认必须允许记录脱敏诊断日志，稳定版才能导出", gate.isEnabled())
+        store.save(ExtendedSettings(debugLogEnabled = false))
+        assertFalse("用户关闭后闸门须立即关闭", gate.isEnabled())
     }
 }

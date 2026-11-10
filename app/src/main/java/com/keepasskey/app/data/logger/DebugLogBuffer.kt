@@ -5,9 +5,17 @@ import java.time.format.DateTimeFormatter
 import javax.inject.Singleton
 
 /**
- * 进程内调试日志环形缓冲（Kp2a 调试日志系统的本地优先轻量实现）。
- * 铁律：只允许记录非敏感运行时事件（同步结果、解锁成败、状态迁移），
- * 严禁调用方把主密码、密钥、凭据等敏感明文写入本缓冲。
+ * 进程内诊断日志环形缓冲（Kp2a 调试日志系统的本地优先轻量实现）。
+ *
+ * 稳定版与调试版共用本缓冲：用户遇到故障后必须能导出日志向开发者反馈，故 release 不再
+ * 恒关。**所有行在写入时经 [DiagnosticLogRedactor] 脱敏**，缓冲、设置页预览、logcat 直出
+ * 与导出文件同源，均不含 URL、账号、主机、库/密钥文件名等标识；导出边界再脱敏一次。
+ * 缓冲只驻留内存、进程结束即消失；logcat 直出写系统日志缓冲（不写应用文件），落盘只发生在
+ * 用户主动选择导出位置时。
+ *
+ * 铁律：调用方只允许写入非敏感运行时事件（同步结果、解锁成败、状态迁移），且只留异常
+ * **类型**、布尔判定与计数，绝不写入主密码、密钥、用户字段、库别名或异常 message。
+ * 正则无法识别任意自然语言中的敏感内容，源头卫生是第一道防线。
  *
  * ISSUE-P3-03 (43f) 接线：设置页「诊断日志」开关（`ExtendedSettings.debugLogEnabled`）
  * 经 [DiagnosticLogGate] 真实约束普通诊断事件的写入——关闭时 [log] 直接丢弃，
@@ -34,7 +42,7 @@ class DebugLogBuffer(
     /**
      * §411 取证桥：logcat 直出开关（生产 DI 恒 true；纯 JVM 单测构造恒 false——
      * 平台 Log 类在 JVM 不存在）。输出内容与缓冲行**同源同约束**（先过诊断闸门，
-     * 同受「仅非敏感事件」铁律），使真机取证可直接 `adb logcat -s KpLog`。
+     * 写入时已脱敏），使真机取证可直接 `adb logcat -s KpLog`。
      */
     internal var logcatEchoEnabled: Boolean = false
 
@@ -62,11 +70,19 @@ class DebugLogBuffer(
 
     fun clear() = synchronized(lock) { lines.clear() }
 
+    /** 进程内预览文本：与导出同源，同样只含写入时已脱敏的行 */
     fun exportText(): String = synchronized(lock) { lines.joinToString("\n") }
+
+    /** 导出边界的第二道防线：规则幂等，对写入时已脱敏的行重复调用不改变内容 */
+    fun exportSanitizedText(): String = synchronized(lock) {
+        DiagnosticLogRedactor.redact(lines.joinToString("\n"))
+    }
 
     private fun append(level: String, tag: String, message: String) {
         val timestamp = LocalTime.now().format(TS_FORMAT)
-        val line = "[$timestamp] [$level] [$tag] $message"
+        // 写入即脱敏：整行（含 tag）过一遍规则，不留任何「导出前才清理」的窗口。
+        // 导出边界的二次脱敏是幂等的第二道防线，不依赖本调用点的历史正确性。
+        val line = DiagnosticLogRedactor.redact("[$timestamp] [$level] [$tag] $message")
         synchronized(lock) {
             lines.addLast(line)
             while (lines.size > MAX_LINES) {
@@ -74,23 +90,11 @@ class DebugLogBuffer(
             }
         }
         if (logcatEchoEnabled) {
-            // 取证桥（§411）：内容与缓冲同源（已受「仅非敏感事件」铁律约束）；
-            // 经统一包装器 AppLog 输出（生产源码不得直引平台 Log 类，由
-            // `tools/doc/check_message_not_in_user_text.py` 等静态扫描约束；
-            // AppLog.safe 自带 JVM fail-safe）
+            // 取证桥（§411）：内容与缓冲同源；经统一包装器 AppLog 输出（生产源码不得直引
+            // 平台 Log 类；AppLog.safe 自带 JVM fail-safe）。release 保留 i 级输出，
+            // 故稳定版同样可经 adb logcat 取得脱敏诊断行。
             com.keepasskey.core.log.AppLog.i(LOGCAT_TAG, line)
         }
-    }
-
-    /**
-     * 断点整改：脱敏导出——兑现设置页「导出前自动移除账号名与网址字段」的 UI 承诺。
-     * 缓冲按契约只记录非敏感运行时事件，但异常/结果消息可能带出主机地址或账号，
-     * 导出前统一做确定性脱敏：先整体移除 URL（内部可能嵌邮箱），再移除独立邮箱。
-     */
-    fun exportSanitizedText(): String = synchronized(lock) {
-        lines.joinToString("\n")
-            .replace(URL_PATTERN, REDACTED_URL)
-            .replace(EMAIL_PATTERN, REDACTED_ACCOUNT)
     }
 
     companion object {
@@ -99,11 +103,5 @@ class DebugLogBuffer(
         private const val MAX_LINES = 500
         private val TS_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
         private const val LOGCAT_TAG = "KpLog"
-
-        // 脱敏规则：URL 须先于邮箱处理（避免 URL 内嵌邮箱被二次匹配后残留 scheme 碎片）
-        private val URL_PATTERN = Regex("https?://\\S+")
-        private val EMAIL_PATTERN = Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}")
-        private const val REDACTED_URL = "<redacted-url>"
-        private const val REDACTED_ACCOUNT = "<redacted-account>"
     }
 }

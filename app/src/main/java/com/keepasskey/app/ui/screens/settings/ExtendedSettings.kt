@@ -108,8 +108,9 @@ data class ExtendedSettings(
     // 关闭态健康度扫描不发起任何网络请求，「已泄露密码」指标无值（不回显 0）
     val breachCheckEnabled: Boolean = false,
 
-    // 调试日志
-    val debugLogEnabled: Boolean = false,
+    // 诊断日志：稳定版默认开启（写入即脱敏、仅内存缓冲），用户遇到故障可直接导出反馈；
+    // 关闭后普通诊断事件不再进入缓冲，导出审计走独立通道不受影响
+    val debugLogEnabled: Boolean = true,
     val verboseSyncLog: Boolean = false,
 
     // ISSUE-P3-444：界面偏好组（自竞品对照 G14 登记）。两个字段刻意追加在**末尾**——

@@ -219,10 +219,11 @@ class ExtendedSettingsStore @Inject constructor(
      *
      * 供 [com.keepasskey.app.data.logger.DiagnosticLogGate] 在每次日志写入时求值，
      * 因此只读单个布尔键，不做全字段反序列化（避免为一行日志构造整个偏好对象）。
-     * 无持久化层（纯 JVM 单测注入 null 上下文）时按关闭处理，与默认值一致。
+     * 缺省值与 [ExtendedSettings.debugLogEnabled] 一致：默认开启，稳定版也能导出脱敏日志；
+     * 无持久化层（纯 JVM 单测注入 null 上下文）时同样按默认开启处理。
      */
     fun isDiagnosticLogEnabled(): Boolean =
-        prefs?.getBoolean(K_DEBUG_LOG_ENABLED, false) ?: false
+        prefs?.getBoolean(K_DEBUG_LOG_ENABLED, true) ?: true
 
     /**
      * ISSUE-P3-03 (43f)：详细同步日志开关单键读取（同 [isDiagnosticLogEnabled] 的轻量语义）。

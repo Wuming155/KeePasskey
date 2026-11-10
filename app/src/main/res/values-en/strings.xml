@@ -788,8 +788,8 @@
     <string name="set_section_system">System</string>
     <string name="set_totp_entry_title">Two-factor (TOTP) settings</string>
     <string name="set_totp_entry_sub">Manage OTP algorithm, period and refresh policy</string>
-    <string name="debug_title">Developer diagnostics</string>
-    <string name="set_debug_entry_sub">Inspect internal state and diagnostics</string>
+    <string name="debug_title">Diagnostics &amp; logs</string>
+    <string name="set_debug_entry_sub">View app events and export redacted logs for support</string>
     <string name="set_about_entry_sub">Version %1$s</string>
     <!-- ISSUE-P2-520: %1$s = cloud old-version note (sync-bound vaults only) / %2$s = .bak cleanup-failed note; empty when absent -->
     <string name="set_master_key_updated">Master password updated, encryption key re-derived%1$s%2$s</string>
@@ -1289,10 +1289,10 @@
     <string name="autofill_save_blacklist_dialog_title">Manage "never ask to save" list</string>
     <string name="autofill_save_blacklist_dialog_desc">Apps on this list will never be asked about saving passwords and no credential will be written. This list is independent from the autofill blacklist above — existing credentials can still be filled for these apps.</string>
 
-    <!-- ===== Developer diagnostics subscreen ===== -->
+    <!-- ===== Diagnostics and logs subscreen ===== -->
     <string name="debug_section_options">Diagnostics</string>
     <string name="debug_log_title">Diagnostic log</string>
-    <string name="debug_log_sub">Internal runtime events, never containing sensitive plaintext</string>
+    <string name="debug_log_sub">Runtime events, redacted as they are written; you can turn this off</string>
     <string name="debug_verbose_title">Verbose logging</string>
     <string name="debug_verbose_sub">Emit finer-grained details for troubleshooting</string>
     <string name="debug_preview_title">Log preview</string>
@@ -1305,9 +1305,9 @@
     <string name="debug_export_failed">Log export failed, please retry</string>
     <string name="debug_clear_btn">Clear log</string>
     <string name="debug_export_dialog_title">Export diagnostic log</string>
-    <string name="debug_export_dialog_desc">A system save dialog will open to choose the destination; the log is sanitized before export (URLs and account names stripped) and contains no passwords or keys</string>
+    <string name="debug_export_dialog_desc">A system save dialog will open to choose the destination. URLs, account names, hosts and file names are stripped when events are recorded, and the export is redacted again. No passwords or keys are included.</string>
     <string name="debug_export_confirm_btn">Confirm export</string>
-    <string name="debug_privacy_desc">Logs stay on this device; account names and URLs are stripped before export</string>
+    <string name="debug_privacy_desc">Logs live only in app memory and disappear when the process ends; both recording and export are redacted, and you can turn recording off above.</string>
 
     <!-- ===== Password health check subscreen ===== -->
     <string name="health_total_score">Overall health score</string>

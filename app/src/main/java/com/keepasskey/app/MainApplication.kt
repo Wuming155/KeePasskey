@@ -115,7 +115,9 @@ class MainApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         // ISSUE-P1-10 (ZT-10)：统一日志包装器调试开关——debug 构建开放 v/d 与完整异常堆栈，
-        // release 保持关闭（AppLog.e/w 自动脱敏，R8 另行剥离 v/d 调用点）
+        // release 保持关闭（AppLog.e/w 自动脱敏，R8 另行剥离 v/d 调用点）。
+        // 应用内诊断缓冲不由此开关控制：默认开启、写入即脱敏，稳定版也可导出；
+        // 其 logcat 直出走 AppLog.i，同样不受 v/d 门控影响。
         AppLog.debugEnabled = BuildConfig.DEBUG
         // ISSUE-P3-459 续：灌应用内语言**启动种子**——SharedPreferences 冷读 1~5ms、早于任何首帧渲染，
         // 后续所有语言读取（Compose 首帧 / StringsProvider / 非 UI 装配点）都退化为一次 volatile 读，

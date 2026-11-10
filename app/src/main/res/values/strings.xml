@@ -800,8 +800,8 @@
     <string name="set_section_system">系统</string>
     <string name="set_totp_entry_title">双重认证 (TOTP) 设置</string>
     <string name="set_totp_entry_sub">管理验证码算法、周期与刷新策略</string>
-    <string name="debug_title">开发者调试</string>
-    <string name="set_debug_entry_sub">查看内部运行状态与诊断信息</string>
+    <string name="debug_title">诊断与日志</string>
+    <string name="set_debug_entry_sub">查看运行事件，导出脱敏日志反馈问题</string>
     <string name="set_about_entry_sub">版本 %1$s</string>
     <!-- ISSUE-P2-520：占位 %1$s＝云端旧版本说明（仅同步库）/ %2$s＝.bak 删除失败说明，缺席时为空串，渲染与旧口径一致 -->
     <string name="set_master_key_updated">主密码已更新，加密密钥已重新派生%1$s%2$s</string>
@@ -1343,10 +1343,10 @@
     <string name="autofill_save_blacklist_dialog_title">管理「不再提示保存」名单</string>
     <string name="autofill_save_blacklist_dialog_desc">名单中的应用在提交表单后不再询问是否保存密码，也不会写入任何凭据；该名单与上方的填充黑名单相互独立——仍可正常为这些应用填充已有凭据。</string>
 
-    <!-- ===== 开发者调试子页 (DebugSettingsScreen) ===== -->
+    <!-- ===== 诊断与日志子页 (DebugSettingsScreen) ===== -->
     <string name="debug_section_options">诊断选项</string>
     <string name="debug_log_title">诊断日志</string>
-    <string name="debug_log_sub">记录应用内部运行事件，不含任何敏感明文</string>
+    <string name="debug_log_sub">记录运行事件；写入时自动脱敏，可随时关闭</string>
     <string name="debug_verbose_title">详细日志模式</string>
     <string name="debug_verbose_sub">输出更细粒度的调试信息，便于定位问题</string>
     <string name="debug_preview_title">日志预览</string>
@@ -1359,9 +1359,9 @@
     <string name="debug_export_failed">日志导出失败，请重试</string>
     <string name="debug_clear_btn">清空日志</string>
     <string name="debug_export_dialog_title">导出诊断日志</string>
-    <string name="debug_export_dialog_desc">确认后将呼起系统保存对话框选择导出位置；导出内容自动脱敏（移除网址与账号字段），不包含密码、密钥等敏感数据</string>
+    <string name="debug_export_dialog_desc">确认后将呼起系统保存对话框选择导出位置。日志在记录时已自动移除网址、账号、主机与文件名等标识，导出内容同样经过脱敏，不含密码与密钥</string>
     <string name="debug_export_confirm_btn">确认导出</string>
-    <string name="debug_privacy_desc">日志仅保存在本机，导出前自动移除账号名与网址字段</string>
+    <string name="debug_privacy_desc">日志仅保存在应用内存中，退出进程即清空；记录与导出均自动脱敏，可在上方关闭记录</string>
 
     <!-- ===== 密码健康检查子页 (HealthCheckScreen) ===== -->
     <string name="health_total_score">综合健康评分</string>
