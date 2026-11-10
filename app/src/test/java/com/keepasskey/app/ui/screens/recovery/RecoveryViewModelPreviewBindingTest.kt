@@ -174,8 +174,33 @@ class RecoveryViewModelPreviewBindingTest {
         assertNull(viewModel.uiState.value.preview)
         assertNull(viewModel.uiState.value.previewBinding)
         assertFalse(viewModel.uiState.value.busy)
+        assertTrue("关闭后迟到的预览不得让对话框重新出现", viewModel.uiState.value.dismissed)
+        assertEquals("关闭不得丢弃真实待处置清单", 1, viewModel.uiState.value.pending.size)
         assertArrayEquals(byteArrayOf(31, 32), official.readBytes())
         assertPayloadEquals(payload, store, pending)
+    }
+
+    @Test
+    fun `关闭本轮对话框后刷新会重新呈现且副本仍保留`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val (store, coordinator) = createCoordinator()
+        val official = createOfficial("refresh-dismiss.kdbx", byteArrayOf(71, 72))
+        val payload = byteArrayOf(73, 74, 75)
+        writeRecovery(store, "refresh-dismiss-vault", official, "Dismiss", payload)
+        coordinator.refresh()
+        val pending = coordinator.pending.value.single()
+        val viewModel = MainDispatcherGuard.track(newViewModel(coordinator))
+
+        assertFalse(viewModel.uiState.value.dismissed)
+        viewModel.keep()
+        assertTrue(viewModel.uiState.value.dismissed)
+        assertEquals(1, viewModel.uiState.value.pending.size)
+        assertPayloadEquals(payload, store, pending)
+
+        viewModel.refresh()
+        assertFalse("刷新发现副本后必须重新呈现对话框", viewModel.uiState.value.dismissed)
+        assertEquals(1, viewModel.uiState.value.pending.size)
+        assertArrayEquals("关闭不得改动正式库", byteArrayOf(71, 72), official.readBytes())
     }
 
     @Test

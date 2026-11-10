@@ -37,7 +37,9 @@ class RecoveryViewModel @Inject constructor(
         val previewText: String? = null,
         val busy: Boolean = false,
         val message: String? = null,
-        val awaitingOverwriteConfirm: Boolean = false
+        val awaitingOverwriteConfirm: Boolean = false,
+        /** 本轮对话框已关闭：副本仍在磁盘，宿主不再呈现；[refresh] 或新 ViewModel 复位。 */
+        val dismissed: Boolean = false
     )
 
     /** 非敏感的预览授权，绑定恢复副本元数据及发起请求的代次。 */
@@ -85,7 +87,8 @@ class RecoveryViewModel @Inject constructor(
                 previewBinding = null,
                 previewText = null,
                 busy = false,
-                awaitingOverwriteConfirm = false
+                awaitingOverwriteConfirm = false,
+                dismissed = false
             )
         }
     }
@@ -210,6 +213,7 @@ class RecoveryViewModel @Inject constructor(
         }
     }
 
+    /** 关闭本轮对话框：副本保留在磁盘，[refresh] 或下次冷启动重新呈现。 */
     fun keep() {
         previewRequestGate.invalidate()
         _uiState.update {
@@ -219,7 +223,8 @@ class RecoveryViewModel @Inject constructor(
                 previewBinding = null,
                 previewText = null,
                 busy = false,
-                awaitingOverwriteConfirm = false
+                awaitingOverwriteConfirm = false,
+                dismissed = true
             )
         }
     }
@@ -237,6 +242,7 @@ class RecoveryViewModel @Inject constructor(
                 previewText = null,
                 busy = false,
                 awaitingOverwriteConfirm = false,
+                dismissed = false,
                 message = message
             )
         }

@@ -89,7 +89,8 @@ fun VaultRecoveryDialogHost(viewModel: RecoveryViewModel) {
         return
     }
 
-    if (state.pending.isEmpty()) return
+    // 本轮已关闭时不再呈现：副本仍在磁盘，refresh() 或下次冷启动会重新发现。
+    if (state.pending.isEmpty() || state.dismissed) return
 
     RecoveryDialog(viewModel = viewModel, state = state)
 }
