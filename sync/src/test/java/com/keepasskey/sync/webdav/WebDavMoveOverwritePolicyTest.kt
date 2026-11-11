@@ -129,4 +129,28 @@ class WebDavMoveOverwritePolicyTest {
         assertTrue(err.message.orEmpty().contains("(HTTP 502)"))
         assertFalse(err.message.orEmpty().contains("拒绝覆盖"))
     }
+
+    @Test
+    fun `兼容写入准入 仅开关开启且双方ETag可核验并一致`() {
+        assertTrue(WebDavMoveOverwritePolicy.canDeleteBeforeMove(true, "e1", "e1"))
+        assertFalse("开关关闭不得删", WebDavMoveOverwritePolicy.canDeleteBeforeMove(false, "e1", "e1"))
+        assertFalse("无预期基线不得删", WebDavMoveOverwritePolicy.canDeleteBeforeMove(true, null, "e1"))
+        assertFalse("空白预期基线不得删", WebDavMoveOverwritePolicy.canDeleteBeforeMove(true, "  ", "e1"))
+        assertFalse("无 ETag 服务器不得删", WebDavMoveOverwritePolicy.canDeleteBeforeMove(true, "e1", ""))
+        assertFalse("重探 ETag 为空不得删", WebDavMoveOverwritePolicy.canDeleteBeforeMove(true, "e1", null))
+        assertFalse("ETag 不一致不得删", WebDavMoveOverwritePolicy.canDeleteBeforeMove(true, "e1", "e2"))
+        assertTrue(
+            "弱 ETag 一致形态按逐字比较",
+            WebDavMoveOverwritePolicy.canDeleteBeforeMove(true, "W/w1", "W/w1")
+        )
+    }
+
+    @Test
+    fun `兼容写入已删除旧文件时文案不得谎称旧文件仍在`() {
+        val err = WebDavMoveOverwritePolicy.protocolErrorFor(
+            overwriteRefusedCode = 409, lastMoveCode = 409, remoteDeleted = true
+        )
+        assertTrue(err.message.orEmpty().contains("云端旧文件已按兼容策略删除"))
+        assertFalse(err.message.orEmpty().contains("远端旧文件未删除"))
+    }
 }

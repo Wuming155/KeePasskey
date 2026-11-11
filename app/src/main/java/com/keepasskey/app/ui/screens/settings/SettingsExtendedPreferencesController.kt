@@ -181,6 +181,9 @@ internal class SettingsExtendedPreferencesController(
 
     fun setWebdavChunkedUpload(enabled: Boolean) = updateExtended { it.copy(webdavChunkedUpload = enabled) }
 
+    fun setWebdavAllowDeleteBeforeMove(enabled: Boolean) =
+        updateExtended { it.copy(webdavAllowDeleteBeforeMove = enabled) }
+
     fun setWebdavChunkSizeMb(sizeMb: Int) = updateExtended { it.copy(webdavChunkSizeMb = sizeMb) }
 
     // ========== KP2A 扩展：TOTP 规范映射 ==========

@@ -10,7 +10,7 @@ import com.keepasskey.sync.model.SyncException
  * 背景：部分服务器对 MOVE 覆盖已有目标报 409/423（仅靠 `Overwrite:T` 不可靠；
  * keepass2android `WebDavStorage.java:235` 注释 + 提交 `9c8ee243` 实证）。
  *
- * 语义（**不以删除正式目标作为覆盖兜底**）：
+ * 默认语义（**不以删除正式目标作为覆盖兜底**）：
  * - 409/423 → 先重探目标元数据做裁决（[refusalGuard]）：
  *   远端 ETag 已漂移 ⇒ 调用方抛 ConflictError（他端并发写入，交上层合并）；
  *   重探失败 ⇒ 如实上抛探测异常（fail-closed）；
@@ -19,7 +19,10 @@ import com.keepasskey.sync.model.SyncException
  * - 412 → ConflictError（ETag 预条件失败），与 409/423 分开报错；
  * - 其它状态码 → ProtocolError（通用 MOVE 失败）。
  *
- * 旧「DELETE 目标 + 无预条件重试」兜底已移除：HTTP/WebDAV 没有原子的「覆盖」原语，
+ * 兼容写入例外：用户显式开启时由 [canDeleteBeforeMove] 判定准入，`WebDavUploadAtomic`
+ * 执行「DELETE 目标 + `Overwrite: F` MOVE」；仍受重探 ETag 约束，且 `Overwrite: F` 拒绝
+ * 覆盖他端在 DELETE 与 MOVE 之间重建的目标。旧「DELETE 目标 + 无预条件重试」兜底
+ * 在默认态已移除：HTTP/WebDAV 没有原子的「覆盖」原语，
  * 删除成功而随后的 MOVE 失败、取消或进程死亡会让正式远端路径缺失，两步之间他端还可重建，
  * 无预条件重试又会静默覆盖该重建结果。宁可如实失败并保留旧文件。
  *
@@ -74,10 +77,32 @@ internal object WebDavMoveOverwritePolicy {
             !currentRemoteEtag.isNullOrBlank() &&
             currentRemoteEtag != expectedEtag
 
-    /** 覆盖被拒且远端未变时的报错文案：明确「未删除远端文件」，用户可据以检查服务器配置 */
-    fun overwriteRefusedMessage(httpCode: Int): String =
-        "WebDAV 原子写入 MOVE 失败：服务器拒绝覆盖已有目标 (HTTP $httpCode)，" +
-            "远端旧文件未删除、临时文件已清理；请确认服务器允许 MOVE 覆盖已有目标 (Overwrite: T) 后重试"
+    /**
+     * 兼容写入（DELETE 正式目标 + `Overwrite: F` MOVE）的准入口径。
+     *
+     * 除用户显式开启外，还要求**双方 ETag 均可核验且一致**：无预期基线（本就是无预条件
+     * 覆盖）或无 ETag 服务器 ⇒ 没有可失效的锁，无法证明删掉的正是本端基线版本，
+     * fail-closed 不删除。重探本身仍由 [refusalGuard] 先判漂移 / 探测失败。
+     */
+    fun canDeleteBeforeMove(
+        enabled: Boolean,
+        expectedEtag: String?,
+        currentRemoteEtag: String?
+    ): Boolean = enabled &&
+        !expectedEtag.isNullOrBlank() &&
+        !currentRemoteEtag.isNullOrBlank() &&
+        currentRemoteEtag == expectedEtag
+
+    /** 覆盖被拒且远端未变时的报错文案：按「旧文件是否已被兼容路径删除」如实表述 */
+    fun overwriteRefusedMessage(httpCode: Int, remoteDeleted: Boolean = false): String =
+        if (remoteDeleted) {
+            "WebDAV 原子写入 MOVE 失败：服务器拒绝覆盖已有目标 (HTTP $httpCode)，" +
+                "云端旧文件已按兼容策略删除，本次临时文件已保留；请重新同步以完成写入"
+        } else {
+            "WebDAV 原子写入 MOVE 失败：服务器拒绝覆盖已有目标 (HTTP $httpCode)，" +
+                "远端旧文件未删除、临时文件已清理；请确认服务器允许 MOVE 覆盖已有目标 " +
+                "(Overwrite: T) 或开启兼容写入开关后重试"
+        }
 
     /** 非预条件、非覆盖冲突时的通用 MOVE 失败文案 */
     fun genericMoveFailureMessage(httpCode: Int): String =
@@ -92,21 +117,29 @@ internal object WebDavMoveOverwritePolicy {
         "WebDAV 原子写入 MOVE 失败：远端已被其他人修改 (HTTP $httpCode)"
 
     /**
-     * 记录一次覆盖被拒日志（不含路径 / 密码等任何用户数据）。
-     * 调用方在抛协议错误之前调用——本路径不删除远端正式目标。
+     * 记录一次覆盖被拒（不含路径 / 密码等任何用户数据）。
+     *
+     * 走 `AppLog.w` 的带异常重载：纯文本 `AppLog.i` 只进 logcat，用户导出的诊断缓冲
+     * 看不到这条决定性事件；异常重载经诊断桥写入类型与栈帧，且不外泄异常 message。
      */
-    fun logOverwriteRefusal(httpCode: Int) {
-        AppLog.i(
-            "WebDavSyncProvider",
+    fun logOverwriteRefusal(httpCode: Int, remoteDeleted: Boolean, error: Throwable) {
+        val message = if (remoteDeleted) {
+            "MOVE 覆盖已有目标返回 HTTP $httpCode，兼容写入未完成：云端旧文件已删除，临时文件保留待重试"
+        } else {
             "MOVE 覆盖已有目标返回 HTTP $httpCode，服务器不支持安全覆盖：保留远端旧文件，仅清理临时文件"
-        )
+        }
+        AppLog.w("WebDavSyncProvider", message, error)
     }
 
-    /** 按最终失败形态构造 ProtocolError */
-    fun protocolErrorFor(overwriteRefusedCode: Int?, lastMoveCode: Int): SyncException.ProtocolError {
+    /** 按最终失败形态构造 ProtocolError；[remoteDeleted] 决定文案不得谎称旧文件仍在 */
+    fun protocolErrorFor(
+        overwriteRefusedCode: Int?,
+        lastMoveCode: Int,
+        remoteDeleted: Boolean = false
+    ): SyncException.ProtocolError {
         val code = overwriteRefusedCode
         return if (code != null) {
-            SyncException.ProtocolError(code, overwriteRefusedMessage(code))
+            SyncException.ProtocolError(code, overwriteRefusedMessage(code, remoteDeleted))
         } else {
             SyncException.ProtocolError(500, genericMoveFailureMessage(lastMoveCode))
         }

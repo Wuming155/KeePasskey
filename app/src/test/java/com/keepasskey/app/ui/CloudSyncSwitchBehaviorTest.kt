@@ -137,6 +137,39 @@ class CloudSyncSwitchBehaviorTest {
         }
     }
 
+    @Test
+    fun `兼容覆盖写入开关默认关闭且开启后由新实例读回仍为开启`() {
+        assertFalse("默认必须关闭（不得静默放松覆盖安全）", ExtendedSettings().webdavAllowDeleteBeforeMove)
+        assertFalse(ExtendedSettingsStore(null).load().webdavAllowDeleteBeforeMove)
+
+        val prefs = InMemorySharedPreferences()
+        ExtendedSettingsStore(prefs.context()).save(
+            ExtendedSettings(webdavAllowDeleteBeforeMove = true)
+        )
+        assertTrue(
+            "用户显式开启后重启不得回弹为关闭",
+            ExtendedSettingsStore(prefs.context()).load().webdavAllowDeleteBeforeMove
+        )
+        assertFalse(
+            "默认快照的设置页回显必须为关闭",
+            project(ExtendedSettings()).webdavAllowDeleteBeforeMove
+        )
+        assertTrue(
+            "设置页回显须取自持久化快照",
+            project(ExtendedSettings(webdavAllowDeleteBeforeMove = true)).webdavAllowDeleteBeforeMove
+        )
+    }
+
+    @Test
+    fun `兼容覆盖写入文案如实告知云端文件短暂消失与并发覆盖风险`() {
+        val zh = stringValue(readSource(ZH_STRINGS), "sync_delete_before_move_sub")
+        val en = stringValue(readSource(EN_STRINGS), "sync_delete_before_move_sub")
+        assertTrue("中文须告知云端文件短暂消失: $zh", zh.contains("短暂消失"))
+        assertTrue("中文须告知多端并发覆盖风险: $zh", zh.contains("多端"))
+        assertTrue("英文须告知 remote file disappears briefly: $en", en.contains("disappears briefly"))
+        assertTrue("英文须告知并发覆盖风险: $en", en.contains("concurrent", ignoreCase = true))
+    }
+
     private fun project(extState: ExtendedSettings): SettingsUiState = buildSettingsUiState(
         userSettings = UserSettings(),
         syncState = SettingsSyncController.SyncUiState(),

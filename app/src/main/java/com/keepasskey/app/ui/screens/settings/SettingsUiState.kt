@@ -279,7 +279,9 @@ data class SettingsUiState(
      */
     val isChangingMasterKey: Boolean = false,
     /** 更换主密钥结果反馈（成功/失败各一条），SettingsContent 经既有 Snackbar 路径展示后清除 */
-    val masterKeyChangeFeedback: UiMessage? = null
+    val masterKeyChangeFeedback: UiMessage? = null,
+    /** WebDAV 覆盖兼容写入（默认关闭）；见 `ExtendedSettings.webdavAllowDeleteBeforeMove` */
+    val webdavAllowDeleteBeforeMove: Boolean = false
 )
 
 /**

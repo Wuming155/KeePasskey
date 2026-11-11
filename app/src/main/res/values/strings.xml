@@ -1112,6 +1112,8 @@
     <string name="sync_section_network">网络安全</string>
     <string name="sync_chunked_title">分块传输</string>
     <string name="sync_chunked_sub">大文件分块上传下载，弱网环境更稳定</string>
+    <string name="sync_delete_before_move_title">兼容拒绝覆盖的 WebDAV 服务器</string>
+    <string name="sync_delete_before_move_sub">坚果云等服务器拒绝覆盖已有文件（409/423）时，先删除云端旧文件再把新文件改名到位。云端文件会短暂消失，多端同时编辑可能覆盖他人修改；仅建议单设备使用时开启</string>
     <string name="sync_zeroknowledge_title">零知识端到端加密</string>
     <string name="sync_zeroknowledge_desc">主密码永不离开本机，云端仅存储 Argon2 加密后的数据块，服务器与网络中间人都无法解密你的密码库</string>
     <string name="sync_credential_auth_notice">同步凭据经 Android Keystore 加密封印（本机实测支持硬件隔离），但封印密钥不绑定生物认证——以确保后台自动同步在锁屏态仍可执行。凭据仅在同步瞬间解封，用毕立即从内存擦除（CharArray 借用语义 + SigV4 派生链全清零），不会以不可变 String 长期驻留</string>

@@ -163,6 +163,7 @@ internal fun NavGraphBuilder.settingsSyncRoute(navController: NavHostController)
             onCheckRemoteChangesToggle = settingsViewModel::setCheckRemoteChangesBeforeSave,
             onConflictResolutionChange = settingsViewModel::setConflictResolution,
             onWebdavChunkedUploadToggle = settingsViewModel::setWebdavChunkedUpload,
+            onWebdavAllowDeleteBeforeMoveToggle = settingsViewModel::setWebdavAllowDeleteBeforeMove,
             browseState = browseState,
             onBrowseWebDav = settingsViewModel::browseWebDav,
             onBrowseS3 = settingsViewModel::browseS3,

@@ -69,4 +69,22 @@ class SyncTransferOptionsTest {
             SyncTransferOptions.DISABLED.chunkSizeBytes
         )
     }
+
+    @Test
+    fun `兼容写入默认关闭且仅经偏好显式开启`() {
+        assertFalse(SyncTransferOptions().allowDeleteBeforeMove)
+        assertFalse(SyncTransferOptions.DISABLED.allowDeleteBeforeMove)
+        assertFalse(
+            SyncTransferOptions.fromPreferences(
+                chunkedUploadEnabled = true, chunkSizeMb = 10
+            ).allowDeleteBeforeMove
+        )
+        assertTrue(
+            SyncTransferOptions.fromPreferences(
+                chunkedUploadEnabled = true,
+                chunkSizeMb = 10,
+                allowDeleteBeforeMove = true
+            ).allowDeleteBeforeMove
+        )
+    }
 }

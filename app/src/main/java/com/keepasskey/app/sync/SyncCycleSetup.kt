@@ -211,7 +211,8 @@ private suspend fun SyncCycleRunner.buildCycleContext(
         "同步周期开始: cached=$isCached, dirty=${databaseSession.state.value}, " +
             "localChange=$localChangeState, 本地文件自上次同步未变=$localFileUnchangedSinceSync, " +
             "远端比对=${settings.checkRemoteChangesBeforeSave}, 冲突策略=$conflictStrategy, " +
-            "分块上传=${settings.webdavChunkedUpload}(${settings.webdavChunkSizeMb}MB)"
+            "分块上传=${settings.webdavChunkedUpload}(${settings.webdavChunkSizeMb}MB), " +
+            "兼容覆盖=${settings.webdavAllowDeleteBeforeMove}"
     )
 
     // 1. 获取本地数据库字节：若无内容变更且已缓存，复用缓存规避 KDBX4 随机 IV 导致的不必要哈希漂移；否则序列化并写缓存

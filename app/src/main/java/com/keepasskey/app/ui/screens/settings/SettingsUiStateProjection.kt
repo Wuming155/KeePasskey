@@ -170,6 +170,7 @@ internal fun buildSettingsUiState(
     conflictResolution = extState.conflictResolution,
     webdavChunkedUpload = extState.webdavChunkedUpload,
     webdavChunkSizeMb = extState.webdavChunkSizeMb,
+    webdavAllowDeleteBeforeMove = extState.webdavAllowDeleteBeforeMove,
 
     // 3. 表单自动填充与 Passkey
     // ISSUE-P2-228：三条通道开关取自持久化的 extState（迁移前来自内存态 AutofillUiState，重启即回弹）

@@ -213,7 +213,8 @@ internal fun FileSafetySection(
 @Composable
 internal fun NetworkOptionsSection(
     uiState: SettingsUiState,
-    onWebdavChunkedUploadToggle: (Boolean) -> Unit
+    onWebdavChunkedUploadToggle: (Boolean) -> Unit,
+    onWebdavAllowDeleteBeforeMoveToggle: (Boolean) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -241,6 +242,14 @@ internal fun NetworkOptionsSection(
                 subtitle = stringResource(R.string.sync_chunked_sub),
                 checked = uiState.webdavChunkedUpload,
                 onCheckedChange = onWebdavChunkedUploadToggle
+            )
+
+            SyncSwitchItem(
+                icon = Icons.Default.Warning,
+                title = stringResource(R.string.sync_delete_before_move_title),
+                subtitle = stringResource(R.string.sync_delete_before_move_sub),
+                checked = uiState.webdavAllowDeleteBeforeMove,
+                onCheckedChange = onWebdavAllowDeleteBeforeMoveToggle
             )
 
             // ISSUE-P3-272：「预加载远程数据库」假开关已移除（PD-39）——无任何生产实现，

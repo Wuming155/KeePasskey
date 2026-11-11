@@ -38,6 +38,7 @@ fun WebDavSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
+    onWebdavAllowDeleteBeforeMoveToggle: (Boolean) -> Unit = {},
     // ISSUE-P3-387：远端目录浏览
     browseState: com.keepasskey.app.sync.RemoteBrowseUiState = com.keepasskey.app.sync.RemoteBrowseUiState.Idle,
     onBrowseWebDav: (url: String, username: String, password: CharArray, remotePath: String, cursor: String?) -> Unit = { _, _, _, _, _ -> },
@@ -79,6 +80,7 @@ fun WebDavSyncScreen(
         onCheckRemoteChangesToggle = onCheckRemoteChangesToggle,
         onConflictResolutionChange = onConflictResolutionChange,
         onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle,
+        onWebdavAllowDeleteBeforeMoveToggle = onWebdavAllowDeleteBeforeMoveToggle,
         browseState = browseState,
         onBrowseWebDav = onBrowseWebDav,
         onBrowseS3 = onBrowseS3,

@@ -92,6 +92,7 @@ fun CloudSyncScreen(
     onCheckRemoteChangesToggle: (Boolean) -> Unit = {},
     onConflictResolutionChange: (ConflictResolution) -> Unit = {},
     onWebdavChunkedUploadToggle: (Boolean) -> Unit = {},
+    onWebdavAllowDeleteBeforeMoveToggle: (Boolean) -> Unit = {},
     // ISSUE-P3-387：远端目录浏览（表单凭据 + 当前路径；选中文件后由宿主回填 remotePath）
     browseState: com.keepasskey.app.sync.RemoteBrowseUiState = com.keepasskey.app.sync.RemoteBrowseUiState.Idle,
     onBrowseWebDav: (url: String, username: String, password: CharArray, remotePath: String, cursor: String?) -> Unit = { _, _, _, _, _ -> },
@@ -444,7 +445,8 @@ fun CloudSyncScreen(
             item {
                 NetworkOptionsSection(
                     uiState = uiState,
-                    onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle
+                    onWebdavChunkedUploadToggle = onWebdavChunkedUploadToggle,
+                    onWebdavAllowDeleteBeforeMoveToggle = onWebdavAllowDeleteBeforeMoveToggle
                 )
             }
 

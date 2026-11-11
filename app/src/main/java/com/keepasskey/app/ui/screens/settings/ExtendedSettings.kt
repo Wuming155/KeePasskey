@@ -118,5 +118,11 @@ data class ExtendedSettings(
     /** 密码 / TOTP 字段用等宽字体展示（默认 true＝既有硬编码行为，收口 [com.keepasskey.app.ui.theme.passwordFieldStyle]）； */
     val monospaceFieldsEnabled: Boolean = true,
     /** 动效降级（默认 false）：关闭转场 / 列表动画，退化为直切（为 HyperOS 2 / Android 15 卡顿机型设）； */
-    val reduceAnimations: Boolean = false
+    val reduceAnimations: Boolean = false,
+    /**
+     * WebDAV 覆盖兼容写入（默认关闭）。服务器拒绝 MOVE 覆盖已有目标（409/423，如坚果云）时，
+     * 允许「删除云端旧文件 + 以 `Overwrite: F` 改名」完成写入。开启即接受云端文件短暂消失
+     * 与多端并发覆盖风险，仅建议单设备使用场景开启；消费方见 `SyncTransferOptions.allowDeleteBeforeMove`。
+     */
+    val webdavAllowDeleteBeforeMove: Boolean = false
 )

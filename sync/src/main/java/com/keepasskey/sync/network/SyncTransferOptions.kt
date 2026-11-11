@@ -16,7 +16,15 @@ data class SyncTransferOptions(
     /** 是否启用分块流式上传 */
     val chunkedUploadEnabled: Boolean = DEFAULT_CHUNKED_UPLOAD_ENABLED,
     /** 单块字节数（恒在 [MIN_CHUNK_SIZE_BYTES]..[MAX_CHUNK_SIZE_BYTES] 闭区间内） */
-    val chunkSizeBytes: Long = DEFAULT_CHUNK_SIZE_MB * BYTES_PER_MIB
+    val chunkSizeBytes: Long = DEFAULT_CHUNK_SIZE_MB * BYTES_PER_MIB,
+    /**
+     * 服务器拒绝 MOVE 覆盖已有目标（HTTP 409/423）时，是否允许
+     * 「DELETE 正式目标 + `Overwrite: F` MOVE」兼容写入。
+     *
+     * 默认关闭：删除正式目标会让云端文件短暂消失，且两步之间存在他端重建后被覆盖的窗口，
+     * 属于需用户显式接受的产品取舍。开启后仍只在重探 ETag 确认远端未漂移时执行。
+     */
+    val allowDeleteBeforeMove: Boolean = DEFAULT_ALLOW_DELETE_BEFORE_MOVE
 ) {
     init {
         require(chunkSizeBytes in MIN_CHUNK_SIZE_BYTES..MAX_CHUNK_SIZE_BYTES) {
@@ -41,6 +49,9 @@ data class SyncTransferOptions(
         /** 分块上传默认关闭：仅用户显式开启后改变传输形态 */
         const val DEFAULT_CHUNKED_UPLOAD_ENABLED = false
 
+        /** 兼容写入默认关闭：保留「拒绝覆盖即如实失败、远端旧文件原样保留」的安全默认 */
+        const val DEFAULT_ALLOW_DELETE_BEFORE_MOVE = false
+
         /** 关闭分块传输、仅承载分块大小的选项（S3 等不使用分块流的协议） */
         val DISABLED: SyncTransferOptions = SyncTransferOptions()
 
@@ -52,10 +63,15 @@ data class SyncTransferOptions(
             sizeMb.coerceIn(MIN_CHUNK_SIZE_MB, MAX_CHUNK_SIZE_MB)
 
         /** 由 app 层偏好组装传输选项（钳制 + 单位换算的唯一入口，杜绝魔法数字外溢） */
-        fun fromPreferences(chunkedUploadEnabled: Boolean, chunkSizeMb: Int): SyncTransferOptions =
+        fun fromPreferences(
+            chunkedUploadEnabled: Boolean,
+            chunkSizeMb: Int,
+            allowDeleteBeforeMove: Boolean = DEFAULT_ALLOW_DELETE_BEFORE_MOVE
+        ): SyncTransferOptions =
             SyncTransferOptions(
                 chunkedUploadEnabled = chunkedUploadEnabled,
-                chunkSizeBytes = clampChunkSizeMb(chunkSizeMb) * BYTES_PER_MIB
+                chunkSizeBytes = clampChunkSizeMb(chunkSizeMb) * BYTES_PER_MIB,
+                allowDeleteBeforeMove = allowDeleteBeforeMove
             )
     }
 }

@@ -1,6 +1,7 @@
 package com.keepasskey.sync.webdav
 
 import com.keepasskey.sync.model.SyncException
+import com.keepasskey.sync.network.SyncTransferOptions
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -31,10 +32,12 @@ import org.junit.Test
  *
  * - **覆盖**：设备回环上 PROPFIND 207 元数据链路、PUT + If-Match 乐观锁、
  *   GET 下载往返、412 → ConflictError、401 → AuthenticationError 的完整请求-响应链路；
+ *   兼容写入开启时 409 → DELETE 正式目标 → `Overwrite: F` MOVE 的事务序列；
  *   并用 `takeRequest()` 断言真实报文（方法 / 头）确从设备发出。
  * - **不覆盖**：真实 TLS 服务器（自签证书信任链行为由 app 层网络策略用例证明，
- *   见 `CleartextPolicyDeviceTest`）；`uploadAtomic` 的 MOVE 事务与回滚
- *   （宿主 `WebDavSyncScenarioTest` 已有全链路覆盖，设备侧重点在传输面）。
+ *   见 `CleartextPolicyDeviceTest`）；`uploadAtomic` 的常规 MOVE 成功路径与全部回滚形态
+ *   （宿主 `WebDavSyncScenarioTest` / `WebDavOverwriteRefusalTest` 已有全链路覆盖，设备侧
+ *   重点在传输面）；真实坚果云服务端到端（需测试专用凭据，不用用户真实库）。
  */
 class WebDavTransferDeviceTest {
 
@@ -195,5 +198,51 @@ class WebDavTransferDeviceTest {
             result.exceptionOrNull() is SyncException.AuthenticationError
         )
         assertEquals("PROPFIND", server.takeRequest().method)
+    }
+
+    @Test
+    fun `设备回环上兼容写入按DELETE后OverwriteF完成MOVE`() = runBlocking {
+        val enabled = WebDavSyncProvider(
+            serverUrl = server.url("/").toString(),
+            username = "device-admin",
+            passwordChars = "device-pass".toCharArray(),
+            transferOptions = SyncTransferOptions(allowDeleteBeforeMove = true),
+            client = plainLoopbackClient
+        )
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"tmp-etag\""))
+        server.enqueue(MockResponse().setResponseCode(409).setBody("destination exists"))
+        server.enqueue(
+            MockResponse().setResponseCode(207).setBody(
+                """<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:propstat><d:prop><d:getetag>"device-etag-1"</d:getetag></d:prop>
+  <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>"""
+            )
+        )
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(201).setHeader("ETag", "\"final-etag\""))
+
+        val result = enabled.uploadAtomic("vault.kdbx", ByteArray(32), expectedEtag = "device-etag-1")
+
+        assertTrue("兼容写入应在设备上成功：${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals("final-etag", result.getOrThrow())
+
+        assertEquals("PUT", server.takeRequest().method)
+        val firstMove = server.takeRequest()
+        assertEquals("MOVE", firstMove.method)
+        assertEquals("T", firstMove.getHeader("Overwrite"))
+        assertTrue(
+            "首试 MOVE 须带 If 预条件",
+            firstMove.getHeader("If")?.contains("device-etag-1") == true
+        )
+        assertEquals("PROPFIND", server.takeRequest().method)
+        val deletion = server.takeRequest()
+        assertEquals("DELETE", deletion.method)
+        assertTrue("DELETE 必须是正式目标", deletion.path?.endsWith("/vault.kdbx") == true)
+        val recovery = server.takeRequest()
+        assertEquals("MOVE", recovery.method)
+        assertEquals("F", recovery.getHeader("Overwrite"))
+        assertTrue("恢复 MOVE 不得带旧 ETag 条件", recovery.getHeader("If") == null)
     }
 }

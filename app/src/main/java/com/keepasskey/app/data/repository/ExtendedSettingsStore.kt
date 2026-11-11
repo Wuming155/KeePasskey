@@ -80,6 +80,9 @@ class ExtendedSettingsStore @Inject constructor(
             ),
             webdavChunkedUpload = p.getBoolean(K_WEBDAV_CHUNKED_UPLOAD, defaults.webdavChunkedUpload),
             webdavChunkSizeMb = p.getInt(K_WEBDAV_CHUNK_SIZE_MB, defaults.webdavChunkSizeMb),
+            webdavAllowDeleteBeforeMove = p.getBoolean(
+                K_WEBDAV_ALLOW_DELETE_BEFORE_MOVE, defaults.webdavAllowDeleteBeforeMove
+            ),
 
             // 安全锁定规则与环境
             // ISSUE-P3-363：lockWhenScreenOff 键已随字段移除（单源 UserSettings/DataStore）
@@ -168,6 +171,7 @@ class ExtendedSettingsStore @Inject constructor(
             .putString(K_CONFLICT_RESOLUTION, settings.conflictResolution.name)
             .putBoolean(K_WEBDAV_CHUNKED_UPLOAD, settings.webdavChunkedUpload)
             .putInt(K_WEBDAV_CHUNK_SIZE_MB, settings.webdavChunkSizeMb)
+            .putBoolean(K_WEBDAV_ALLOW_DELETE_BEFORE_MOVE, settings.webdavAllowDeleteBeforeMove)
             .putBoolean(K_LOCK_WHEN_NAVIGATE_BACK, settings.lockWhenNavigateBack)
             .putBoolean(K_CLEAR_PASSWORD_ON_LEAVE, settings.clearPasswordOnLeave)
             .putBoolean(K_REMEMBER_KEY_FILE_LOCATION, settings.rememberKeyFileLocation)
@@ -386,6 +390,7 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_CONFLICT_RESOLUTION = "conflict_resolution"
         const val K_WEBDAV_CHUNKED_UPLOAD = "webdav_chunked_upload"
         const val K_WEBDAV_CHUNK_SIZE_MB = "webdav_chunk_size_mb"
+        const val K_WEBDAV_ALLOW_DELETE_BEFORE_MOVE = "webdav_allow_delete_before_move"
         const val K_LOCK_WHEN_NAVIGATE_BACK = "lock_when_navigate_back"
         const val K_CLEAR_PASSWORD_ON_LEAVE = "clear_password_on_leave"
         const val K_REMEMBER_KEY_FILE_LOCATION = "remember_key_file_location"

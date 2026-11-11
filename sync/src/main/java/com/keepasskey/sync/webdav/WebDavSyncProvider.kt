@@ -403,10 +403,15 @@ class WebDavSyncProvider private constructor(
      * **ISSUE-P2-381 / ENG-20261028-20**：部分服务器对 MOVE 覆盖已有目标报 409/423（仅靠
      * `Overwrite:T` 不可靠；keepass2android `WebDavStorage.java:235` 注释 + 提交 `9c8ee243` 实证）。
      * 收到 409/423 时先重探目标元数据裁决（远端 ETag 非空且 ≠ 预期 ⇒ ConflictError，交上层合并；
-     * 探测失败 ⇒ 如实上抛，fail-closed）；远端未漂移也**不再**以「DELETE 正式目标 + 无预条件重试」
-     * 兜底——两步之间没有原子性：DELETE 成功而重试 MOVE 失败、取消或进程死亡会让正式远端路径缺失，
-     * DELETE 与重试之间他端重建的目标又会被无 `If` 的 MOVE 静默覆盖。此类服务器因此得到
-     * 可处理的协议错误（[WebDavMoveOverwritePolicy.overwriteRefusedMessage]），远端旧文件原样保留。
+     * 探测失败 ⇒ 如实上抛，fail-closed）。**默认**不做「DELETE 正式目标 + 无预条件重试」兜底：
+     * 两步之间没有原子性，DELETE 成功而重试 MOVE 失败、取消或进程死亡会让正式远端路径缺失，
+     * DELETE 与重试之间他端重建的目标又会被无 `If` 的 MOVE 静默覆盖。此时返回可处理的协议错误
+     * （[WebDavMoveOverwritePolicy.overwriteRefusedMessage]），远端旧文件原样保留。
+     *
+     * **兼容写入例外**：用户在设置页显式开启 [com.keepasskey.sync.network.SyncTransferOptions.allowDeleteBeforeMove]
+     * （默认关闭）、且重探 ETag 与预期基线均可核验并一致时，DELETE 正式目标后以 `Overwrite: F`
+     * 重试 MOVE（见 [WebDavUploadAtomic]）。该例外用于坚果云等拒绝覆盖的服务，代价与边界见
+     * `docs/architecture/已知工程限界.md`；漂移 / 探测失败 / 无 ETag 可核验时仍不删除。
      * 409/423 与 412 分开报错文案。
      *
      * Overwrite 语义裁定（expectedEtag 为空时的两种形态必须区分）：
@@ -440,6 +445,7 @@ class WebDavSyncProvider private constructor(
             data = data,
             expectedEtag = expectedEtag,
             remoteExists = remoteExists,
+            allowDeleteBeforeMove = transferOptions.allowDeleteBeforeMove,
             upload = { path, bytes, etag -> upload(path, bytes, etag) },
             getMetadata = { path -> getMetadata(path) },
             delete = { path -> delete(path) },

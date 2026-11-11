@@ -71,7 +71,8 @@ class SyncProviderResolver @Inject constructor(
         val settings = preferences.currentSettings()
         return SyncTransferOptions.fromPreferences(
             chunkedUploadEnabled = settings.webdavChunkedUpload,
-            chunkSizeMb = settings.webdavChunkSizeMb
+            chunkSizeMb = settings.webdavChunkSizeMb,
+            allowDeleteBeforeMove = settings.webdavAllowDeleteBeforeMove
         )
     }
 

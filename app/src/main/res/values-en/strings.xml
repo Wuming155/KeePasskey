@@ -1098,6 +1098,8 @@
     <string name="sync_section_network">Network security</string>
     <string name="sync_chunked_title">Chunked transfer</string>
     <string name="sync_chunked_sub">Upload and download large files in chunks, more stable on weak networks</string>
+    <string name="sync_delete_before_move_title">Compatibility for servers that refuse overwrite</string>
+    <string name="sync_delete_before_move_sub">When a server (e.g. Jianguoyun) rejects overwriting an existing file (409/423), delete the old remote file first and then rename the new one. The remote file disappears briefly and concurrent edits from other devices may be overwritten; enable only for single-device use</string>
     <string name="sync_zeroknowledge_title">Zero-knowledge end-to-end encryption</string>
     <string name="sync_zeroknowledge_desc">Your master password never leaves this device. The cloud stores only Argon2-encrypted blocks, so neither the server nor anyone in between can decrypt your vault</string>
     <string name="sync_credential_auth_notice">Sync credentials are sealed with Android Keystore encryption (hardware isolation measured on this device), but the sealing key does not require biometric authentication — this ensures background auto-sync works while the device is locked. Credentials are unsealed only during sync and immediately wiped from memory afterward (CharArray borrow semantics + full SigV4 derivation chain zeroing), never persisting as immutable Strings</string>

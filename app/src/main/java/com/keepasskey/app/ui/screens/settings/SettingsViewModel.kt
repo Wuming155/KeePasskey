@@ -382,6 +382,8 @@ class SettingsViewModel @Inject constructor(
     fun setCheckRemoteChangesBeforeSave(enabled: Boolean) = extendedPreferences.setCheckRemoteChangesBeforeSave(enabled)
     fun setConflictResolution(resolution: ConflictResolution) = extendedPreferences.setConflictResolution(resolution)
     fun setWebdavChunkedUpload(enabled: Boolean) = extendedPreferences.setWebdavChunkedUpload(enabled)
+    fun setWebdavAllowDeleteBeforeMove(enabled: Boolean) =
+        extendedPreferences.setWebdavAllowDeleteBeforeMove(enabled)
     fun setWebdavChunkSizeMb(sizeMb: Int) = extendedPreferences.setWebdavChunkSizeMb(sizeMb)
 
     // ===== KP2A 扩展：TOTP 规范映射 =====
