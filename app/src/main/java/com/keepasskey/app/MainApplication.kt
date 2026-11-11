@@ -3,6 +3,7 @@ package com.keepasskey.app
 import android.app.Application
 import androidx.work.Configuration
 import com.keepasskey.app.data.binary.FileBinaryStore
+import com.keepasskey.app.data.logger.DiagnosticLogBridge
 import com.keepasskey.app.ui.AppLaunchLanguageSeed
 import com.keepasskey.app.notification.NotificationChannels
 import com.keepasskey.app.notification.UnlockedNotificationController
@@ -71,6 +72,10 @@ class MainApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var sessionCloseMarker: com.keepasskey.app.security.SessionCloseMarker
 
+    // 稳定版故障诊断桥：把 AppLog.e/w 的脱敏异常栈接进可导出缓冲，并写下进程诊断头
+    @Inject
+    lateinit var diagnosticLogBridge: DiagnosticLogBridge
+
     // ISSUE-P3-116：同步缓存销毁器（`cacheDir/sync` 的 KDBX 密文快照）。
     // 与 fileBinaryStore 一起构成「彻底退出应用」前的易失缓存清理面。
     @Inject
@@ -119,6 +124,9 @@ class MainApplication : Application(), Configuration.Provider {
         // 应用内诊断缓冲不由此开关控制：默认开启、写入即脱敏，稳定版也可导出；
         // 其 logcat 直出走 AppLog.i，同样不受 v/d 门控影响。
         AppLog.debugEnabled = BuildConfig.DEBUG
+        // 稳定版同样安装：release 里 AppLog.e/w 的类型与栈帧不再只留在 logcat。
+        // 装在所有其它冷启动动作之前，使后续初始化失败的异常也能进入可导出缓冲。
+        diagnosticLogBridge.install()
         // ISSUE-P3-459 续：灌应用内语言**启动种子**——SharedPreferences 冷读 1~5ms、早于任何首帧渲染，
         // 后续所有语言读取（Compose 首帧 / StringsProvider / 非 UI 装配点）都退化为一次 volatile 读，
         // 冷启动不再先闪一帧系统语言。此处**刻意不**等 DataStore 冷读（主线程阻塞 → 启动期 ANR 风险）。

@@ -1,7 +1,9 @@
 package com.keepasskey.app.data.logger
 
+import com.keepasskey.core.log.diagnosticText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -145,6 +147,60 @@ class DebugLogBufferTest {
         assertEquals(before, exported)
         assertEquals(exported, buffer.exportSanitizedText())
         assertTrue(exported.contains("<redacted-url>"))
+    }
+
+    @Test
+    fun `日志行带日期时刻与线程名且保持级别与 tag 连续`() {
+        buffer.info("Unlock", "主密码解锁成功")
+
+        val line = buffer.snapshot().single()
+        assertTrue("须带日期以便跨天排查：$line", Regex("""\[\d{4}-\d{2}-\d{2}]""").containsMatchIn(line))
+        assertTrue("须带时刻与毫秒：$line", Regex("""\[\d{2}:\d{2}:\d{2}\.\d{3}]""").containsMatchIn(line))
+        assertTrue("须带线程名：$line", line.contains("[${Thread.currentThread().name.take(48)}]"))
+        assertTrue(line.contains("[INFO] [Unlock] 主密码解锁成功"))
+    }
+
+    @Test
+    fun `环形缓冲溢出时给出丢弃提示且状态可查`() {
+        repeat(DebugLogBuffer.MAX_LINES + 3) { buffer.info("T", "line-$it") }
+
+        val status = buffer.status()
+        assertEquals(DebugLogBuffer.MAX_LINES, status.retained)
+        assertEquals(DebugLogBuffer.MAX_LINES, status.capacity)
+        assertEquals(3, status.dropped)
+        assertNotNull(status.firstTimestamp)
+        assertNotNull(status.lastTimestamp)
+        assertTrue(
+            "快照首行须提示截断：${buffer.snapshot().first()}",
+            buffer.snapshot().first().contains("已丢弃较早的 3 行")
+        )
+        assertTrue("导出正文同样含截断提示", buffer.exportText().contains("已丢弃较早的 3 行"))
+        assertFalse("最早的记录确已被淘汰", buffer.snapshot().any { it.endsWith("line-0") })
+    }
+
+    @Test
+    fun `清空后状态与溢出提示一并复位`() {
+        repeat(DebugLogBuffer.MAX_LINES + 1) { buffer.info("T", "line-$it") }
+
+        buffer.clear()
+
+        assertEquals(0, buffer.status().retained)
+        assertEquals(0, buffer.status().dropped)
+        assertTrue(buffer.snapshot().isEmpty())
+        assertEquals("", buffer.exportText())
+    }
+
+    @Test
+    fun `诊断栈帧写入后仍是一条事件且包名不被主机名规则误伤`() {
+        val stack = diagnosticText("解锁失败", IllegalStateException("raw-secret"), frameBudget = 4)
+
+        buffer.error("Unlock", stack)
+
+        val line = buffer.snapshot().single()
+        assertTrue(line.contains("java.lang.IllegalStateException"))
+        assertTrue(line.contains("\tat "))
+        assertTrue("栈帧类名须完整保留以供 retrace：$line", line.contains("com.keepasskey."))
+        assertFalse("异常 message 不得进入缓冲", line.contains("raw-secret"))
     }
 
     private data class RedactionCase(

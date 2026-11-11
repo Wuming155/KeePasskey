@@ -192,8 +192,9 @@
 #     因此**只剥 v/d，不剥 i/w/e**——剥掉 i/w/e 会让 release 包在故障时彻底失声。
 #     `DebugLogBuffer` 的 logcat 取证桥也经 `AppLog.i` 输出**写入时已脱敏**的诊断行，
 #     稳定版同样依赖该级别；不得把 i 加入剥离列表。
-#     e/w 的 release 形态由 `AppLog`（core/log/AppLog.kt 的 `diagnostic`）统一产出：调用方
-#     message + 异常**类型**（含 cause 链的类型行）+ **有界栈帧**（`at 类.方法(文件:行号)`，
+#     e/w 的 release 形态由 `AppLog`（core/log/AppLog.kt 的顶层 `diagnosticText`）统一产出：
+#     应用内可导出缓冲经诊断桥复用同一函数，故 logcat 与用户导出的故障定位信息同源。
+#     内容为调用方 message + 异常**类型**（含 cause 链的类型行）+ **有界栈帧**（`at 类.方法(文件:行号)`，
 #     帧预算 32、cause 链上限 4 层，超出分别标注 `... N more` / `... cause chain truncated`）；
 #     **不输出** Throwable message、cause message、suppressed 内容与 `Throwable.toString()` 结果
 #     （message 属不可信外部输入）。

@@ -13,6 +13,7 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
+import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.security.KeyFileVaultCopyStore
 import com.keepasskey.app.security.VaultFileDriftCoordinator
 import com.keepasskey.app.sync.PeriodicSyncScheduler
@@ -67,7 +68,9 @@ internal class SettingsControllerGraph(
     private val credentialRotationRuntime: CredentialRotationRuntime?,
     private val credentialRotationCompletion: CredentialRotationCompletion?,
     private val stateSubscribeTimeoutMillis: Long,
-    private val onTriggerSync: () -> Unit
+    private val onTriggerSync: () -> Unit,
+    // 诊断日志复制的统一剪贴板出口；null 仅用于纯 JVM 单测
+    private val clipboardSecurityChannel: ClipboardSecurityChannel? = null
 ) {
     // ===== 生物识别开关「开启前当场验证」 + 更换主密钥任务态（P2-354 / P2-398 重封印挂点） =====
     internal val biometricGate = SettingsBiometricGate(
@@ -166,7 +169,7 @@ internal class SettingsControllerGraph(
     )
 
     internal val exportController = SettingsExportController(
-        vaultRepository, debugLogBuffer, appContext, strings, scope
+        vaultRepository, debugLogBuffer, appContext, strings, scope, clipboardSecurityChannel
     )
 
     internal val kdfBenchmarkController = SettingsKdfBenchmarkController(

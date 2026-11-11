@@ -1346,9 +1346,9 @@
     <!-- ===== 诊断与日志子页 (DebugSettingsScreen) ===== -->
     <string name="debug_section_options">诊断选项</string>
     <string name="debug_log_title">诊断日志</string>
-    <string name="debug_log_sub">记录运行事件；写入时自动脱敏，可随时关闭</string>
+    <string name="debug_log_sub">记录运行事件与故障调用栈；写入时自动脱敏，可随时关闭</string>
     <string name="debug_verbose_title">详细日志模式</string>
-    <string name="debug_verbose_sub">输出更细粒度的调试信息，便于定位问题</string>
+    <string name="debug_verbose_sub">追加同步过程细节与完整异常调用栈，便于定位疑难问题</string>
     <string name="debug_preview_title">日志预览</string>
     <string name="debug_cd_refresh">刷新日志</string>
     <string name="debug_log_empty">暂无日志，执行一次同步或解锁后这里会显示真实运行时事件</string>
@@ -1357,11 +1357,20 @@
     <string name="debug_export_btn">导出日志</string>
     <string name="debug_export_done">日志已导出</string>
     <string name="debug_export_failed">日志导出失败，请重试</string>
+    <string name="debug_copy_btn">复制日志</string>
+    <string name="debug_copy_done">日志已复制到剪贴板</string>
+    <string name="debug_copy_empty">暂无日志可复制</string>
+    <string name="debug_copy_truncated">（日志较长，剪贴板仅保留报告头与最近的记录；完整日志请导出）</string>
+    <string name="debug_clip_label">KeePasskey 诊断日志</string>
+    <string name="debug_report_title">KeePasskey 诊断日志</string>
+    <string name="debug_report_env">版本 %1$s，构建 %2$s，Android API %3$d，ABI %4$s，生成于 %5$s</string>
+    <string name="debug_report_state">保留 %1$d / %2$d 行，已丢弃 %3$d 行，记录范围 %4$s ~ %5$s</string>
+    <string name="debug_preview_limited">仅预览最近 %1$d 行（共 %2$d 行）；复制或导出包含全部记录</string>
     <string name="debug_clear_btn">清空日志</string>
     <string name="debug_export_dialog_title">导出诊断日志</string>
-    <string name="debug_export_dialog_desc">确认后将呼起系统保存对话框选择导出位置。日志在记录时已自动移除网址、账号、主机与文件名等标识，导出内容同样经过脱敏，不含密码与密钥</string>
+    <string name="debug_export_dialog_desc">确认后将呼起系统保存对话框选择导出位置。日志在记录时已自动移除网址、账号、主机与文件名等标识，导出内容同样经过脱敏，不含密码与密钥；报告头附版本、平台与记录范围摘要</string>
     <string name="debug_export_confirm_btn">确认导出</string>
-    <string name="debug_privacy_desc">日志仅保存在应用内存中，退出进程即清空；记录与导出均自动脱敏，可在上方关闭记录</string>
+    <string name="debug_privacy_desc">日志仅保存在应用内存中，退出进程即清空；记录、复制与导出均自动脱敏，异常只保留类型与栈帧，可在上方关闭记录</string>
 
     <!-- ===== 密码健康检查子页 (HealthCheckScreen) ===== -->
     <string name="health_total_score">综合健康评分</string>

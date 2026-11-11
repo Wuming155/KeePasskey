@@ -1,0 +1,88 @@
+package com.keepasskey.core.log
+
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * `AppLog` 诊断出口与栈帧格式化的纯 JVM 行为用例。
+ *
+ * 设备侧 `AppLogDeviceTest` 已锁定 release 的 logcat 形态；本用例补的是**另一条通道**：
+ * 带异常的 e/w 必须把原始故障事件交给应用内诊断桥（稳定版可导出日志据此拿到调用栈），
+ * 纯文案事件不得占用该出口，且出口自身失败不得影响业务故障路径。
+ */
+class AppLogDiagnosticSinkTest {
+
+    private data class Event(
+        val level: String,
+        val tag: String,
+        val message: String,
+        val throwable: Throwable
+    )
+
+    @After
+    fun tearDown() {
+        AppLog.diagnosticSink = null
+        AppLog.debugEnabled = false
+    }
+
+    @Test
+    fun `带异常的 e 与 w 经出口转发原始事件`() {
+        val events = mutableListOf<Event>()
+        AppLog.diagnosticSink = { level, tag, message, throwable ->
+            events += Event(level, tag, message, throwable)
+        }
+        val error = IllegalStateException("raw")
+        val warn = IllegalArgumentException("warn")
+
+        AppLog.e("Fault", "错误事件", error)
+        AppLog.w("Fault", "告警事件", warn)
+
+        assertEquals(listOf("ERROR", "WARN"), events.map { it.level })
+        assertEquals("错误事件", events[0].message)
+        assertEquals("Fault", events[0].tag)
+        assertSame(error, events[0].throwable)
+        assertSame(warn, events[1].throwable)
+    }
+
+    @Test
+    fun `不带异常的 e 与 w 不占用诊断出口`() {
+        val events = mutableListOf<Event>()
+        AppLog.diagnosticSink = { level, tag, message, throwable ->
+            events += Event(level, tag, message, throwable)
+        }
+
+        AppLog.e("Fault", "纯文案错误")
+        AppLog.w("Fault", "纯文案告警")
+        AppLog.i("Fault", "信息")
+
+        assertTrue("纯文案事件由业务调用点自行留痕，不得重复灌入缓冲", events.isEmpty())
+    }
+
+    @Test
+    fun `诊断文本保留类型与栈帧且不透出异常原文`() {
+        val cause = IllegalArgumentException("cause-marker")
+        val throwable = IllegalStateException("raw-marker", cause)
+
+        val text = diagnosticText("调用方信息", throwable, frameBudget = 4, maxCauses = 2)
+
+        assertTrue(text.contains("调用方信息"))
+        assertTrue(text.contains("java.lang.IllegalStateException"))
+        assertTrue(text.contains("Caused by: java.lang.IllegalArgumentException"))
+        assertTrue(text.contains("\tat "))
+        assertFalse("顶层异常 message 不得进入日志", text.contains("raw-marker"))
+        assertFalse("cause message 不得进入日志", text.contains("cause-marker"))
+        assertTrue("超出帧预算须有截断标记", text.contains("more"))
+    }
+
+    @Test
+    fun `诊断出口自身抛异常不影响业务调用`() {
+        AppLog.diagnosticSink = { _, _, _, _ -> throw RuntimeException("sink failure") }
+
+        AppLog.e("Fault", "错误事件", IllegalStateException("raw"))
+        AppLog.w("Fault", "告警事件", IllegalArgumentException("raw"))
+    }
+}

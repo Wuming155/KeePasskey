@@ -328,6 +328,7 @@ internal fun NavGraphBuilder.settingsDebugRoute(navController: NavHostController
             onRefreshLogs = settingsViewModel::refreshDebugLogs,
             onClearLogs = settingsViewModel::clearDebugLogs,
             onExportLogs = settingsViewModel::exportDebugLogs,
+            onCopyLogs = settingsViewModel::copyDebugLogs,
             exportFeedback = debugExportFeedback,
             onClearExportFeedback = settingsViewModel::clearDebugExportFeedback
         )

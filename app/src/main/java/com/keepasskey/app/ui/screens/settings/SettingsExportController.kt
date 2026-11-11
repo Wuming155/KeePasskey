@@ -5,10 +5,14 @@ import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.data.export.SpreadsheetTextWorkbookExporter
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.logger.DiagnosticLogRedactor
 import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.security.ClipboardSecurityChannel
+import com.keepasskey.app.security.tryWrite
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.app.ui.model.clipboardCopyFailedMessage
 import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +33,9 @@ internal class SettingsExportController(
     private val debugLogBuffer: DebugLogBuffer,
     private val appContext: Context?,
     private val strings: StringsProvider,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    // 诊断日志复制的统一剪贴板出口；null 仅用于纯 JVM 单测（复制如实报失败，不假装成功）
+    private val clipboard: ClipboardSecurityChannel? = null
 ) {
 
     /** ISSUE-P2-10 (ZT-15)：导出审计记录器（复用 DebugLogBuffer，仅写类型与脱敏目标标识） */
@@ -37,17 +43,19 @@ internal class SettingsExportController(
 
     companion object {
         private const val TAG = "SettingsViewModel"
+        private const val LOG_COPY_AUDIT_TAG = "LogCopyAudit"
     }
 
     // ========== 断点整改：调试日志导出（SAF CreateDocument 真实落盘） ==========
     private val debugExportFeedbackFlow = MutableStateFlow<UiMessage?>(null)
 
-    /** SAF 另存为结果反馈（成功/失败），由 Screen 层消费后清除 */
+    /** 导出 / 复制结果反馈（成功/失败），由 Screen 层消费后清除 */
     val debugExportFeedback: StateFlow<UiMessage?> = debugExportFeedbackFlow.asStateFlow()
 
     /**
-     * 真实导出诊断日志——写入 SAF 目标 Uri。缓冲行在记录时已脱敏，导出边界再脱敏一次；
-     * 稳定版与调试版内容同源，[targetUri] 由 Screen 层 CreateDocument 选择器产生。
+     * 真实导出诊断日志——写入 SAF 目标 Uri。导出文本为 [DiagnosticLogReport] 拼装的报告：
+     * 环境摘要 + 正文（正文在记录时已脱敏、导出边界再脱敏一次）；稳定版与调试版同源，
+     * [targetUri] 由 Screen 层 CreateDocument 选择器产生。
      */
     fun exportDebugLogs(targetUri: Uri) {
         val resolver = appContext?.contentResolver
@@ -57,9 +65,9 @@ internal class SettingsExportController(
         }
         scope.launch(Dispatchers.IO) {
             try {
-                val sanitizedText = debugLogBuffer.exportSanitizedText()
+                val report = DiagnosticLogRedactor.redact(DiagnosticLogReport.build(debugLogBuffer, strings))
                 val written = resolver.openOutputStream(targetUri)?.use { os ->
-                    os.write(sanitizedText.toByteArray(Charsets.UTF_8))
+                    os.write(report.toByteArray(Charsets.UTF_8))
                     os.flush()
                     true
                 } ?: false
@@ -71,6 +79,36 @@ internal class SettingsExportController(
                 debugLogBuffer.warn(TAG, "调试日志导出失败: ${e.javaClass.simpleName}")
                 debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed, isError = true)
             }
+        }
+    }
+
+    /**
+     * 复制诊断日志到剪贴板：与导出共用同一份 [DiagnosticLogReport]，正文同样是写入即脱敏、
+     * 出域再脱敏一次的文本（不含密码与密钥）。
+     *
+     * 必须经 [ClipboardSecurityChannel.copyPlainText]：该通道为自身写入记账并复位敏感值
+     * 待清状态，绕过它会让上一次敏感复制被误判为「外部覆盖」而漏清（ISSUE-P3-553 口径）。
+     * 日志不标记敏感属性、不参与自动擦除——用户需要把它粘贴到反馈渠道；超长时由
+     * [DiagnosticLogReport.forClipboard] 保留报告头与最近整行并显式标注截断。
+     * 复制属数据出域行为，成功与失败都留审计（[DebugLogBuffer.audit] 不受诊断开关约束）。
+     */
+    fun copyDebugLogs() {
+        if (DiagnosticLogReport.isEmpty(debugLogBuffer)) {
+            debugExportFeedbackFlow.value = UiMessage(R.string.debug_copy_empty, isError = true)
+            return
+        }
+        val report = DiagnosticLogRedactor.redact(DiagnosticLogReport.build(debugLogBuffer, strings))
+        val text = DiagnosticLogReport.forClipboard(report, strings)
+        val label = strings.get(R.string.debug_clip_label)
+        val copied = clipboard.tryWrite { copyPlainText(label, text) }
+        debugLogBuffer.audit(
+            LOG_COPY_AUDIT_TAG,
+            "日志复制: 结果=${if (copied) "成功" else "失败"}, 字符数=${text.length}"
+        )
+        debugExportFeedbackFlow.value = if (copied) {
+            UiMessage(R.string.debug_copy_done)
+        } else {
+            clipboardCopyFailedMessage()
         }
     }
 

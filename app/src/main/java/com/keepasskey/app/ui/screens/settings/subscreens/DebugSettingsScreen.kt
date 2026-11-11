@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
@@ -68,6 +70,12 @@ import java.time.format.DateTimeFormatter
 private val EXPORT_FILE_TS_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
 /**
+ * 日志预览单次渲染的行数上限：环形缓冲现可容纳 2000 行，一次性组合 2000 个 Text 会让本页
+ * 滚动掉帧。预览只取最近的若干行并显式提示；「复制日志」与「导出日志」始终包含全部记录。
+ */
+private const val PREVIEW_MAX_LINES = 400
+
+/**
  * 系统诊断与调试日志二级设置页 (对应 KeePass2Android 调试日志系统)
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,6 +88,7 @@ fun DebugSettingsScreen(
     onRefreshLogs: () -> Unit = {},
     onClearLogs: () -> Unit = {},
     onExportLogs: (Uri) -> Unit = {},
+    onCopyLogs: () -> Unit = {},
     exportFeedback: UiMessage? = null,
     onClearExportFeedback: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -100,7 +109,7 @@ fun DebugSettingsScreen(
         if (uri != null) onExportLogs(uri)
     }
 
-    // 断点整改：导出结果（成功/失败）经 ViewModel 反馈流回到本页 Snackbar
+    // 断点整改：导出 / 复制结果（成功/失败）经 ViewModel 反馈流回到本页 Snackbar
     // ISSUE-P3-359 AC④：导出反馈转发全局通道（外壳唯一宿主呈现），回执后一次性清位
     exportFeedback?.let { message ->
         LaunchedEffect(message) {
@@ -197,49 +206,61 @@ fun DebugSettingsScreen(
                         .border(1.dp, Color(0xFF334155), RoundedCornerShape(14.dp))
                         .padding(12.dp)
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (logLines.isEmpty()) {
-                            Text(
-                                text = stringResource(R.string.debug_log_empty),
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                color = Color(0xFF94A3B8)
-                            )
-                        }
-                        // ISSUE-P3-179：等级色按**日志内容**预计算一次——原实现对每行做最多 4 次
-                        // `contains` 判定，而该判定在每次重组（含滚动引起的重组）都会重跑。
-                        //
-                        // 刻意保留（如实声明）：本卡片仍以**单个 `item`** 承载全部日志行。
-                        // 理由是日志缓冲**上限 500 行**（`DebugLogBuffer.MAX_LINES`）且本页是
-                        // **调试专用页**；而改成嵌套 `LazyColumn` 会在外层 `LazyColumn` 内引入
-                        // **嵌套纵向滚动**（触达全量日志需先滚内层再滚外层）——那是 UX 回归，
-                        // 不是优化。若要彻底惰性化，正确形态是先把日志卡片移出外层列表语义。
-                        val coloredLines = remember(logLines) {
-                            logLines.map { line ->
-                                line to when {
-                                    line.contains("[ERROR]") -> Color(0xFFF87171)
-                                    line.contains("[DEBUG]") -> Color(0xFF38BDF8)
-                                    line.contains("[INFO]") -> Color(0xFF4ADE80)
-                                    line.contains("[WARN]") -> Color(0xFFFBBF24)
-                                    else -> Color(0xFFE2E8F0)
+                    // 文本可被长按选取，用于只复制片段；全文复制请用下方按钮
+                    SelectionContainer {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (logLines.isEmpty()) {
+                                Text(
+                                    text = stringResource(R.string.debug_log_empty),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
+                            if (logLines.size > PREVIEW_MAX_LINES) {
+                                Text(
+                                    text = stringResource(
+                                        R.string.debug_preview_limited, PREVIEW_MAX_LINES, logLines.size
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = Color(0xFFFBBF24)
+                                )
+                            }
+                            // ISSUE-P3-179：等级色按**日志内容**预计算一次——原实现对每行做最多 4 次
+                            // `contains` 判定，而该判定在每次重组（含滚动引起的重组）都会重跑。
+                            //
+                            // 刻意保留（如实声明）：本卡片仍以**单个 `item`** 承载预览行。缓冲上限已
+                            // 放宽到 2000 行，但此处按 [PREVIEW_MAX_LINES] 限流，避免一次性组合上千个
+                            // Text；改成嵌套 `LazyColumn` 会在外层 `LazyColumn` 内引入**嵌套纵向滚动**
+                            // （触达全量日志需先滚内层再滚外层）——那是 UX 回归，不是优化。
+                            // 全量日志由「复制 / 导出」提供，二者直读实时缓冲，不受预览快照影响。
+                            val coloredLines = remember(logLines) {
+                                logLines.takeLast(PREVIEW_MAX_LINES).map { line ->
+                                    line to when {
+                                        line.contains("[ERROR]") -> Color(0xFFF87171)
+                                        line.contains("[DEBUG]") -> Color(0xFF38BDF8)
+                                        line.contains("[INFO]") -> Color(0xFF4ADE80)
+                                        line.contains("[WARN]") -> Color(0xFFFBBF24)
+                                        else -> Color(0xFFE2E8F0)
+                                    }
                                 }
                             }
-                        }
-                        coloredLines.forEach { (line, color) ->
-                            Text(
-                                text = line,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    lineHeight = 16.sp
-                                ),
-                                color = color
-                            )
+                            coloredLines.forEach { (line, color) ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        lineHeight = 16.sp
+                                    ),
+                                    color = color
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // 3. 操作操作卡片：导出 / 清除
+            // 3. 操作卡片：导出 / 复制 / 清除
             item {
                 BentoCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -258,6 +279,20 @@ fun DebugSettingsScreen(
                             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(stringResource(R.string.debug_export_btn))
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                // 复制直读实时缓冲；顺带刷新预览，使「看到的」与「复制走的」一致
+                                onRefreshLogs()
+                                onCopyLogs()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.debug_copy_btn))
                         }
 
                         OutlinedButton(

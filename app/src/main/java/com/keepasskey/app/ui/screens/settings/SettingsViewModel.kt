@@ -13,6 +13,7 @@ import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
+import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncCredentialsStore
 import com.keepasskey.app.ui.model.orFallback
@@ -82,7 +83,9 @@ class SettingsViewModel @Inject constructor(
     private val keyFileVaultCopyStore: com.keepasskey.app.security.KeyFileVaultCopyStore? = null,
     private val resumeSyncProbeCoordinator: com.keepasskey.app.sync.ResumeSyncProbeCoordinator? = null,
     private val credentialRotationRuntime: CredentialRotationRuntime? = null,
-    private val credentialRotationCompletion: CredentialRotationCompletion? = null
+    private val credentialRotationCompletion: CredentialRotationCompletion? = null,
+    // 诊断日志复制通道；生产由 Hilt 注入统一剪贴板安全出口，null 仅用于纯 JVM 单测
+    private val clipboardSecurityChannel: ClipboardSecurityChannel? = null
 ) : ViewModel() {
 
     companion object {
@@ -169,7 +172,8 @@ class SettingsViewModel @Inject constructor(
         credentialRotationRuntime = credentialRotationRuntime,
         credentialRotationCompletion = credentialRotationCompletion,
         stateSubscribeTimeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS,
-        onTriggerSync = { triggerSync() }
+        onTriggerSync = { triggerSync() },
+        clipboardSecurityChannel = clipboardSecurityChannel
     )
 
     // 逐项转发：装配顺序与生命周期仍由装配图保证，本类不再持有构造逻辑
@@ -396,6 +400,8 @@ class SettingsViewModel @Inject constructor(
     // ===== 导出/模板/调试日志委托 [SettingsExportController] =====
     val debugExportFeedback: StateFlow<UiMessage?> get() = exportController.debugExportFeedback
     fun exportDebugLogs(targetUri: Uri) = exportController.exportDebugLogs(targetUri)
+
+    fun copyDebugLogs() = exportController.copyDebugLogs()
     fun clearDebugExportFeedback() = exportController.clearDebugExportFeedback()
     val exportFeedback: StateFlow<UiMessage?> get() = exportController.exportFeedback
     // ISSUE-P3-437 AC②：导出长操作进行中（库属性页渲染过程反馈段）

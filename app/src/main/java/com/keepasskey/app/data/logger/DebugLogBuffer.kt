@@ -1,17 +1,34 @@
 package com.keepasskey.app.data.logger
 
-import java.time.LocalTime
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Singleton
+
+/**
+ * 环形诊断缓冲的当前状态（供导出/复制报告头说明「日志是否被截断」，不进入日志正文）。
+ */
+data class DiagnosticLogStatus(
+    val retained: Int,
+    val capacity: Int,
+    val dropped: Int,
+    val firstTimestamp: String?,
+    val lastTimestamp: String?
+)
 
 /**
  * 进程内诊断日志环形缓冲（Kp2a 调试日志系统的本地优先轻量实现）。
  *
  * 稳定版与调试版共用本缓冲：用户遇到故障后必须能导出日志向开发者反馈，故 release 不再
  * 恒关。**所有行在写入时经 [DiagnosticLogRedactor] 脱敏**，缓冲、设置页预览、logcat 直出
- * 与导出文件同源，均不含 URL、账号、主机、库/密钥文件名等标识；导出边界再脱敏一次。
+ * 与导出文件正文同源，均不含 URL、账号、主机、库/密钥文件名等标识；导出边界再脱敏一次。
  * 缓冲只驻留内存、进程结束即消失；logcat 直出写系统日志缓冲（不写应用文件），落盘只发生在
  * 用户主动选择导出位置时。
+ *
+ * 故障可定位性：每行带**日期、时刻、线程名、级别、tag**，并由应用内诊断桥把 `AppLog.e/w`
+ * 的异常类型与有界栈帧（[com.keepasskey.core.log.diagnosticText]，不含异常 message）写入同一缓冲。
+ * 因此稳定版导出的日志不只是「某步失败」，还能看到失败发生在哪个类、哪个方法。
+ * 容量放宽到 [MAX_LINES] 行；溢出时在快照首行给出明确的丢弃提示，并可由 [status] 精确查询，
+ * 避免关键故障被静默冲掉而排查者误以为日志完整。
  *
  * 铁律：调用方只允许写入非敏感运行时事件（同步结果、解锁成败、状态迁移），且只留异常
  * **类型**、布尔判定与计数，绝不写入主密码、密钥、用户字段、库别名或异常 message。
@@ -46,6 +63,12 @@ class DebugLogBuffer(
      */
     internal var logcatEchoEnabled: Boolean = false
 
+    /** 溢出提示：缓冲被裁掉过历史行时作为快照首行呈现，不占正文容量、也不重复进 logcat。 */
+    private var overflowNotice: String? = null
+    private var droppedLines = 0
+    private var firstTimestamp: String? = null
+    private var lastTimestamp: String? = null
+
     /** 普通诊断事件入口：受 [DiagnosticLogGate] 约束（关闭时整条丢弃，不占缓冲容量）。 */
     fun log(level: String, tag: String, message: String) {
         if (!gate.isEnabled()) return
@@ -66,27 +89,58 @@ class DebugLogBuffer(
      */
     fun audit(tag: String, message: String) = append(AUDIT_LEVEL, tag, message)
 
-    fun snapshot(): List<String> = synchronized(lock) { lines.toList() }
+    fun snapshot(): List<String> = synchronized(lock) { snapshotLocked() }
 
-    fun clear() = synchronized(lock) { lines.clear() }
+    fun clear() = synchronized(lock) {
+        lines.clear()
+        overflowNotice = null
+        droppedLines = 0
+        firstTimestamp = null
+        lastTimestamp = null
+    }
 
-    /** 进程内预览文本：与导出同源，同样只含写入时已脱敏的行 */
-    fun exportText(): String = synchronized(lock) { lines.joinToString("\n") }
+    /** 缓冲当前状态：报告头据此说明时间跨度、保留行数与丢弃行数。 */
+    fun status(): DiagnosticLogStatus = synchronized(lock) {
+        DiagnosticLogStatus(
+            retained = lines.size,
+            capacity = MAX_LINES,
+            dropped = droppedLines,
+            firstTimestamp = firstTimestamp,
+            lastTimestamp = lastTimestamp
+        )
+    }
+
+    /** 进程内预览文本：与导出正文同源，同样只含写入时已脱敏的行 */
+    fun exportText(): String = synchronized(lock) { textLocked() }
 
     /** 导出边界的第二道防线：规则幂等，对写入时已脱敏的行重复调用不改变内容 */
     fun exportSanitizedText(): String = synchronized(lock) {
-        DiagnosticLogRedactor.redact(lines.joinToString("\n"))
+        DiagnosticLogRedactor.redact(textLocked())
     }
 
     private fun append(level: String, tag: String, message: String) {
-        val timestamp = LocalTime.now().format(TS_FORMAT)
-        // 写入即脱敏：整行（含 tag）过一遍规则，不留任何「导出前才清理」的窗口。
+        val now = LocalDateTime.now()
+        val date = now.format(DATE_FORMAT)
+        val time = now.format(TS_FORMAT)
+        val fullTimestamp = now.format(FULL_TS_FORMAT)
+        // 线程名只在多线程问题上有意义，截断防止异常长的自定义线程名撑爆单行
+        val thread = Thread.currentThread().name.take(MAX_THREAD_NAME_LENGTH)
+        // 写入即脱敏：整行（含 tag / 线程名 / 栈帧）过一遍规则，不留任何「导出前才清理」的窗口。
         // 导出边界的二次脱敏是幂等的第二道防线，不依赖本调用点的历史正确性。
-        val line = DiagnosticLogRedactor.redact("[$timestamp] [$level] [$tag] $message")
+        val line = DiagnosticLogRedactor.redact("[$date] [$time] [$thread] [$level] [$tag] $message")
         synchronized(lock) {
             lines.addLast(line)
+            if (firstTimestamp == null) firstTimestamp = fullTimestamp
+            lastTimestamp = fullTimestamp
             while (lines.size > MAX_LINES) {
                 lines.removeFirst()
+                droppedLines++
+            }
+            if (droppedLines > 0) {
+                overflowNotice = DiagnosticLogRedactor.redact(
+                    "[$date] [$time] [$thread] [WARN] [Diagnostics] " +
+                        "日志缓冲已达上限 $MAX_LINES 行，已丢弃较早的 $droppedLines 行；完整记录请及时复制或导出"
+                )
             }
         }
         if (logcatEchoEnabled) {
@@ -97,11 +151,25 @@ class DebugLogBuffer(
         }
     }
 
+    /** 调用方已持锁：快照与导出正文共用，保证「看到什么就能导出什么」。 */
+    private fun snapshotLocked(): List<String> = buildList(lines.size + 1) {
+        overflowNotice?.let(::add)
+        addAll(lines)
+    }
+
+    private fun textLocked(): String = snapshotLocked().joinToString("\n")
+
     companion object {
         /** 审计行级别标识（区分于 INFO/WARN，便于导出后人工核查） */
         const val AUDIT_LEVEL = "AUDIT"
-        private const val MAX_LINES = 500
+
+        /** 环形缓冲容量：故障复盘常需覆盖数小时事件，原 500 行易把关键失败冲掉。 */
+        const val MAX_LINES = 2_000
+
+        private const val MAX_THREAD_NAME_LENGTH = 48
+        private val DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
         private val TS_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+        private val FULL_TS_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
         private const val LOGCAT_TAG = "KpLog"
     }
 }
