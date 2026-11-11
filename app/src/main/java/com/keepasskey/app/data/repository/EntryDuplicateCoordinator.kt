@@ -18,7 +18,9 @@ import java.time.Instant
  * - 全字段保真复制：标准/自定义字段、受保护字段、TOTP 配置、附件引用、tags、
  *   AutoType 序列与 customData 全量随拷；
  * - 历史修订清空（克隆体是新生命周期的起点，不继承原条目 history）；
- * - 时间属性重置：creation/modification/access/locationChanged 全部取克隆时刻；
+ * - 生命周期时间重置：creation/modification/access/locationChanged 全部取克隆时刻，usageCount 归零；
+ * - 有效期沿用源条目：`expires` 与 `expiryTime` 原样保留（克隆不得静默变成永不过期，
+ *   也不得把到期时刻改成克隆时刻）；
  * - 标题保持不变（KeePass 2.x 默认行为：克隆即逐字节保真，重命名交由用户后续编辑）。
  */
 internal class EntryDuplicateCoordinator(
@@ -67,9 +69,17 @@ internal class EntryDuplicateCoordinator(
     }
 }
 
-/** 克隆体构造：新 UUID + 重置时间属性 + 清空历史；其余字段全量保真 */
+/** 克隆体构造：新 UUID + 重置生命周期时间 + 清空历史；有效期与其余字段保真 */
 internal fun KdbxEntry.toFreshClone(now: Instant = Instant.now()): KdbxEntry = copy(
     id = KdbxUuid.random(),
-    times = KdbxTimes(creationTime = now),
+    times = KdbxTimes(
+        creationTime = now,
+        lastModificationTime = now,
+        lastAccessTime = now,
+        expiryTime = times.expiryTime,
+        expires = times.expires,
+        usageCount = 0L,
+        locationChanged = now
+    ),
     history = emptyList()
 )

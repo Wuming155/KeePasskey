@@ -67,9 +67,9 @@ internal object WebDavPropfindParser {
         }
         return try {
             // L2 整改：与 KdbxXmlParser 同级的 XXE 纵深防御——防御恶意/被劫持的 WebDAV 服务端
-            // 返回带 XXE payload 的 PROPFIND 响应。平台侧真正生效的是 [newHardenedBuilder] 装配的
-            // 空实体 EntityResolver；四项 Xerces 特性名在 Android 上全部不受支持（仅桌面生效）。
-            // ISSUE-P3-172：工厂改为按线程缓存（原实现每次响应都重建并逐项设 6 个特性）
+            // 返回带 XXE payload 的 PROPFIND 响应。防线由 [newHardenedBuilder] 装配的空实体
+            // EntityResolver 兑现；ENG-20261111-01 删除了在本仓唯一的运行平台（Android）上一律
+            // 抛异常、零效果的特性设置。ISSUE-P3-172：工厂按线程缓存一次。
             val builder = newHardenedBuilder()
             val doc = builder.parse(xml.byteInputStream())
             val root = doc.documentElement
@@ -191,83 +191,39 @@ internal object WebDavPropfindParser {
     }
 
     /**
-     * ISSUE-P3-10 子项 3：逐项应用 DOM 解析器 XXE 加固特性，**失败即落告警且不中断**。
-     *
-     * 逐项设置并留痕：原 `runCatching` 空吞使「加固特性未生效」完全不可观测，
-     * 且首项失败会连带后续三项根本不被尝试。
-     *
-     * 不 fail-fast 的理由：加固特性在部分实现（如 Android 平台 DOM）上不受支持，
-     * 若因此判定 PROPFIND 响应非法，则一个实现差异会让所有 WebDAV 同步直接失败；
-     * 解析失败路径另有外层 catch 留痕。故保留「尽力加固 + 可观测告警」语义。
-     *
-     * ISSUE-P1-191 更正此前的一句推定：「`isExpandEntityReferences = false` 与不加载外部 DTD
-     * 的默认语义仍在」**在 Android 上并不成立**——真机实测这四项 Xerces 特性名全部抛
-     * `ParserConfigurationException`（即全部未生效），平台实现上唯一可用的外部实体防线是
-     * builder 侧的 `EntityResolver`（见 [newHardenedBuilder]）。
-     *
-     * ISSUE-P3-172：加固结果取决于平台能力（进程级常量），故告警现只在每线程首次
-     * 建工厂时出现一次；原实现每次响应都重新探测一遍。
-     */
-    private fun applyXxeGuardFeature(factory: DocumentBuilderFactory, feature: String, enabled: Boolean) {
-        try {
-            factory.setFeature(feature, enabled)
-        } catch (e: Exception) {
-            AppLog.w(TAG, "DOM 解析器 XXE 加固特性不受支持，已跳过该项: $feature=$enabled", e)
-        }
-    }
-
-    /**
-     * ISSUE-P3-172：加固后的 DOM 工厂**按线程**构建一次。
+     * ISSUE-P3-172：DOM 工厂**按线程**构建一次。
      *
      * `DocumentBuilderFactory` 除 `newDocumentBuilder()` 外的实例状态不可并发共享，
-     * 故用 `ThreadLocal` 而非进程级单例——两种写法都只消除「每次响应重建工厂 + 逐项设 6 个
-     * 特性」的开销，不改变加固语义；每次解析仍取全新的 `DocumentBuilder`。
+     * 故用 `ThreadLocal` 而非进程级单例——两种写法都只消除「每次响应重建工厂」的开销，
+     * 不改变解析语义；每次解析仍取全新的 `DocumentBuilder`。
+     *
+     * ENG-20261111-01：此处曾逐项设置 4 个 Xerces/SAX 特性（`disallow-doctype-decl`、
+     * `external-general-entities`、`external-parameter-entities`、`load-external-dtd`）并
+     * `setXIncludeAware(false)`。真机日志与源码复核确认 Android 平台实现
+     * （`org.apache.harmony.xml.parsers.DocumentBuilderFactoryImpl`）对这 5 项一律抛异常，
+     * 只经容错包装落 WARN、从未改变平台行为；本仓只交付 Android APK，故这些调用与两个
+     * 容错包装一并删除，外部实体防线只剩 [newHardenedBuilder]（设备哨兵见
+     * `WebDavPropfindParserDeviceTest`）。
+     *
+     * `isExpandEntityReferences = false` 是平台**接受**的设置，保留裸赋值：删除会把工厂状态
+     * 退回默认 `true`，属行为变化而非清理无效代码。
      */
     private val hardenedFactories = ThreadLocal.withInitial {
         DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
-            // 以下四项在 Android 平台实现（`org.apache.harmony.xml.parsers.DocumentBuilderFactoryImpl`）
-            // 上**全部**抛 ParserConfigurationException（真机实测见 WebDavPropfindParserDeviceTest），
-            // 即「尝试过、未生效」；桌面 JVM（Xerces）才真正吃到特性项。
-            // 平台侧的有效防线见 [newHardenedBuilder]。
-            applyXxeGuardFeature(this, "http://apache.org/xml/features/disallow-doctype-decl", true)
-            applyXxeGuardFeature(this, "http://xml.org/sax/features/external-general-entities", false)
-            applyXxeGuardFeature(this, "http://xml.org/sax/features/external-parameter-entities", false)
-            applyXxeGuardFeature(this, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-            // ISSUE-P1-191：这两项曾以**裸赋值**写在这里，而平台实现的
-            // `setXIncludeAware(false)` 直接抛 `UnsupportedOperationException`——它不在
-            // [applyXxeGuardFeature] 的容错面内，异常顺着 ThreadLocal 初始化落到外层 catch，
-            // 于是真机上**每一次** PROPFIND 解析整体落空（元数据全部回退 HTTP 头）。
-            // 与特性项同法处理：尽力加固、失败留痕，绝不让一项可选加固否决整篇解析。
-            applyXxeGuardSetting("isXIncludeAware=false") { isXIncludeAware = false }
-            applyXxeGuardSetting("isExpandEntityReferences=false") { isExpandEntityReferences = false }
+            isExpandEntityReferences = false
         }
     }
 
     private fun hardenedFactory(): DocumentBuilderFactory = hardenedFactories.get()
 
     /**
-     * 逐项加固布尔开关：不受支持仅告警（与 [applyXxeGuardFeature] 同一容错口径，ISSUE-P1-191）。
-     *
-     * 必须是**非递归**的就地容错：本函数在 `hardenedFactories` 的初始化块内被调用，
-     * 若再经 `hardenedFactory()` 取工厂会自入 `ThreadLocal.get()` 的重入循环。
-     */
-    private fun DocumentBuilderFactory.applyXxeGuardSetting(label: String, block: DocumentBuilderFactory.() -> Unit) {
-        try {
-            block()
-        } catch (e: Exception) {
-            AppLog.w(TAG, "DOM 解析器加固开关不受支持，已跳过该项: $label", e)
-        }
-    }
-
-    /**
      * 新建已加固的 `DocumentBuilder`（ISSUE-P1-191 补的平台侧有效防线）。
      *
-     * 四项 Xerces 特性名在 Android 平台实现上全部不受支持（实测仅落告警），意味着
-     * 「禁用外部实体 / 不加载外部 DTD」在设备上**从未真正生效**；JAXP 在平台实现上唯一
-     * 可用的拦截点是 builder 侧的 [EntityResolver]——外部实体（含 DOCTYPE 外部子集与
-     * 参数实体）一律以**空输入**兑现，使被劫持/恶意的服务端无法借 PROPFIND 读取本应用
-     * 私有目录（缓存内是完整 KDBX 密文快照）。桌面 JVM 仍另有特性项把关，两条防线互不冲突。
+     * 空输入 [EntityResolver] 是 Android 与桌面 JVM 上**唯一**生效的外部实体拦截点：外部实体
+     * （含 DOCTYPE 外部子集与参数实体）一律以**空输入**兑现，使被劫持/恶意的服务端无法借
+     * PROPFIND 读取本应用私有目录（缓存内是完整 KDBX 密文快照）。真机证明见
+     * `WebDavPropfindParserDeviceTest.真机平台DOM不得展开外部实体` 的哨兵断言。
      */
     private fun newHardenedBuilder(): DocumentBuilder =
         hardenedFactory().newDocumentBuilder().apply {

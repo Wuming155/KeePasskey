@@ -14,9 +14,10 @@
 //! 秘密擦除：私钥标量 / 种子经 `SigningKey` 构造后，栈上副本即刻由调用方（JNI 层 `Zeroizing`）
 //! 管理；签名输出非秘密（公可验证），但仍以受管缓冲回写。
 
-// `signature::Signer` 是对两处签名调用都生效的**同一个 trait**（被 p256 与 ed25519-dalek
-// 双重再导出），故只需引入一次；重复引入会被 rustc 判为 unused import（2026-09-17 实测）。
+// `Signer` 须分别引入两次：p256 0.14 走 `signature` 3，ed25519-dalek 2 仍走 `signature` 2，
+// 两者是**同名不同版本**的 trait，不能互代（旧版 p256 0.13 与 dalek 共用 signature 2 时只需一次）。
 use ed25519_dalek::Signer as _;
+use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{DerSignature, SigningKey};
 use zeroize::Zeroizing;
 
@@ -34,7 +35,7 @@ pub fn es256_sign_der(scalar: &[u8], data: &[u8]) -> Option<Zeroizing<Vec<u8>>> 
     if scalar.len() != ES256_SCALAR_LEN {
         return None;
     }
-    let signing = SigningKey::from_bytes(scalar.into()).ok()?;
+    let signing = SigningKey::from_slice(scalar).ok()?;
     let signature: DerSignature = signing.sign(data);
     Some(Zeroizing::new(signature.to_bytes().into()))
 }

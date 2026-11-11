@@ -21,7 +21,10 @@ import org.junit.Test
  *   对其它字段的就近修改，与 `ISSUE-P1-631` 的裁决范围收口同口径）；
  * - 双方保留：原分组保留本地值，同父下插入复制子树，根节点取云端值 + 副本后缀，
  *   子树内分组与条目 UUID 全部重生成；
- * - 结构不一致（目标不在树内 / 目标为根）fail-closed 返回 null，绝不静默跳过冲突。
+ * - 结构不一致（目标不在树内）fail-closed 返回 null，绝不静默跳过冲突；
+ * - `ENG-20261111-05`：根组也可成为冲突目标（根组普通属性已并入三方合并）——`KEEP_LOCAL` /
+ *   `KEEP_REMOTE` 按字段重裁并保留已装好的子树；根的「双方保留」无兄弟副本可挂，按原节点
+ *   保留本地字段值落定（单库只有一个根，与库级 Meta 的同名边界一致）。
  */
 class SyncGroupConflictResolutionTest {
 
@@ -120,10 +123,9 @@ class SyncGroupConflictResolutionTest {
     }
 
     @Test
-    fun `冲突指向根组时 fail-closed`() {
-        val rootPair = conflictPair().copy(groupId = rootId.toHexString())
-        assertNull(
-            "替换根节点会丢掉整棵子树，必须拒绝",
+    fun `冲突指向根组时按字段重裁并保留整棵子树`() {
+        val rootPair = rootConflictPair()
+        val resolved = requireNotNull(
             applyGroupConflictChoices(
                 root = mergedTree(),
                 conflicts = listOf(rootPair),
@@ -131,6 +133,37 @@ class SyncGroupConflictResolutionTest {
                 duplicateNameOf = { "副本" }
             )
         )
+        assertEquals("差异字段取本地根名", "本地根名", resolved.name)
+        assertEquals("非差异字段保持合并产物", "合并根备注", resolved.notes)
+        assertEquals("根身份不得改变", rootId, resolved.id)
+        assertEquals("重裁根组不得丢掉已装好的子树", 1, resolved.subgroups.size)
+        assertEquals("子树内容原样保留", parentId, resolved.subgroups.single().id)
+
+        val keepRemote = requireNotNull(
+            applyGroupConflictChoices(
+                root = mergedTree(),
+                conflicts = listOf(rootPair),
+                choiceOf = { ConflictResolutionChoice.KEEP_REMOTE },
+                duplicateNameOf = { "副本" }
+            )
+        )
+        assertEquals("以远端为准落定远端根名", "云端根名", keepRemote.name)
+        assertEquals("以远端为准同样保留子树", 1, keepRemote.subgroups.size)
+    }
+
+    @Test
+    fun `根组双方保留按原节点保留本地字段且不复制整棵树`() {
+        val resolved = requireNotNull(
+            applyGroupConflictChoices(
+                root = mergedTree(),
+                conflicts = listOf(rootConflictPair()),
+                choiceOf = { ConflictResolutionChoice.DUPLICATE_BOTH },
+                duplicateNameOf = { "云端根名 (云端冲突副本)" }
+            )
+        )
+        assertEquals("根组保留本地字段值", "本地根名", resolved.name)
+        assertEquals("单库只有一个根，不得派生兄弟根副本", 1, resolved.subgroups.size)
+        assertEquals("根 UUID 必须保持不变", rootId, resolved.id)
     }
 
     @Test
@@ -211,9 +244,19 @@ class SyncGroupConflictResolutionTest {
         return KdbxGroup(
             id = rootId,
             name = "根",
+            notes = "合并根备注",
             subgroups = listOf(parent)
         )
     }
+
+    /** `ENG-20261111-05`：根组冲突对（差异字段 = 根组名称） */
+    private fun rootConflictPair(): ConflictedGroupPair = ConflictedGroupPair(
+        groupId = rootId.toHexString(),
+        groupName = "本地根名",
+        localGroup = KdbxGroup(id = rootId, name = "本地根名"),
+        remoteGroup = KdbxGroup(id = rootId, name = "云端根名"),
+        modifiedFields = listOf(KdbxGroupConflictKeys.NAME)
+    )
 
     private fun conflictPair(): ConflictedGroupPair = ConflictedGroupPair(
         groupId = targetId.toHexString(),

@@ -25,6 +25,11 @@ import com.keepasskey.sync.merge.KdbxGroupDuplicator
  * - 任一环节找不到目标节点（树结构与冲突清单不一致）返回 null，调用方 fail-closed，
  *   **绝不静默跳过一条冲突**。
  *
+ * `ENG-20261111-05`：**根组**也可以是冲突目标——根组普通属性已并入三方合并（`MergeResult.groupConflicts`），
+ * 其字段级重裁（本地 / 远端）与子组同口径生效；`resolveFieldsOnly` 以合并产物为底版、连同已装好的子树
+ * 一并返回，故替换根节点不会丢子树。根的「双方保留」无对应语义：一棵库只有一个根，无父组可挂兄弟副本，
+ * 按原节点保留**本地**字段值落定（与 `ISSUE-P2-659` 库级 Meta「双方保留不产生副本」的既定边界同类）。
+ *
  * @return 应用裁决后的新根；结构不一致时 null
  */
 internal fun applyGroupConflictChoices(
@@ -40,9 +45,6 @@ internal fun applyGroupConflictChoices(
 
     for (pair in conflicts) {
         val mergedGroup = byHex[pair.groupId] ?: return null
-        // 根组不参与分组冲突（`KdbxGroupMerger.allGroupUuids` 已排除 rootId）；出现即结构异常，
-        // 替换根节点会丢掉整棵子树 —— fail-closed 而不是静默降级。
-        if (mergedGroup.id == root.id) return null
         when (choiceOf(pair)) {
             ConflictResolutionChoice.KEEP_LOCAL -> {
                 replacements[mergedGroup.id] = KdbxGroupConflictResolver.resolveFieldsOnly(
@@ -64,7 +66,8 @@ internal fun applyGroupConflictChoices(
                     pair = pair,
                     choice = ConflictResolutionChoice.KEEP_LOCAL
                 )
-                duplicates += pair
+                // 根组无父组可挂同父兄弟副本（`KdbxGroupDuplicator` 对根目标即返回 null）
+                if (mergedGroup.id != root.id) duplicates += pair
             }
         }
     }

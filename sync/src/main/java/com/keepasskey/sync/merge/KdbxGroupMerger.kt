@@ -6,6 +6,18 @@ import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxUuid
 
 /**
+ * `ENG-20261111-05`：分组树组装产物。
+ *
+ * [rootConflicts] 是根组**普通属性**同字段双侧异值的冲突（词汇表与子组同源：
+ * `MERGED_GROUP_FIELDS` + `KdbxGroupConflictKeys`）。根组不进入 [KdbxGroupMerger.mergeSurvivingGroups]
+ * 的存活裁决（根 UUID 与身份固定），冲突必须在组装阶段带出，否则只能由 LWW 静默定案。
+ */
+internal class GroupTreeAssembly(
+    val root: KdbxGroup,
+    val rootConflicts: List<ConflictedGroupPair>
+)
+
+/**
  * 分组级三方合并单元（自 [KdbxMerger] 结构性拆出，零行为变更）。
  *
  * 负责分组存活裁决、父子关系自愈（防死循环/断链）与合并后分组树递归组装；
@@ -190,6 +202,15 @@ internal object KdbxGroupMerger {
     /**
      * 递归组装合并后分组树：根组取本地/远端较晚的变更时间戳，其余节点取已净化分组。
      *
+     * `ENG-20261111-05`：根组**普通属性**（名称 / 备注 / 图标 / 自定义图标）与子组同口径参与
+     * 字段级三方合并——整改前根分支只在 `localRoot` 上替换 times 与 customData，远端单侧改的
+     * 根组名称等被静默丢弃，双侧分歧也不产生根组冲突。判据与取值复用子组同一条实现
+     * [mergeGroupsBothModified]（词汇表 `MERGED_GROUP_FIELDS` 为单一真相源），仅保留根组既有的
+     * times LWW（取较晚一侧整份时间戳）与 customData 三方合并口径；根 UUID 与树组装语义不变。
+     * 同字段双侧异值经 [GroupTreeAssembly.rootConflicts] 交调用方并入 `MergeResult.groupConflicts`。
+     * 前提：两侧根为同一实体（同一根 UUID）；不同 UUID 的远端根（`.kdbx` 并入的他库根组）
+     * 不覆盖本地根身份属性，保持既有导入语义。
+     *
      * `ISSUE-P3-165`：本递归**未设自有深度上限**，依据是**上游已封顶**——
      * 两侧树均由 `KdbxXmlParser` 解析而来，其 `MAX_XML_DEPTH = 64` 对嵌套深度 fail-closed 封顶
      * （分组嵌套是 XML 嵌套的一部分），且 `subgroupsByParent` 由**净化后**的父链构建
@@ -207,21 +228,45 @@ internal object KdbxGroupMerger {
         sanitizedGroups: Map<KdbxUuid, KdbxGroup>,
         entriesByParent: Map<KdbxUuid, List<KdbxEntry>>,
         subgroupsByParent: Map<KdbxUuid, List<KdbxGroup>>
-    ): KdbxGroup {
+    ): GroupTreeAssembly {
+        val lTime = localRoot.times.lastModificationTime
+        val rTime = remoteRoot.times.lastModificationTime
+        val laterTimes = if (rTime.isAfter(lTime)) remoteRoot.times else localRoot.times
+        // ISSUE-P2-385：根组 customData 与子组同口径三方合并（Secret Service 暴露组等）
+        val rootCustomData = mergeCustomDataMap(
+            base = baseRoot.customData,
+            local = localRoot.customData,
+            remote = remoteRoot.customData,
+            localTime = lTime,
+            remoteTime = rTime
+        )
+        // ENG-20261111-05：根组普通属性复用子组同一字段级合并（含同字段双侧异值的冲突登记）。
+        // 前提是两侧根为**同一实体**（同一根 UUID）——UUID 是全局合并键，不同 UUID 的「远端根组」
+        // 属于另一个库（`.kdbx` 并入路径即以他库根组作 remote），其身份属性不得覆盖当前库根组。
+        val rootFieldMerge =
+            if (localRoot.id == remoteRoot.id) mergeGroupsBothModified(baseRoot, localRoot, remoteRoot) else null
+        val rootGroup = if (rootFieldMerge != null) {
+            rootFieldMerge.group.copy(times = laterTimes, customData = rootCustomData)
+        } else {
+            localRoot.copy(times = laterTimes, customData = rootCustomData)
+        }
+        val rootConflicts = if (rootFieldMerge == null || rootFieldMerge.conflictingFields.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(
+                ConflictedGroupPair(
+                    groupId = rootId.toHexString(),
+                    groupName = localRoot.name.ifBlank { remoteRoot.name },
+                    localGroup = localRoot,
+                    remoteGroup = remoteRoot,
+                    modifiedFields = rootFieldMerge.conflictingFields
+                )
+            )
+        }
+
         fun assembleGroup(gid: KdbxUuid): KdbxGroup {
             val rawGroup = if (gid == rootId) {
-                val lTime = localRoot.times.lastModificationTime
-                val rTime = remoteRoot.times.lastModificationTime
-                val laterTimes = if (rTime.isAfter(lTime)) remoteRoot.times else localRoot.times
-                // ISSUE-P2-385：根组 customData 与子组同口径三方合并（Secret Service 暴露组等）
-                val rootCustomData = mergeCustomDataMap(
-                    base = baseRoot.customData,
-                    local = localRoot.customData,
-                    remote = remoteRoot.customData,
-                    localTime = lTime,
-                    remoteTime = rTime
-                )
-                localRoot.copy(times = laterTimes, customData = rootCustomData)
+                rootGroup
             } else {
                 sanitizedGroups[gid]!!
             }
@@ -235,7 +280,7 @@ internal object KdbxGroupMerger {
             )
         }
 
-        return assembleGroup(rootId)
+        return GroupTreeAssembly(assembleGroup(rootId), rootConflicts)
     }
 
     /**

@@ -704,17 +704,77 @@ class RealVaultRepositoryTest {
         assertTrue("原条目应保留其历史修订", original.history.isNotEmpty())
         assertEquals("克隆体父组应与原条目一致", original.parentGroupId, clone.parentGroupId)
 
-        // 4. 不存在的条目 / 非法 id → 如实失败
+        // 4. 有效期沿袭（ENG-20261111-06）：未来到期 / 已过期 / 永不过期三类源条目，
+        //    克隆体必须各自保住 expires 与 expiryTime，不得静默变成永不过期
+        val futureExpiry = Instant.parse("2099-01-01T00:00:00Z")
+        val pastExpiry = Instant.parse("2020-01-01T00:00:00Z")
+        val futureId = KdbxUuid.random().toHexString()
+        val pastId = KdbxUuid.random().toHexString()
+        assertTrue(
+            "未来到期源条目应创建成功",
+            repository.saveEntry(
+                UiVaultEntry(id = futureId, title = "未来到期条目", username = "bob", url = "", expiresAt = futureExpiry),
+                passwordChars = "future_oej_001".toCharArray()
+            ) is com.keepasskey.core.result.KdbxResult.Success
+        )
+        assertTrue(
+            "已过期源条目应创建成功",
+            repository.saveEntry(
+                UiVaultEntry(id = pastId, title = "已过期条目", username = "carol", url = "", expiresAt = pastExpiry),
+                passwordChars = "{{SECRET_d8mqc4vn}}".toCharArray()
+            ) is com.keepasskey.core.result.KdbxResult.Success
+        )
+
+        val sources = session.databaseFlow.first()!!.rootGroup.allEntries().associateBy { it.id.toHexString() }
+        val neverSource = sources.getValue(srcId)
+        assertFalse("未设有效期的源条目应保持永不过期", neverSource.times.expires)
+        assertTrue("未来到期源条目必须 expires=true", sources.getValue(futureId).times.expires)
+        assertEquals(futureExpiry, sources.getValue(futureId).times.expiryTime)
+        assertTrue("已过期源条目必须 expires=true", sources.getValue(pastId).times.expires)
+        assertEquals(pastExpiry, sources.getValue(pastId).times.expiryTime)
+
+        val futureCloneId = (repository.duplicateEntry(futureId) as com.keepasskey.core.result.KdbxResult.Success).data
+        val pastCloneId = (repository.duplicateEntry(pastId) as com.keepasskey.core.result.KdbxResult.Success).data
+
+        val afterExpiryDup = session.databaseFlow.first()!!.rootGroup.allEntries().associateBy { it.id.toHexString() }
+        assertEquals("三条源条目各自克隆后应共 6 条", 6, afterExpiryDup.size)
+        val futureClone = afterExpiryDup.getValue(futureCloneId)
+        assertTrue("未来到期副本必须保留有效期开关", futureClone.times.expires)
+        assertEquals("未来到期副本必须保留到期时刻", futureExpiry, futureClone.times.expiryTime)
+        assertEquals("克隆体 usageCount 应从零开始", 0L, futureClone.times.usageCount)
+        val pastClone = afterExpiryDup.getValue(pastCloneId)
+        assertTrue("已过期副本必须保留有效期开关", pastClone.times.expires)
+        assertEquals("已过期副本必须保留到期时刻", pastExpiry, pastClone.times.expiryTime)
+        val neverClone = afterExpiryDup.getValue(cloneId)
+        assertFalse("永不过期副本不得被置为过期", neverClone.times.expires)
+        assertEquals(
+            "永不过期副本的 expiryTime 也应与源条目一致",
+            neverSource.times.expiryTime,
+            neverClone.times.expiryTime
+        )
+
+        // 5. 不存在的条目 / 非法 id → 如实失败
         assertTrue(repository.duplicateEntry("deadbeef") is com.keepasskey.core.result.KdbxResult.Failure)
 
-        // 5. 持久化往返：重开后克隆体仍在
+        // 6. 持久化往返：重开后克隆体仍在，且有效期两态经落盘保持
         session.close()
         val reopenSession = DatabaseSession()
         assertTrue(reopenSession.open(testFile, password) is com.keepasskey.core.result.KdbxResult.Success)
-        assertEquals(2, reopenSession.databaseFlow.first()!!.rootGroup.allEntries().size)
-        assertTrue(
-            "重开后克隆体应存在",
-            reopenSession.databaseFlow.first()!!.rootGroup.allEntries().any { it.id.toHexString() == cloneId }
+        val reopened = reopenSession.databaseFlow.first()!!.rootGroup.allEntries().associateBy { it.id.toHexString() }
+        assertEquals(6, reopened.size)
+        assertTrue("重开后克隆体应存在", reopened.containsKey(cloneId))
+        val reopenedFuture = reopened.getValue(futureCloneId)
+        assertTrue("重开后未来到期副本必须仍启用过期", reopenedFuture.times.expires)
+        assertEquals("重开后未来到期副本的到期时刻必须保持", futureExpiry, reopenedFuture.times.expiryTime)
+        val reopenedPast = reopened.getValue(pastCloneId)
+        assertTrue("重开后已过期副本必须仍启用过期", reopenedPast.times.expires)
+        assertEquals("重开后已过期副本的到期时刻必须保持", pastExpiry, reopenedPast.times.expiryTime)
+        val reopenedNever = reopened.getValue(cloneId)
+        assertFalse("重开后永不过期副本不得被置为过期", reopenedNever.times.expires)
+        assertEquals(
+            "重开后永不过期副本的 expiryTime 须与源条目同秒（落盘为官方秒级时间戳）",
+            neverSource.times.expiryTime.epochSecond,
+            reopenedNever.times.expiryTime.epochSecond
         )
 
         password.fill('0')

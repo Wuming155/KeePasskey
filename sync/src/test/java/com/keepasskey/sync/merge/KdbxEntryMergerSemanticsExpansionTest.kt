@@ -1,11 +1,13 @@
 package com.keepasskey.sync.merge
 
+import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxAutoType
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.security.ProtectedString
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -17,6 +19,8 @@ import java.time.Instant
  *
  * 锁定「判定（`isModified`）= 实际合并 = 上报（`diffFields`）」同一词汇表；双边同值不产生虚假冲突；
  * 到期按**联合语义**裁决，绝不出现「两端都未选择的混合状态」。
+ *
+ * ENG-20261111-04：附件按名称做三方存在性 / 内容裁决——双方一致删除不得被基线兜底复活。
  */
 class KdbxEntryMergerSemanticsExpansionTest {
 
@@ -31,15 +35,21 @@ class KdbxEntryMergerSemanticsExpansionTest {
         background: String? = null,
         foreground: String? = null,
         expires: Boolean = false,
-        expiryTime: Instant = t0
+        expiryTime: Instant = t0,
+        attachments: List<KdbxAttachment> = emptyList()
     ): KdbxEntry = KdbxEntry(
         id = ENTRY_ID,
         fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString(title, false)),
+        attachments = attachments,
         autoType = autoType,
         backgroundColor = background,
         foregroundColor = foreground,
         times = KdbxTimes(creationTime = t0, lastModificationTime = mod, expires = expires, expiryTime = expiryTime)
     )
+
+    /** 每份附件用单字节内容区分版本；[refIndex] 刻意可调，用于验证池索引不参与内容判等。 */
+    private fun attachment(name: String, value: Int, refIndex: Int = 0): KdbxAttachment =
+        KdbxAttachment(name = name, refIndex = refIndex, data = byteArrayOf(value.toByte()))
 
     private fun mergeBothModified(
         base: KdbxEntry,
@@ -169,6 +179,113 @@ class KdbxEntryMergerSemanticsExpansionTest {
         assertEquals("#333333", resolved.foregroundColor)
         assertTrue(resolved.times.expires)
         assertEquals(t2, resolved.times.expiryTime)
+    }
+
+    @Test
+    fun `双方一致删除的附件不得复活`() {
+        val base = entry(t0, attachments = listOf(attachment("a.bin", 1)))
+        val local = entry(t1)
+        val remote = entry(t2)
+
+        val (merged, _) = mergeBothModified(base, local, remote)
+
+        assertEquals(
+            "两端都删除了同一附件，合并产物不得由基线兜底把它复活",
+            emptyList<KdbxAttachment>(),
+            merged.attachments
+        )
+    }
+
+    @Test
+    fun `单侧删除且对侧内容未改：删除生效`() {
+        // 远端仍持有该附件，但池索引与基线不同（索引随保存重排，不属内容），应视为「未修改」
+        val base = entry(t0, attachments = listOf(attachment("a.bin", 1)))
+        val local = entry(t1)
+        val remote = entry(t2, attachments = listOf(attachment("a.bin", 1, refIndex = 7)))
+
+        val (merged, _) = mergeBothModified(base, local, remote)
+
+        assertTrue("本地删除、远端未改内容 ⇒ 删除必须生效", merged.attachments.isEmpty())
+    }
+
+    @Test
+    fun `删除 vs 修改：双向都保留修改方`() {
+        val base = entry(t0, attachments = listOf(attachment("a.bin", 1)))
+
+        val (remoteKept, _) = mergeBothModified(
+            base,
+            entry(t1),
+            entry(t2, attachments = listOf(attachment("a.bin", 2)))
+        )
+        assertArrayEquals(
+            "本地删除、远端改内容 ⇒ 保留远端修改",
+            byteArrayOf(2),
+            remoteKept.attachments.single().data
+        )
+
+        val (localKept, _) = mergeBothModified(
+            base,
+            entry(t1, attachments = listOf(attachment("a.bin", 3))),
+            entry(t2)
+        )
+        assertArrayEquals(
+            "远端删除、本地改内容 ⇒ 保留本地修改",
+            byteArrayOf(3),
+            localKept.attachments.single().data
+        )
+    }
+
+    @Test
+    fun `不同名称的独立修改各自保留`() {
+        val base = entry(t0, attachments = listOf(attachment("a.bin", 1), attachment("b.bin", 3)))
+        val local = entry(t1, attachments = listOf(attachment("a.bin", 2), attachment("b.bin", 3)))
+        val remote = entry(t2, attachments = listOf(attachment("a.bin", 1), attachment("b.bin", 4)))
+
+        val (merged, _) = mergeBothModified(base, local, remote)
+
+        val byName = merged.attachments.associateBy { it.name }
+        assertEquals("不得多出或丢失附件", setOf("a.bin", "b.bin"), byName.keys)
+        assertArrayEquals("本地对 a.bin 的修改保留", byteArrayOf(2), byName.getValue("a.bin").data)
+        assertArrayEquals("远端对 b.bin 的修改保留", byteArrayOf(4), byName.getValue("b.bin").data)
+    }
+
+    @Test
+    fun `单侧新增的附件保留`() {
+        val base = entry(t0)
+        val local = entry(t1, attachments = listOf(attachment("new.bin", 5)))
+        val remote = entry(t2, title = "远端改名")
+
+        val (merged, _) = mergeBothModified(base, local, remote)
+
+        assertEquals("单侧新增不得被丢弃", listOf("new.bin"), merged.attachments.map { it.name })
+        assertArrayEquals(byteArrayOf(5), merged.attachments.single().data)
+    }
+
+    @Test
+    fun `同名内容双侧分歧按最后修改时间裁决`() {
+        val base = entry(t0, attachments = listOf(attachment("a.bin", 1)))
+
+        val (remoteWins, _) = mergeBothModified(
+            base,
+            entry(t1, attachments = listOf(attachment("a.bin", 2))),
+            entry(t2, attachments = listOf(attachment("a.bin", 3)))
+        )
+        assertArrayEquals(
+            "与字段冲突同口径：远端较新取远端，且只保留一份",
+            byteArrayOf(3),
+            remoteWins.attachments.single().data
+        )
+
+        val (localWins, _) = mergeBothModified(
+            base,
+            entry(t2, attachments = listOf(attachment("a.bin", 2))),
+            entry(t1, attachments = listOf(attachment("a.bin", 3)))
+        )
+        assertArrayEquals(
+            "本地较新取本地",
+            byteArrayOf(2),
+            localWins.attachments.single().data
+        )
     }
 
     private companion object {

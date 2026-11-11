@@ -310,6 +310,96 @@ class KdbxMergerV2Test {
     }
 
     @Test
+    fun `测试根目录条目带存活旧父组引用时合并后仍留根组`() {
+        val entryUuid = KdbxUuid(ByteArray(16) { 61 })
+        val groupAId = KdbxUuid(ByteArray(16) { 62 })
+
+        val oldTimes = KdbxTimes(
+            creationTime = Instant.ofEpochMilli(500L),
+            lastModificationTime = Instant.ofEpochMilli(500L)
+        )
+        val groupA = KdbxGroup(id = groupAId, parentGroupId = rootId, name = "GroupA", times = oldTimes)
+
+        // 条目曾由 GroupA 移到根目录，移动史留下指向**存活** GroupA 的 previousParentGroup
+        val baseEntry = KdbxEntry(
+            id = entryUuid,
+            parentGroupId = rootId,
+            previousParentGroup = groupAId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Original", false)),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(1000L))
+        )
+        val baseDb = KdbxDatabaseLite(createRootGroup(subgroups = listOf(groupA), entries = listOf(baseEntry)))
+
+        // 两侧各改不同字段 → 走字段级冲突合并，合并结果沿用根目录归属
+        val localModified = baseEntry.copy(
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Local Title", false)),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(2000L))
+        )
+        val localDb = KdbxDatabaseLite(createRootGroup(subgroups = listOf(groupA), entries = listOf(localModified)))
+
+        val remoteModified = baseEntry.copy(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Original", false),
+                KdbxConstants.Fields.URL to ProtectedString("https://example.test", false)
+            ),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(3000L))
+        )
+        val remoteDb = KdbxDatabaseLite(createRootGroup(subgroups = listOf(groupA), entries = listOf(remoteModified)))
+
+        val result = KdbxMerger.mergeDatabases(baseDb, localDb, remoteDb)
+
+        // ENG-20261111-03：根目录是合法挂载点，不得被 previousParentGroup 拽回旧的存活子组
+        assertNull(result.mergedRoot.findGroup(groupAId)?.findEntry(entryUuid))
+        val mergedEntry = result.mergedRoot.findEntry(entryUuid)
+        assertNotNull(mergedEntry)
+        assertEquals(rootId, mergedEntry?.parentGroupId)
+        assertEquals("Local Title", mergedEntry?.title)
+    }
+
+    @Test
+    fun `测试根目录条目无旧父组引用时合并后仍留根组`() {
+        val entryUuid = KdbxUuid(ByteArray(16) { 71 })
+        val groupAId = KdbxUuid(ByteArray(16) { 72 })
+
+        val oldTimes = KdbxTimes(
+            creationTime = Instant.ofEpochMilli(500L),
+            lastModificationTime = Instant.ofEpochMilli(500L)
+        )
+        val groupA = KdbxGroup(id = groupAId, parentGroupId = rootId, name = "GroupA", times = oldTimes)
+
+        val baseEntry = KdbxEntry(
+            id = entryUuid,
+            parentGroupId = rootId,
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Original", false)),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(1000L))
+        )
+        val baseDb = KdbxDatabaseLite(createRootGroup(subgroups = listOf(groupA), entries = listOf(baseEntry)))
+
+        val localModified = baseEntry.copy(
+            fields = mapOf(KdbxConstants.Fields.TITLE to ProtectedString("Local Title", false)),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(2000L))
+        )
+        val localDb = KdbxDatabaseLite(createRootGroup(subgroups = listOf(groupA), entries = listOf(localModified)))
+
+        val remoteModified = baseEntry.copy(
+            fields = mapOf(
+                KdbxConstants.Fields.TITLE to ProtectedString("Original", false),
+                KdbxConstants.Fields.URL to ProtectedString("https://example.test", false)
+            ),
+            times = KdbxTimes(lastModificationTime = Instant.ofEpochMilli(3000L))
+        )
+        val remoteDb = KdbxDatabaseLite(createRootGroup(subgroups = listOf(groupA), entries = listOf(remoteModified)))
+
+        val result = KdbxMerger.mergeDatabases(baseDb, localDb, remoteDb)
+
+        // 无移动史可回退，合并后仍直属根组，且不得凭空产生 previousParentGroup
+        val mergedEntry = result.mergedRoot.findEntry(entryUuid)
+        assertNotNull(mergedEntry)
+        assertEquals(rootId, mergedEntry?.parentGroupId)
+        assertNull(mergedEntry?.previousParentGroup)
+    }
+
+    @Test
     fun `测试条目挂载点丢失且无移动史时归属根组`() {
         val entryUuid = KdbxUuid(ByteArray(16) { 41 })
         val groupAId = KdbxUuid(ByteArray(16) { 42 })

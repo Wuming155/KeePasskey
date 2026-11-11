@@ -192,7 +192,7 @@ object KdbxMerger {
 
         val subgroupsByParent = sanitizedGroups.values.groupBy { it.parentGroupId ?: rootId }
 
-        val mergedRootGroup = KdbxGroupMerger.assembleGroupTree(
+        val mergedGroupTree = KdbxGroupMerger.assembleGroupTree(
             rootId = rootId,
             baseRoot = base.rootGroup,
             localRoot = local.rootGroup,
@@ -201,6 +201,7 @@ object KdbxMerger {
             entriesByParent = entriesByParent,
             subgroupsByParent = subgroupsByParent
         )
+        val mergedRootGroup = mergedGroupTree.root
 
         // 5. 墓碑合并去重与存活对象清洗
         val survivingEntryUuids = survivingEntries.map { it.id }.toSet()
@@ -228,8 +229,9 @@ object KdbxMerger {
             conflicts = conflicts,
             // ISSUE-P2-280 AC①：自定义图标池参与合并（对齐官方 MergeInCustomIcons 口径）
             mergedCustomIcons = mergeCustomIcons(local.customIcons, remote.customIcons),
-            // ISSUE-P1-631：分组同字段双侧异值一并带出（不得只给存活集合而吞掉冲突信号）
-            groupConflicts = groupMerge.conflicts,
+            // ISSUE-P1-631：分组同字段双侧异值一并带出（不得只给存活集合而吞掉冲突信号）；
+            // ENG-20261111-05：根组普通属性的双侧异值同样并入（根组不进入存活裁决，由组装阶段产出）
+            groupConflicts = groupMerge.conflicts + mergedGroupTree.rootConflicts,
             // ISSUE-P2-659：Meta 合并产物与残余冲突
             mergedMeta = metaMerge?.meta,
             metaConflicts = metaMerge?.conflicts.orEmpty()

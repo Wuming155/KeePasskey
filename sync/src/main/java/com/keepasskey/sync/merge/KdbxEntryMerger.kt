@@ -148,6 +148,10 @@ internal object KdbxEntryMerger {
      * 条目分配至所属分组：parentGroupId 失链时（删除vs修改复活场景）优先回退到
      * previousParentGroup（KeePassXC Merger 复活规则：跨设备移动/复活条目应回到原父组
      * 而非无条件抛到根组），仍无处可挂才归属根组；回退时同步改写条目 parentGroupId。
+     *
+     * `ENG-20261111-03`：父组有效性必须经 [isEffectiveParent] 判定——`sanitizedGroups` 的键
+     * 只含存活子组（根组不在其中），直接查表会把挂在**根目录**的合法条目误判为失链，
+     * 再按 previousParentGroup 挪回旧子组。`parentGroupId` 与 `previousParentGroup` 两处判据同口径。
      */
     fun assignEntriesToGroups(
         survivingEntries: List<KdbxEntry>,
@@ -156,18 +160,27 @@ internal object KdbxEntryMerger {
     ): Map<KdbxUuid, List<KdbxEntry>> {
         return survivingEntries
             .map { entry ->
-                val pid = entry.parentGroupId
-                if (pid != null && sanitizedGroups.containsKey(pid)) {
+                if (isEffectiveParent(entry.parentGroupId, sanitizedGroups, rootId)) {
                     entry
                 } else {
                     val target = entry.previousParentGroup
-                        ?.takeIf { sanitizedGroups.containsKey(it) }
+                        ?.takeIf { isEffectiveParent(it, sanitizedGroups, rootId) }
                         ?: rootId
                     entry.copy(parentGroupId = target)
                 }
             }
             .groupBy { it.parentGroupId!! }
     }
+
+    /**
+     * 父组引用是否有落点：根组（`sanitizedGroups` 刻意不含根组）与存活子组均算有效，
+     * 其余为失链 / 指向已被删除的分组。
+     */
+    private fun isEffectiveParent(
+        groupId: KdbxUuid?,
+        sanitizedGroups: Map<KdbxUuid, KdbxGroup>,
+        rootId: KdbxUuid
+    ): Boolean = groupId != null && (groupId == rootId || sanitizedGroups.containsKey(groupId))
 
     private fun mergeConflictedEntry(
         base: KdbxEntry?,
@@ -338,7 +351,7 @@ internal object KdbxEntryMerger {
         remote: KdbxEntry
     ): Map<String, String> = EntryCustomDataMerge.mergeCustomData(base, local, remote)
 
-    /** 附件合并：单侧变更取该侧；双侧变更按名称并集（远端先入、本地覆盖同名项）。 */
+    /** 附件合并：单侧变更取该侧；双侧变更按名称做三方存在性/内容裁决（策略体在 [EntryMergeHelpers]）。 */
     private fun mergeAttachments(
         base: KdbxEntry?,
         local: KdbxEntry,

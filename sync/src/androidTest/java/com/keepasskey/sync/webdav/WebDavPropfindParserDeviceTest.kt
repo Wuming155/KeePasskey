@@ -15,12 +15,14 @@ import java.io.File
  * WebDAV PROPFIND 解析 · **设备侧真机验证**（平台 DOM 实现差异）。
  *
  * 为什么必须真机：[WebDavPropfindParser] 走的是 JAXP `DocumentBuilderFactory`，
- * **Android 上的实现是平台自带的 Expat 后端，不是桌面 JVM 的 Xerces**。该类的三道防线
+ * **Android 上的实现是平台自带的 Expat 后端，不是桌面 JVM 的 Xerces**。该类的防线
  * 全部依赖解析器实现的具体行为，宿主单测 green 什么都不说明：
- * 1. XXE 加固的四项特性（`disallow-doctype-decl` 等是 Apache/Xerces 特性名）在平台实现上
- *    **可能整体不受支持**——[applyXxeGuardFeature] 对此只落告警不 fail-fast（ISSUE-P3-10 子项 3
- *    的既定取舍），于是「加固是否真的生效」在真机上是一个**未被证明的事实**。若平台实现展开
- *    外部实体，被劫持的服务端可读取本应用私有目录下的文件（缓存里是完整 KDBX 密文快照）。
+ * 1. XXE 防线是 builder 侧的空输入 `EntityResolver`——「平台实现在解析外部实体时是否
+ *    真的经它兑现」只能在本用例里用哨兵文件证明。若平台实现绕过它展开外部实体，
+ *    被劫持的服务端可读取本应用私有目录下的文件（缓存里是完整 KDBX 密文快照）。
+ *    ENG-20261111-01 之前工厂还逐项设置 5 项 Xerces/SAX 加固（4 个特性名 +
+ *    `setXIncludeAware(false)`），实测平台一律抛异常、只落告警且零效果，这些调用已删除；
+ *    外部实体防线现在唯一依赖的就是下面哨兵用例的断言。
  * 2. ISSUE-P0-09 的超深 XML 遏制：`StackOverflowError` 是否真被 `catch (Throwable)` 兜住，
  *    取决于 ART 上平台解析器**自身的递归深度**（解析期即可能爆栈，与遍历期的深度上限是两件事）。
  * 3. HTTP 日期解析依赖 `SimpleDateFormat` 的星期名 / 月名数据——Android 侧由 ICU 提供。
@@ -43,11 +45,12 @@ class WebDavPropfindParserDeviceTest {
 
     @Test
     fun 真机加固不得让整篇PROPFIND解析落空() {
-        // ISSUE-P1-191 回归锁：Android 平台 DOM（Harmony DocumentBuilderFactoryImpl）对
-        // `setXIncludeAware(false)` 直接抛 UnsupportedOperationException。该调用曾以裸赋值写在
-        // 加固块里、不在任何容错面内，异常顺 ThreadLocal 初始化落到 parse 的 catch(Throwable)，
-        // 于是**真机上每一次 PROPFIND 解析都返回空元数据**（etag 空 / 长度 -1 / 非目录），
-        // 而桌面 Xerces 支持该项 ⇒ 宿主单测 100% 绿。合法报文必须逐项真实采信，缺一项即红。
+        // 回归锁：工厂初始化的任何一项在平台抛异常，都会顺 ThreadLocal 初始化落到 parse 的
+        // catch(Throwable)，于是**真机上每一次 PROPFIND 解析都整体失败**（ISSUE-P1-191 的实际
+        // 形态：`setXIncludeAware(false)` 裸赋值抛 UnsupportedOperationException），而桌面 JVM
+        // 支持该项 ⇒ 宿主单测全绿。ENG-20261111-01 已删掉平台一律抛异常的 5 项设置，只保留平台
+        // 接受的 `isExpandEntityReferences = false`；本断言守住「设备上合法报文必须逐项真实采信」，
+        // 防止将来再往工厂初始化里加裸赋值时静默复发。
         val xml = multistatus(
             getetag = "\"live-etag\"",
             contentLength = "12345",
@@ -77,7 +80,7 @@ class WebDavPropfindParserDeviceTest {
                     """<!DOCTYPE D:multistatus [<!ENTITY xxe SYSTEM "$fileEntity">]>""" +
                     """<D:multistatus xmlns:D="DAV:"><D:response><D:propstat><D:prop>""" +
                     """<D:getetag>&xxe;</D:getetag></D:prop></D:propstat></D:response></D:multistatus>""",
-                // 外部 DTD 子集：`load-external-dtd=false` 针对的正是这条通路
+                // 外部 DTD 子集：DOCTYPE SYSTEM 指向哨兵文件，验证空实体 EntityResolver 覆盖该通路
                 "external-dtd-subset" to
                     """<!DOCTYPE D:multistatus SYSTEM "$fileEntity">""" +
                     """<D:multistatus xmlns:D="DAV:"><D:response><D:propstat><D:prop>""" +
