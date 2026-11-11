@@ -18,8 +18,8 @@ KeePasskey 是一款原生 Kotlin Android 密码管理器，使用标准 KeePass
 # 构建调试 APK
 .\gradlew.bat assembleDebug
 
-# 运行 JVM 行为测试
-.\gradlew.bat test
+# 定向运行与改动相关的 JVM 测试（示例；按实际改动选择测试类）
+.\gradlew.bat :app:testDebugUnitTest --tests "*RecoveryViewModelPreviewBindingTest"
 
 # 静态分析（无需构建原生库）
 .\gradlew.bat lint -x :crypto:cargoNdkBuild
@@ -28,7 +28,11 @@ KeePasskey 是一款原生 Kotlin Android 密码管理器，使用标准 KeePass
 python tools/doc/gate_readings.py
 ```
 
-设备测试优先复用已有的专用测试 AVD 执行 `connectedDebugAndroidTest`，需要时清理环境，具体要求见 [设备测试规则](AGENTS.md#工作规则)；真实 WebDAV/S3 联调及独立 KDBX 对拍按需运行 `tools/local-sync/`、`tools/kdbx-corpus/` 和 `tools/passkey-interop/` 中的入口。日常修改运行受影响模块的测试，发布前运行全模块测试及打包验证。
+日常修改按 [测试规则](.codebuddy/rules/engineering-rules.md#测试) 选择相关测试类或方法；仅在影响范围需要时扩大到模块或全项目。正式发布前在本地运行 `.\gradlew.bat test` 及打包验证，日常验收 APK 构建不等同于正式发布。
+
+设备测试优先复用已有的专用测试 AVD 执行 `connectedDebugAndroidTest`，需要时清理环境，具体要求见 [设备测试规则](AGENTS.md#工作规则)；真实 WebDAV/S3 联调及独立 KDBX 对拍按需运行 `tools/local-sync/`、`tools/kdbx-corpus/` 和 `tools/passkey-interop/` 中的入口。
+
+云端只保留每周及手动触发的 [CodeQL](.github/workflows/codeql.yml) 和 [依赖安全扫描](.github/workflows/dependency-scan.yml)（Gradle 依赖漏洞、Rust 漏洞/许可证/来源检查）；APK 构建、签名及应用测试均在本地执行。CodeQL 当前扫描 Rust、Python 和 Actions，未覆盖 Kotlin 源码；Dependabot 继续按配置巡检依赖更新。
 
 调试 APK 位于 `app/build/outputs/apk/debug/`，可安装到 Android 16（API 36）或更新版本的设备。
 

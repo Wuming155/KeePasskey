@@ -25,6 +25,13 @@
 
 ## P2 中危缺陷与协议/测试缺口
 
+### ENG-20261111-07 Rust 生产依赖命中两个常数时间实现漏洞公告
+
+- **核实时间与方式**：2026-11-11，在 `crypto/src/main/rust` 实跑 `cargo-deny 0.20.2` 的 `cargo deny --locked check`，退出码 1，`advisories FAILED`，许可证、来源及 bans 检查通过；并核对现有 `Cargo.lock`，本次未修改加密依赖。
+- **位置**：`crypto/src/main/rust/Cargo.lock:196`（`crypto-bigint 0.5.5`）、`:227`（`ctutils 0.4.2`）；扫描入口为 `.github/workflows/dependency-scan.yml` 的 Rust 供应链作业。
+- **问题与影响**：`p256 → elliptic-curve → crypto-bigint` 命中 [RUSTSEC-2026-0387](https://rustsec.org/advisories/RUSTSEC-2026-0387)，公告修复范围为 `>=0.7.6`；`argon2/blake2、sha2 → digest 0.11.3 → ctutils` 命中 [RUSTSEC-2026-0385](https://rustsec.org/advisories/RUSTSEC-2026-0385)，公告修复范围为 `>=0.4.4`。两项涉及预期常数时间运算中的秘密相关分支，扫描会正确报红。已确认依赖版本命中公告，尚未核实 Android 目标上的具体可达运算及实际侧信道可利用性，不等同于已证明密钥泄露。
+- **关闭条件**：核实受影响调用及兼容升级路径，将依赖迁至修复版本并保持锁文件可复现；实跑供应链扫描与受影响加密行为测试，原生改动按 AGENTS.md 执行四层设备测试。不得通过忽略公告或降低失败判定消除扫描告警。
+
 ### ENG-20261111-03 合并把根目录条目误判为失链并移回旧分组
 
 - **核实时间与方式**：2026-11-11，`a5f61dd9` 源码调用链与宿主 JVM 公共入口 `KdbxMerger.mergeDatabases` 复现。基线条目位于子组，本地移至根组并保留指向原组的 `previousParentGroup`，远端条目未改；合并后条目回到原子组。`ReviewMergeProbeTest.moveToRootMustSurviveMerge` 在父组断言失败。本地临时证据为 `build/review-probes/results/TEST-com.keepasskey.sync.merge.ReviewMergeProbeTest.xml`；未做真实服务端同步验收。
@@ -61,4 +68,4 @@
 - **位置**：`sync/src/main/java/com/keepasskey/sync/webdav/WebDavPropfindParser.kt:211-217`（`applyXxeGuardFeature`）、`:226-245`（`hardenedFactories` 初始化）、`:255-261`（`applyXxeGuardSetting`）、`:263-275`（`newHardenedBuilder`）；`app/src/main/java/com/keepasskey/app/data/logger/DiagnosticLogRedactor.kt:35,41`（脱敏误伤）。
 - **问题**：`hardenedFactories` 按线程初始化时逐项设置 4 个 Xerces/SAX 特性与 `setXIncludeAware(false)`，Android 平台实现 `org.apache.harmony.xml.parsers.DocumentBuilderFactoryImpl` 分别抛 `ParserConfigurationException` / `UnsupportedOperationException`，容错后只落 WARN；第 6 项 `isExpandEntityReferences = false` 未抛异常、被平台接受。本仓只交付 Android APK（`settings.gradle.kts` 五个模块均为 Android 模块，模块外无 Kotlin/JVM 运行时源码，`sync/src/test` 无 XXE/DOCTYPE 用例），桌面 JVM 仅为单测执行环境，故这 5 项尝试在运行时零效果，却在每个工作线程首次建工厂时抛异常、采集栈帧并写入可导出诊断缓冲；导出的 `<redacted-url>` / `<redacted-file>` 还把 feature URL 与异常类名误判脱敏。Android 上真正有效的外部实体防线是 `EntityResolver`（空输入兑现），由设备测试哨兵验证，不依赖上述特性。
 - **影响边界**：诊断日志 5 条重复告警与无谓的异常/栈帧开销；不影响同步结果（同一组告警同时出现在 `Error` 与 `MergedAndUploaded` 两份日志中），无已知安全缺口。删除时须注意 `isExpandEntityReferences = false` 是被接受的设置，直接删除会把工厂状态从 `false` 改回默认 `true`，属于行为变化而非清理无效代码。
-- **尚未完成**：删掉 5 个注定抛异常的调用与两个容错包装函数，保留 `isExpandEntityReferences = false` 裸赋值以维持工厂状态；同步更新 `WebDavPropfindParser.kt` 与 `WebDavPropfindParserDeviceTest.kt` 的过时注释；真机跑 `WebDavPropfindParserDeviceTest`（XXE 哨兵 + 合法报文）与 `:sync:testDebugUnitTest` 全量通过，确认 `EntityResolver` 仍兜住外部实体后移除本条。可选：修正 `DiagnosticLogRedactor` 对异常类型行的豁免。
+- **尚未完成**：删掉 5 个注定抛异常的调用与两个容错包装函数，保留 `isExpandEntityReferences = false` 裸赋值以维持工厂状态；同步更新 `WebDavPropfindParser.kt` 与 `WebDavPropfindParserDeviceTest.kt` 的过时注释；真机跑 `WebDavPropfindParserDeviceTest`（XXE 哨兵 + 合法报文），并用 `:sync:testDebugUnitTest --tests '*WebDavPropfindParserTest' --tests '*WebDavPropfindListParserTest' --tests '*WebDavSyncProviderTest'` 验证解析与调用方；如调用链复核发现其它受影响行为，再扩大测试范围，所选测试均须通过，确认 `EntityResolver` 仍兜住外部实体后移除本条。可选：修正 `DiagnosticLogRedactor` 对异常类型行的豁免。
