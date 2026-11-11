@@ -8,6 +8,7 @@ import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -106,12 +107,91 @@ class DatabaseSessionIncrementalErasureTest {
         val secret = ProtectedString("move-secret", isProtected = true)
         session.saveEntry(entry(1, rootId, secret))
 
-        session.batchMoveEntries(setOf(uuid(1)), subId)
+        assertTrue(
+            "目标分组存在时移动必须成功",
+            session.batchMoveEntries(setOf(uuid(1)), subId)
+        )
 
         val moved = session.findEntry(uuid(1))!!
         assertEquals("条目必须落在目标分组", subId, moved.parentGroupId)
         assertEquals("moved 副本共享的实例仍可读", "move-secret", secret.readString())
         assertEquals("move-secret", moved.password!!.readString())
+        session.close()
+    }
+
+    /**
+     * `ENG-20261111-02`：目标分组在取得写锁前被同步移除时，批量移动必须在同一临界区内
+     * 核验失败并**零修改**——整改前先摘除条目、落树时目标缺失却静默返回，调用方照常落盘，
+     * 结果不只是 UI 不可见，而是保存重开后原条目消失。
+     */
+    @Test
+    fun `目标分组失效时批量移动零修改且保存重开保留原条目`() = runBlocking {
+        val password = "{{SECRET_7o9bq2bc}}".toCharArray()
+        val file = File(tempFolder.root, "stale_move_${System.nanoTime()}.kdbx")
+        val session = DatabaseSession()
+        assertTrue(
+            session.create(file = file, name = "Vault", passwordChars = password, useArgon2 = false).isSuccess
+        )
+        val rootId = session.root().id
+        val sourceId = uuid(5)
+        val targetId = uuid(6)
+        session.saveGroup(KdbxGroup(id = sourceId, parentGroupId = rootId, name = "source"))
+        session.saveGroup(KdbxGroup(id = targetId, parentGroupId = rootId, name = "target"))
+        val rootSecret = ProtectedString("root-move-secret", isProtected = true)
+        val nestedSecret = ProtectedString("nested-move-secret", isProtected = true)
+        session.saveEntry(entry(1, rootId, rootSecret))
+        session.saveEntry(entry(2, sourceId, nestedSecret))
+
+        // 模拟「用户选择目标组之后、写锁取得之前」目标被同步移除
+        session.deleteGroup(targetId)
+        val before = session.databaseFlow.value!!
+        val stateBefore = session.state.value
+
+        assertFalse(
+            "失效目标必须返回失败",
+            session.batchMoveEntries(setOf(uuid(1), uuid(2)), targetId)
+        )
+        assertSame("失效目标不得替换活动树", before, session.databaseFlow.value)
+        assertEquals("失效目标不得置 DIRTY", stateBefore, session.state.value)
+        assertEquals("根组条目字段不得被摘除或擦除", "root-move-secret", rootSecret.readString())
+        assertEquals("源组条目字段不得被摘除或擦除", "nested-move-secret", nestedSecret.readString())
+        assertEquals("条目必须仍在原分组", rootId, session.findEntry(uuid(1))!!.parentGroupId)
+        assertEquals("条目必须仍在原分组", sourceId, session.findEntry(uuid(2))!!.parentGroupId)
+
+        assertTrue("失败后仍应能正常保存", session.save().isSuccess)
+        session.close()
+
+        val reopened = DatabaseSession()
+        assertTrue(reopened.open(file, password).isSuccess)
+        val reloaded = reopened.databaseFlow.value!!
+        assertEquals(
+            "重开后根组条目必须保留",
+            rootId,
+            reloaded.rootGroup.findEntry(uuid(1))!!.parentGroupId
+        )
+        assertEquals(
+            "重开后源组条目必须保留",
+            sourceId,
+            reloaded.rootGroup.findEntry(uuid(2))!!.parentGroupId
+        )
+        assertEquals("root-move-secret", reloaded.rootGroup.findEntry(uuid(1))!!.password!!.readString())
+        assertEquals("nested-move-secret", reloaded.rootGroup.findEntry(uuid(2))!!.password!!.readString())
+        reopened.close()
+    }
+
+    @Test
+    fun `批量移动到根组与显式根 UUID 均成功`() = runBlocking {
+        val session = openedSession()
+        val rootId = session.root().id
+        val subId = uuid(5)
+        session.saveGroup(KdbxGroup(id = subId, parentGroupId = rootId, name = "sub"))
+        session.saveEntry(entry(1, subId, ProtectedString("root-target-a", isProtected = true)))
+        session.saveEntry(entry(2, subId, ProtectedString("root-target-b", isProtected = true)))
+
+        assertTrue("null 目标表示根组", session.batchMoveEntries(setOf(uuid(1)), null))
+        assertEquals(rootId, session.findEntry(uuid(1))!!.parentGroupId)
+        assertTrue("显式根组 UUID 同样合法", session.batchMoveEntries(setOf(uuid(2)), rootId))
+        assertEquals(rootId, session.findEntry(uuid(2))!!.parentGroupId)
         session.close()
     }
 

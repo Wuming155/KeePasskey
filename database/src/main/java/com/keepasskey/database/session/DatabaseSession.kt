@@ -365,8 +365,15 @@ class DatabaseSession @androidx.annotation.VisibleForTesting internal constructo
     /** 删除分组 */
     suspend fun deleteGroup(groupId: KdbxUuid) = mutations.deleteGroup(groupId)
 
-    /** 批量移动条目 */
-    suspend fun batchMoveEntries(entryIds: Set<KdbxUuid>, targetGroupId: KdbxUuid?) =
+    /**
+     * 批量移动条目；[targetGroupId] 为 null 表示根组。
+     *
+     * `ENG-20261111-02`：目标分组在会话锁内核验，失效即**零修改**。
+     *
+     * @return 目标分组存在且移动已发布时为 true；只读态 / 无活动库 / 目标分组不存在为 false，
+     *   此时**不做任何写入**。详见 [SessionContentMutations.batchMoveEntries]。
+     */
+    suspend fun batchMoveEntries(entryIds: Set<KdbxUuid>, targetGroupId: KdbxUuid?): Boolean =
         mutations.batchMoveEntries(entryIds, targetGroupId)
 
     /** 批量删除条目 */

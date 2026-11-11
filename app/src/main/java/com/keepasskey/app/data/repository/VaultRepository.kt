@@ -302,7 +302,11 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWrit
      */
     suspend fun emptyRecycleBin(): com.keepasskey.core.result.KdbxResult<Unit>
 
-    /** 批量移动凭据条目至目标分组（`null` = 根组） */
+    /**
+     * 批量移动凭据条目至目标分组（`null` = 根组）。
+     *
+     * 目标分组失效或不可解析时如实失败且**不落盘**，条目保持原归属。
+     */
     suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): com.keepasskey.core.result.KdbxResult<Unit>
 
     /** 批量删除凭据条目（移至回收站） */

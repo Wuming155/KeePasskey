@@ -324,32 +324,45 @@ internal class SessionContentMutations(
         stateFlow.value = DatabaseSession.SessionState.DIRTY
     }
 
-    /** 批量移动条目。 */
-    suspend fun batchMoveEntries(entryIds: Set<KdbxUuid>, targetGroupId: KdbxUuid?) = mutex.withLock {
-        requireCurrentSessionRequest(credentialTicket())
-        if (readOnly()) return@withLock
-        val currentDb = databaseFlow.value ?: return@withLock
-        val entriesToMove = currentDb.rootGroup.allEntries().filter { it.id in entryIds }
-        // ISSUE-P3-160：一次批量移除（单趟按 id 集合剪枝整棵树），取代「对每个条目各调一次
-        // removeEntry」——后者 K 个 id 即 O(K × 节点数) 次整树遍历 + K × 分组数 次列表分配，
-        // 且全程持会话 Mutex。被移除集合与逐条实现相同（entriesToMove 的 id ⊆ entryIds）。
-        var currentRoot = SessionTreeEditor.removeEntries(currentDb.rootGroup, entryIds)
-        // ISSUE-P2-06 / P3-156：待擦除对 = 源位置被移除的旧条目 → 其 moved 副本（`copy` 按引用
-        // 共享全部敏感实例，故候选集合通常为空）；目标位置若已有同 id 旧节点被替换，一并纳入
-        val superseded = mutableListOf<Pair<KdbxEntry, KdbxEntry>>()
-        for (e in entriesToMove) {
-            val movedEntry = e.copy(parentGroupId = targetGroupId)
-            val edit = SessionTreeEditor.updateOrAddEntry(currentRoot, movedEntry)
-            currentRoot = edit.root
-            superseded += e to movedEntry
-            edit.replaced?.let { superseded += it to movedEntry }
+    /**
+     * 批量移动条目；[targetGroupId] 为 null 表示根组，显式根组 UUID 同样合法。
+     *
+     * `ENG-20261111-02`：目标核验与摘除必须同处本临界区，且核验在**摘除之前**——
+     * [SessionTreeEditor.removeEntries] 先移走条目，随后 [SessionTreeEditor.updateOrAddEntry]
+     * 遇到不存在的目标父组会原样返回同一棵树且不报错，条目就此从内存树消失，调用方仍会照常落盘。
+     *
+     * @return 目标分组存在且移动已发布时为 true；只读态 / 无活动库 / 目标分组不存在为 false，
+     *   此时**不做任何写入**（不摘除、不置 DIRTY、不擦除敏感实例）。
+     */
+    suspend fun batchMoveEntries(entryIds: Set<KdbxUuid>, targetGroupId: KdbxUuid?): Boolean =
+        mutex.withLock {
+            requireCurrentSessionRequest(credentialTicket())
+            if (readOnly()) return@withLock false
+            val currentDb = databaseFlow.value ?: return@withLock false
+            val targetId = targetGroupId ?: currentDb.rootGroup.id
+            if (currentDb.rootGroup.findGroup(targetId) == null) return@withLock false
+            val entriesToMove = currentDb.rootGroup.allEntries().filter { it.id in entryIds }
+            // ISSUE-P3-160：一次批量移除（单趟按 id 集合剪枝整棵树），取代「对每个条目各调一次
+            // removeEntry」——后者 K 个 id 即 O(K × 节点数) 次整树遍历 + K × 分组数 次列表分配，
+            // 且全程持会话 Mutex。被移除集合与逐条实现相同（entriesToMove 的 id ⊆ entryIds）。
+            var currentRoot = SessionTreeEditor.removeEntries(currentDb.rootGroup, entryIds)
+            // ISSUE-P2-06 / P3-156：待擦除对 = 源位置被移除的旧条目 → 其 moved 副本（`copy` 按引用
+            // 共享全部敏感实例，故候选集合通常为空）；目标位置若已有同 id 旧节点被替换，一并纳入
+            val superseded = mutableListOf<Pair<KdbxEntry, KdbxEntry>>()
+            for (e in entriesToMove) {
+                val movedEntry = e.copy(parentGroupId = targetGroupId)
+                val edit = SessionTreeEditor.updateOrAddEntry(currentRoot, movedEntry)
+                currentRoot = edit.root
+                superseded += e to movedEntry
+                edit.replaced?.let { superseded += it to movedEntry }
+            }
+            // 擦除在**最终树**上执行（存活判定需看到全部移动结果）。
+            // ISSUE-P2-534：**先发布最终树、后擦除**（同 [saveEntry]；擦除只触碰 `superseded` 中的旧实例）
+            databaseFlow.value = currentDb.copy(rootGroup = currentRoot)
+            stateFlow.value = DatabaseSession.SessionState.DIRTY
+            superseded.forEach { (old, moved) -> currentRoot.eraseSupersededSensitiveData(old, moved) }
+            true
         }
-        // 擦除在**最终树**上执行（存活判定需看到全部移动结果）。
-        // ISSUE-P2-534：**先发布最终树、后擦除**（同 [saveEntry]；擦除只触碰 `superseded` 中的旧实例）
-        databaseFlow.value = currentDb.copy(rootGroup = currentRoot)
-        stateFlow.value = DatabaseSession.SessionState.DIRTY
-        superseded.forEach { (old, moved) -> currentRoot.eraseSupersededSensitiveData(old, moved) }
-    }
 
     /** 批量删除条目。 */
     suspend fun batchDeleteEntries(entryIds: Set<KdbxUuid>) = mutex.withLock {

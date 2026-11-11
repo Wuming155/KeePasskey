@@ -14,6 +14,7 @@ import com.keepasskey.core.model.KdbxGroup
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.model.PasskeyData
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.security.ProtectedString
 import com.keepasskey.database.file.InnerHeader
 import com.keepasskey.database.file.KdbxDatabase
@@ -537,6 +538,112 @@ class RealVaultRepositoryTest {
         assertEquals("重开后子分组必须仍在", 1, reloadedGroup.subgroups.size)
         assertEquals("孙条目", reloadedGroup.subgroups[0].entries[0].title)
         assertEquals(2, reloadedDb.rootGroup.allEntries().size)
+
+        password.fill('0')
+    }
+
+    /**
+     * `ENG-20261111-02`：移动目标分组在取得写锁前失效时，仓库必须如实失败并**跳过落盘**。
+     *
+     * 整改前批量通道不核验目标、无条件 `persistSession()`：条目已被会话层摘除，仓库仍把
+     * 「已摘除」的树当成移动成功写回文件，重开后原条目消失。本用例同时覆盖详情页单条通道、
+     * 多选批量通道，以及不可解析目标（不得回退为「移到根组」）。
+     */
+    @Test
+    fun `移动目标分组失效时如实失败且重开保留全部原条目`() = runTest {
+        val testFile = File(tempFolder.root, "stale_move_target.kdbx")
+        val password = "{{SECRET_9k2m5xqa}}".toCharArray()
+        val session = DatabaseSession()
+        assertTrue(
+            session.create(
+                file = testFile,
+                name = "MoveVault",
+                passwordChars = password,
+                useArgon2 = false
+            ) is com.keepasskey.core.result.KdbxResult.Success
+        )
+        val repository = newRepository(session)
+
+        assertTrue(
+            repository.saveGroup(VaultGroup(id = "group_source", name = "源组", iconName = "folder"))
+                is com.keepasskey.core.result.KdbxResult.Success
+        )
+        assertTrue(
+            repository.saveGroup(VaultGroup(id = "group_target", name = "目标组", iconName = "folder"))
+                is com.keepasskey.core.result.KdbxResult.Success
+        )
+        val groups = repository.getGroups().first()
+        val sourceId = groups.first { it.name == "源组" }.id
+        val targetId = groups.first { it.name == "目标组" }.id
+
+        val rootEntryId = KdbxUuid.random().toHexString()
+        val nestedEntryId = KdbxUuid.random().toHexString()
+        assertTrue(
+            repository.saveEntry(
+                UiVaultEntry(id = rootEntryId, title = "根目录条目", username = "", url = "", groupId = null),
+                passwordChars = "root_entry_pw".toCharArray()
+            ) is com.keepasskey.core.result.KdbxResult.Success
+        )
+        assertTrue(
+            repository.saveEntry(
+                UiVaultEntry(id = nestedEntryId, title = "源组条目", username = "", url = "", groupId = sourceId),
+                passwordChars = "nested_entry_pw".toCharArray()
+            ) is com.keepasskey.core.result.KdbxResult.Success
+        )
+
+        // 模拟同步周期在「用户选择目标组之后、写锁取得之前」移除该组
+        session.deleteGroup(KdbxUuid.fromHexString(targetId))
+        val beforeFailure = session.databaseFlow.first()!!
+        val stateBefore = session.state.value
+
+        val single = repository.batchMoveEntries(setOf(rootEntryId), targetId)
+        assertEquals(
+            "详情页单条移动必须如实失败",
+            KdbxError.ENTRY_GROUP_TARGET_INVALID,
+            (single as com.keepasskey.core.result.KdbxResult.Failure).code
+        )
+        val batch = repository.batchMoveEntries(setOf(rootEntryId, nestedEntryId), targetId)
+        assertEquals(
+            "多选批量移动必须如实失败",
+            KdbxError.ENTRY_GROUP_TARGET_INVALID,
+            (batch as com.keepasskey.core.result.KdbxResult.Failure).code
+        )
+        val unparsable = repository.batchMoveEntries(setOf(nestedEntryId), "not-a-uuid")
+        assertEquals(
+            "不可解析目标不得回落为根组",
+            KdbxError.ENTRY_GROUP_TARGET_INVALID,
+            (unparsable as com.keepasskey.core.result.KdbxResult.Failure).code
+        )
+
+        assertSame("失效目标不得替换活动树", beforeFailure, session.databaseFlow.first())
+        assertEquals("失效目标不得置 DIRTY", stateBefore, session.state.value)
+        val rootAfterFailure = session.databaseFlow.first()!!.rootGroup
+        assertEquals(
+            "根组条目必须留在根组",
+            rootAfterFailure.id,
+            rootAfterFailure.findEntry(KdbxUuid.fromHexString(rootEntryId))?.parentGroupId
+        )
+        assertEquals(
+            "源组条目必须留在源组",
+            KdbxUuid.fromHexString(sourceId),
+            rootAfterFailure.findEntry(KdbxUuid.fromHexString(nestedEntryId))?.parentGroupId
+        )
+
+        assertTrue("失败后仍应能正常保存", session.save().isSuccess)
+        session.close()
+
+        val reopenSession = DatabaseSession()
+        assertTrue(reopenSession.open(testFile, password).isSuccess)
+        val reloadedRoot = reopenSession.databaseFlow.first()!!.rootGroup
+        val reloadedRootEntry = reloadedRoot.findEntry(KdbxUuid.fromHexString(rootEntryId))
+        val reloadedNested = reloadedRoot.findEntry(KdbxUuid.fromHexString(nestedEntryId))
+        assertNotNull("重开后根组条目必须保留", reloadedRootEntry)
+        assertNotNull("重开后源组条目必须保留", reloadedNested)
+        assertEquals(reloadedRoot.id, reloadedRootEntry!!.parentGroupId)
+        assertEquals(KdbxUuid.fromHexString(sourceId), reloadedNested!!.parentGroupId)
+        assertEquals("root_entry_pw", reloadedRootEntry.password!!.readString())
+        assertEquals("nested_entry_pw", reloadedNested.password!!.readString())
+        reopenSession.close()
 
         password.fill('0')
     }

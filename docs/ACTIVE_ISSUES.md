@@ -21,12 +21,7 @@
 
 ## P1 高危与核心功能问题
 
-### ENG-20261111-02 移动目标分组失效时静默删除条目并保存成功
-
-- **核实时间与方式**：2026-11-11，基于 `a5f61dd9` 静态追踪详情页、批量移动、仓库及会话调用链；宿主 JVM 使用虚构库执行创建条目和目标组 → 删除目标组 → 用原目标 UUID 移动 → 保存 → 关闭重开，保存与重开均成功，但原条目不存在。`ReviewCloneProbeTest.staleMoveTargetMustNotDeleteEntry` 在重开后的存在性断言失败；本地临时证据为 `build/review-probes/results/TEST-com.keepasskey.app.data.repository.ReviewCloneProbeTest.xml`，不是永久资产。未实跑设备上的并发 UI 时序。
-- **位置**：`database/src/main/java/com/keepasskey/database/session/SessionContentMutations.kt:328-351`；`SessionTreeEditor.kt:24-34`；`app/src/main/java/com/keepasskey/app/data/repository/VaultGroupCoordinator.kt:112-117`。
-- **问题与影响**：`batchMoveEntries` 未在会话锁内核验目标组，先 `removeEntries`，再逐条插入；目标 UUID 已不存在时，`updateOrAddEntry` 返回已经摘除条目的树，不报告失败。仓库随后仍执行 `persistSession()`，详情页与多选操作均可显示移动成功。触发前提是收到失效的目标 UUID，例如用户选择后、协程真正取得写锁前目标被同步移除；受影响的是本次选中条目，结果不只是 UI 暂时不可见，而是可落盘的数据丢失。编辑页的 `saveEntryInGroup` 已有目标核验，但批量通道（也供详情页单条移动使用）没有复用该保护。
-- **关闭条件**：在同一写锁内、摘除之前核验目标；目标失效须零修改并向仓库/UI 返回失败。复用现有移动测试覆盖失效目标、根目录目标和正常分组目标，并验证失败后保存重开仍保留全部原条目。
+暂无。
 
 ## P2 中危缺陷与协议/测试缺口
 

@@ -2,6 +2,7 @@ package com.keepasskey.app.data.repository
 
 import com.keepasskey.app.ui.model.VaultGroup
 import com.keepasskey.core.model.KdbxGroup
+import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.flow.Flow
@@ -106,14 +107,31 @@ internal class VaultGroupCoordinator(
     /**
      * 批量移动条目至目标分组（ISSUE-P3-305：自 `RealVaultRepository` 逐行搬出）。
      *
-     * 目标分组为 null 表示移至根组；id 非法者按既有口径静默丢弃（`mapNotNull`）。
+     * 目标分组为 null 表示移至根组；条目 id 非法者按既有口径静默丢弃（`mapNotNull`）。
      * 树变换由会话层在同一次受控变换内完成，随后统一落盘。
+     *
+     * `ENG-20261111-02`：目标分组可能在用户选择后、写锁取得前被同步移除。会话层此刻返回
+     * false 且零修改，本层必须**如实失败并跳过落盘**——整改前无条件 `persistSession()`，
+     * 已从内存树摘除的条目被当成「移动成功」写回文件。非 null 但不可解析的目标同属失效，
+     * 不得回退为 null（那会把条目移到根组）。
      */
     suspend fun batchMoveEntries(entryIds: Set<String>, targetGroupId: String?): KdbxResult<Unit> =
         databaseSession.withWriteAcceptance {
             val uuidSet = entryIds.mapNotNull { parseKdbxUuidOrNull(it) }.toSet()
-            val targetUuid = targetGroupId?.let { parseKdbxUuidOrNull(it) }
-            databaseSession.batchMoveEntries(uuidSet, targetUuid)
+            val targetUuid = if (targetGroupId == null) {
+                null
+            } else {
+                parseKdbxUuidOrNull(targetGroupId) ?: return@withWriteAcceptance KdbxResult.Failure(
+                    IllegalArgumentException("target group id unparsable"),
+                    code = KdbxError.ENTRY_GROUP_TARGET_INVALID
+                )
+            }
+            if (!databaseSession.batchMoveEntries(uuidSet, targetUuid)) {
+                return@withWriteAcceptance KdbxResult.Failure(
+                    IllegalStateException("move target group vanished before commit"),
+                    code = KdbxError.ENTRY_GROUP_TARGET_INVALID
+                )
+            }
             persistSession()
         }
 }
