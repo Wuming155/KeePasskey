@@ -7,6 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultDatabaseCatalog
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.di.AutofillDeviceGraph
@@ -27,7 +28,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Real EntryDetailScreen clicks validate history row identity before and after a repository head insert. */
+/** 在真实详情页点击历史行，验证仓库头插修订前后的行身份、对比和回滚。 */
 @RunWith(AndroidJUnit4::class)
 class HistoryRevisionUiDeviceTest {
 
@@ -75,6 +76,11 @@ class HistoryRevisionUiDeviceTest {
 
     @Test
     fun `真实详情页第二行对比回滚且头插后仍能选择原历史`() {
+        val compareLabel = context.getString(R.string.detail_diff_compare)
+        val diffTitle = context.getString(R.string.diff_dialog_title)
+        val cancelLabel = context.getString(R.string.btn_cancel)
+        val detailTitle = context.getString(R.string.detail_title)
+        val rollbackLabel = context.getString(R.string.diff_rollback_btn)
         val file = createAndOpenTestVault()
         val initialPasswords = listOf("P0", "P1", "P2", "P3")
         initialPasswords.forEach { savePassword(file, it) }
@@ -83,30 +89,32 @@ class HistoryRevisionUiDeviceTest {
             .putExtra(EntryDetailDeviceHostActivity.EXTRA_ENTRY_ID, entryId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         ActivityScenario.launch<EntryDetailDeviceHostActivity>(intent).use {
-            assertTrue("详情页必须显示三条历史行", waitForExactTextCount("对比差异", 3))
+            val initialHistoryVisible = waitForExactTextCount(compareLabel, 3)
+            assertTrue("详情页必须显示三条历史行：${accessibilityText()}", initialHistoryVisible)
 
-            // Old history row 2 is P1 while current value is P3.
-            clickNthText("对比差异", 1)
-            assertTrue("第二条历史的对比弹窗必须出现", waitForExactText("版本差异对比"))
+            // 第二条历史是 P1，当前值是 P3。
+            clickNthText(compareLabel, 1)
+            assertTrue("第二条历史的对比弹窗必须出现", waitForExactText(diffTitle))
             assertTrue("第二条历史必须对应 P1，当前必须是 P3", waitUntil {
                 val text = accessibilityText()
                 "P1" in text && "P3" in text
             })
-            clickText("取消")
-            assertTrue("对比弹窗关闭后详情页必须可见", waitForExactText("凭据详情"))
+            clickText(cancelLabel)
+            assertTrue("对比弹窗关闭后详情页必须可见", waitForExactText(detailTitle))
 
-            // Keep the real detail screen mounted while the production repository inserts a head revision.
+            // 保持真实详情页挂载，通过生产仓库在头部插入修订。
             savePassword(file, "P4")
-            assertTrue("头插后详情投影应出现四条历史行", waitForExactTextCount("对比差异", 4))
+            val updatedHistoryVisible = waitForExactTextCount(compareLabel, 4)
+            assertTrue("头插后详情投影应出现四条历史行：${accessibilityText()}", updatedHistoryVisible)
 
-            // After head insertion P1 moves from row 2 to row 3. Tapping that row must still resolve P1.
-            clickNthText("对比差异", 2)
-            assertTrue("头插后的 P1 历史对比弹窗必须出现", waitForExactText("版本差异对比"))
+            // 头插后 P1 移至第三行，点击仍须命中 P1。
+            clickNthText(compareLabel, 2)
+            assertTrue("头插后的 P1 历史对比弹窗必须出现", waitForExactText(diffTitle))
             assertTrue("头插后第 3 行仍须对应 P1，当前为 P4", waitUntil {
                 val text = accessibilityText()
                 "P1" in text && "P4" in text
             })
-            clickText("回滚至该历史版本")
+            clickText(rollbackLabel)
             assertTrue("真实 UI 回滚必须把正式库提交为 P1", waitUntil { currentPassword(file) == "P1" })
             assertEquals("回滚后活动会话也必须为 P1", "P1", currentSessionPassword())
         }

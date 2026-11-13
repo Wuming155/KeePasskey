@@ -29,9 +29,4 @@
 
 ## P3 低危问题与体验改进
 
-### ENG-20261111-08 HistoryRevisionUiDeviceTest 在测试模拟器上稳定失败（基线即失败）
-
-- **核实时间与方式**：2026-11-11，专用 AVD `KeePasskey_Remediation_20261020`（API 36）实跑 `:app:connectedDebugAndroidTest` 单类过滤；全量、清理数据后隔离、单独重试三次均在同一断言失败（`详情页必须显示三条历史行`，`HistoryRevisionUiDeviceTest.kt:86`，`UI_TIMEOUT_MS=8000`）。在 HEAD `28c34560` 的独立 worktree（不含本次六项修复）以相同断言失败，证明非本次改动引入。logcat 无崩溃，`EntryDetailDeviceHostActivity` 正常 RESUMED，合成库创建/保存/回读断言均通过。历史证据 `build/test-evidence/p2-issues/HistoryRevisionUiDeviceTest.xml` 记录 2026-10-18 曾通过（环境未必相同）。
-- **位置**：`app/src/androidTest/java/com/keepasskey/app/ui/HistoryRevisionUiDeviceTest.kt:86`；详情页历史行渲染与无障碍检索路径。
-- **问题与影响**：该用例非编排门控（普通连接跑法本应通过），却在当前测试模拟器上稳定失败，削弱其作为历史对比/回滚 UI 回归门的有效性。尚未根因：可能是模拟器 UI/无障碍时序（8s 超时偏短）或详情页历史行渲染的既有缺陷，两者未区分；不等同于已证明产品缺陷。
-- **关闭条件**：根因定位并区分环境时序与真实渲染缺陷；若为环境时序，稳定无障碍检索或调整超时后实跑转绿；若为真实缺陷，修复详情页历史行渲染并实跑验证。不得为消除失败而删除用例或弱化断言。
+暂无。
