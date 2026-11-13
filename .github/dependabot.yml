@@ -1,11 +1,17 @@
-# TASK-20（P3）：供应链自动化——每周依赖更新巡检。
+# TASK-20（P3）：供应链自动化——依赖巡检。
 # - package-ecosystem: gradle 以目录 "/" 覆盖仓库内全部模块 build.gradle.kts 与版本目录
 #   （本项目依赖版本集中于 gradle/libs.versions.toml，5 模块统一受控）。
-# - ISSUE-P2-469：BouncyCastle（bcprov-jdk18on）为 KDF / 分组密码的**生产兜底路径**
-#   （`CipherFallbackParityTest` 锁定等价），其安全更新须同批跟进，不得以「主路径已原生化」
-#   为由滞留；本 gradle 生态已覆盖版本目录，故 BC 更新会正常进入 Dependabot PR。
-# - 分组策略：gradle minor/patch 合并为单 PR 防风暴；major 保持独立 PR（人工重点评审
-#   破坏性变更，如 AGP / Kotlin / KSP / Hilt 大版本需配合迁移）。
+# - **版本更新已整体关闭**（2026-11-13）：两个生态均设 `open-pull-requests-limit: 0`。
+#   理由：本仓的依赖升级不是「版本一变就合」的事——AGP 跨 minor 需核对 IDE 兼容上限与
+#   Gradle 下限，material3 走 1.5.0 预发布线且有「仅允许预发布线内部上调」的显式约束，
+#   KSP 需与 Kotlin 内置编译器版本对齐，okhttp/datastore 影响同步与持久化运行时面。
+#   此前每周自动产生的分组 PR（#22/#23）无法在无人值守下完成这套核对，反而堆积待办。
+#   依赖升级改为**人工发起 + 本地实跑验证**后合并，见 gradle/libs.versions.toml 内的
+#   版本演进注释。
+# - **安全更新不受影响**：Dependabot 安全更新走独立的固定上限（官方文档：安全更新 PR 不受
+#   `open-pull-requests-limit` 约束，最多 10 条），因此 CVE 修复仍会自动提 PR，需照常评审。
+# - 保留分组配置：将来若恢复版本更新（如人工触发或改回非零上限），分组策略仍然有效，
+#   避免一次性涌入大量零散 PR。
 # - timezone 使用 Asia/Shanghai，周末凌晨低频扫描。
 version: 2
 updates:
@@ -16,7 +22,8 @@ updates:
       day: "saturday"
       time: "02:00"
       timezone: "Asia/Shanghai"
-    open-pull-requests-limit: 10
+    # 0 = 关闭该生态的版本更新 PR（安全更新不受此限制，仍会自动提 PR）
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "gradle"
@@ -34,7 +41,8 @@ updates:
       day: "saturday"
       time: "02:30"
       timezone: "Asia/Shanghai"
-    open-pull-requests-limit: 5
+    # 同上：关闭常规版本更新；安全更新仍照常提出
+    open-pull-requests-limit: 0
     labels:
       - "dependencies"
       - "ci"
