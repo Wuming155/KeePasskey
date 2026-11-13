@@ -273,23 +273,26 @@ def run_vhost_mode(keep=False):
             systemProperty "javax.net.ssl.trustStoreType", "PKCS12"
             systemProperty "liveS3VirtualHostEndpoint", "https://minio.127.0.0.1.nip.io:%d"
             systemProperty "liveS3Bucket", "%s"
-            systemProperty "liveS3Access", "%s"
-            systemProperty "liveS3Secret", "%s"
         }
     }
 }
-""" % (p12_forward, lab.s3_port, lab.bucket, lab.s3_user, lab.s3_password)
+""" % (p12_forward, lab.s3_port, lab.bucket)
         with open(init_script_path, "w", encoding="utf-8") as f:
             f.write(init_template)
 
         # 5. 执行 Gradle LiveS3VirtualHostTest
         env = dict(os.environ)
+        # 凭据只经本次进程环境传给测试 JVM（LiveS3VirtualHostTest.credential 的 env 兜底），
+        # 不写入 init-script 或命令行；--no-daemon 避免常驻 daemon 复用旧环境快照。
+        env["MINIO_ROOT_USER"] = lab.s3_user
+        env["MINIO_ROOT_PASSWORD"] = lab.s3_password
         cmd = [
             os.path.join(lab_services.REPO, "gradlew.bat"),
             ":sync:testDebugUnitTest",
             "--tests", "com.keepasskey.sync.s3.LiveS3VirtualHostTest",
             "--init-script", init_script_path,
             "-DliveS3VirtualHost=true",
+            "--no-daemon",
             "--offline",
             "--console=plain",
         ]
@@ -340,6 +343,7 @@ def run_vhost_mode(keep=False):
             "tls_and_isolation": {
                 "san_names": ["minio.127.0.0.1.nip.io", "*.minio.127.0.0.1.nip.io", "localhost", "127.0.0.1"],
                 "truststore_strategy": "通过 Gradle init-script 将隔离测试 JVM 的 javax.net.ssl.trustStore 定向至临时 PKCS12 测试 CA",
+                "credentials_channel": "本次随机凭据只经进程环境 MINIO_ROOT_USER/MINIO_ROOT_PASSWORD 传入（--no-daemon 隔离），init-script 与命令行不含凭据",
                 "production_client_unbypassed": True,
                 "client_injection": False,
                 "system_ca_or_hosts_modified": False,

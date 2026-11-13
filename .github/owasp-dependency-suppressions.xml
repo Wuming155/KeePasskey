@@ -21,53 +21,46 @@
 
     <suppress>
         <notes><![CDATA[
-            核实结论：误报（CPE 误配）。androidx.sqlite 的 Java/Kotlin 包装器被比对成 SQLite C 库本体，
-            因而继承了 SQLite C 库的全部 CVE（CVE-2025-6965 / CVE-2022-35737 / CVE-2023-7104 /
-            CVE-2015-5895 / CVE-2017-10989 / CVE-2018-20346 等，去重后 20 条 ≥ CVSS 7.0，
-            两个构件合计 40 条）。
+            核实结论：误报（CPE 误配）。androidx.sqlite 的 Java/Kotlin 包装器被比对成
+            SQLite C 库本体，因而继承了 SQLite C 库与命令行 shell 的 CVE。本条覆盖的
+            39 个 CVE 均属该误配；其中 2026 年新增的 11 个（CVE-2026-119371~119379、
+            119586、119591）经 NVD API 实查，受影响产品一律为
+            `vendor=SQLite / product=SQLite / pkg:github/sqlite/sqlite`，版本条件为
+            < 3.54.0（119586 的 CLI shell 命令注入为 ≤ 3.54.1）。androidx.sqlite 的版本号
+            恒远小于 3.54.0，升级该依赖无法让告警消失。
 
-            核实依据（2026-09-10，逐条可复现）：
-            1. **构件内无原生 SQLite**：解包本机 Gradle 缓存中的
-               androidx.sqlite:sqlite:2.4.0 / sqlite-framework:2.4.0 两个 AAR，`.so` 文件数为 0，
-               且不存在 `jni/` 目录（仅有 classes.jar）——即不含任何 SQLite C 代码；
-               而所列 CVE 全部针对 SQLite C 库。
-            2. **构件语义**：`androidx.sqlite:sqlite-framework` 提供 FrameworkSQLiteOpenHelper，
-               它**委托给系统自带的 android.database.sqlite**（设备侧 SQLite 由系统更新）。
-               真正捆绑原生 SQLite 的变体是 `androidx.sqlite:sqlite-bundled`，本仓并未使用。
+            核实依据（2026-11-13 复核，命令可复现）：
+            1. **构件内无原生 SQLite**：解包本机 Gradle 缓存中告警所指的
+               androidx.sqlite:sqlite-android:2.5.0 与
+               androidx.sqlite:sqlite-framework-android:2.5.0 两个 AAR，各 14 个条目、
+               `.so` 数为 0、无 `jni/` 目录，仅有 classes.jar 与 Android 资源；所列 CVE
+               全部针对 SQLite C 库 / CLI，包装器内不存在对应代码。
+            2. **构件语义**：AndroidX 发布说明把 `sqlite-framework` 定义为通过 Android
+               framework APIs 实现，`AndroidSQLiteDriver` 调用
+               `android.database.sqlite.SQLiteDatabase.openOrCreateDatabase` 委托设备系统
+               SQLite；真正捆绑源码编译 SQLite 的是 `sqlite-bundled`，本仓未使用。
+               设备系统 SQLite 的补丁状态由 Android 系统版本负责，不由该 AAR 版本决定。
             3. **依赖来源**：`:app:dependencyInsight --configuration debugRuntimeClasspath
-               --dependency androidx.sqlite:sqlite` 显示经
-               androidx.work:work-runtime:2.10.0 → androidx.room:room-runtime:2.6.1 传递引入
-               （app/build.gradle.kts:158 声明 work-runtime-ktx）。
-            4. **升级不可消除**：CPE 按产品名 + 版本区间比对，androidx.sqlite 的任何版本号都远小于
-               SQLite 的 3.50.2，故升级该依赖无法让告警消失——误报只能登记，不能靠升级"修掉"。
-
-            2026-10-19 后续复核（GitHub 开放告警）：Code Scanning 中 112 条 SQLite 告警为上述
-            28 个 CVE 各重复 4 次，均来自 androidx.sqlite 的 `sqlite-android` 与
-            `sqlite-framework-android` 2.5.0 AAR 及其 Gradle 转换产物。原规则只匹配基础 artifactId，
-            漏掉了 KMP Android 目标发布的 `-android` 变体，故已列出的 28 个 CVE 豁免未命中。
-            AndroidX 官方发布说明将 `sqlite-framework` 定义为通过 Android framework APIs 实现，
-            将 `sqlite-bundled` 定义为使用源码编译 SQLite 的实现；官方 `AndroidSQLiteDriver`
-            源码调用 `android.database.sqlite.SQLiteDatabase.openOrCreateDatabase`，委托系统 SQLite。
+               --dependency androidx.sqlite:sqlite` 实测经
+               androidx.work:work-runtime-ktx:2.12.0 → androidx.work:work-runtime:2.12.0
+               → androidx.room:room-runtime:2.7.0 传递引入 2.5.0（app 声明 work-runtime-ktx）。
             依据链接：AndroidX 发布说明 https://developer.android.com/jetpack/androidx/releases/sqlite#2.5.0；
-            AndroidSQLiteDriver API https://developer.android.com/reference/kotlin/androidx/sqlite/driver/AndroidSQLiteDriver；
             AndroidSQLiteDriver 源码 https://android.googlesource.com/platform/frameworks/support/+/ab8cea0ea3273a089525e51e38e915bb7769e209/sqlite/sqlite-framework/src/androidMain/kotlin/androidx/sqlite/driver/AndroidSQLiteDriver.android.kt；
-            sqlite-android POM（2.5.0-alpha13）https://android.googlesource.com/platform/prebuilts/sdk/+/4f79ea96d70770876a53272f7179ba164a6c2194/current/androidx/m2repository/androidx/sqlite/sqlite-android/2.5.0-alpha13/sqlite-android-2.5.0-alpha13.pom。
-            最终版 2.5.0 AAR 的字节级 `.so` 清点因 Google Maven 下载失败未能完成；结论基于 AndroidX 发布说明、
-            上游实现和该模块的公开 POM 结构交叉核对，不宣称完成了对告警 AAR 二进制的直接检查。
-            因此这两种 Android 目标变体仍不含随包捆绑的 SQLite C 库；设备系统 SQLite 的补丁状态
-            仍由 Android 系统版本负责，不由该 AAR 版本决定。
+            NVD https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-119371。
 
-            范围护栏：本 regex 精确覆盖 `sqlite`、`sqlite-framework`、`sqlite-android` 与
+            范围护栏：regex 精确覆盖 `sqlite`、`sqlite-framework`、`sqlite-android` 与
             `sqlite-framework-android` 四个 artifactId；**不含** `sqlite-bundled`、
-            `sqlite-bundled-android` 或 `sqlite-ktx`。若将来改用捆绑原生 SQLite 的变体，其 CVE
-            仍会进入闸门（这正是期望行为）。
+            `sqlite-bundled-android` 或 `sqlite-ktx`。若改用捆绑原生 SQLite 的变体，
+            其 CVE 仍会进入闸门（期望行为）。豁免按 CVE 逐条列出，新出现的 SQLite C 库
+            CVE 不会被正则自动吞掉，须重新核实后逐条追加——fail-closed。
         ]]></notes>
         <packageUrl regex="true">^pkg:maven/androidx\.sqlite/sqlite(-framework)?(-android)?@.*$</packageUrl>
         <!-- 插件 XSD（dependency-suppression.1.3.xsd）要求 suppress 至少含
              cpe / cve / vulnerabilityName / cwe / cvssBelow 之一——
              仅 packageUrl + notes 是**schema 非法**的（2026-09-10 经本地真实运行
              `dependencyCheckAggregate` 捕获：Line=49 元素 'suppress' 的内容不完整）。
-             故此处逐条列出该族在报告中命中的全部 28 个 CVE（20 个 ≥ CVSS 7.0）。 -->
+             故此处逐条列出该族在报告中命中的全部 39 个 CVE；新出现的 CVE 不会被
+             packageUrl 正则自动豁免，仍会令闸门报红，须逐条核实后追加。 -->
         <cve>CVE-2015-3414</cve>
         <cve>CVE-2015-3415</cve>
         <cve>CVE-2015-3416</cve>
@@ -96,6 +89,17 @@
         <cve>CVE-2025-70873</cve>
         <cve>CVE-2026-11822</cve>
         <cve>CVE-2026-11824</cve>
+        <cve>CVE-2026-119371</cve>
+        <cve>CVE-2026-119372</cve>
+        <cve>CVE-2026-119373</cve>
+        <cve>CVE-2026-119374</cve>
+        <cve>CVE-2026-119375</cve>
+        <cve>CVE-2026-119376</cve>
+        <cve>CVE-2026-119377</cve>
+        <cve>CVE-2026-119378</cve>
+        <cve>CVE-2026-119379</cve>
+        <cve>CVE-2026-119586</cve>
+        <cve>CVE-2026-119591</cve>
     </suppress>
 
     <!-- ============ ISSUE-P3-32：构建工具链专属构件（不进入发布产物，2026-09-10 核实） ============ -->
