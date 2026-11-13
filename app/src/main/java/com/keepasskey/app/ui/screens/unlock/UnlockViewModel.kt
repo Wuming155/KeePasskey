@@ -320,16 +320,19 @@ class UnlockViewModel @Inject constructor(
     fun unlock(activity: FragmentActivity? = null) = masterPasswordSession.unlock(activity)
 
     /**
-     * ISSUE-P3-117：离开解锁页（导航离开 / 页面进入后台）时的清理。
+     * 离开解锁页时取消尚未完成的系统认证，并按偏好清理未提交主密码。
      *
      * 开关 `clearPasswordOnLeave`（设置页「离开密码页清空已输入字符」，默认关闭）的行为裁决
      * 在 [MasterPasswordUnlockSession.onScreenLeft]；此处只读进程内共享快照
      * （ExtendedSettingsStore KDoc 声明的「读侧唯一来源」，与设置页写入具备即时可见性），
      * 未注入（纯 JVM 单测）时按默认关闭处理。
      */
-    fun onScreenLeft() = masterPasswordSession.onScreenLeft(
-        extendedSettingsStore?.settings?.value?.clearPasswordOnLeave ?: false
-    )
+    fun onScreenLeft() {
+        biometricUnlock.cancelPendingAuthentication()
+        masterPasswordSession.onScreenLeft(
+            extendedSettingsStore?.settings?.value?.clearPasswordOnLeave ?: false
+        )
+    }
 
     /**
      * 生物识别解锁：结合 AndroidX Biometric 与硬件 Keystore 解封。
@@ -397,6 +400,7 @@ class UnlockViewModel @Inject constructor(
     ) = biometricUnlock.completeBiometricUnlock(decryptedBytes, storage, dbId)
 
     override fun onCleared() {
+        biometricUnlock.cancelPendingAuthentication()
         // 离开解锁页：显式擦除驻留的敏感字节（主密码与密钥文件）
         masterPasswordSession.wipe()
         keyFileSession.wipe()

@@ -58,7 +58,7 @@ data class UnlockUiState(
     val isBiometricEnabled: Boolean = false,
     // ISSUE-P3-01：进入解锁页的「自动唤起生物识别」一次性状态机。
     // IDLE（条件未满足）→ PENDING（等待 UI 消费一次）→ CONSUMED（已消费，终态不可逆）；
-    // 见 [BiometricAutoPrompt]，UI 仅在 LaunchedEffect 中透传一次性意图，不自行判断业务条件。
+    // 见 [BiometricAutoPrompt]，UI 在页面与宿主均已恢复时透传意图，不自行判断业务条件。
     val biometricAutoPrompt: BiometricAutoPrompt = BiometricAutoPrompt.IDLE,
 
     // ISSUE-P1-04：主密码解锁失败节流状态（界面重试节流）

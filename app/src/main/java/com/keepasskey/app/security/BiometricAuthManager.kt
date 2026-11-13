@@ -97,6 +97,7 @@ class BiometricAuthManager @Inject constructor(
      * @param cipher 非空时以 CryptoObject 发起（授权后方可 doFinal）
      * @param negativeButtonText 负向按钮文案；仅当集合不含 DEVICE_CREDENTIAL 时生效
      *   （官方约束：设备凭据路径由系统入口取代负向按钮，二者互斥）
+     * @return 取消本次系统认证的操作，由需要管理请求生命周期的调用方持有。
      */
     fun authenticate(
         activity: FragmentActivity,
@@ -107,7 +108,7 @@ class BiometricAuthManager @Inject constructor(
         cipher: Cipher? = null,
         negativeButtonText: String? = null,
         onResult: (BiometricResult) -> Unit
-    ) {
+    ): () -> Unit {
         val executor = ContextCompat.getMainExecutor(activity)
         val usesDeviceCredential =
             authenticators and BiometricManager.Authenticators.DEVICE_CREDENTIAL != 0
@@ -161,6 +162,7 @@ class BiometricAuthManager @Inject constructor(
         } else {
             biometricPrompt.authenticate(promptInfo)
         }
+        return { biometricPrompt.cancelAuthentication() }
     }
 
     /**

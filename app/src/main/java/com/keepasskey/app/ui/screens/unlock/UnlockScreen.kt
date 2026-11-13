@@ -102,16 +102,14 @@ fun UnlockScreen(
         }
     }
 
-    // ISSUE-P3-01 整改：进入解锁页的生物识别自动唤起收敛为「ViewModel 显式一次性意图」。
-    // 此处只透传状态位（Screen 不做业务判断），条件判定与「已消费」守卫全部在 ViewModel：
-    // - pending 由 ViewModel 在「开关开启 + 存在已封印凭据 + 活动库 + 快速解锁模式」时置位，
-    //   且在数据库流/设置流任一路径抵达后重算，判定与两条异步源的抵达顺序无关
-    //   （原实现只在设置流抵达时用当时的可用性算一次，先到者定格终态 → 真机第二次解锁不弹窗）；
-    // - 意图消费后状态机进入 CONSUMED 终态，PENDING 无法再从 CONSUMED 抵达，
-    //   因此重组、切后台回前台、onResume 类钩子都不可能重复弹窗（死循环来源已被结构性消除）；
-    // - ViewModel 对非 PENDING 状态幂等空操作，故本调用可无条件透传。
-    LaunchedEffect(uiState.biometricAutoPrompt) {
-        viewModel.onBiometricAutoPromptRequested(activity)
+    LaunchedEffect(lifecycleOwner, activity, viewModel) {
+        observeBiometricAutoPrompt(
+            screenLifecycle = lifecycleOwner.lifecycle,
+            hostLifecycle = activity?.lifecycle ?: lifecycleOwner.lifecycle,
+            state = viewModel.uiState
+        ) {
+            viewModel.onBiometricAutoPromptRequested(activity)
+        }
     }
 
     // 修复虚假开关整改：真实 SAF 选择器——密钥文件字节立即读入内存交给 ViewModel，

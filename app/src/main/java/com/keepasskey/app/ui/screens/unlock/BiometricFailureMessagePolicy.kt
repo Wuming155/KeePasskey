@@ -55,7 +55,8 @@ internal object BiometricFailureMessagePolicy {
         ERROR_LOCKOUT, ERROR_LOCKOUT_PERMANENT -> UiMessage(R.string.sec_biometric_lockout)
         ERROR_HW_UNAVAILABLE, ERROR_HW_NOT_PRESENT, ERROR_NO_BIOMETRICS ->
             UiMessage(R.string.sec_biometric_hardware)
-        ERROR_TIMEOUT -> UiMessage(R.string.sec_biometric_timeout)
+        ERROR_TIMEOUT, com.keepasskey.app.security.BiometricAuthManager.ERROR_AUTH_TIMEOUT ->
+            UiMessage(R.string.sec_biometric_timeout)
         else -> UiMessage(R.string.sec_biometric_auth_failed)
     }
 }

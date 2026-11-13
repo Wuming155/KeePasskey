@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.unlock
 
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultRepository
@@ -21,11 +22,9 @@ import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
 
 /**
- * 生物识别解锁协调器（ISSUE-P3-25 结构拆分，纯搬运零行为变更）。
+ * 生物识别解锁协调器。
  *
- * 承载原 `UnlockViewModel` 内生物识别解锁状态机：`BiometricAutoPrompt` 的
- * `IDLE→PENDING→CONSUMED` 生命周期、[UnlockModePolicy] 派生的解锁模式重算、
- * 解封与解锁收尾。字段名、清零时机、协程作用域（`viewModelScope`）与顺序均与原实现逐字一致。
+ * 承载自动唤起状态机、解锁模式重算、认证请求的取消与超时，以及解封和解锁收尾。
  *
  * 另承载两处跨文件入口（原先为 `UnlockViewModel` 的可测入口，可见性语义不变）：
  * [handleBiometricResult] 与 [completeBiometricUnlock]。
@@ -46,7 +45,8 @@ internal class BiometricUnlockCoordinator(
      * （冷启动记忆恢复已有）；为 null 时经 [restoreRememberedKeyFile] 现读一次。
      */
     private val sessionKeyFileData: () -> ByteArray? = { null },
-    private val restoreRememberedKeyFile: (suspend () -> Unit)? = null
+    private val restoreRememberedKeyFile: (suspend () -> Unit)? = null,
+    private val prompt: BiometricUnlockPrompt = BiometricUnlockPrompt(scope)
 ) {
 
     /**
@@ -59,6 +59,13 @@ internal class BiometricUnlockCoordinator(
      * [UnlockModePolicy] 在任一异步源变化后统一重算。
      */
     private var unlockModeSelection: UnlockMode? = null
+
+    fun cancelPendingAuthentication() = prompt.cancel()
+
+    private fun canAuthenticate(activity: FragmentActivity): Boolean =
+        activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+            !activity.isFinishing && !activity.isDestroyed &&
+            !activity.supportFragmentManager.isStateSaved
 
     /**
      * 依据「生物识别开关 + 封印凭据 + 活动库」重算解锁模式与自动唤起判定（ISSUE-P3-01）。
@@ -93,31 +100,32 @@ internal class BiometricUnlockCoordinator(
      */
     private fun fallbackToMasterPasswordMode() {
         unlockModeSelection = UnlockMode.STANDARD
-        uiState.update { it.copy(unlockMode = UnlockMode.STANDARD) }
+        uiState.update {
+            it.copy(unlockMode = UnlockMode.STANDARD, biometricAutoPrompt = BiometricAutoPrompt.CONSUMED)
+        }
     }
 
     /** 手动切换解锁模式：登记为显式选择，后续异步状态重算不再覆盖（ISSUE-P3-01） */
     fun switchUnlockMode(mode: UnlockMode) {
+        if (mode == UnlockMode.STANDARD) cancelPendingAuthentication()
         unlockModeSelection = mode
-        uiState.update { it.copy(unlockMode = mode, errorMessage = null, infoMessage = null) }
+        uiState.update {
+            it.copy(
+                unlockMode = mode,
+                errorMessage = null,
+                infoMessage = null,
+                biometricAutoPrompt = BiometricAutoPrompt.CONSUMED
+            )
+        }
     }
 
-    /**
-     * 解锁页一次性意图：消费「应自动唤起生物识别」的判定，并立即发起一次认证（ISSUE-P3-01）。
-     *
-     * Screen 只在 `LaunchedEffect(uiState.biometricAutoPrompt)` 中**透传**本调用，不做任何条件判断；
-     * 判定条件（开关 / 封印凭据 / 快速解锁模式 / 活动库）与「已消费」守卫全部收在本协调器：
-     * - 仅当状态机处于 [BiometricAutoPrompt.PENDING] 时真正发起 → 每次进入解锁页**至多一次**；
-     * - 发起前先推进为 [BiometricAutoPrompt.CONSUMED]（不可逆终态）→ 取消 / 失败 / 重组 /
-     *   切后台回前台都不可能再次自动弹窗（原实现在 Composable 内直接判断条件，
-     *   任何状态抖动都会重复满足条件，这正是重复弹窗/死循环的结构性来源）。
-     *
-     * 无论本次认证是否最终成功，调用返回后自动唤起机会即已用尽；之后只能由用户显式点击按钮触发。
-     *
-     * @return true 表示本次调用确实发起了一次自动唤起；false 表示无待消费判定（幂等空操作）
-     */
+    /** 宿主就绪后才消费自动唤起意图；用户取消或认证失败后不自动重试。 */
     fun onBiometricAutoPromptRequested(activity: FragmentActivity?): Boolean {
-        if (uiState.value.biometricAutoPrompt != BiometricAutoPrompt.PENDING) return false
+        val state = uiState.value
+        if (state.biometricAutoPrompt != BiometricAutoPrompt.PENDING || state.isLoading ||
+            state.unlockMode != UnlockMode.QUICK_UNLOCK
+        ) return false
+        if (activity != null && !canAuthenticate(activity)) return false
         uiState.update { it.copy(biometricAutoPrompt = BiometricAutoPrompt.CONSUMED) }
         unlockWithBiometric(activity)
         return true
@@ -152,6 +160,14 @@ internal class BiometricUnlockCoordinator(
             return
         }
 
+        if (!canAuthenticate(activity)) {
+            uiState.update {
+                it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
+            }
+            fallbackToMasterPasswordMode()
+            return
+        }
+
         val cred = storage.getEncryptedCredential(dbId)
         if (cred == null) {
             // §411 补日志：凭据缺失（被清除 / 键不一致）此前完全静默，真机无从定位
@@ -171,13 +187,18 @@ internal class BiometricUnlockCoordinator(
 
         try {
             val decryptCipher = authManager.prepareDecryptCipher(dbId, cred.first)
-            authManager.authenticate(
-                activity = activity,
-                title = activity.getString(R.string.unlock_biometric_title),
-                subtitle = activity.getString(R.string.unlock_biometric_subtitle),
-                authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS,
-                cipher = decryptCipher
-            ) { result -> handleBiometricResult(result, storage, dbId, cred.second) }
+            prompt.start(
+                onResult = { result -> handleBiometricResult(result, storage, dbId, cred.second) }
+            ) { onResult ->
+                authManager.authenticate(
+                    activity = activity,
+                    title = activity.getString(R.string.unlock_biometric_title),
+                    subtitle = activity.getString(R.string.unlock_biometric_subtitle),
+                    authenticators = BiometricAuthManager.UNLOCK_AUTHENTICATORS,
+                    cipher = decryptCipher,
+                    onResult = onResult
+                )
+            }
         } catch (e: KeyPermanentlyInvalidatedException) {
             // 系统指纹增删导致密钥作废：清空失效凭据与硬件密钥别名，提示用户使用主密码重新验证
             storage.clearCredential(dbId)

@@ -1,5 +1,8 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.testutil.MainDispatcherGuard
 import com.keepasskey.app.R
@@ -16,6 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -160,6 +165,192 @@ class UnlockViewModelBiometricAutoPromptTest {
     /** 写入一份「已封印凭据」占位密文；真实解密语义在成功路径用例中另行以 JDK AES-GCM 构造 */
     private fun InMemorySealedCredentialStore.sealPlaceholderCredential() {
         storage.saveEncryptedCredential(activeDbId, ByteArray(12) { 1 }, ByteArray(32) { 2 })
+    }
+
+    private class TestLifecycleOwner : LifecycleOwner {
+        override val lifecycle = LifecycleRegistry.createUnsafe(this)
+    }
+
+    @Test
+    fun `页面和宿主都恢复后才消费自动唤起且恢复不会重复消费`() = runTest {
+        val storage = InMemorySealedCredentialStore().also { it.sealPlaceholderCredential() }
+        val viewModel = createViewModel(enabledSettings(), storage.storage)
+        val screen = TestLifecycleOwner()
+        val host = TestLifecycleOwner()
+        screen.lifecycle.currentState = Lifecycle.State.STARTED
+        host.lifecycle.currentState = Lifecycle.State.CREATED
+        var consumed = 0
+        backgroundScope.launch {
+            observeBiometricAutoPrompt(screen.lifecycle, host.lifecycle, viewModel.uiState) {
+                if (viewModel.onBiometricAutoPromptRequested(null)) consumed++
+            }
+        }
+        testScheduler.runCurrent()
+        assertEquals(BiometricAutoPrompt.PENDING, viewModel.uiState.value.biometricAutoPrompt)
+        assertFalse(viewModel.uiState.value.isLoading)
+
+        screen.lifecycle.currentState = Lifecycle.State.RESUMED
+        host.lifecycle.currentState = Lifecycle.State.STARTED
+        testScheduler.runCurrent()
+        assertEquals(0, consumed)
+        host.lifecycle.currentState = Lifecycle.State.RESUMED
+        testScheduler.runCurrent()
+        assertEquals(1, consumed)
+
+        host.lifecycle.currentState = Lifecycle.State.CREATED
+        host.lifecycle.currentState = Lifecycle.State.RESUMED
+        screen.lifecycle.currentState = Lifecycle.State.STARTED
+        screen.lifecycle.currentState = Lifecycle.State.RESUMED
+        testScheduler.runCurrent()
+        assertEquals(1, consumed)
+        assertEquals(BiometricAutoPrompt.CONSUMED, viewModel.uiState.value.biometricAutoPrompt)
+    }
+
+    private inner class PromptFixture(scope: kotlinx.coroutines.CoroutineScope) {
+        val storage = InMemorySealedCredentialStore().also { it.sealPlaceholderCredential() }.storage
+        val state = MutableStateFlow(
+            UnlockUiState(
+                hasDatabase = true,
+                isQuickUnlockAvailable = true,
+                unlockMode = UnlockMode.QUICK_UNLOCK,
+                biometricAutoPrompt = BiometricAutoPrompt.CONSUMED
+            )
+        )
+        val prompt = BiometricUnlockPrompt(scope)
+        val events = MutableSharedFlow<UnlockEvent>()
+        val repository = RecordingVaultRepository(FakeVaultRepository())
+        val coordinator = BiometricUnlockCoordinator(
+            scope = scope,
+            uiState = state,
+            events = events,
+            vaultRepository = repository,
+            activeDbId = { activeDbId },
+            biometricAuthManager = null,
+            biometricCredentialStorage = storage,
+            debugLog = DebugLogBuffer(),
+            cryptoDispatcher = testDispatcher,
+            prompt = prompt
+        )
+        val callbacks = mutableListOf<(BiometricResult) -> Unit>()
+        var cancellations = 0
+
+        fun start(ciphertext: ByteArray = ByteArray(0)) {
+            state.value = state.value.copy(isLoading = true, loadStage = UnlockStage.UNSEALING)
+            prompt.start(
+                onResult = { coordinator.handleBiometricResult(it, storage, activeDbId, ciphertext) }
+            ) { callback ->
+                callbacks += callback
+                val cancel: () -> Unit = { cancellations++ }
+                cancel
+            }
+        }
+    }
+
+    @Test
+    fun `授权成功后停止认证超时并走既有解锁管线`() = runTest {
+        val fixture = PromptFixture(backgroundScope)
+        val secret = "Prompt-Session-Master".toCharArray()
+        val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        val encrypt = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        val payload = BiometricSealedPayloadCodec.encode(secret, null)
+        val ciphertext = encrypt.doFinal(payload)
+        payload.fill(0)
+        val decrypt = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, encrypt.iv))
+        }
+        fixture.start(ciphertext)
+        fixture.callbacks.single()(BiometricResult.Success(decrypt))
+        testScheduler.runCurrent()
+        assertEquals(String(secret), fixture.repository.lastUnlockPassword)
+        assertFalse(fixture.state.value.isLoading)
+        val completed = fixture.state.value
+        testScheduler.advanceTimeBy(60_000L)
+        testScheduler.runCurrent()
+        assertEquals(completed, fixture.state.value)
+        assertEquals(0, fixture.cancellations)
+        secret.fill('\u0000')
+    }
+
+    @Test
+    fun `认证无回调超时后恢复密码入口并忽略迟到成功`() = runTest {
+        val fixture = PromptFixture(backgroundScope)
+        fixture.start()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(60_000L)
+        testScheduler.runCurrent()
+
+        assertFalse(fixture.state.value.isLoading)
+        assertNull(fixture.state.value.loadStage)
+        assertEquals(UnlockMode.STANDARD, fixture.state.value.unlockMode)
+        assertEquals(R.string.sec_biometric_timeout, fixture.state.value.errorMessage?.resId)
+        assertTrue(fixture.storage.hasEncryptedCredential(activeDbId))
+        assertEquals(1, fixture.cancellations)
+        val recovered = fixture.state.value
+        fixture.callbacks.single()(BiometricResult.Success(Cipher.getInstance("AES/GCM/NoPadding")))
+        testScheduler.runCurrent()
+        assertEquals(recovered, fixture.state.value)
+        assertNull(fixture.repository.lastUnlockPassword)
+    }
+
+    @Test
+    fun `切换主密码取消认证且旧回调不干扰新的认证`() = runTest {
+        val fixture = PromptFixture(backgroundScope)
+        fixture.start()
+        fixture.coordinator.switchUnlockMode(UnlockMode.STANDARD)
+        assertFalse(fixture.state.value.isLoading)
+        assertNull(fixture.state.value.loadStage)
+        assertEquals(UnlockMode.STANDARD, fixture.state.value.unlockMode)
+        assertEquals(1, fixture.cancellations)
+
+        fixture.coordinator.switchUnlockMode(UnlockMode.QUICK_UNLOCK)
+        fixture.start()
+        fixture.callbacks.first()(BiometricResult.Cancelled)
+        assertTrue(fixture.state.value.isLoading)
+        fixture.callbacks.last()(BiometricResult.Cancelled)
+        assertFalse(fixture.state.value.isLoading)
+        assertEquals(2, fixture.cancellations)
+        assertEquals(UnlockMode.STANDARD, fixture.state.value.unlockMode)
+        testScheduler.advanceTimeBy(60_000L)
+        testScheduler.runCurrent()
+        assertNull(fixture.state.value.errorMessage)
+    }
+
+    @Test
+    fun `离页取消未完成认证后不残留加载态`() = runTest {
+        val fixture = PromptFixture(backgroundScope)
+        fixture.start()
+        fixture.coordinator.cancelPendingAuthentication()
+        fixture.coordinator.cancelPendingAuthentication()
+        assertEquals(1, fixture.cancellations)
+        assertFalse(fixture.state.value.isLoading)
+        assertNull(fixture.state.value.loadStage)
+        assertFalse(fixture.coordinator.onBiometricAutoPromptRequested(null))
+        testScheduler.advanceTimeBy(60_000L)
+        testScheduler.runCurrent()
+        assertNull(fixture.state.value.errorMessage)
+    }
+
+    @Test
+    fun `同步失败回调和启动异常都不会遗留超时任务`() = runTest {
+        val fixture = PromptFixture(backgroundScope)
+        fixture.prompt.start(
+            onResult = { fixture.coordinator.handleBiometricResult(it, fixture.storage, activeDbId, ByteArray(0)) }
+        ) { callback ->
+            callback(BiometricResult.Error(1, "unavailable"))
+            val cancel: () -> Unit = { fixture.cancellations++ }
+            cancel
+        }
+        assertFalse(fixture.state.value.isLoading)
+        assertEquals(1, fixture.cancellations)
+        val failed = fixture.state.value
+        assertTrue(runCatching {
+            fixture.prompt.start(onResult = { error("不应收到超时回调") }) {
+                throw IllegalStateException("启动失败")
+            }
+        }.isFailure)
+        testScheduler.advanceTimeBy(60_000L)
+        testScheduler.runCurrent()
+        assertEquals(failed, fixture.state.value)
     }
 
     // ── 验收标准 1：开关开启 + 已封印凭据 → 自动唤起恰好一次 ────────────────
