@@ -86,7 +86,7 @@ class SyncCycleRunner @Inject constructor(
      */
     internal val credentialRotationStore: SyncCredentialRotationStore? = null,
     /**
-     * `ISSUE-P2-536`：「本地库文件自上次成功同步以来未被重写」的进程内检查点（生产由 Hilt 注入）。
+     * `ISSUE-P2-536`：「本地库文件自上次成功同步以来未被重写」的持久化摘要检查点（生产由 Hilt 注入）。
      * 为 null（既有手工装配路径 / 单测）时本机制整体旁路，占位态判定与整改前逐字节一致。
      */
     internal val localFileCheckpoint: SyncLocalFileCheckpoint? = null,
@@ -153,7 +153,7 @@ class SyncCycleRunner @Inject constructor(
      *
      * `ISSUE-P2-536`：决策在 [runCycleUnderLock] 内完成后，于锁外统一执行检查点记录面
      * （仅「已与远端收敛」的结论记录，判据见 [SyncOutcome.isInSyncWithRemote]）——
-     * 记录放在锁外是因为它只读本地文件并写进程内摘要，不触碰任何周期共享状态。
+     * 记录放在同步锁外；摘要捕获仍持有会话提交锁并核对已确认树实例，偏好写入在 IO 执行。
      */
     suspend fun runSyncCycle(): SyncOutcome = runSyncCycleForConfig(null)
 

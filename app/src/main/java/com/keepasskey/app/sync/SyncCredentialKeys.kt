@@ -29,6 +29,7 @@ internal object SyncCredentialKeys {
 
     /** 当前同步协议（`CloudSyncProvider.name`） */
     const val PROVIDER = "sync_provider"
+    const val LOCAL_SYNC_CHECKPOINT = "local_sync_checkpoint"
 
     const val WEBDAV_URL = "webdav_url"
     const val WEBDAV_USERNAME = "webdav_username"
@@ -59,7 +60,7 @@ internal object SyncCredentialKeys {
 
     // 迁移需按类型读写：SharedPreferences 无「按原类型搬运」的通用入口，故按存储类型分列
     private val STRING_BASES = listOf(
-        PROVIDER,
+        PROVIDER, LOCAL_SYNC_CHECKPOINT,
         WEBDAV_URL, WEBDAV_USERNAME, WEBDAV_REMOTE_PATH,
         WEBDAV_PASSWORD_IV, WEBDAV_PASSWORD_CIPHER,
         S3_ENDPOINT, S3_BUCKET, S3_REGION, S3_OBJECT_KEY,

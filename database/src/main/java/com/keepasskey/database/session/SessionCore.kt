@@ -149,6 +149,11 @@ internal class SessionCore(
     /** 基线密文快照的**克隆**（无基线返回 null）；调用方拥有并负责用毕清零 */
     fun persistedBaselineClone(): ByteArray? = persistedBaseline?.clone()
 
+    fun persistedBaselineDigest(): String? = persistedBaseline?.let {
+        java.security.MessageDigest.getInstance("SHA-256").digest(it)
+            .joinToString("") { byte -> "%02x".format(byte) }
+    }
+
     fun persistedBaselineRevision(): Long = persistedBaselineRevisionValue
 
     fun persistedBaselinePathIdentifier(): String? = persistedBaselinePathValue

@@ -44,7 +44,7 @@ internal data class SyncCycleContext(
     val localChangeState: LocalContentChangeState,
     /**
      * `ISSUE-P2-536`：仅占位态（BASELINE_MISSING）下有意义——本地库文件自上次成功同步以来
-     * 未被重写（进程内检查点命中）⇒ 与远端的内容差异只能来自远端一侧。其余态恒 false。
+     * 未被重写（持久化摘要检查点命中）⇒ 与远端的内容差异只能来自远端一侧。其余态恒 false。
      */
     val localFileUnchangedSinceSync: Boolean,
     val currentDb: KdbxDatabase
@@ -195,7 +195,7 @@ private suspend fun SyncCycleRunner.buildCycleContext(
     }
     val hasLocalContentChanged = localChangeState != LocalContentChangeState.UNCHANGED
     // ISSUE-P2-536：占位态（BASELINE_MISSING）下「本地内容变了吗」的证据已被锁库清缓存
-    // （ISSUE-P1-07）销毁，以进程内检查点补上「本地库文件自上次成功同步以来未被重写」这一件——
+    // （ISSUE-P1-07）销毁，以持久化摘要检查点补上「本地库文件自上次成功同步以来未被重写」这一件——
     // 命中 ⇒ 与远端的内容差异只能来自远端一侧，`handleRemoteSynced` 据此走远端接管
     // （零上传 + 「检测到云端已有更新」文案），绝不把占位投影出的 true 当「本地已修改」的证据。
     // 仅占位态读取（其余态证据已足）；摘要为整库密文流式计算，不整份物化。

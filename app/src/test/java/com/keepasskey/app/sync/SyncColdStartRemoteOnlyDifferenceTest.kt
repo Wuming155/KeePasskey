@@ -3,6 +3,10 @@ package com.keepasskey.app.sync
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import com.keepasskey.app.R
+import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.screens.vault.VaultListSyncController
+import kotlinx.coroutines.channels.Channel
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.security.AutoLockHoldoff
@@ -53,16 +57,16 @@ private val REMOTE_DIFF_STRINGS = StringsProvider { _, _ -> "" }
  *
  * ## 判据
  *
- * 进程内检查点 `SyncLocalFileCheckpoint`（本地库文件字节 SHA-256，成功周期收尾记录）：
+ * 持久化摘要检查点 `SyncLocalFileCheckpoint`（本地密文 SHA-256，成功周期收尾记录）：
  * 占位态且「本地库文件自上次成功同步以来未被重写」⇒ 差异只能来自远端 ⇒ 走既有
  * **远端接管**尾段（零上传 + `UpdatedCachedFileOnLoad` 诚实文案）；本地确有改动
  * （`isDirty` 或文件已被重写）⇒ 维持既有合并路径，F1 两类覆盖面不回退。
  *
  * ## 与缓存存活路径的关系（为何本机制只补占位态）
  *
- * 进程被杀（无锁回调）时缓存存活，`resolveLocalContentChanged` 比对缓存快照即可确证
- * `UNCHANGED`，远端更新本就走远端接管——锁库清缓存（`ISSUE-P1-07`）把这份证据也销毁了，
- * 本检查点即补回它。
+ * 缓存存活时，`resolveLocalContentChanged` 比对快照即可确证 `UNCHANGED`；
+ * 锁库清缓存后改用持久化摘要检查点，进程重启亦可恢复证明。覆盖 File 与 SAF 流式通道，
+ * 并验证真实本地编辑、同步窗口内编辑及配置撤销不会误用旧证明。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncColdStartRemoteOnlyDifferenceTest {
@@ -95,10 +99,13 @@ class SyncColdStartRemoteOnlyDifferenceTest {
         val autoLockGuard: AutoLockSessionGuard?
     )
 
-    private fun newFixture(key: String, withAutoLockGuard: Boolean = false): Fixture {
+    private fun newFixture(
+        key: String,
+        withAutoLockGuard: Boolean = false,
+        prefs: InMemorySharedPreferences = InMemorySharedPreferences()
+    ): Fixture {
         val cacheDir = File(tempFolder.root, "$key-cache").apply { mkdirs() }
         val filesDir = File(tempFolder.root, "$key-files").apply { mkdirs() }
-        val prefs = InMemorySharedPreferences()
         val fakeContext = object : ContextWrapper(null) {
             override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = prefs.prefs
             override fun getCacheDir(): File = cacheDir
@@ -121,7 +128,7 @@ class SyncColdStartRemoteOnlyDifferenceTest {
         val codec = SyncDatabaseCodec(databaseSession, debugLog)
         val conflicts = SyncConflictController(databaseSession, codec, REMOTE_DIFF_STRINGS, session, debugLog)
         val changes = SyncContentChangeDetector(codec, session)
-        val checkpoint = SyncLocalFileCheckpoint()
+        val checkpoint = SyncLocalFileCheckpoint(fakeContext)
         val cycle = SyncCycleRunner(
             context = fakeContext,
             databaseSession = databaseSession,
@@ -279,6 +286,133 @@ class SyncColdStartRemoteOnlyDifferenceTest {
             )
             assertEquals("远端必须仍是注入后的他端版本", remoteAfterInject.toList(), fx.provider.remoteBytes(fx.remotePath).toList())
         }
+    }
+
+    private suspend fun reopenVault(fx: Fixture, stream: Boolean) {
+        val opened = if (stream) {
+            fx.databaseSession.openStream(
+                pathIdentifier = "content://test/vault/${fx.vaultFile.name}",
+                inputStreamProvider = { fx.vaultFile.inputStream() },
+                saveWriter = { fx.vaultFile.writeBytes(it) },
+                passwordChars = PROBE_PASSWORD
+            )
+        } else {
+            fx.databaseSession.open(fx.vaultFile, PROBE_PASSWORD)
+        }
+        assertTrue("重新打开密码库失败: $opened", opened is KdbxResult.Success)
+    }
+
+    @Test
+    fun `锁库后重启进程仍能证明本地未变且远端更新零上传`() = runTest(testDispatcher) {
+        for (stream in listOf(false, true)) {
+            val key = "restart-remote-$stream"
+            val prefs = InMemorySharedPreferences()
+            val original = newFixture(key, prefs = prefs)
+            createVault(original, key)
+            original.databaseSession.saveEntry(entry(LOCAL_ID, "基线值"))
+            assertTrue(original.databaseSession.save() is KdbxResult.Success)
+            if (stream) {
+                original.databaseSession.close()
+                reopenVault(original, stream = true)
+            }
+            assertEquals(SyncOutcome.UploadedLocal, original.cycle.runSyncCycle())
+            assertTrue(checkpointMatchesCurrentRevision(original))
+            pushRemoteOnlyEntry(original)
+            val remoteBytes = original.provider.remoteBytes(original.remotePath).copyOf()
+            simulateLockAndColdStart(original)
+            original.databaseSession.close()
+
+            val restarted = newFixture(key, prefs = prefs)
+            restarted.provider.inject(restarted.remotePath, remoteBytes, "etag-peer-update")
+            reopenVault(restarted, stream)
+            assertTrue("新进程应读回已同步的本地版本证明", checkpointMatchesCurrentRevision(restarted))
+            assertEquals(SyncOutcome.UpToDate, restarted.cycle.runSyncCycle())
+            assertEquals("只有远端更新不能重新上传整库", 0, restarted.provider.uploadCount)
+            assertTrue(remoteBytes.contentEquals(restarted.provider.remoteBytes(restarted.remotePath)))
+            assertEquals(setOf("基线值", "他端新增"), notesOf(restarted.databaseSession.databaseFlow.value))
+            assertTrue(restarted.session.lastSyncEngine!!.events.replayCache.any {
+                it is SyncCacheEvent.UpdatedCachedFileOnLoad
+            })
+            assertEquals(SyncOutcome.UpToDate, restarted.cycle.runSyncCycle())
+            assertEquals("重建基线后的再次同步仍不得上传", 0, restarted.provider.uploadCount)
+            restarted.databaseSession.close()
+        }
+    }
+
+    @Test
+    fun `重启后真实本地编辑使持久检查点失配且不能被远端覆盖`() = runTest(testDispatcher) {
+        for (stream in listOf(false, true)) {
+            val key = "restart-edited-$stream"
+            val prefs = InMemorySharedPreferences()
+            val original = newFixture(key, prefs = prefs)
+            createVault(original, key)
+            original.databaseSession.saveEntry(entry(LOCAL_ID, "基线值"))
+            assertTrue(original.databaseSession.save() is KdbxResult.Success)
+            if (stream) {
+                original.databaseSession.close()
+                reopenVault(original, stream = true)
+            }
+            assertEquals(SyncOutcome.UploadedLocal, original.cycle.runSyncCycle())
+            pushRemoteOnlyEntry(original)
+            val remoteBytes = original.provider.remoteBytes(original.remotePath).copyOf()
+            original.databaseSession.saveEntry(entry(LOCAL_ID, "本地尚未上传"))
+            assertTrue(original.databaseSession.save() is KdbxResult.Success)
+            simulateLockAndColdStart(original)
+            original.databaseSession.close()
+
+            val restarted = newFixture(key, prefs = prefs)
+            restarted.provider.inject(restarted.remotePath, remoteBytes, "etag-peer-update")
+            reopenVault(restarted, stream)
+            assertFalse("新保存的本地文件不能沿用旧同步证明", checkpointMatchesCurrentRevision(restarted))
+            val outcome = restarted.cycle.runSyncCycle()
+            assertTrue("本地编辑必须进入合并或冲突: $outcome",
+                outcome is SyncOutcome.MergedAndUploaded || outcome is SyncOutcome.ConflictNeedsUser)
+            assertTrue("不能丢弃本地未上传内容", "本地尚未上传" in notesOf(restarted.databaseSession.databaseFlow.value))
+            restarted.databaseSession.close()
+        }
+    }
+
+    @Test
+    fun `列表提示区分本地首传与缺失证明后的合并上传`() = runTest(testDispatcher) {
+        val fx = newFixture("sync-feedback")
+        createVault(fx, "sync-feedback")
+        fx.databaseSession.saveEntry(entry(LOCAL_ID, "基线值"))
+        assertTrue(fx.databaseSession.save() is KdbxResult.Success)
+        val credentials = SyncCredentialsStore(fx.cycle.context, null).apply {
+            customEncryptor = { plain -> Pair(byteArrayOf(1), plain) }
+            customDecryptor = { _, cipher -> cipher }
+        }
+        assertTrue(credentials.saveWebDavConfig(
+            "https://sync.example.test", "fake-user", "fake-password".toCharArray(), fx.remotePath
+        ))
+        val coordinator = SyncCoordinator(
+            context = fx.cycle.context,
+            databaseSession = fx.databaseSession,
+            syncCredentialsStore = credentials,
+            debugLog = DebugLogBuffer(),
+            strings = REMOTE_DIFF_STRINGS,
+            syncSession = fx.session,
+            syncProviderResolver = fx.cycle.providerResolver,
+            syncConflicts = fx.cycle.conflicts,
+            syncCycle = fx.cycle
+        )
+        val messages = Channel<UiMessage>(Channel.UNLIMITED)
+        val controller = VaultListSyncController(
+            coordinator, this, REMOTE_DIFF_STRINGS
+        ) { messages.trySend(it) }
+        controller.triggerPullRefresh()
+        val uploaded = messages.receive()
+        assertEquals(R.string.vault_sync_uploaded, uploaded.resId)
+        assertEquals(UiMessage.SYNC_STATUS_DURATION_MS, uploaded.durationMillis)
+        pushRemoteOnlyEntry(fx)
+        fx.checkpoint.clear()
+        simulateLockAndColdStart(fx)
+        controller.triggerPullRefresh()
+        val merged = messages.receive()
+        assertEquals(R.string.vault_sync_merged, merged.resId)
+        assertEquals(UiMessage.SYNC_STATUS_DURATION_MS, merged.durationMillis)
+        fx.databaseSession.close()
+        messages.close()
     }
 
     @Test
@@ -442,13 +576,39 @@ class SyncColdStartRemoteOnlyDifferenceTest {
 
     @Test
     fun `检查点绑定云端目标身份`() = runTest {
-        val checkpoint = SyncLocalFileCheckpoint()
+        val checkpoint = SyncLocalFileCheckpoint(InMemorySharedPreferences().context())
         val revision = StableDatabaseFileDigest("vault-id", "C:/vault.kdbx", "aabbcc")
         checkpoint.record("/vault.kdbx", "endpoint-A", revision)
 
         assertTrue(checkpoint.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", revision))
         assertFalse("同一路径改绑端点后不得复用旧证明", checkpoint.isUnchangedSinceSync("/vault.kdbx", "endpoint-B", revision))
         assertFalse("缺少目标身份时不得放行", checkpoint.isUnchangedSinceSync("/vault.kdbx", null, revision))
+    }
+
+    @Test
+    fun `检查点跨实例按库隔离且单库及全部撤销配置都会清除`() = runTest {
+        val prefs = InMemorySharedPreferences()
+        val context = prefs.context()
+        val first = StableDatabaseFileDigest("C:/first.kdbx", "C:/first.kdbx", "digest-first")
+        val second = StableDatabaseFileDigest("C:/second.kdbx", "C:/second.kdbx", "digest-second")
+        val checkpoint = SyncLocalFileCheckpoint(context)
+        checkpoint.record("/vault.kdbx", "endpoint-A", first)
+        checkpoint.record("/vault.kdbx", "endpoint-A", second)
+
+        val restarted = SyncLocalFileCheckpoint(context)
+        assertTrue(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", first))
+        assertTrue(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", second))
+        assertFalse(restarted.isUnchangedSinceSync("/other.kdbx", "endpoint-A", first))
+        assertFalse(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", first.copy(sha256 = "edited")))
+        assertFalse(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", first.copy(filePath = "C:/other.kdbx")))
+        assertFalse(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", null))
+        assertTrue("持久化键值只包含版本摘要", prefs.storage.values.all { (it as String).matches(Regex("[0-9a-f]{64}")) })
+
+        SyncCredentialKeys.removeScoped(prefs.prefs, first.pathIdentifier)
+        assertFalse(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", first))
+        assertTrue(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", second))
+        SyncCredentialsStore(context, null).clear()
+        assertFalse(restarted.isUnchangedSinceSync("/vault.kdbx", "endpoint-A", second))
     }
 
     @Test

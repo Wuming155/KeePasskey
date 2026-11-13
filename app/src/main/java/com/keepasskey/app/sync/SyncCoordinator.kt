@@ -76,7 +76,7 @@ open class SyncCoordinator @Inject constructor(
     // ISSUE-P3-528：主凭据轮换后的「云端副本待替换」持久标记（生产 Hilt 注入；
     // 既有单测构造点为 null，就地装配时本机制整体旁路，行为与整改前一致）
     syncCredentialRotationStore: SyncCredentialRotationStore? = null,
-    // ISSUE-P2-536：「本地库文件自上次成功同步以来未被重写」进程内检查点（同上口径）
+    // 已成功同步的本地密文版本证明（持久化摘要，跨锁库与进程重启保留）
     syncLocalFileCheckpoint: SyncLocalFileCheckpoint? = null,
     // ISSUE-P3-366 AC②：同步（含三方合并与落盘）期间挂锁。可空 + 默认 null 仅为保持
     // 既有单测构造点兼容（同 strings / extendedSettingsStore 先例），生产路径由 Hilt 注入

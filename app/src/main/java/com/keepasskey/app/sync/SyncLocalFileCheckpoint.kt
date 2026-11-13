@@ -1,119 +1,77 @@
 package com.keepasskey.app.sync
 
+import android.content.Context
 import com.keepasskey.database.session.StableDatabaseFileDigest
+import com.keepasskey.sync.engine.SyncCache
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 「本地密码库**文件**自上次成功同步以来是否被重写过」的进程内检查点（`ISSUE-P2-536`）。
+ * 已成功同步的本地密文版本证明，跨锁库及进程重启保留。
  *
- * ## 解决的问题（§372 遗留的那一半）
+ * 只保存摘要，不保存密码、条目或整库快照。键按库路径隔离，值绑定云端目标、远端路径、
+ * 本地写入目标及密文摘要；目标变化、文件重写或记录缺失时一律回退合并，不能据此丢弃本地编辑。
+ * 记录与同步凭据共用偏好文件，撤销全部或单库配置时同步清除。
  *
- * 锁库按 `ISSUE-P1-07` 清空 `cacheDir/sync`，`<hash>.cache`（上次同步的工作副本）连带
- * `.version` / `.baseversion` 一并销毁 ⇒ 下一次冷启动的「本地内容变了吗」判定**失去全部证据**，
- * 只能返回占位 [LocalContentChangeState.BASELINE_MISSING]。§372 用「与已下载远端字节做内容级
- * 比较」补上了**两端一致**那一半；**差异全在远端一侧**（他端改了云端、本地一行未改）时，
- * 占位投影出的 `hasLocalContentChanged = true` 仍被当作「本地已修改」的证据送进合并上传
- * ⇒ 用户零编辑却看到「本地修改已上传至云端」并整库重传（`ISSUE-P2-536` 的实跑复现读数：
- * `outcome=MergedAndUploaded`、`uploads 1→2`、本地条目集合未变）。
- *
- * 本类补上判定缺失的那件证据：**本地库文件字节的 SHA-256**（在「已与远端收敛」的周期收尾记录）。
- * 冷启动时若**当前文件摘要与记录一致**，即可判定「本地自上次同步以来未被重写过」——
- * 该结论与「缓存存活时 `resolveLocalContentChanged` 比出 `UNCHANGED`」等价，
- * 使「锁库后的冷启动」与「进程被杀后的冷启动」收敛到同一条**远端接管**路径
- * （`handleRemoteSynced` 的远端接管尾段 + `UpdatedCachedFileOnLoad` 诚实文案）。
- *
- * ## 口径与边界（改前必读）
- *
- * - **只记「已收敛」的结论**（[SyncOutcome.UpToDate] / `UploadedLocal` / `MergedAndUploaded`）；
- *   `Error` / `Offline` / `ConflictNeedsUser` / `VaultBindingMismatch` **一律不记**——
- *   冲突待决期本地可能正持有未上传编辑，记录会让下一轮把「本地未动」判真并据此丢弃它。
- * - **进程内，不落盘**：进程被杀时缓存本身存活（锁回调未触发即不驱逐），该场景由
- *   `SyncContentChangeDetector` 的缓存解析分支承担同一判定，本机制无增量价值。
- *   「进程被杀 **且** 缓存被系统回收」这一残余组合退化为保守的合并上传（如实登记于批次文档）。
- * - **不随锁库销毁**：本值是**密文文件的摘要**（无明文、无凭据、不可逆推），
- *   与 `P1-07` 要销毁的密文快照不同类；且**销毁即令本机制失效**。失配一律保守回退，
- *   摘要天然自证（换库 / 换远端路径都不会误命中）。
- * - **SAF 通道**（`currentFile == null`）无本地文件可比 ⇒ 本机制旁路，行为与整改前一致。
+ * 调用者仅在已收敛后，使用会话提交锁内捕获且绑定已确认树实例的回执登记；
+ * 待同步、冲突及失败不得登记。SAF 使用会话读取或写盘确认的密文基线摘要。
  */
 @Singleton
-class SyncLocalFileCheckpoint @Inject constructor() {
-
+class SyncLocalFileCheckpoint @Inject constructor(
+    @ApplicationContext context: Context
+) {
+    private val prefs = context.getSharedPreferences(SyncCredentialsStore.PREFS_NAME, Context.MODE_PRIVATE)
     private val mutex = Mutex()
 
-    /** 记录归属的远端路径（换绑即视为无记录，防跨库误命中）。 */
-    private var recordedRemotePath: String? = null
-
-    /** 记录归属的非秘密 Provider 目标身份（同路径换端点/账号配置后不复用旧证明）。 */
-    private var recordedTargetIdentity: String? = null
-
-    /** 记录归属的会话路径标识与正式文件路径。 */
-    private var recordedPathIdentifier: String? = null
-    private var recordedFilePath: String? = null
-
-    /** 上次收敛收尾时的本地库文件摘要（SHA-256 十六进制小写）。 */
-    private var recordedDigest: String? = null
-
-    /**
-     * 判定「本地库文件自上次成功同步以来未被重写」。
-     *
-     * 记录缺失、远端路径不符、文件不可读（无 File / 读取失败 / 非普通文件）一律返回
-     * **false**（保守：宁可按「本地可能变过」处理，绝不据此丢弃本地内容）。
-     */
     suspend fun isUnchangedSinceSync(
         remotePath: String,
         targetIdentity: String?,
         currentRevision: StableDatabaseFileDigest?
-    ): Boolean = mutex.withLock {
-        val recorded = recordedDigest ?: return@withLock false
-        val currentTarget = targetIdentity ?: return@withLock false
-        currentRevision ?: return@withLock false
-        recordedRemotePath == remotePath &&
-            recordedTargetIdentity == currentTarget &&
-            recordedPathIdentifier == currentRevision.pathIdentifier &&
-            recordedFilePath == currentRevision.filePath &&
-            recorded == currentRevision.sha256
+    ): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val target = targetIdentity ?: return@withLock false
+            val revision = currentRevision ?: return@withLock false
+            prefs.getString(keyFor(revision), null) == proofFor(remotePath, target, revision)
+        }
     }
 
-    /** 仅接受数据库提交锁内、与指定活动数据库身份绑定的正式文件摘要。 */
     suspend fun record(
         remotePath: String,
         targetIdentity: String?,
         revision: StableDatabaseFileDigest?
-    ) = mutex.withLock {
-        val confirmedTarget = targetIdentity ?: return@withLock
-        if (revision == null) return@withLock
-        recordedRemotePath = remotePath
-        recordedTargetIdentity = confirmedTarget
-        recordedPathIdentifier = revision.pathIdentifier
-        recordedFilePath = revision.filePath
-        recordedDigest = revision.sha256
+    ) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val target = targetIdentity ?: return@withLock
+            revision ?: return@withLock
+            prefs.edit().putString(keyFor(revision), proofFor(remotePath, target, revision)).apply()
+        }
     }
 
-    /** 清空记录（同步关系终止 / 换库治理面使用；判定本身已自证，非必需）。 */
-    suspend fun clear() = mutex.withLock {
-        recordedRemotePath = null
-        recordedTargetIdentity = null
-        recordedPathIdentifier = null
-        recordedFilePath = null
-        recordedDigest = null
+    suspend fun clear() = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val editor = prefs.edit()
+            prefs.all.keys.filter { it.startsWith(SyncCredentialKeys.LOCAL_SYNC_CHECKPOINT + "_") }
+                .forEach(editor::remove)
+            editor.apply()
+        }
     }
+
+    private fun keyFor(revision: StableDatabaseFileDigest): String =
+        SyncCredentialKeys.scoped(SyncCredentialKeys.LOCAL_SYNC_CHECKPOINT, revision.pathIdentifier)
+
+    private fun proofFor(remotePath: String, targetIdentity: String, revision: StableDatabaseFileDigest): String =
+        SyncCache.sha256Hex(
+            listOf(remotePath, targetIdentity, revision.pathIdentifier, revision.filePath, revision.sha256)
+                .joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
+        )
 }
 
-/**
- * 「本轮同步结束时本地与远端已收敛」的判据（`ISSUE-P2-536`：检查点记录点的**唯一**判据）。
- *
- * 三个成功结论都保证「云端内容 == 本地内容」：`UpToDate`（两端一致 / 远端已接管）、
- * `UploadedLocal`（本地赢已上传）、`MergedAndUploaded`（合并产物已上传）。
- * 其余（`Error` / `Offline` / `ConflictNeedsUser` / `VaultBindingMismatch` /
- * `LocalPendingChanges`）**不得**记录检查点。
- *
- * `ISSUE-P1-591`：`LocalPendingChanges` 明确排除——它表示「远端已接受本轮上传版本，但本地在上传
- * 窗口内又保存出了未同步的新版本」，本地文件与远端**尚未收敛**，记录检查点会把 B 误标为已同步
- * （下一轮判定「本地文件自上次同步未变」而错过 B）。
- */
+/** 仅与远端已收敛的结论允许记录本地密文版本证明。 */
 internal fun SyncOutcome.isInSyncWithRemote(): Boolean = when (this) {
     is SyncOutcome.UpToDate,
     is SyncOutcome.UploadedLocal,

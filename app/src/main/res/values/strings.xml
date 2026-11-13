@@ -351,6 +351,7 @@
     <string name="vault_sync_verifying">正在与云端服务器校验最新版本...</string>
     <string name="vault_sync_completed">云端数据库同步校验完成，当前为最新版本</string>
     <string name="vault_sync_uploaded">本地修改已上传至云端</string>
+    <string name="vault_sync_merged">密码库已合并并同步至云端</string>
     <string name="vault_sync_saved_locally">云端保存失败，本次修改已安全保留在本地缓存</string>
     <string name="vault_sync_remote_updated">检测到云端已有更新，本地数据库已刷新</string>
     <string name="sync_s3_path_style_title">Path 寻址风格 (Path-Style)</string>

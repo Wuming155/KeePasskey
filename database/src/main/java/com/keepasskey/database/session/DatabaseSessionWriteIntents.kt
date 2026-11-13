@@ -27,17 +27,25 @@ class DatabaseSessionWriteIntents internal constructor(
     }
 
     /**
-     * Hash the currently committed private file only while the same database revision is still active.
-     * The shared session mutex prevents an application save or database replacement while the file is
-     * read. Callers use the returned digest as a revision-bound receipt, never as a standalone proof.
+     * 只在指定数据库仍为已落盘活动版本时捕获密文摘要，期间持有会话提交锁。
+     * 私有文件读取正式文件；SAF 使用已读取或写盘确认的密文基线，避免额外物化整库。
+     * 回执绑定数据库身份，不能单独作为内容已同步的证据。
      */
     suspend fun digestStableFileFor(expectedDatabase: KdbxDatabase): StableDatabaseFileDigest? = mutex.withLock {
         if (core.database.value !== expectedDatabase ||
             core.state.value != DatabaseSession.SessionState.OPENED
         ) return@withLock null
 
-        val file = core.activeFile ?: return@withLock null
         val pathIdentifier = core.activePathIdentifier ?: return@withLock null
+        val file = core.activeFile
+        if (file == null) {
+            if (core.persistedBaselinePathIdentifier() != pathIdentifier) return@withLock null
+            return@withLock withContext(Dispatchers.Default) {
+                core.persistedBaselineDigest()?.let { digest ->
+                    StableDatabaseFileDigest(pathIdentifier, pathIdentifier, digest)
+                }
+            }
+        }
         withContext(Dispatchers.IO) {
             if (!file.isFile) return@withContext null
             val digest = MessageDigest.getInstance(SHA_256)

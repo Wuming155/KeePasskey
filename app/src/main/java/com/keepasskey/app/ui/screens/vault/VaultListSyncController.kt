@@ -167,12 +167,20 @@ internal class VaultListSyncController(
                     )
                 )
             }
-            is SyncOutcome.UploadedLocal,
-            is SyncOutcome.MergedAndUploaded -> {
+            is SyncOutcome.UploadedLocal -> {
                 lastSyncTimeMillisFlow.value = System.currentTimeMillis()
                 onMessage(
                     UiMessage(
                         R.string.vault_sync_uploaded,
+                        durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
+                    )
+                )
+            }
+            is SyncOutcome.MergedAndUploaded -> {
+                lastSyncTimeMillisFlow.value = System.currentTimeMillis()
+                onMessage(
+                    UiMessage(
+                        R.string.vault_sync_merged,
                         durationMillis = UiMessage.SYNC_STATUS_DURATION_MS
                     )
                 )

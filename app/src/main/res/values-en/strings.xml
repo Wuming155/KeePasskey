@@ -339,6 +339,7 @@
     <string name="vault_sync_verifying">Verifying latest version with cloud server...</string>
     <string name="vault_sync_completed">Cloud sync verification complete, you are up to date</string>
     <string name="vault_sync_uploaded">Local changes uploaded to cloud</string>
+    <string name="vault_sync_merged">Database merged and synced to cloud</string>
     <string name="vault_sync_saved_locally">Could not save to remote; your changes are safely kept in the local cache</string>
     <string name="vault_sync_remote_updated">Remote updates detected; local database refreshed</string>
     <string name="sync_s3_path_style_title">Path-Style Addressing</string>

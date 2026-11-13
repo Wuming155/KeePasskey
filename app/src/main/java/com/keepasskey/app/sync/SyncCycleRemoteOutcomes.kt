@@ -37,7 +37,7 @@ internal data class RemoteSyncContext(
     val localChangeState: LocalContentChangeState,
     /**
      * `ISSUE-P2-536`：仅占位态（BASELINE_MISSING）下有意义——本地库文件自上次成功同步以来
-     * 未被重写（进程内检查点命中）⇒ 与远端的内容差异只能来自远端一侧。其余态恒 false。
+     * 未被重写（持久化摘要检查点命中）⇒ 与远端的内容差异只能来自远端一侧。其余态恒 false。
      */
     val localFileUnchangedSinceSync: Boolean,
     val conflictStrategy: SyncConflictStrategy
