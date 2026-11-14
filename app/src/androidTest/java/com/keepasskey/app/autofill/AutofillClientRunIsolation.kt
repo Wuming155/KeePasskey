@@ -36,7 +36,8 @@ internal class AutofillClientRunIsolation(
         assertTrue("客户端必须具有独立 UID", activity.applicationInfo.uid != targetContext.applicationInfo.uid)
         validated = true
         writeEvidence("合成客户端身份确认 runId=$runId package=$clientPackage uid=${activity.applicationInfo.uid}")
-        // 旧轮次显式授权会令 PD-05 直接去确认页；只恢复合成调用方的首次绑定前提。
+        // 清除合成调用方的首次绑定记录，使本轮从「未完成包名+签名绑定」的干净前提出发：
+        // 新口径下该前提令锁定态解锁后零自动候选、只留「搜索全部条目」兜底入口。
         val preferences = targetContext.getSharedPreferences(TRUST_PREFERENCES, android.content.Context.MODE_PRIVATE)
         trustPreferences = preferences
         savedClientTrust = preferences.all.filterKeys { it.startsWith("$clientPackage|") }

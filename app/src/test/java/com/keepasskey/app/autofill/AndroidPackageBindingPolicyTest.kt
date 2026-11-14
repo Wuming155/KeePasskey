@@ -105,11 +105,10 @@ class AndroidPackageBindingWiringTest {
 
     @Test
     fun `排序器调用点必须传入授权判定结果`() {
-        // ISSUE-P3-528：候选集解析（含本判定的消费点）已自 AutofillDatasetBuilders.kt
-        // 按职责拆至 AutofillUnlockedCandidates.kt（原文件随本批越入 tier1 行数闸门）——
-        // 判据一字未改，只随搬运更新被读文件
+        // 候选集解析已收敛为唯一事实源 AutofillCandidateResolver.kt：已解锁分支与锁定态
+        // 解锁后分支共用同一实例，判据与消费点同处该文件（判据一字未改，只随搬运更新被读文件）
         val source = readSource(
-            "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt"
+            "app/src/main/java/com/keepasskey/app/autofill/AutofillCandidateResolver.kt"
         )
 
         assertTrue(

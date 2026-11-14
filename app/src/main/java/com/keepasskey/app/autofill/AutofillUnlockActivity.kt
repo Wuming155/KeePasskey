@@ -3,14 +3,16 @@ package com.keepasskey.app.autofill
 import android.content.Intent
 import android.os.Bundle
 import android.view.autofill.AutofillId
+import android.view.autofill.AutofillManager
+import android.view.inputmethod.InlineSuggestionsRequest
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
@@ -20,7 +22,6 @@ import com.keepasskey.app.ui.localizedConfigurationOf
 import com.keepasskey.app.ui.localizedContextOf
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import com.keepasskey.core.log.AppLog
-import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.security.ProtectedStringReclamation
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -31,23 +32,19 @@ import javax.inject.Inject
 /**
  * 传统自动填充 (AutofillService) 链式解锁落地 Activity。
  *
- * 官方自动填充认证流程：锁库时数据集的认证 PendingIntent 指向本 Activity；
- * 解锁成功后本页**按 PD-05 路由**（[AutofillUnlockRouter]，候选 C）链入选择器
- * [AutofillPickerActivity] 或确认页 [AutofillConfirmActivity]，并把落地页的认证结果
- * （`resultCode` + `data`，其中 `data` 携带 `AutofillManager.EXTRA_AUTHENTICATION_RESULT`
- * 的真实 [android.service.autofill.Dataset]）**原样转发**给框架，由框架写入目标表单。
+ * 官方自动填充认证流程：锁库时数据集的认证 PendingIntent 指向本 Activity；解锁成功后本页按与
+ * 「库已解锁」分支同源的候选解析，把**全部命中条目**各装配一个仍带 `setAuthentication` 的候选
+ * Dataset，并在偏好开启时追加「搜索全部条目」入口，组装成完整 [android.service.autofill.FillResponse]，经
+ * [AutofillManager.EXTRA_AUTHENTICATION_RESULT] 回传给框架，由框架替换当前响应并重新展示候选 UI。
  *
- * ISSUE-P2-86（真机实测结论，纠正本页原 KDoc 前提）：解锁成功后**框架不会**自动重新发起
- * `onFillRequest`——干净归因口径下（客户端全程不主动请求）6/6 为 false，框架侧会话事件恒 0 条。
- * 故「解锁成功即 setResult(RESULT_OK, 空 extras) 并等框架重发」这条路径**永远填不出凭据**。
- * 现今的交付路径是复用本应用内经真机验证可用的通道（选择器 / 确认页经
- * `EXTRA_AUTHENTICATION_RESULT` 回传真实 Dataset，两条链路同一载荷构造）。
+ * ISSUE-P2-86（真机实测结论）：解锁成功后**框架不会**自动重新发起 `onFillRequest`，
+ * 故「解锁成功即 setResult(RESULT_OK, 空 extras) 并等框架重发」这条路径永远填不出凭据。
  *
- * PD-05（2026-09-22 裁决，候选 C；ISSUE-P3-256）：唯一强匹配且调用方已绑定时改链确认页，
- * 否则维持链选择器。判据单点化在 [AutofillUnlockRouter]（纯函数）；本页**不自建 Dataset**
- * 回传（PD-05 对候选 B 的禁令延续）——归属展示、二次确认与 Dataset 构造由落地页承担。
- *
- *（此前指向 MainActivity 且不结束，框架收不到认证完成事件，导致解锁后候选永远不出。）
+ * 旧版按候选数分路（唯一强匹配且调用方已绑定 ⇒ 链 [AutofillConfirmActivity]，其余链
+ * [AutofillPickerActivity]）已退役：多账号应用里只有一条账号绑定了应用时，解锁后只匹配到这一条，
+ * 确认页内没有换账号入口，生物识别路径更是系统弹窗，用户会在未察觉的情况下填入另一账号。
+ * 现锁定态与已解锁态呈现同一候选列表口径，唯一候选与多候选同构；每个候选仍须经
+ * [AutofillConfirmActivity] 二次确认后才由该页构造真实 Dataset 交付，本页不物化任何凭据明文。
  *
  * ISSUE-P0-01 (ZT-01)：本 Activity 属不经 MainActivity 的独立冷启动入口，
  * 防护与主入口同源——挂载 FlagSecureGuard 动态守卫（首帧同步生效，冷启动会话
@@ -63,52 +60,23 @@ class AutofillUnlockActivity : FragmentActivity() {
     @Inject
     lateinit var flagSecureGuard: FlagSecureGuard
 
-    // PD-05（ISSUE-P3-256）：路由判据的输入通道——解锁后现算候选集合与绑定状态
     @Inject
     lateinit var vaultRepository: VaultRepository
 
     @Inject
-    lateinit var autofillOriginResolver: AutofillOriginResolver
+    lateinit var settingsStore: ExtendedSettingsStore
+
+    /** 与已解锁分支同源的候选解析（域归属校验 / P2-46 门 / 签名摘要快照 / 关联记忆）。 */
+    @Inject
+    lateinit var candidateResolver: AutofillCandidateResolver
 
     @Inject
-    lateinit var callerTrustStore: AutofillCallerTrustStore
-
-    @Inject
-    lateinit var autofillLastFilledStore: AutofillLastFilledStore
+    lateinit var unlockResponseBuilder: AutofillUnlockResponseBuilder
 
     private var completed = false
 
-    /**
-     * 路由已发起（PD-05：判据计算为挂起调用，异步窗口内防 `onUnlockSuccess` 双发；
-     * 旧版同步链入无此窗口，双发会经同一 launcher 启动两次落地页）。
-     */
-    private var routeStarted = false
-
-    /**
-     * 落地页结果转发通道（ISSUE-P2-86；PD-05 起选择器与确认页**共用**本通道）。
-     *
-     * 注册时机受 AndroidX Activity 契约约束（须早于 STARTED），故作为属性初始化器在
-     * 构造期注册（早于 `onCreate` 返回，合法且最先）。
-     * 落地页已负责构造真实 Dataset、（选择器路径）写调用方首次绑定、做二次确认——本页只做
-     * **原样转发**，不另写一份数据集构造。
-     */
-    private val pickerResultLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (completed) return@registerForActivityResult
-        completed = true
-        val resultCode = result.resultCode
-        val data = result.data
-        if (resultCode == RESULT_OK && data != null) {
-            // 原样转发落地页结果：resultCode + data（data 携带 EXTRA_AUTHENTICATION_RESULT 数据集）
-            setResult(resultCode, data)
-        } else {
-            // 用户在落地页中取消 / 放弃（或结果缺失）：如实回传取消，绝不谎报成功。
-            // 一律走双参重载——官方明文：Android 12 起认证结果的 extras 为 null 会崩溃。
-            setResult(RESULT_CANCELED, Intent().putExtras(Bundle.EMPTY))
-        }
-        finish()
-    }
+    /** 候选解析为挂起调用，异步窗口内防 `onUnlockSuccess` 双发。 */
+    private var deliveryStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -136,7 +104,7 @@ class AutofillUnlockActivity : FragmentActivity() {
                     LocalConfiguration provides localizedConfiguration
                 ) {
                     UnlockScreen(
-                        onUnlockSuccess = { chainToPicker() },
+                        onUnlockSuccess = { deliverCandidateResponse() },
                         onNavigateToDatabasePicker = { /* 自动填充解锁场景不提供库切换导航 */ }
                     )
                 }
@@ -145,193 +113,107 @@ class AutofillUnlockActivity : FragmentActivity() {
     }
 
     /**
-     * 解锁成功：按 PD-05（候选 C，ISSUE-P3-256）路由到选择器或确认页完成交付。
+     * 解锁成功：回传完整候选响应。
      *
-     * 判据经纯函数 [AutofillUnlockRouter.route] 单点计算：[AutofillUnlockRouter.Route.Picker]
-     * ⇒ 现状路径逐字不变（链 [AutofillPickerActivity]）；[AutofillUnlockRouter.Route.Confirm]
-     * ⇒ 链 [AutofillConfirmActivity] 交付该条目（归属展示 + 单次生物识别 / 手动确认 +
-     * Dataset 回传，全在确认页内）。两条链的结果都经 [pickerResultLauncher] **原样转发**给框架；
-     * 本页不消费任何凭据明文，也不自建 Dataset。
+     * 候选解析与装配整段处于一条敏感值读租约内（候选是活的 `KdbxEntry`，展示面读口与会话整树
+     * 替换的就地擦除并发）；锁定态 / 通道开关在挂起前后各复核一次，与确认页交付边界同口径。
+     * 任何不确定分支（异常、零数据集、目标框缺失）一律按 `RESULT_CANCELED` 收尾，绝不谎报成功。
      */
-    private fun chainToPicker() {
-        if (completed || routeStarted) return
+    private fun deliverCandidateResponse() {
+        if (completed || deliveryStarted) return
         val usernameId = readAutofillId(AutofillPickerActivity.EXTRA_USERNAME_ID)
         val passwordId = readAutofillId(AutofillPickerActivity.EXTRA_PASSWORD_ID)
-        // ISSUE-P3-298 ⑤：OTP 框 id 只透传、不参与路由判据（无 OTP 框不影响交付链路）
         val otpId = readAutofillId(AutofillPickerActivity.EXTRA_OTP_ID)
         if (usernameId == null && passwordId == null) {
-            // 本次请求未识别到任何目标框（正常下发路径不会出现）：无可填充目标，如实取消
-            completed = true
-            AppLog.w(TAG, "解锁页未收到目标字段 id，无法链入选择器，按取消回传")
-            setResult(RESULT_CANCELED, Intent().putExtras(Bundle.EMPTY))
-            finish()
+            cancelDelivery("解锁页未收到目标字段 id，无法回传候选响应")
             return
         }
-        routeStarted = true
+        deliveryStarted = true
         lifecycleScope.launch {
-            // ENG-20261028-11：路由判据 → 链入确认页的整段处于一条读租约内。
-            // 候选是**活的** `KdbxEntry`，`Route.Confirm` 把条目带出 `resolveRouting`，
-            // 随后 `launchConfirm` 还要读它的标题 / 用户名；会话在此期间替换整树会把下线实例
-            // 就地清零，展示面读口就会降级成空串（归属展示缺失）。租约延到本段结束即覆盖该窗口。
             val lease = ProtectedStringReclamation.acquireReadLease()
             try {
-                val routing = resolveRouting(hasTargetField = usernameId != null || passwordId != null)
-                when (val route = routing.route) {
-                    is AutofillUnlockRouter.Route.Confirm ->
-                        launchConfirm(route.entry, usernameId, passwordId, otpId, routing.verifiedWebDomain)
-
-                    AutofillUnlockRouter.Route.Picker ->
-                        launchPicker(usernameId, passwordId, otpId)
+                if (!canDeliver()) {
+                    cancelDelivery("会话已锁定或自动填充通道已关闭，丢弃本次解锁候选响应")
+                    return@launch
                 }
+                val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE).orEmpty()
+                val reportedDomain = intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
+                    ?.takeIf { it.isNotBlank() }
+                val candidates = candidateResolver.resolve(callingPackage, reportedDomain)
+                val request = UnlockResponseRequest(
+                    callingPackage = callingPackage,
+                    reportedWebDomain = reportedDomain,
+                    verifiedWebDomain = candidates.webDomain,
+                    usernameId = usernameId,
+                    passwordId = passwordId,
+                    otpId = otpId,
+                    blockedIds = intent.getParcelableArrayListExtra(
+                        EXTRA_BLOCKED_IDS,
+                        AutofillId::class.java
+                    ).orEmpty(),
+                    inlineRequest = intent.getParcelableExtra(
+                        EXTRA_INLINE_SUGGESTIONS_REQUEST,
+                        InlineSuggestionsRequest::class.java
+                    ),
+                    candidates = candidates.ranked
+                )
+                val response = unlockResponseBuilder.build(this@AutofillUnlockActivity, request)
+                if (!canDeliver() || response == null) {
+                    cancelDelivery("解锁后无可交付候选或会话已失效")
+                    return@launch
+                }
+                AppLog.i(
+                    TAG,
+                    "解锁后回传候选响应：候选数=${candidates.ranked.size}, " +
+                        "手动选择入口=${settingsStore.isAutofillManualPickerEnabled()}"
+                )
+                finishWithResult(
+                    RESULT_OK,
+                    Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, response)
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Exception) {
+                cancelDelivery("解锁后候选响应组装异常：${t.javaClass.simpleName}")
             } finally {
                 lease.close()
             }
         }
     }
 
-    /** 路由结论 + 归属校验后的域（CONFIRM 分支下传确认页作会话授权上下文） */
-    private data class Routing(
-        val route: AutofillUnlockRouter.Route,
-        val verifiedWebDomain: String?
-    )
+    /** 交付边界复核：锁定态与自动填充通道开关均不放宽（与确认页 `canDeliverAuthResult` 同口径）。 */
+    private fun canDeliver(): Boolean =
+        AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked()) &&
+            settingsStore.isAutofillServiceEnabled()
 
-    /**
-     * 现算路由判据的输入（候选集合 + 绑定状态 + 表单上下文）。
-     *
-     * 与服务端已解锁分支（`AutofillDatasetBuilders.resolveUnlockedCandidates`）同口径：
-     * 证书摘要**只读一次**（归属解析与绑定校验共用，ISSUE-P3-170）、webDomain 经归属校验
-     * 不可验证即按 null（fail-closed）、包名维度经 [AndroidPackageBindingPolicy] 首次绑定门。
-     *
-     * 任何不确定分支（异常）一律回落 PICKER——绝不静默直达确认页。
-     *
-     * `ENG-20261028-11`：本函数返回的 [Routing] 可能携带活的 `KdbxEntry`（`Route.Confirm`），
-     * 故租约由**调用方**（`chainToPicker` 的 `lifecycleScope.launch` 块）持有，不在此处登记。
-     */
-    private suspend fun resolveRouting(hasTargetField: Boolean): Routing = try {
-        val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE).orEmpty()
-        val reportedDomain = intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
-            ?.takeIf { it.isNotBlank() }
-        val certDigests = autofillOriginResolver.callingAppCertDigests(callingPackage)
-        val verifiedWebDomain = autofillOriginResolver.resolveUsableWebDomain(
-            callingPackage,
-            reportedDomain,
-            certDigests
-        )
-        if (reportedDomain != null && verifiedWebDomain == null) {
-            AppLog.w(TAG, "webDomain 归属无法验证，路由按无域处理（fail-closed）")
-        }
-        val packageDimensionAuthorized = AndroidPackageBindingPolicy.isPackageDimensionAuthorized(
-            callingPackage = callingPackage,
-            callingCertDigests = certDigests,
-            isTrusted = { pkg, digests -> callerTrustStore.isTrusted(pkg, digests) }
-        )
-        val ranked = AutofillCandidateRanker.rank(
-            // ISSUE-P2-341：解锁后即时装配的候选同样排除回收站子树
-            entries = vaultRepository.getUsableKdbxEntries(),
-            callingPackage = callingPackage,
-            webDomain = verifiedWebDomain,
-            packageDimensionAuthorized = packageDimensionAuthorized,
-            lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
-            // ISSUE-P3-372 AC④：调用方应用名作排序加成（与服务端装配同口径）
-            callingAppLabel = callerAppLabelOrNull(callingPackage),
-            // ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成（与服务端装配同口径）
-            wifiContext = WifiFillBoostPolicy.isWifiSettingsPackage(callingPackage),
-            // KeePassDX `AndroidApp*` 字段绑定必须拿本次摘要快照做签名归一比对。
-            // 不显式传入时 rank 的默认值为 EMPTY ⇒ 字段绑定一律不命中，解锁后候选为空 ⇒
-            // 回落选择器（表现为「先开目标 APP 再解锁必须手选凭据」）；与服务端
-            // `resolveUnlockedCandidates` 同源，两条路径不得漂移。
-            callingCertDigests = certDigests
-        )
-        val route = AutofillUnlockRouter.route(
-            candidates = ranked,
-            packageDimensionAuthorized = packageDimensionAuthorized,
-            hasTargetField = hasTargetField
-        )
-        // 不含调用方 / 条目标识的可导出诊断：区分「字段绑定没命中」与「命中了但路由到选择器」
-        AppLog.i(
-            TAG,
-            "解锁后路由判据: 候选数=${ranked.size}, 包名维度已授权=$packageDimensionAuthorized, " +
-                "路由=${if (route is AutofillUnlockRouter.Route.Confirm) "CONFIRM" else "PICKER"}"
-        )
-        Routing(
-            route = route,
-            verifiedWebDomain = verifiedWebDomain
-        )
-    } catch (e: CancellationException) {
-        throw e
-    } catch (t: Exception) {
-        // PD-05：判据算不出 = 不确定分支，回落选择器（fail-closed）；日志不携带任何调用方标识
-        AppLog.w(TAG, "解锁后路由判据计算失败，回落选择器：${t.javaClass.simpleName}")
-        Routing(AutofillUnlockRouter.Route.Picker, null)
+    private fun cancelDelivery(reason: String) {
+        AppLog.w(TAG, "$reason，按取消回传")
+        finishWithResult(RESULT_CANCELED, Intent().putExtras(Bundle.EMPTY))
     }
 
-    /**
-     * PICKER 分支：现状路径逐字不变（ISSUE-P2-86 已真机验证可用的构造）。
-     *
-     * 复用**本应用内经真机验证可用**的交付路径——选择器（[AutofillPickerActivity]）
-     * 选中条目后经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传真实 Dataset，
-     * 由 [pickerResultLauncher] 原样转发给框架。
-     */
-    private fun launchPicker(usernameId: AutofillId?, passwordId: AutofillId?, otpId: AutofillId?) {
-        val pickerIntent = Intent(this, AutofillPickerActivity::class.java).apply {
-            putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
-            putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
-            // ISSUE-P3-298 ⑤：OTP 框 id 透传，选择器交付时把当前 TOTP 值填入该框
-            putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
-            putExtra(
-                AutofillPickerActivity.EXTRA_CALLING_PACKAGE,
-                intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE)
-            )
-            putExtra(
-                AutofillPickerActivity.EXTRA_WEB_DOMAIN,
-                intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
-            )
-        }
-        pickerResultLauncher.launch(pickerIntent)
-    }
-
-    /**
-     * CONFIRM 分支（PD-05 候选 C）：链入确认页交付唯一强匹配条目。
-     *
-     * 确认页入参与其既有（框架经认证 PendingIntent 拉起）路径**同一批 extras**——全部为本应用
-     * 自有键，不依赖平台 fill-in，故无需改动确认页本身；确认页继续承担归属展示（P1-24）、
-     * 单次生物识别 / 手动确认、Dataset 构造与回传（P2-88），本页只搬运上下文。
-     * 结果经既有 [pickerResultLauncher] 原样转发：`RESULT_OK + data` ⇒ 转发；
-     * 取消 / 缺失 ⇒ `RESULT_CANCELED + Bundle.EMPTY`。
-     */
-    private fun launchConfirm(
-        entry: KdbxEntry,
-        usernameId: AutofillId?,
-        passwordId: AutofillId?,
-        otpId: AutofillId?,
-        verifiedWebDomain: String?
-    ) {
-        val confirmIntent = Intent(this, AutofillConfirmActivity::class.java).apply {
-            putExtra(AutofillConfirmActivity.EXTRA_TARGET_USERNAME_ID, usernameId)
-            putExtra(AutofillConfirmActivity.EXTRA_TARGET_PASSWORD_ID, passwordId)
-            // ISSUE-P3-298 ⑤：OTP 框 id 透传，确认页回传时把当前 TOTP 值填入该框
-            putExtra(AutofillConfirmActivity.EXTRA_TARGET_OTP_ID, otpId)
-            putExtra(AutofillConfirmActivity.EXTRA_ENTRY_ID, entry.id.toHexString())
-            putExtra(
-                AutofillConfirmActivity.EXTRA_CREDENTIAL_TITLE,
-                // ISSUE-P2-534：解锁页候选列表是**展示面**——与会话整树替换的就地擦除并发，
-                // 裸 getter（`entry.userName` / `entry.title`）会抛 ISE 崩进程
-                entry.displayUserName().ifBlank { entry.displayTitle() }
-            )
-            putExtra(
-                AutofillConfirmActivity.EXTRA_GRANT_PACKAGE,
-                intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE)
-            )
-            // 与服务端数据集路径同口径：授权上下文用**归属校验后**的域（不可归属记空串）
-            putExtra(AutofillConfirmActivity.EXTRA_GRANT_DOMAIN, verifiedWebDomain.orEmpty())
-        }
-        pickerResultLauncher.launch(confirmIntent)
+    /** 双参重载是强制项：Android 12 起认证结果 Intent 的 extras 为 null 会崩溃。 */
+    private fun finishWithResult(resultCode: Int, data: Intent) {
+        if (completed) return
+        setResult(resultCode, data)
+        completed = true
+        finish()
+        // FillResponse 内的 ParceledListSlice 只可 parcel 一次；finish() 已把本次结果同步发出，
+        // 随即清空 Activity 上残留的 result data——系统或测试若再次 finish() 本页，不会重 parcel
+        // 同一响应而抛 IllegalStateException（不影响已交付的 RESULT_OK + FillResponse）。
+        setResult(RESULT_CANCELED, Intent().putExtras(Bundle.EMPTY))
     }
 
     private fun readAutofillId(key: String): AutofillId? =
         intent.getParcelableExtra(key, AutofillId::class.java)
 
-    private companion object {
+    companion object {
+        /** 本次被字段级屏蔽的框 id（解锁后的认证结果响应以 `setIgnoredIds` 继承）。 */
+        const val EXTRA_BLOCKED_IDS = "com.keepasskey.app.autofill.EXTRA_UNLOCK_BLOCKED_IDS"
+
+        /** 本次内联建议请求（解锁后候选 Dataset 与解锁引导同口径携带内联展示）。 */
+        const val EXTRA_INLINE_SUGGESTIONS_REQUEST =
+            "com.keepasskey.app.autofill.EXTRA_UNLOCK_INLINE_SUGGESTIONS_REQUEST"
+
         private const val TAG = "AutofillUnlock"
     }
 }

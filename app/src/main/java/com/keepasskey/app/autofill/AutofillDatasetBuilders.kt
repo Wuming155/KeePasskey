@@ -1,6 +1,7 @@
 package com.keepasskey.app.autofill
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.service.autofill.Dataset
@@ -68,7 +69,8 @@ internal fun KeePasskeyAutofillService.buildInlinePresentation(
  */
 private val authRequestCodeAllocator = AtomicInteger(AUTH_REQUEST_CODE_BASE)
 
-private fun nextAuthRequestCode(): Int = authRequestCodeAllocator.getAndIncrement()
+/** 认证 PendingIntent 的进程级单调分配器：服务端与解锁落地页共用同一序列，避免跨链路撞码。 */
+internal fun nextAuthRequestCode(): Int = authRequestCodeAllocator.getAndIncrement()
 
 /**
  * 将随机身份写入 PendingIntent 匹配键，避免进程重建后复位的 requestCode 更新系统仍持有的旧入口。
@@ -90,15 +92,15 @@ private const val AUTH_REQUEST_CODE_BASE = 100
 /**
  * 库已锁定时构建解锁引导数据集。
  *
- * ISSUE-P2-86：认证入口指向 [AutofillUnlockActivity]，该页解锁成功后经 **PD-05 路由**
- * （[AutofillUnlockRouter]，候选 C：唯一强匹配且调用方已绑定 ⇒ 链 [AutofillConfirmActivity]，
- * 否则维持链 [AutofillPickerActivity]）完成交付，并原样转发落地页的认证结果——两条链路都经
- * `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传真实 [Dataset]，均为本应用内
- * 经真机验证可用的交付路径。因此基 Intent 必须按选择器所需的上下文补齐 extras
- * （路由判据的输入亦取自同一批 extras）。
+ * ISSUE-P2-86：认证入口指向 [AutofillUnlockActivity]，该页解锁成功后按与已解锁分支同源的
+ * 候选解析，把全部命中条目 + 「搜索全部条目」入口组装成完整 [FillResponse]，经
+ * `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传——框架不会在解锁后自动重发
+ * `onFillRequest`，故必须由本次认证结果携带完整响应。基 Intent 需带齐目标框 id、调用方包名、
+ * 表单自报域、被屏蔽字段 id 与本次内联建议请求，供解锁页原样复用同批上下文。
  *
- * @param callingPkg 调用方包名（下发解锁页，用于路由归属展示与绑定状态判定）
+ * @param callingPkg 调用方包名（下发解锁页，用于候选解析与授权上下文）
  * @param webDomain 表单**自报**域（下发解锁页，解锁后经归属校验再参与匹配；可为 null）
+ * @param blockedIds 本次被字段级屏蔽的框 id（解锁后响应需以 `setIgnoredIds` 继承）
  * @return 库锁定时返回仅含解锁引导数据集的响应；库已解锁时返回 null（由调用方继续走已解锁分支）
  */
 internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
@@ -107,7 +109,8 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
     callingPkg: String,
     webDomain: String?,
     inlineRequest: InlineSuggestionsRequest?,
-    otpId: AutofillId? = null
+    otpId: AutofillId? = null,
+    blockedIds: List<AutofillId> = emptyList()
 ): FillResponse? {
     // 库已锁定：提供解锁 Action Dataset
     if (!vaultRepository.isLocked()) return null
@@ -117,8 +120,8 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
         setTextViewText(R.id.tv_subtitle, getString(R.string.cred_autofill_locked_subtitle))
     }
     // ISSUE-P2-86：与已验证可用的选择器基 Intent（[buildPickerDataset]）**严格同构**——
-    // 不带任何 activity flag（旧构造的 NEW_TASK|CLEAR_TOP 与之相异），并携带选择器所需的
-    // 全部上下文，使解锁页解锁后能直接链入选择器完成交付。
+    // 不带任何 activity flag（旧构造的 NEW_TASK|CLEAR_TOP 与之相异），并携带足够的请求上下文，
+    // 使解锁页解锁后能原样解析候选并回传完整 FillResponse。
     val unlockIntent = attachAutofillRequestIdentity(
         Intent(this, AutofillUnlockActivity::class.java).apply {
             putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
@@ -127,6 +130,10 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
             putExtra(AutofillPickerActivity.EXTRA_OTP_ID, otpId)
             putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
             putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, webDomain.orEmpty())
+            putExtra(AutofillUnlockActivity.EXTRA_BLOCKED_IDS, ArrayList(blockedIds))
+            inlineRequest?.let {
+                putExtra(AutofillUnlockActivity.EXTRA_INLINE_SUGGESTIONS_REQUEST, it)
+            }
         }
     )
     val pendingIntent = PendingIntent.getActivity(
@@ -350,8 +357,8 @@ private suspend fun KeePasskeyAutofillService.buildCandidateDataset(
     return dsBuilder.build()
 }
 
-/** 每个数据集独立 requestCode，避免 PendingIntent 因 extras 相互覆盖 */
-internal fun KeePasskeyAutofillService.attachConfirmationAuth(
+/** 每个数据集独立 requestCode，避免 PendingIntent 因 extras 相互覆盖（服务端与解锁落地页共用）。 */
+internal fun Context.attachConfirmationAuth(
     dsBuilder: Dataset.Builder,
     entryIdHex: String,
     displayName: String,
@@ -382,6 +389,9 @@ internal fun KeePasskeyAutofillService.attachConfirmationAuth(
 
 /**
  * 追加手动搜索兜底入口（认证数据集形式）数据集。
+ *
+ * ISSUE-P3-376：手动选择器兜底数据集开关（默认开启）——关闭即本次响应不挂
+ * 「搜索全部条目…」入口；自动匹配数据集与解锁引导不受影响（在本函数之前已装配）。
  */
 internal fun KeePasskeyAutofillService.buildPickerDataset(
     responseBuilder: FillResponse.Builder,
@@ -391,14 +401,36 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
     passwordId: AutofillId?,
     otpId: AutofillId? = null
 ) {
-    // ISSUE-P3-376：手动选择器兜底数据集开关（默认开启）——关闭即本次响应不挂
-    // 「搜索全部条目…」入口；自动匹配数据集与解锁引导不受影响（在本函数之前已装配）
     if (!settingsStore.isAutofillManualPickerEnabled()) return
-    // ISSUE-P3-40：手动搜索兜底入口（自动匹配零候选/候选不含目标条目时使用）。
-    // 以「认证数据集」形式挂入：值在用户于选择器中选中并确认后才经
-    // AutofillManager.EXTRA_AUTHENTICATION_RESULT 回传——未确认前不携带任何明文。
+    appendManualPickerDataset(
+        context = this,
+        responseBuilder = responseBuilder,
+        callingPkg = callingPkg,
+        reportedDomain = scanResult.webDomain,
+        usernameId = usernameId,
+        passwordId = passwordId,
+        otpId = otpId
+    )
+}
+
+/**
+ * 「搜索全部条目」入口的**单一装配实现**：已解锁响应与锁定态解锁后的认证结果响应共用，
+ * 保证两条链路呈现同一兜底入口（同一 Intent 构造、同一 requestCode 序列、同一认证语义）。
+ *
+ * 以「认证数据集」形式挂入：值在用户于选择器中选中并确认后才经
+ * `EXTRA_AUTHENTICATION_RESULT` 回传——未确认前不携带任何明文。
+ */
+internal fun appendManualPickerDataset(
+    context: Context,
+    responseBuilder: FillResponse.Builder,
+    callingPkg: String,
+    reportedDomain: String?,
+    usernameId: AutofillId?,
+    passwordId: AutofillId?,
+    otpId: AutofillId? = null
+) {
     val pickerIntent = attachAutofillRequestIdentity(
-        Intent(this, AutofillPickerActivity::class.java).apply {
+        Intent(context, AutofillPickerActivity::class.java).apply {
             putExtra(AutofillPickerActivity.EXTRA_USERNAME_ID, usernameId)
             putExtra(AutofillPickerActivity.EXTRA_PASSWORD_ID, passwordId)
             // ISSUE-P3-298 ⑤：OTP 框 id 随链路转发，选择器交付时把当前 TOTP 值填入该框
@@ -406,19 +438,19 @@ internal fun KeePasskeyAutofillService.buildPickerDataset(
             // ISSUE-P3-43 ②：下传「字段签名」所需上下文，使选择器成为字段级屏蔽的写入入口。
             // 只传包名与表单自报域（均为非敏感标识），不传任何表单内容或凭据。
             putExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE, callingPkg)
-            putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, scanResult.webDomain.orEmpty())
+            putExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN, reportedDomain.orEmpty())
         }
     )
     val pickerPendingIntent = PendingIntent.getActivity(
-        this,
+        context,
         nextAuthRequestCode(),
         pickerIntent,
         // 框架需注入 fillIn extras，必须 FLAG_MUTABLE
         PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
-    val pickerViews = RemoteViews(packageName, R.layout.autofill_dataset_item).apply {
-        setTextViewText(R.id.tv_username, getString(R.string.autofill_picker_entry_title))
-        setTextViewText(R.id.tv_subtitle, getString(R.string.autofill_picker_entry_sub))
+    val pickerViews = RemoteViews(context.packageName, R.layout.autofill_dataset_item).apply {
+        setTextViewText(R.id.tv_username, context.getString(R.string.autofill_picker_entry_title))
+        setTextViewText(R.id.tv_subtitle, context.getString(R.string.autofill_picker_entry_sub))
     }
     val pickerBuilder = Dataset.Builder(
         Presentations.Builder()
@@ -451,10 +483,26 @@ internal fun KeePasskeyAutofillService.applySaveInfoIfNeeded(
     responseBuilder: FillResponse.Builder,
     usernameId: AutofillId?,
     passwordId: AutofillId?
+): Unit = applyAutofillSaveInfo(
+    responseBuilder = responseBuilder,
+    usernameId = usernameId,
+    passwordId = passwordId,
+    offerSaveEnabled = settingsStore.isOfferSaveCredentialsEnabled()
+)
+
+/**
+ * SaveInfo 的单一装配实现：已解锁响应、锁定态解锁引导响应与解锁后的认证结果响应共用。
+ * 调用方负责按各自偏好读取 `offerSaveEnabled`。
+ */
+internal fun applyAutofillSaveInfo(
+    responseBuilder: FillResponse.Builder,
+    usernameId: AutofillId?,
+    passwordId: AutofillId?,
+    offerSaveEnabled: Boolean
 ) {
     // 注册 SaveInfo 以便在用户提交时捕获新账密
     // ISSUE-P3-44：仅在用户开启「新密码保存提示」时注册
-    if (!settingsStore.isOfferSaveCredentialsEnabled()) {
+    if (!offerSaveEnabled) {
         AppLog.i(TAG, "新密码保存提示已关闭，本次不注册 SaveInfo")
         return
     }

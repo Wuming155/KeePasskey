@@ -48,6 +48,10 @@ class KeePasskeyAutofillService : AutofillService() {
     @Inject
     lateinit var vaultRepository: VaultRepository
 
+    // 候选解析的唯一事实源：已解锁分支与锁定态解锁后分支共用同一实例（含签名摘要快照口径）
+    @Inject
+    lateinit var candidateResolver: AutofillCandidateResolver
+
     // TASK-44：自动填充黑名单（命中即不下发任何数据集，fail-closed）
     @Inject
     lateinit var autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore
@@ -201,8 +205,8 @@ class KeePasskeyAutofillService : AutofillService() {
         val inlineRequest = request.inlineSuggestionsRequest
 
         // 库已锁定：提供解锁 Action Dataset
-        // ISSUE-P2-86：解锁引导数据集需携带链入选择器所需的上下文（目标框 id + 调用方包名 +
-        // 表单自报域），故按选择器同一口径传入 callingPkg / scanResult.webDomain
+        // ISSUE-P2-86：解锁引导数据集需携带解锁后装配候选响应的上下文（目标框 id + 调用方包名 +
+        // 表单自报域 + 被屏蔽字段 id + 内联建议请求），故按选择器同一口径传入 callingPkg / scanResult.webDomain
         // ISSUE-P3-375：纯结构化表单（无账号 / 密码框）锁库时不下发解锁引导——解锁链的
         // 交付面是 U/P 通道，引导过去也无处回填；解锁后框架重发 onFillRequest 自然带出结构化目标
         // （P2-73 实证的「认证完成后框架重发」语义），本分支如实返回空响应。
@@ -219,7 +223,9 @@ class KeePasskeyAutofillService : AutofillService() {
                 otpId = otpId,
                 callingPkg = callingPkg,
                 webDomain = scanResult.webDomain,
-                inlineRequest = inlineRequest
+                inlineRequest = inlineRequest,
+                // 解锁后的认证结果响应继承本次字段级屏蔽（setIgnoredIds），不放宽既有闸门
+                blockedIds = targets.blockedIds
             )?.let { lockedResponse ->
                 // ISSUE-P2-73 AC③：设备侧核对「库锁定 ⇒ 下发认证引导数据集」的调试留痕。
                 // 用 `AppLog.d`（仅 debug 构建输出，release 静默且被 R8 剥离）——不改变任何语义，

@@ -1,98 +1,30 @@
 package com.keepasskey.app.autofill
 
 import android.view.autofill.AutofillId
-import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.MAX_DATASET_COUNT
-import com.keepasskey.app.autofill.KeePasskeyAutofillService.Companion.TAG
-import com.keepasskey.core.log.AppLog
 
 /**
- * 已解锁分支的**候选集解析**（ISSUE-P3-528 自 [AutofillDatasetBuilders] 按职责拆出——
- * 原文件随本批新增越入 tier1(>500) 行数闸门；拆分**零行为变更**，只做结构搬运）。
- *
- * 本文件承载「哪些条目可成为候选 + 该批候选是否需要逐条二次确认」，
- * 数据集装配（值解析 / 呈现 / 认证挂接）仍留在 [AutofillDatasetBuilders]。
+ * 已解锁分支的候选集与逐条二次确认策略（候选解析已收敛至 [AutofillCandidateResolver]）。
+ * 数据集装配（值解析 / 呈现 / 认证挂接）留在 [AutofillDatasetBuilders]。
  */
 
-/** 已解锁分支的候选集：域名维度 + `android://` 包名维度双路打分后的截断结果 */
-internal data class UnlockedCandidates(
+/** 域名维度 + `android://` 包名维度双路打分后的截断结果；已解锁与解锁后两条链路共用。 */
+data class UnlockedCandidates(
     val webDomain: String?,
     val ranked: List<AutofillCandidateRanker.Ranked>
 )
 
 /**
- * 解析本轮可用候选（域归属校验 + 包名维度首次绑定校验 + 打分排序）。
+ * 已解锁分支的候选集解析入口：委托 [AutofillCandidateResolver] ——锁定态解锁后分支调用同一实例，
+ * 两条链路的域归属校验、P2-46 首次绑定门、关联记忆、签名摘要快照与截断上限因此不可能漂移。
  *
- * `ENG-20261028-11`：本函数返回的 [UnlockedCandidates.ranked] 携带**活的** `KdbxEntry`，
- * 调用方在后续装配（值解析 / TOTP 直填 / 结构化字段）中还要读它们的字段。因此租约**必须由调用方**
- * 跨「解析 → 装配」整段持有（见 [appendUnlockedDatasets] 与
- * `AutofillUnlockActivity.resolveRouting` 的调用点）；本函数自身不登记租约，
- * 以免在返回时就把保护撤掉。
+ * `ENG-20261028-11`：返回的 [UnlockedCandidates.ranked] 携带**活的** `KdbxEntry`，
+ * 调用方在后续装配（值解析 / TOTP 直填 / 结构化字段）中还要读它们的字段。因此读租约**必须由调用方**
+ * 跨「解析 → 装配」整段持有（见 [appendUnlockedDatasets] 与解锁落地页的调用点）。
  */
 internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
     callingPkg: String,
     scanResult: ScanResult
-): UnlockedCandidates {
-    // 库已解锁：查找匹配凭据
-    // ISSUE-P2-07：webDomain 参与匹配前必须通过归属校验（受信浏览器白名单或 DAL 归属声明）；
-    // 无法验证时按 null 处理（不下发该域候选），绝不静默放行
-    // ISSUE-P3-170：调用方证书摘要**只读一次**并由下述两处共用（归属解析 + `android://` 维度
-    // 首次绑定校验）——原实现各读一次，各含一次 `getPackageInfo` + 逐签名者 SHA-256 + 逐字节 hex 格式化；
-    // 顺带消除「两次读取之间调用方身份变化」造成的判定不一致
-    val callerCertDigests = autofillOriginResolver.callingAppCertDigests(callingPkg)
-    val webDomain = autofillOriginResolver.resolveUsableWebDomain(callingPkg, scanResult.webDomain, callerCertDigests)
-    if (scanResult.webDomain != null && webDomain == null) {
-        AppLog.w(TAG, "webDomain 归属无法验证，已忽略该域候选（fail-closed）")
-    }
-    // ISSUE-P2-46：`android://` 包名维度必须先通过「调用方包名 + 签名摘要」首次绑定校验。
-    // 未绑定 / 签名不可读时该维度一律不命中（fail-closed），条目仍可经域名维度入选；
-    // 未绑定调用方的补救路径是选择器显式指认（该动作即首次绑定写入，见 AutofillPickerActivity）。
-    val packageDimensionAuthorized = AndroidPackageBindingPolicy.isPackageDimensionAuthorized(
-        callingPackage = callingPkg,
-        callingCertDigests = callerCertDigests,
-        isTrusted = { pkg, digests -> callerTrustStore.isTrusted(pkg, digests) }
-    )
-    if (!packageDimensionAuthorized && callingPkg.isNotBlank()) {
-        // 日志不携带包名 / 摘要等调用方标识（ISSUE-P1-10 语义）
-        AppLog.i(TAG, "android:// 维度未授权（未完成包名+签名首次绑定），本次不提供包名维度候选")
-    }
-    // ISSUE-P3-39：候选打分排序——严格匹配（DomainMatcher）通过的条目按
-    // 「精确域名 > 精确包名 > 父域」打分并截断；匹配条件一字未放宽，
-    // 未通过 isDomainMatch / isPackageMatch 的条目不会进入结果。
-    // ISSUE-P3-528：调用方关联记忆（键＝包名 + 签名摘要 + 域，见 AutofillCallerEntryMemory）命中时，
-    // 该条目按 [AutofillCandidateRanker] 的记忆档规则入选并置首——准入依据是用户此前在该调用方上
-    // 已发生的显式交付；这是唯一的非匹配准入来源（纯 App 上下文），浏览器上下文还须过当前域匹配
-    // （`ISSUE-P2-617`：召回即按已校验域隔离，排序器另有第二道门），且记忆条目仍挂强制二次确认
-    // （见 attachConfirmationAuth）。
-    // 召回传入的必须是归属校验后的 [webDomain]（`ISSUE-P2-617`）——表单自报域未经校验，
-    // 不得作为记忆键，否则恶意站自报他站域名即可召回他站记忆。
-    val rememberedEntryId = autofillCallerEntryMemory.recall(callingPkg, callerCertDigests, webDomain)
-    if (rememberedEntryId != null) {
-        // 只记事实（不含条目名 / 包名 / 摘要等标识）
-        AppLog.i(TAG, "调用方关联记忆命中，本条候选含该条目")
-    }
-    // ENG-20261028-11：候选条目在返回后仍要被逐条读取（值解析 / TOTP / 结构化字段），
-    // 故读租约由**调用方**跨「解析 → 装配」整段持有；此处保持裸读口，不自行登记再在返回时撤销。
-    return UnlockedCandidates(
-        webDomain = webDomain,
-        ranked = AutofillCandidateRanker.rank(
-            // ISSUE-P2-341：候选装配走「可用条目」读口，回收站内的凭据不得被填出去
-            entries = vaultRepository.getUsableKdbxEntries(),
-            callingPackage = callingPkg,
-            webDomain = webDomain,
-            packageDimensionAuthorized = packageDimensionAuthorized,
-            lastFilledEntryId = autofillLastFilledStore.lastFilledEntryId(),
-            limit = MAX_DATASET_COUNT,
-            // ISSUE-P3-372 AC④：调用方应用名作排序加成（取不到即 null，仅损失一个维度）
-            callingAppLabel = callerAppLabelOrNull(callingPkg),
-            // ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成（清单外恒 false）
-            wifiContext = WifiFillBoostPolicy.isWifiSettingsPackage(callingPkg),
-            // ISSUE-P3-528：关联记忆命中条目（未命中传 null，对本条零影响）
-            rememberedEntryId = rememberedEntryId,
-            // KeePassDX `AndroidApp*` 字段绑定的签名比对：复用本请求已读取的同一份摘要快照
-            callingCertDigests = callerCertDigests
-        )
-    )
-}
+): UnlockedCandidates = candidateResolver.resolve(callingPkg, scanResult.webDomain)
 
 /**
  * TASK-11 整改（审核报告 P2-24）：已解锁分支的每个数据集必须携带 setAuthentication

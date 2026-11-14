@@ -9,6 +9,7 @@ import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -26,6 +27,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.Collections
+import java.util.Locale
 
 /**
  * ISSUE-P2-73 AC③：**设备侧实测自动填充认证填充链路**。
@@ -34,9 +36,11 @@ import java.util.Collections
  *
  * - **A（认证链路不崩溃 + 认证结果被接受）**：库锁定时服务下发带 `setAuthentication` 的数据集 →
  *   系统填充 UI 展示 → 点选后由**框架**拉起 [AutofillUnlockActivity] → 在真机上完成解锁 →
- *   该页链入 [AutofillPickerActivity] 并把其认证结果原样转发给框架，全程无崩溃。
- * - **B（解锁后不经人工重请求即可填充，ISSUE-P2-86 判据）**：解锁页链入的选择器中显式指认条目后，
- *   框架把**真实凭据**写入客户端目标输入框（客户端 logcat 自述 `passwordFilled=true`），
+ *   该页把完整 [android.service.autofill.FillResponse] 作认证结果回传，框架重新展示候选 UI，
+ *   全程无崩溃。
+ * - **B（解锁后不经人工重请求即可填充，ISSUE-P2-86 判据）**：解锁后的候选 UI 中点选
+ *   「搜索全部条目」入口 → 框架拉起 [AutofillPickerActivity] → 显式指认条目后，框架把
+ *   **真实凭据**写入客户端目标输入框（客户端 logcat 自述 `passwordFilled=true`），
  *   且全程客户端 `requestAutofill(` 计数不变——即不依赖任何「显式重请求」补救手法。
  * - **B（已解锁分支选择器路径）**：客户端重新拉起后请求填充 → 经选择器指认条目 → 再次被真实填充。
  * - **C（第二个认证 Activity + 真实写入，ISSUE-P2-88 判据）**：已解锁候选数据集点选后由框架拉起
@@ -182,7 +186,11 @@ class AutofillAuthChainDeviceTest {
             evidence.write("收尾：原活动选择已恢复；本轮合成库已清理=$removed")
         }.onFailure { evidence.write("活动库前提收尾异常: ${it.javaClass.simpleName}") }
         instrumentation.runOnMainSync {
-            synchronized(runActivities) { runActivities.toList() }.forEach { it.finish() }
+            synchronized(runActivities) { runActivities.toList() }
+                // 已结束的认证页不再二次 finish()：其结果 Intent 可能携带 FillResponse
+                // （内含只能 parcel 一次的 ParceledListSlice），重 parcel 会抛异常并污染收尾。
+                .filterNot { it.isFinishing || it.isDestroyed }
+                .forEach { it.finish() }
         }
         runActivities.clear()
         runBlocking {
@@ -443,21 +451,51 @@ class AutofillAuthChainDeviceTest {
         }
         assertNotNull("未在解锁页找到解锁按钮", unlockButton)
         val clientRequestsBeforeUnlock = clientRequestCount()
-        val unlockPickerResumesBefore = traceCount("resumed:$PICKER_ACTIVITY")
         evidence.write("解锁按钮点击=${probe.click(unlockButton!!)}（文本「${normalizedText(unlockButton)}」）")
 
-        // (1) ISSUE-P2-86 的决定性观测：解锁页解锁成功后**链入选择器**，由本次认证结果直接
-        //     交付真实 Dataset。**不**再用「客户端显式重请求」把链路接下去——该手法恰好绕过本缺陷。
-        //     注意：此刻解锁页**尚未**结束——它要等选择器回传结果后才 setResult+finish。
-        val pickerChained = awaitNewTrace("resumed:$PICKER_ACTIVITY", CHAIN_WAIT_MS, unlockPickerResumesBefore)
+        // (1) ISSUE-P2-86 的决定性观测：解锁页解锁成功后以**完整 FillResponse** 作认证结果回传，
+        //     框架随即重新展示候选 UI。**不**再用「客户端显式重请求」把链路接下去——该手法恰好
+        //     绕过本缺陷。干净归因前提下本轮零自动候选（合成调用方尚未完成首次绑定），故候选 UI
+        //     先出现的是「搜索全部条目」兜底入口；点选后由框架拉起选择器完成交付。
+        val unlockFinishedAfterResponse = awaitActivityFinished(UNLOCK_ACTIVITY, CHAIN_WAIT_MS)
         evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
         assertTrue(
-            "解锁页未链入 $PICKER_ACTIVITY——ISSUE-P2-86 要求解锁成功后直接经选择器交付，" +
+            "解锁页未以认证结果结束——ISSUE-P2-86 要求解锁成功后由本次认证结果携带完整响应，" +
                 "而非以空载荷结束并等待（已被证伪的）框架重发",
+            unlockFinishedAfterResponse
+        )
+        val unlockPickerEntryText = labels.dataset(R.string.autofill_picker_entry_title)
+        val unlockPickerEntry = probe.awaitDatasetText(
+            targetContext.packageName,
+            unlockPickerEntryText,
+            FILL_UI_WAIT_MS
+        )
+        if (unlockPickerEntry == null) {
+            evidence.write("解锁后候选 UI 窗口快照:\n" + probe.snapshot())
+            evidence.write("服务侧留痕:\n" + filteredLogcat(SERVICE_TAG))
+            evidence.write("框架留痕:\n" + frameworkLogcat())
+        }
+        assertNotNull(
+            "解锁后的认证结果响应未出现「$unlockPickerEntryText」入口——" +
+                "框架未接受完整 FillResponse 或候选响应装配失败，结合窗口树与服务/框架留痕判断",
+            unlockPickerEntry
+        )
+        evidence.write("解锁后候选 UI 已出现「$unlockPickerEntryText」入口")
+        screenshot("ac3-04-unlock-candidate-response")
+        val unlockPickerResumesBefore = traceCount("resumed:$PICKER_ACTIVITY")
+        evidence.write("点选搜索全部条目入口=${probe.click(unlockPickerEntry!!)}")
+        val pickerChained = awaitNewTrace(
+            "resumed:$PICKER_ACTIVITY",
+            ACTIVITY_WAIT_MS,
+            unlockPickerResumesBefore
+        )
+        evidence.write("生命周期留痕: ${lifecycleTrace.toList()}")
+        assertTrue(
+            "点选「搜索全部条目」入口后框架未拉起 $PICKER_ACTIVITY",
             pickerChained
         )
         SystemClock.sleep(UI_SETTLE_MS)
-        evidence.write("解锁后链入的选择器窗口快照:\n" + probe.snapshot())
+        evidence.write("解锁后经认证结果链入的选择器窗口快照:\n" + probe.snapshot())
         screenshot("ac3-04-unlock-chained-picker")
 
         val chainedEntry = probe.awaitActiveNode(ENTRY_ITEM_LABEL, ACTIVITY_WAIT_MS) { node ->
@@ -471,8 +509,8 @@ class AutofillAuthChainDeviceTest {
             chainedEntry
         )
         evidence.write("点选播种条目=${probe.click(chainedEntry!!)}")
-
-        // 判据：客户端输入框被真实凭据写入，**且客户端全程未再请求填充**（无补救驱动）
+        dismissBindingWriteBackAsk("阶段 5")
+        // 判断：客户端输入框被真实凭据写入，**且客户端全程未再请求填充**（无补救驱动）
         val filledAfterUnlock = awaitNewLogcatLine(CLIENT_FILLED_TRACE, FILL_RESULT_WAIT_MS)
         evidence.write(
             "解锁后（未经客户端重请求）客户端自述:\n" + filteredLogcat(AutofillClientActivity.TAG).lines()
@@ -610,6 +648,7 @@ class AutofillAuthChainDeviceTest {
         }
         assertNotNull("选择器中未找到播种条目「${AutofillSeedContract.ENTRY_TITLE}」", entryItem)
         evidence.write("点选播种条目=${probe.click(entryItem!!)}")
+        dismissBindingWriteBackAsk("阶段 6")
 
         val filled = awaitNewLogcatLine(CLIENT_FILLED_TRACE, FILL_RESULT_WAIT_MS)
         evidence.write("客户端自述（logcat）:\n" + filteredLogcat(AutofillClientActivity.TAG))
@@ -716,8 +755,9 @@ class AutofillAuthChainDeviceTest {
 
         evidence.section("结论")
         evidence.write(
-            "A：认证数据集下发并展示 → 框架拉起 $UNLOCK_ACTIVITY → 真机完成解锁 → 链入 " +
-                "$PICKER_ACTIVITY 并原样转发其认证结果，解锁页正常结束=已实测（$unlockFinished）"
+            "A：认证数据集下发并展示 → 框架拉起 $UNLOCK_ACTIVITY → 真机完成解锁 → 以完整 " +
+                "FillResponse 作认证结果回传，框架重新展示候选 UI 并经「搜索全部条目」入口拉起 " +
+                "$PICKER_ACTIVITY，解锁页正常结束=已实测（$unlockFinished）"
         )
         evidence.write(
             "B（ISSUE-P2-86 判据）：解锁后**未经客户端重请求**（请求次数 $clientRequestsBeforeUnlock → " +
@@ -739,11 +779,38 @@ class AutofillAuthChainDeviceTest {
                 "已在 ISSUE-P2-86 中纠正"
         )
         evidence.write(
-            "未覆盖边界：webDomain 归属路径（本用例客户端为原生应用，不产生 webDomain）"
+            "未覆盖边界：webDomain 归属路径（本用例客户端为原生应用，不产生 webDomain）；" +
+                "同一应用多账号条目在解锁后候选 UI 中的并列展示需用户真机复验"
         )
     }
 
     // ------------------------------------------------------------------ 断言/观测工具
+
+    /**
+     * 交付链在 `setResult` 前可能提出「记住这个应用？」询问（ISSUE-P3-571 / PD-83），
+     * 该询问挂起交付直到用户处置。本用例只验证填充链路、不写回库内关联，按返回键取消
+     * （拒绝不阻断交付）。询问可能出现在受保护窗口的独立 Dialog 窗口，故按全窗口树定位。
+     */
+    private fun dismissBindingWriteBackAsk(stage: String) {
+        val titles = buildList {
+            add(targetContext.getString(R.string.autofill_app_binding_write_back_title))
+            for (language in listOf("zh", "en")) {
+                val config = Configuration(targetContext.resources.configuration)
+                config.setLocale(Locale.forLanguageTag(language))
+                add(
+                    targetContext.createConfigurationContext(config)
+                        .getString(R.string.autofill_app_binding_write_back_title)
+                )
+            }
+        }.distinct()
+        val dialog = probe.awaitNode("$stage 应用关联询问", BINDING_ASK_WAIT_MS) { node ->
+            AutofillNodeIdentity.appNode(node, targetContext.packageName) &&
+                titles.any { title -> textOf(node).contains(title) }
+        } ?: return
+        evidence.write("$stage 出现「记住这个应用？」询问（${textOf(dialog).take(40)}），按返回键取消")
+        probe.shell("input keyevent 4")
+        SystemClock.sleep(UI_SETTLE_MS)
+    }
 
     /** 客户端启动意图（阶段 2 与阶段 7 复用） */
     private fun clientIntent(): Intent = Intent().apply {
@@ -1015,6 +1082,8 @@ class AutofillAuthChainDeviceTest {
 
         const val POLL_MS = 200L
         const val UI_SETTLE_MS = 1_200L
+        /** 「记住这个应用？」询问出现窗口（Compose 状态更新，比 Activity 拉起快）。 */
+        const val BINDING_ASK_WAIT_MS = 5_000L
         const val CLIENT_WAIT_MS = 15_000L
         const val FILL_UI_WAIT_MS = 25_000L
         // §204 纠偏：原 15s 窗口 < 完整性周期重扫间隔（LIVE_RESCAN_INTERVAL_MS = 30s，安全参数不得
