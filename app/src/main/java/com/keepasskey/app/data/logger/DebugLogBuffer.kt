@@ -1,5 +1,6 @@
 package com.keepasskey.app.data.logger
 
+import com.keepasskey.core.log.diagnosticText
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Singleton
@@ -28,6 +29,8 @@ data class DiagnosticLogStatus(
  * 故障可定位性：每行带**日期、时刻、线程名、级别、tag**，并由应用内诊断桥把 `AppLog.e/w`
  * 的异常类型与有界栈帧（[com.keepasskey.core.log.diagnosticText]，不含异常 message）写入同一缓冲。
  * 因此稳定版导出的日志不只是「某步失败」，还能看到失败发生在哪个类、哪个方法。
+ * 逃出线程栈的未捕获异常另由 [recordCrash] 同步留痕（进程退出前的最后一笔），
+ * 覆盖「服务被系统重启但归档里没有原因」的取证缺口。
  * 容量放宽到 [MAX_LINES] 行；溢出时在快照首行给出明确的丢弃提示，并可由 [status] 精确查询，
  * 避免关键故障被静默冲掉而排查者误以为日志完整。
  *
@@ -123,13 +126,44 @@ class DebugLogBuffer(
         return DiagnosticLogRedactor.redact(text)
     }
 
-    private fun append(level: String, tag: String, message: String) {
+    private fun append(level: String, tag: String, message: String) =
+        appendLine(level, tag, message, Thread.currentThread().name, persistSynchronously = false)
+
+    /**
+     * 进程级未捕获异常的最后一笔记录（`APP-CRASH-01`）。
+     *
+     * 背景：`AppLog.e/w` 只覆盖**被业务捕获**的异常；逃出线程栈的未捕获异常此前仅进 logcat，
+     * 用户可导出的归档里只剩「服务被系统重启」这一现象而没有「为什么崩」。本入口由
+     * [CrashLogRecorder] 在默认异常处理器内调用，复用与普通行同源的脱敏与栈帧格式，
+     * 并**同步**落盘——异步队列在进程退出前来不及冲刷。
+     *
+     * 仍受 [DiagnosticLogGate] 约束：用户关闭诊断日志即不记录，与既有隐私口径一致。
+     * 异常 message / cause message 依旧不外传，只留类型与有界栈帧。
+     */
+    fun recordCrash(threadName: String, t: Throwable) {
+        if (!gate.isEnabled()) return
+        appendLine(
+            level = "ERROR",
+            tag = CRASH_TAG,
+            message = diagnosticText(CRASH_MESSAGE, t),
+            threadName = threadName.ifEmpty { "<unnamed>" },
+            persistSynchronously = true
+        )
+    }
+
+    private fun appendLine(
+        level: String,
+        tag: String,
+        message: String,
+        threadName: String,
+        persistSynchronously: Boolean
+    ) {
         val now = LocalDateTime.now()
         val date = now.format(DATE_FORMAT)
         val time = now.format(TS_FORMAT)
         val fullTimestamp = now.format(FULL_TS_FORMAT)
         // 线程名只在多线程问题上有意义，截断防止异常长的自定义线程名撑爆单行
-        val thread = Thread.currentThread().name.take(MAX_THREAD_NAME_LENGTH)
+        val thread = threadName.take(MAX_THREAD_NAME_LENGTH)
         // 写入即脱敏：整行（含 tag / 线程名 / 栈帧）过一遍规则，不留任何「导出前才清理」的窗口。
         // 导出边界的二次脱敏是幂等的第二道防线，不依赖本调用点的历史正确性。
         val line = DiagnosticLogRedactor.redact("[$date] [$time] [$thread] [$level] [$tag] $message")
@@ -154,8 +188,12 @@ class DebugLogBuffer(
             // 故稳定版同样可经 adb logcat 取得脱敏诊断行。
             com.keepasskey.core.log.AppLog.i(LOGCAT_TAG, line)
         }
-        // 跨进程留存：写入时已脱敏的整行异步落盘，下次进程启动灌回缓冲前缀。
-        DiagnosticLogHistory.append(line)
+        // 跨进程留存：写入时已脱敏的整行落盘，下次进程启动灌回缓冲前缀。
+        if (persistSynchronously) {
+            DiagnosticLogHistory.appendSync(line)
+        } else {
+            DiagnosticLogHistory.append(line)
+        }
     }
 
     /** 调用方已持锁：快照与导出正文共用，保证「看到什么就能导出什么」。 */
@@ -178,5 +216,9 @@ class DebugLogBuffer(
         private val TS_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
         private val FULL_TS_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
         internal const val LOGCAT_TAG = "KpLog"
+
+        /** 未捕获异常记录的 tag 与固定文案（用户导出后可直接检索「进程即将退出」）。 */
+        internal const val CRASH_TAG = "Crash"
+        internal const val CRASH_MESSAGE = "未捕获异常，进程即将退出"
     }
 }

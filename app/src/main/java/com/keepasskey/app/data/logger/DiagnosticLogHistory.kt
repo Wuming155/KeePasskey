@@ -36,6 +36,9 @@ internal object DiagnosticLogHistory {
     private var retentionDays: Int = 3
 
     private val lock = Any()
+
+    /** 文件写入串行化：崩溃路径的同步追加与后台 executor 不得交错写出半行。 */
+    private val fileLock = Any()
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "DiagnosticLogHistory").apply { isDaemon = true }
     }
@@ -67,12 +70,34 @@ internal object DiagnosticLogHistory {
         val file = synchronized(lock) { directory?.let { File(it, FILE_NAME) } } ?: return
         executor.execute {
             runCatching {
+                synchronized(fileLock) {
+                    runCatching { file.parentFile?.mkdirs() }
+                    file.appendText(line + "\n", Charsets.UTF_8)
+                    if (file.length() > MAX_BYTES) {
+                        val kept = retain(
+                            runCatching { file.readLines(Charsets.UTF_8) }.getOrDefault(emptyList()),
+                            retentionDays
+                        )
+                        atomicWrite(file, kept)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 同步落盘：**只用于进程即将退出**（未捕获异常）的最后一笔记录。
+     *
+     * 异步 executor 的排队写入来不及在进程被系统回收前完成，崩溃现场会整段落空——正是
+     * 「崩溃发生了但归档里没有栈」的成因。本入口在当前线程完成一次有界追加，不读全文件、
+     * 不做裁剪（超限由下次启动的 [configure] 或后续 [append] 收敛），失败静默。
+     */
+    fun appendSync(line: String) {
+        val file = synchronized(lock) { directory?.let { File(it, FILE_NAME) } } ?: return
+        runCatching {
+            synchronized(fileLock) {
                 runCatching { file.parentFile?.mkdirs() }
                 file.appendText(line + "\n", Charsets.UTF_8)
-                if (file.length() > MAX_BYTES) {
-                    val kept = retain(runCatching { file.readLines(Charsets.UTF_8) }.getOrDefault(emptyList()), retentionDays)
-                    atomicWrite(file, kept)
-                }
             }
         }
     }

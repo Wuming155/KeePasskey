@@ -3,6 +3,7 @@ package com.keepasskey.app
 import android.app.Application
 import androidx.work.Configuration
 import com.keepasskey.app.data.binary.FileBinaryStore
+import com.keepasskey.app.data.logger.CrashLogRecorder
 import com.keepasskey.app.data.logger.DiagnosticLogBridge
 import com.keepasskey.app.ui.AppLaunchLanguageSeed
 import com.keepasskey.app.notification.NotificationChannels
@@ -76,6 +77,10 @@ class MainApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var diagnosticLogBridge: DiagnosticLogBridge
 
+    // APP-CRASH-01：未捕获异常在进程退出前同步留痕（崩溃现场的唯一证据来源）
+    @Inject
+    lateinit var crashLogRecorder: CrashLogRecorder
+
     // ISSUE-P3-116：同步缓存销毁器（`cacheDir/sync` 的 KDBX 密文快照）。
     // 与 fileBinaryStore 一起构成「彻底退出应用」前的易失缓存清理面。
     @Inject
@@ -127,6 +132,9 @@ class MainApplication : Application(), Configuration.Provider {
         // 稳定版同样安装：release 里 AppLog.e/w 的类型与栈帧不再只留在 logcat。
         // 装在所有其它冷启动动作之前，使后续初始化失败的异常也能进入可导出缓冲。
         diagnosticLogBridge.install(this)
+        // APP-CRASH-01：紧跟诊断桥安装——归档目录此刻已配置，未捕获异常才能在进程退出前
+        // 同步写入归档（异步队列来不及冲刷）。处理器原样转交安装前的默认处理器，不改变崩溃语义。
+        crashLogRecorder.install()
         diagnosticLogBridge.logAutofillEnvironment(this)
         // ISSUE-P3-459 续：灌应用内语言**启动种子**——SharedPreferences 冷读 1~5ms、早于任何首帧渲染，
         // 后续所有语言读取（Compose 首帧 / StringsProvider / 非 UI 装配点）都退化为一次 volatile 读，

@@ -35,4 +35,16 @@ class DiagnosticLogHistoryTest {
         assertTrue("周期内的既有行应保留", exported.contains("fresh-entry"))
         assertTrue("本进程新写入的行应可读回", exported.contains("appended-entry"))
     }
+
+    @Test
+    fun `崩溃现场同步追加在进程退出前即落到归档`() {
+        val dir = Files.createTempDirectory("diagnostic-sync").toFile()
+        DiagnosticLogHistory.configure(dir, 3)
+
+        DiagnosticLogHistory.appendSync("[2026-11-14] [14:43:00.500] [main] [ERROR] [Crash] crash-entry")
+
+        val file = File(dir, "diagnostic_history.log")
+        val content = file.readText()
+        assertTrue("同步追加必须立刻可见，不能等异步队列：$content", content.contains("crash-entry"))
+    }
 }

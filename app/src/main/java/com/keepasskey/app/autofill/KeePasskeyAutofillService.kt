@@ -110,14 +110,18 @@ class KeePasskeyAutofillService : AutofillService() {
     override fun onConnected() {
         super.onConnected()
         // 系统绑定本服务时再采一次环境：进程头是冷启动快照，用户可能在进程启动后才启用服务。
-        AppLog.i(
-            TAG,
-            "系统已连接自动填充服务；" + autofillEnvironmentLine(
-                context = this,
-                autofillChannelEnabled = settingsStore.isAutofillServiceEnabled(),
-                offerSaveEnabled = settingsStore.isOfferSaveCredentialsEnabled()
+        // APP-CRASH-01 同批：本回调跑在主线程，偏好读取或系统查询一旦抛出即进程级崩溃——
+        // 环境描述属可观测性附加项，任何失败都只落日志，不允许把服务绑定变成崩溃。
+        runCatching {
+            AppLog.i(
+                TAG,
+                "系统已连接自动填充服务；" + autofillEnvironmentLine(
+                    context = this,
+                    autofillChannelEnabled = autofillChannelEnabled(),
+                    offerSaveEnabled = offerSaveEnabled()
+                )
             )
-        )
+        }.onFailure { AppLog.w(TAG, "自动填充环境采集失败: ${it.javaClass.simpleName}") }
     }
 
     override fun onDisconnected() {
@@ -166,7 +170,7 @@ class KeePasskeyAutofillService : AutofillService() {
         // ISSUE-P2-226 / ISSUE-P2-228：调用方即本应用、或用户已关闭本通道 ⇒ 一律不下发。
         // 置于完整性闸门**之前**短路：这两种情形无论风险态如何都拒绝，免去自家口令框每次聚焦
         // 都触发一轮 `awaitEnforcement()` 重扫（maps / 路径扫描）。
-        if (!settingsStore.isAutofillServiceEnabled() ||
+        if (!autofillChannelEnabled() ||
             AutofillAccessPolicy.isSelfApp(callingPkg, packageName)
         ) {
             AppLog.i(TAG, "自动填充通道已关闭或调用方即本应用，跳过下发")
@@ -248,6 +252,27 @@ class KeePasskeyAutofillService : AutofillService() {
             inlineRequest = inlineRequest
         )
     }
+
+    /**
+     * APP-CRASH-01：偏好读取的进程级兜底。
+     *
+     * `onSaveRequest` 的前置判定跑在系统 Binder 线程上，`onConnected` 跑在主线程，二者都在
+     * 任何协程守卫之外——`SharedPreferences` 在键类型被历史版本改写时会抛 `ClassCastException`，
+     * 该异常会直接结束进程，表象即「自动填充服务进程崩溃重启」。读取失败按**通道关闭**
+     * 处理：不下发数据集、不落库，与用户关闭该通道同一收敛语义。
+     */
+    private fun autofillChannelEnabled(): Boolean =
+        runCatching { settingsStore.isAutofillServiceEnabled() }.getOrElse { t ->
+            AppLog.w(TAG, "读取自动填充通道开关失败，按关闭处理: ${t.javaClass.simpleName}")
+            false
+        }
+
+    /** 同上：保存提示开关读取失败按「不保存」收口，绝不因可观测性/偏好故障杀进程。 */
+    private fun offerSaveEnabled(): Boolean =
+        runCatching { settingsStore.isOfferSaveCredentialsEnabled() }.getOrElse { t ->
+            AppLog.w(TAG, "读取保存提示开关失败，按不保存处理: ${t.javaClass.simpleName}")
+            false
+        }
 
     /**
      * ISSUE-P2-226：调用方即本应用自身；TASK-44：黑名单命中 fail-closed——两者均不下发
@@ -334,7 +359,7 @@ class KeePasskeyAutofillService : AutofillService() {
         }
         // ISSUE-P2-228：用户关闭「系统自动填充服务」通道 ⇒ 一律不接收保存
         // （onSuccess 表示「本次无需保存」，与「用户关闭保存提示」同一收敛语义；不报错）
-        if (!settingsStore.isAutofillServiceEnabled()) {
+        if (!autofillChannelEnabled()) {
             callback.onSuccess()
             return
         }
@@ -394,7 +419,7 @@ class KeePasskeyAutofillService : AutofillService() {
 
             // ISSUE-P3-44：接线既有「新密码保存提示」开关（此前无填充侧消费方，属假开关）。
             // 关闭时不落库、不打扰用户——向框架回调成功即表示「本次无需保存」。
-            if (!settingsStore.isOfferSaveCredentialsEnabled()) {
+            if (!offerSaveEnabled()) {
                 AppLog.i(TAG, "已关闭新密码保存，跳过本次自动填充保存")
                 callback.onSuccess()
                 return

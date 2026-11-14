@@ -203,6 +203,30 @@ class DebugLogBufferTest {
         assertFalse("异常 message 不得进入缓冲", line.contains("raw-secret"))
     }
 
+    @Test
+    fun `未捕获异常写入脱敏栈且不带异常 message`() {
+        val crash = IllegalStateException("raw-secret password=leak-me")
+
+        buffer.recordCrash("main", crash)
+
+        val line = buffer.snapshot().single()
+        assertTrue("须带可检索的退出文案：$line", line.contains("[ERROR] [Crash]"))
+        assertTrue(line.contains(DebugLogBuffer.CRASH_MESSAGE))
+        assertTrue("须带异常类型供 retrace", line.contains("java.lang.IllegalStateException"))
+        assertTrue("须带栈帧锚点", line.contains("\tat "))
+        assertFalse("异常 message 不得进入缓冲", line.contains("raw-secret"))
+        assertFalse(line.contains("leak-me"))
+    }
+
+    @Test
+    fun `关闭诊断日志时不记录未捕获异常`() {
+        val off = DebugLogBuffer(DiagnosticLogGate.alwaysOff())
+
+        off.recordCrash("main", IllegalStateException("boom"))
+
+        assertTrue("用户关闭诊断日志即不记录", off.snapshot().isEmpty())
+    }
+
     private data class RedactionCase(
         val name: String,
         val message: String,
