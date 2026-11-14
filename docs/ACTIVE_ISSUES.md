@@ -21,13 +21,7 @@
 
 ## P1 高危与核心功能问题
 
-### 结构树非文本值导致填充失败，以及保存后无法自动召回
-
-- **核实时间 / 方式**：2026-11-14；用户 release 诊断日志（Android API 37，13:19:49 导出）中 6 条 `onFillRequest 发生异常` 堆栈为 `AutofillValue.getTextValue` → `Preconditions.checkState` → `IllegalStateException`，静态定位 `AutofillStructureScan.kt` 无条件读 `textValue`；14:11:42 复验日志已无该异常，但用户反馈清除数据后重新登录仍无候选、无保存询问，代码复核发现传统 Autofill 保存链落库后未写「调用方首次绑定」。JVM autofill 包 346 例全绿；设备侧平台契约用例在专用 AVD 实跑（真实 `AutofillValue` 四类、`FillResponse.build()` 构造约束）。
-- **影响**：`traverseViewNode` 对每个节点无条件调 `getTextValue()`，非 TEXT（TOGGLE / LIST / DATE）即抛异常，被 `onFillRequest` 兜底为 `callback.onFailure`，FillResponse 整体不下发 ⇒ 候选、选择器、SaveInfo 全缺。此外 `onSaveRequest` 与 `AutofillLockedSaveActivity` 落库成功后不写 `AutofillCallerTrustStore`，落库条目的 `android://<包名>` 仍被 P2-46 绑定门挡住，用户同意保存后下次依旧拿不到自动候选。清除应用数据会同时清掉本地信任与互动记忆，旧条目同样无法召回。
-- **触发前提**：宿主表单结构树出现非 TEXT `AutofillValue` 节点；清除数据 / 重装 / 换设备后本地绑定与记忆丢失。两处均属既有健壮性缺口，非本轮代码回归。
-- **处置**：`resolveAutofillNodeText` 按 `AutofillValue.isText()` 判型，非 TEXT 回退 `ViewNode.getText()`；库锁定态 `FillResponse` 同样注册 SaveInfo；两条传统 Autofill 保存路径落库成功后按 CM 通道同口径写调用方首次绑定（签名摘要不可读即 fail-closed）；填充目标识别、SaveInfo 注册、保存请求入口与绑定结果补 release 可见的无标识诊断日志；关联询问否决亦留痕。诊断日志系统补两层可观测：进程审计头写入系统自动填充状态与装机时间（区分「系统未启用本服务」与「同版本旧包」），服务实例创建 / 系统连接断开 / 填充请求入口 / 销毁全链路打点，用于区分「服务未绑定 / 请求未到达 / 目标未识别」。真机 logcat 取证另证实：服务确被调用且 `SaveInfo 已注册`，但 14:43:01 服务进程崩溃重启导致缓冲清空；导出日志看不到自动填充事件的主因是 `AppLog.i` 纯文案只写 logcat、未接进可导出缓冲。15:14 日志（通道修复后）确证：本次走的是「解锁引导 → 手动选择器选条目」，`android:// 维度首次绑定写入结果=true`，但「应用关联询问条件不满足」被跳过、条目网址未写回，且整份日志无 `收到系统保存请求`——即系统保存流程未被触发。现由 core 行出口把纯文案统一接入 `DebugLogBuffer`（过滤 `KpLog` 回显防回环），并把已脱敏行按设置页周期（默认 3 天，可选 1 / 3 / 7 / 30 天）留存于私有目录，导出正文直接取归档、超期行在启动与导出时裁剪，隐私政策 §5 同步更新。另修「下次直接出候选」的本地记忆链：选择器写入关联记忆改用与召回侧同源的归属校验后域（原用表单自报域，校验不通过时键会错开导致记忆静默失效）；记忆写入 / 命中与询问否决原因均改为可导出的 INFO 行，否决原因逐项写明（只读 / 包名 / 摘要 / 该包名已绑定），不含任何标识。随库持久通道按 KeePassDX 口径改写：交付成功后的关联询问不再要求空 URL / 纯 App 表单，同意后经字段级写入器把 `AndroidApp` / `AndroidApp Signature`（签名受保护、冒号分隔大写 hex、连续编号、可绑多个包名）写入条目自定义字段，`URL` 原样保留；候选打分新增该字段序列的读取并仍受 P2-46「包名 + 签名」首次绑定门约束；保存链新建纯 App 条目同时写该字段、upsert 去重兼容 URL 旧形态与字段两种形态，CM 通道所依赖的 `android://` URL 形态保持不变。
-- **关闭条件**：用户真机复验——在**已有网址**的条目上经手动选择器交付后弹出「记住这个应用？」，同意后条目可见 `AndroidApp` 字段、`URL` 原样保留，下次该应用直接出候选；清除数据 / 重装 / 换设备（库同步回来）后关联仍有效；诊断日志不再出现 `onFillRequest 发生异常`，且可见 SaveInfo 注册与保存请求记录。自动验收须同时满足：JVM 定向用例全绿、设备侧 `connectedDebugAndroidTest` 实跑且结果非空、独立实现（pykeepass / keepassxc-cli）对拍 `AndroidApp` / `AndroidApp Signature` 的值与保护位并按 KeePassDX 包名 + 签名口径匹配、`:app:assembleDebug` 与 `:app:assembleRelease` 及文档门禁通过。全部通过即移除本条；若清除数据后系统自动填充服务被重置，需用户在系统设置重新选择 KeePasskey 再复验。
+暂无。
 
 ## P2 中危缺陷与协议/测试缺口
 
@@ -45,5 +39,12 @@
 - **核实时间 / 方式**：2026-11-14；用户真机描述（QQ 类多账号应用：解锁后自动匹配到一条并弹指纹确认），静态定位 `AutofillUnlockRouter.kt:62-73`（`singleOrNull()` 才走 CONFIRM）、`AutofillConfirmManualScreen.kt:62-75`（手动确认页仅「确认 / 取消」，生物识别路径为系统弹窗）、`KeePasskeyAutofillService.kt:294-305`（已解锁态恒有「搜索全部条目」兜底入口）。设备侧交互未复现。
 - **影响**：多个账号条目都声明关联时候选 ≥2，会进选择器让用户选；但若只有其中一个账号绑定了 `AndroidApp`（典型：用户只给常用账号点过「记住这个应用」），解锁后只匹配到 1 条 ⇒ 直接弹确认页，指纹 / 手动确认后填这一条，页面内没有换账号入口。用户需取消 → 重新聚焦输入框 → 从「搜索全部条目」进选择器，入口不可发现，容易在未察觉的情况下填入另一个账号。确认成功后写入「上次填充」与关联记忆（`AutofillConfirmActivity.kt:236-245`），下次该条置顶，进一步强化该倾向。
 - **触发前提**：同一应用存在多个账号条目，且本轮只有一条能通过匹配准入。
-- **处置**：待产品裁决。候选方案：① 确认页加「改用其它条目」按钮链现有选择器（保留一键填充、改动集中在确认页与解锁页 extras 透传）；② 改 PD-05 路由，该调用方在库内关联账号 >1 时一律先进选择器（行为最一致，但需单点定义「关联账号数」口径且多账号用户每次多一步）；③ 维持现状，靠取消后重新聚焦换账号。
-- **关闭条件**：用户真机复验——同一应用多账号场景下解锁后能明确选择要填充的账号，且不存在「未察觉即填入另一账号」的路径；判定有 JVM 用例覆盖，涉及 androidTest 时实跑且结果非空。
+- **处置**：按 KeePassDX 口径取消锁定态解锁后的「唯一强匹配直达确认页」捷径（PD-05 候选 C），使两条路径统一回传候选列表。`AutofillUnlockActivity` 解锁成功后不再经 `AutofillUnlockRouter.route` 分 CONFIRM / PICKER，改为把 `resolveRouting` 现算的**全部命中条目**各装配一个仍带 `setAuthentication` 的候选 Dataset，并恒追加「搜索全部条目」入口，组装成 `FillResponse` 经 `AutofillManager.EXTRA_AUTHENTICATION_RESULT` 回传；候选解析与已解锁态同源（本次签名摘要快照必须下传，不得回退为 `EMPTY`），P2-46 首次绑定门、字段级屏蔽、库锁定复核与二次确认一律不放宽。同步改写 `AutofillUnlockRouter` 的 PD-05 候选 C 口径说明与真值表，退役 CONFIRM 分支及其接线用例（`AutofillUnlockRouteWiringTest`），避免两套口径并存。依据：`参考项目/KeePassDX/.../KeeAutofillService.kt:161-205`、`SearchHelper.kt:139-174`（返回全部命中，上限 1000）、`AutofillHelper.kt:454-547,560-583`（每条一个 Dataset、默认开启的「手动选择」入口、完整 `FillResponse` 作认证结果）、`AutofillLauncherViewModel.kt:107-142`（库未打开时解锁后仍回候选列表）。本方案让锁定态与已解锁态行为一致、多账号必然可选、单账号仍只需点一下候选且少一次指纹；代价是改动 PD-05 裁决与解锁页组装逻辑，且框架对 `FillResponse` 认证结果的行为须在本仓真机实测，不外推同类项目结论。
+- **关闭条件**：用户真机复验——同一应用多账号场景下解锁后能明确选择要填充的账号，且不存在「未察觉即填入另一账号」的路径；锁定态解锁后与已解锁态呈现同一候选列表口径，每个候选仍带二次确认；判定有 JVM 用例覆盖，涉及 androidTest 时实跑且结果非空；PD-05 候选 C 的口径说明与失效用例同步退役。
+
+### 自动填充服务进程崩溃重启根因未定位
+
+- **核实时间 / 方式**：2026-11-14；真机 logcat 取证（14:43:01 `W/ActivityManager: Scheduling restart of crashed service com.keepasskey/.app.autofill.KeePasskeyAutofillService`，随后新进程写入新的进程诊断头），取证描述留痕于已闭合 P1 条目的处置段（提交 `d2889312`）；与用户 release 诊断日志（15:14 / 15:25 导出）交叉核对，15:25 导出含两个进程诊断头，证实跨进程留存生效。未取得崩溃堆栈 / tombstone，未复现，未证实是代码缺陷。
+- **影响**：崩溃会清空当时的内存日志缓冲并中断在途的填充 / 保存请求；诊断日志改落私有目录按周期留存后，跨进程链路可复盘，取证丢失这一后果已消除。未观察到凭据损坏、明文泄露或数据丢失。用户划掉应用、系统回收与未捕获异常均可产生同形事件，当前无法区分。
+- **触发前提**：未定位；仅在 14:43 一次真机取证中观察到。
+- **处置 / 关闭条件**：下次复现时导出诊断日志归档（进程诊断头 + 自动填充服务创建 / 连接断开 / 填充请求 / 销毁全链路打点），必要时取 `adb logcat` 崩溃堆栈或 tombstone，判定是系统回收 / 用户操作还是未捕获异常；确认为代码缺陷则按实际影响重新分级并修根因，确认为系统行为则从本表移除并说明依据。归档出现新进程头但无异常堆栈且前后链路完整时，按系统回收收口。
