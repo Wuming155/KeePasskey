@@ -64,17 +64,34 @@ internal suspend fun SyncCycleRunner.establishRemoteBaselineIfMissing(
         } else {
             // ISSUE-P2-402：非 404 失败不再一律误报「离线」——401/403 鉴权失败、429/503 限流、
             // 超时等此前全部被标成 Offline（网络正常时同步失败也无从定位真实原因），
-            // 现按异常类型如实归类并留痕（远端路径为非敏感元数据，与 RemoteBrowse 日志同口径）。
+            // 现按异常类型如实归类并留痕。远端路径只出摘要：路径含目录与库名，属脱敏盲区。
             com.keepasskey.core.log.AppLog.w(
                 TAG,
-                "首传探测失败: type=${ex?.javaClass?.simpleName}, remotePath=$remotePath"
+                "首传探测失败: type=${ex?.javaClass?.simpleName}, remotePathDigest=${remotePathDigest(remotePath)}"
             )
-            // ISSUE-P2-548：与本仓其余远端失败路径共用同一归出口径（此前只有本处是三分法）
-            strings.remoteFailureOutcome(ex)
+            // ISSUE-P2-548：与本仓其余远端失败路径共用同一归出口径（此前只有本处是三分法）。
+            // 必须**整体 return**：早前此处丢弃了归类结果，函数落到末尾 `return null`，调用方据此
+            // 认为「本步骤无结论」而继续进入步骤 3 / 4，401/403/5xx 被后续路径覆盖成别的结论。
+            return strings.remoteFailureOutcome(ex)
         }
     }
     return null
 }
+
+/**
+ * 远端路径的日志摘要：同一路径在同一份导出日志内可关联，但不还原出目录、库名或主机。
+ * 取 SHA-256 前 8 字节十六进制；仅用于日志，不参与任何同步判定。
+ */
+private fun remotePathDigest(remotePath: String): String {
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(remotePath.toByteArray(Charsets.UTF_8))
+    return digest.take(8).joinToString("") { byte ->
+        val value = byte.toInt() and 0xFF
+        "${HEX_DIGITS[value shr 4]}${HEX_DIGITS[value and 0x0F]}"
+    }
+}
+
+private const val HEX_DIGITS = "0123456789abcdef"
 
 /**
  * 步骤 3（原样搬运）：本地未落盘修改 + 已有缓存基线 → 快速提交路径。

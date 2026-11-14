@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
@@ -16,7 +17,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -85,7 +85,7 @@ class AutofillPickerViewModel @Inject constructor(
      */
     private fun observeTreeChanges() {
         val session = databaseSession ?: return
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("AutofillPickerViewModel") {
             var seenFirst = false
             session.databaseFlow.collect { db ->
                 // 首个 emission 是当前已装载的那一代，跳过（避免与 loadEntries 重复装载）
@@ -130,7 +130,7 @@ class AutofillPickerViewModel @Inject constructor(
     fun loadEntries() {
         if (entriesLoadStarted) return
         entriesLoadStarted = true
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("AutofillPickerViewModel") {
             val lease = vaultRepository.acquireEntriesReadLease()
             try {
                 // ISSUE-P2-341：选择器列的是"可交给调用方的凭据"，回收站内的须排除

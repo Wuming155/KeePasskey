@@ -7,6 +7,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
@@ -15,7 +16,6 @@ import com.keepasskey.app.ui.localizedConfigurationOf
 import com.keepasskey.app.ui.localizedContextOf
 import com.keepasskey.app.ui.screens.unlock.UnlockScreen
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -51,10 +51,10 @@ class CredentialUnlockPresenter @Inject constructor(
      * 必须在主线程调用（内部涉及 `setContent`）。
      */
     fun requireUnlocked(activity: FragmentActivity, onUnlocked: () -> Unit) {
-        activity.lifecycleScope.launch {
+        activity.lifecycleScope.safeLaunch("CredentialUnlockPresenter") {
             if (!vaultRepository.isLocked()) {
                 onUnlocked()
-                return@launch
+                return@safeLaunch
             }
             val settings = settingsRepository.getSettings().first()
             activity.setContent {

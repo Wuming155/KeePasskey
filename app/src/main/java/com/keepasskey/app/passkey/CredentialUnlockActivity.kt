@@ -12,6 +12,7 @@ import androidx.credentials.provider.BeginGetCredentialResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -25,7 +26,6 @@ import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -95,7 +95,7 @@ class CredentialUnlockActivity : FragmentActivity() {
             null
         }
 
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("CredentialUnlockActivity") {
             // 密码库已处于解锁状态（例如用户在其他入口刚解锁过）时直接回传候选，跳过解锁页
             if (!vaultRepository.isLocked()) {
                 completeChainedResponse(originalRequest)
@@ -108,8 +108,8 @@ class CredentialUnlockActivity : FragmentActivity() {
     }
 
     private fun renderUnlockScreen(originalRequest: BeginGetCredentialRequest?) {
-        lifecycleScope.launch {
-            if (completed) return@launch
+        lifecycleScope.safeLaunch("CredentialUnlockActivity") {
+            if (completed) return@safeLaunch
             val settings = settingsRepository.getSettings().first()
             setContent {
                 // 遮挡触摸过滤（ISSUE-P2-09 / P3-12）
@@ -147,14 +147,14 @@ class CredentialUnlockActivity : FragmentActivity() {
         if (completed) return
         completed = true
 
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("CredentialUnlockActivity") {
             try {
                 if (originalRequest == null) {
                     // 唯一成因：上游 AuthenticationAction 的 PendingIntent 未以 FLAG_MUTABLE 创建，
                     // 系统注入的 fillIn extras 被丢弃（ISSUE-P1-01）。fail-closed，绝不伪造候选。
                     AppLog.w(TAG, "缺少原始凭据请求（AuthenticationAction PendingIntent 需 FLAG_MUTABLE），无法链式回传候选")
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
 
                 val response: BeginGetCredentialResponse =

@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.notification.NotificationGate
 import com.keepasskey.app.notification.NotificationPermissionDecision
 import com.keepasskey.app.notification.NotificationPermissionPrompter
@@ -17,7 +18,6 @@ import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 /**
  * 应用主入口 Activity，承载 KeePasskeyApp 全局 Compose 导航与主题容器。
@@ -86,7 +86,7 @@ class MainActivity : FragmentActivity() {
      * - 用户拒绝也不影响任何功能可用性：相关通知静默降级，绝不崩溃。
      */
     private fun requestNotificationPermissionAfterUnlock() {
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("MainActivity") {
             databaseSession.state.first { NotificationGate.isUnlockedState(it) }
             val decision = notificationPermissionPrompter.decide(this@MainActivity)
             if (decision == NotificationPermissionDecision.REQUEST) {

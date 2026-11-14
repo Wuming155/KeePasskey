@@ -8,6 +8,7 @@ import androidx.credentials.provider.PendingIntentHandler
 import androidx.credentials.provider.ProviderGetCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
@@ -20,7 +21,6 @@ import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.database.fieldref.FieldReferenceEngine.RefField
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -114,7 +114,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
             failAndFinish()
             return
         }
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasswordFillActivity") {
             try {
                 performFill(request)
             } catch (t: Throwable) {
@@ -316,12 +316,12 @@ class PasswordFillActivity : BaseCredentialActivity() {
         if (settled) return
         settled = true
 
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasswordFillActivity") {
             // ENG-20261028-11：「定位条目 → 读用户名 / 口令 → {REF:} 展开 → 回传」整段处于一条读租约内。
             // 本路径是**交付面**，字段读取是 fail-fast 语义（读不到即失败）；租约保证这些读取不会
             // 因为会话在此期间替换整树、把本条目下线擦除而变成「凭据读取失败」。
             // 块内不触发任何写（写回只记 `credentialLastUsedStore`，与库树无关）。
-            // `Closeable.use` 是 inline，块内 `return@launch` 会正常释放租约；异常路径由外层 catch 收尾。
+            // `Closeable.use` 是 inline，块内 `return@safeLaunch` 会正常释放租约；异常路径由外层 catch 收尾。
             try {
                 ProtectedStringReclamation.acquireReadLease().use {
                     // ISSUE-P2-620：验证完成后重新确认请求、库、会话和条目，覆盖用户交互期间的状态变化。
@@ -329,7 +329,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                     if (entryBeforeExpansion == null) {
                         AppLog.w(TAG, "验证后凭据请求或目标状态已变化，拒绝回填密码")
                         failAndFinish()
-                        return@launch
+                        return@safeLaunch
                     }
                     // ISSUE-P3-371 ①：CM 回传两通道补 {REF:} 展开（与 Autofill DatasetBuilders
                     // 消费点同口径）。用户名走 USER_NAME 面（非口令通道，{REF:P@…} 掩码输出）；
@@ -345,7 +345,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                     if (entryBeforePassword == null || entryBeforePassword.id.toHexString() != entryIdHex) {
                         AppLog.w(TAG, "取密前凭据请求或目标状态已变化，拒绝回填密码")
                         failAndFinish()
-                        return@launch
+                        return@safeLaunch
                     }
                     val rawPassword = entryBeforePassword.password?.readString().orEmpty()
                     val password = vaultRepository.resolveFieldReferences(
@@ -357,14 +357,14 @@ class PasswordFillActivity : BaseCredentialActivity() {
                     if (entryBeforeDelivery == null || entryBeforeDelivery.id.toHexString() != entryIdHex) {
                         AppLog.w(TAG, "回传前凭据请求或目标状态已变化，拒绝回填密码")
                         failAndFinish()
-                        return@launch
+                        return@safeLaunch
                     }
 
                     // ENG-20261028-05：用户验证 / 取密期间通道仍可能被关闭——提交前按本次值复核，
                     // 关闭即按失败收尾（不记录使用时刻、不回传明文）。
                     if (channelClosed()) {
                         failAndFinish()
-                        return@launch
+                        return@safeLaunch
                     }
 
                     val sessionTicket = request.context.sessionTicket
@@ -379,7 +379,7 @@ class PasswordFillActivity : BaseCredentialActivity() {
                     ) {
                         AppLog.w(TAG, "最终提交前会话代次变化，拒绝回填密码")
                         failAndFinish()
-                        return@launch
+                        return@safeLaunch
                     }
 
                     // ISSUE-P3-298 ⑥：进入唯一成功回传路径后记录本次真实使用。

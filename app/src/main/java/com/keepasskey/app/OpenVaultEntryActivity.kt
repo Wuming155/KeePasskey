@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import android.view.WindowManager
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.VaultOpenUriPolicy
 import com.keepasskey.core.log.AppLog
@@ -18,7 +19,6 @@ import com.keepasskey.app.ui.model.UiMessage
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -73,13 +73,13 @@ class OpenVaultEntryActivity : FragmentActivity() {
         }
         // ISSUE-P3-616：显示名查询经外部 Provider（任意应用可注册且可能缓慢/无响应），
         // 移出主线程并伴随 Activity 生命周期取消；查询完成前不弹确认、不登记任何状态。
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("OpenVaultEntryActivity") {
             val displayName = resolveDisplayName(uri)
             if (displayName == null ||
                 VaultOpenUriPolicy.acceptDisplayName(displayName) !is VaultOpenUriPolicy.Decision.Accept
             ) {
                 rejectAndFallback()
-                return@launch
+                return@safeLaunch
             }
             // ISSUE-P3-575 AC②：登记 / 覆写活动库指针前必须用户确认，外部输入不得静默改状态
             confirmThenImport(uri, displayName)
@@ -118,7 +118,7 @@ class OpenVaultEntryActivity : FragmentActivity() {
 
     /** 用户已确认：登记外部库（既有链路）并回落主界面。 */
     private fun performImport(uri: Uri, displayName: String) {
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("OpenVaultEntryActivity") {
             val result = vaultRepository.importExternalDatabase(displayName, uri.toString())
             if (result is KdbxResult.Failure) {
                 // 不透传异常 message（可能含路径形态）；仅记录类型

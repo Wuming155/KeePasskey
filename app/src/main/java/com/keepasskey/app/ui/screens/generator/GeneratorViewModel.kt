@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.generator
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.core.security.ProtectedString
@@ -14,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
@@ -128,7 +128,7 @@ class GeneratorViewModel @Inject constructor(
         // ISSUE-P2-12：熵值计算走字符数组通道，不把种子物化为额外 String
         // ISSUE-P2-286：强度内核为 CPU 热路径，评估段下沉 Dispatchers.Default（§3 规则 2）
         val requestEpoch = synchronized(generationGate) { ++generationEpoch }
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("GeneratorViewModel") {
             val entropy = withContext(Dispatchers.Default) {
                 password.useChars { PasswordGenerationEngine.calculateEntropy(it).toInt() }
             }
@@ -172,7 +172,7 @@ class GeneratorViewModel @Inject constructor(
         }
         // ISSUE-P3-360 AC③b：生成器复制同为敏感通道——消息附「Ns 后自动清空」倒计时
         // （秒数经 ClipboardSecurityChannel.scheduledClearSeconds 同源裁决；假通道缺省 null 即不附）
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("GeneratorViewModel") {
             _uiState.update {
                 it.copy(
                     userMessage = UiMessage(
@@ -199,7 +199,7 @@ class GeneratorViewModel @Inject constructor(
         // ISSUE-P2-286：强度内核评估（CPU 热路径）与生成一并下沉 Dispatchers.Default（§3 规则 2）；
         // 熵读数收敛单一真相源：随机 / 掩码走 crypto 内核（calculateEntropy），
         // 口令短语走「词数 × log2(词表) + 变形位」模型（passphraseEntropyBits，AC②）
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("GeneratorViewModel") {
             val completedResult = AtomicReference<GeneratorGeneratedResult?>(null)
             var committed = false
             try {
@@ -217,7 +217,7 @@ class GeneratorViewModel @Inject constructor(
                             _uiState.update { it.copy(userMessage = UiMessage(R.string.op_failed)) }
                         }
                     }
-                    return@launch
+                    return@safeLaunch
                 }
                 synchronized(generationGate) {
                     if (requestEpoch == generationEpoch) {

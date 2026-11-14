@@ -9,6 +9,7 @@ import androidx.activity.viewModels
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -19,7 +20,6 @@ import com.keepasskey.app.ui.localizedContextForAppLanguage
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -117,7 +117,7 @@ class AutofillPickerActivity : FragmentActivity() {
         // ISSUE-P3-390 AC①：选择器页不经主外壳——语言快照就绪后经 AppShellLocalization 派生本地化
         // 上下文并同源包装（与解锁入口同法），页内文案随应用内语言。
         // 内容树拆至 [AutofillPickerLocalizedContent]（行数分档）。
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillPickerActivity") {
             val localizedContext = localizedContextForAppLanguage(this@AutofillPickerActivity, settingsRepository)
             setContent {
                 AutofillPickerLocalizedContent(
@@ -173,7 +173,7 @@ class AutofillPickerActivity : FragmentActivity() {
     /** 用户选中条目：按需解密 → 会话授权宽限（命中免生物识别）→ 二次确认（可用认证器时）→ 回传数据集 */
     private fun confirmAndFill(entryId: String) {
         if (completed) return
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillPickerActivity") {
             // ISSUE-P3-201：进入交付链路前锁定复核（凭据解密之前）——与确认页 ISSUE-P3-95 同口径：
             // 锁定即终止本次填充，绝不在此之后继续解密与交付
             // ENG-20261028-05：Autofill 通道开关同口径——选择器在开关关闭前已下发，关闭即不再解密交付。
@@ -182,13 +182,13 @@ class AutofillPickerActivity : FragmentActivity() {
             ) {
                 AppLog.w(TAG, "会话已锁定或自动填充通道已关闭，放弃本次选择器填充")
                 finish()
-                return@launch
+                return@safeLaunch
             }
             val credentials = viewModel.resolveCredentials(entryId)
             if (credentials == null) {
                 AppLog.w(TAG, "选中条目凭据不可用，放弃本次填充")
                 finish()
-                return@launch
+                return@safeLaunch
             }
             // ISSUE-P3-185：会话授权宽限与数据集路径同口径（开关开启 + 库已解锁 + 「包名 +
             // 归属校验后域」存在有效授权）——命中则跳过本次生物识别直接交付。归属校验仅在
@@ -205,7 +205,7 @@ class AutofillPickerActivity : FragmentActivity() {
                 )
             if (skipBiometric) {
                 deliver(credentials, entryId, grantContext)
-                return@launch
+                return@safeLaunch
             }
             // ISSUE-P3-52：可用认证器时以 Keystore 认证绑定密钥的 Cipher 发起（CryptoObject），
             // 本次放行与生物识别密码学绑定；无可用认证器 / 密钥不可用 / 结果未携带绑定 Cipher
@@ -265,7 +265,7 @@ class AutofillPickerActivity : FragmentActivity() {
         // （摘要读取含一次 getPackageInfo + 逐签名者 SHA-256，per-request 只读一次，ISSUE-P3-170 同口径）
         // 实现已拆至 AutofillPickerRequesterResolver（行数闸门，零行为变更）
         val callerDigests = bindCallerForPackageDimension(intent, autofillOriginResolver, callerTrustStore)
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillPickerActivity") {
             // ISSUE-P3-186：回传前按偏好执行 TOTP 二次动作（与确认页共用实现：500ms 硬超时 +
             // 双开关闸门 + 库锁定不触碰，任何异常 / 超时都不阻断回传——实现内部已兜底）
             totpPostFillActions.runAfterFill(entryId)
@@ -278,7 +278,7 @@ class AutofillPickerActivity : FragmentActivity() {
             ) {
                 AppLog.w(TAG, "会话在交付过程中被锁定或通道已关闭，丢弃未决响应（不回传 RESULT_OK）")
                 discardPendingResult()
-                return@launch
+                return@safeLaunch
             }
             // ENG-20261028-11：**读段**（TOTP 现算 + 条目标题 + 数据集构造）整体处于一条读租约内。
             // 本页在「用户选中 → 回传」窗口里反复从会话现读条目；会话在此期间替换整树会把本条目
@@ -310,7 +310,7 @@ class AutofillPickerActivity : FragmentActivity() {
                     AppLog.w(TAG, "认证回传复检：字段已被屏蔽，按取消回传（不交付被屏蔽字段）")
                     setResult(RESULT_CANCELED, authenticationCanceledIntent())
                     finish()
-                    return@launch
+                    return@safeLaunch
                 }
                 val dataset = buildAuthenticationResultDataset(
                     packageName = packageName,
@@ -330,7 +330,7 @@ class AutofillPickerActivity : FragmentActivity() {
                     AppLog.w(TAG, "选中条目没有任何可交付字段，按取消回传")
                     setResult(RESULT_CANCELED, authenticationCanceledIntent())
                     finish()
-                    return@launch
+                    return@safeLaunch
                 }
                 title to dataset
             } finally {
@@ -342,13 +342,13 @@ class AutofillPickerActivity : FragmentActivity() {
             if (!settingsStore.isAutofillServiceEnabled()) {
                 AppLog.w(TAG, "交付前自动填充通道已关闭，丢弃未决响应（不回传 RESULT_OK）")
                 discardPendingResult()
-                return@launch
+                return@safeLaunch
             }
             // 询问是否把应用关联写进条目自定义字段（KeePassDX AndroidApp 口径，URL 不动；锁定丢弃口径见 VM 方法 KDoc）
             // ENG-20261028-11：本段含自定义字段写回，**刻意不套租约**——写路径的定点擦除不得被推迟。
             if (!viewModel.offerAppBindingWriteBack(callerDigests, callingPackage, formDomain, entryId, entryTitle)) {
                 discardPendingResult()
-                return@launch
+                return@safeLaunch
             }
             // ISSUE-P3-185：成功交付后按确认页同口径写入会话授权（30 秒 TTL），使同
             // 「包名 + 域」的重复填充免二次确认；不可归属域由存储自身拒绝（fail-closed）

@@ -7,6 +7,7 @@ import androidx.credentials.CreatePasswordResponse
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.credentials.provider.ProviderCreateCredentialRequest
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.CallerCertDigests
@@ -14,7 +15,6 @@ import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -116,7 +116,7 @@ class PasswordSaveActivity : BaseCredentialActivity() {
         }
 
         // M4 整改：平台 String 到 CharArray 的唯一副本即取即用；擦除必须发生在协程内部
-        // （lifecycleScope.launch 为异步，外层 finally 会先于保存完成执行）
+        // （lifecycleScope.safeLaunch 同为异步，外层 finally 会先于保存完成执行）
         val passwordChars = password.toCharArray()
         // ISSUE-P2-606：数组自构造起即登记为本 Activity 在等待解锁阶段独占的载体
         pendingPasswordChars = passwordChars
@@ -186,19 +186,19 @@ class PasswordSaveActivity : BaseCredentialActivity() {
         webDomain: String?,
         requestToken: String?
     ) {
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasswordSaveActivity") {
             try {
                 if (vaultRepository.isLocked()) {
                     AppLog.w(TAG, "密码库仍未解锁，无法保存密码凭据")
                     consumeRequest(requestToken)
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
                 // ENG-20261028-05：解锁 / 等待期间通道仍可能被关闭——落库前按本次值复核。
                 if (rejectsClosedChannel(providerReq)) {
                     consumeRequest(requestToken)
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
 
                 val boundPackage = targetPackage.ifBlank { callingPackage ?: packageName }
@@ -215,7 +215,7 @@ class PasswordSaveActivity : BaseCredentialActivity() {
                     AppLog.e(TAG, "保存密码凭据失败: ${saveResult.error.javaClass.simpleName}")
                     consumeRequest(requestToken)
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
 
                 // ISSUE-P2-83：保存流程是「用户在受保护窗口内把凭据显式交给该调用方」的两个入口之一

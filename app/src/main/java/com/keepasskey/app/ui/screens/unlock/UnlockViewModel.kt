@@ -5,6 +5,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -26,7 +27,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -160,7 +160,7 @@ class UnlockViewModel @Inject constructor(
             _uiState.update { it.copy(lastSessionAbnormalCloseNotice = true) }
         }
 
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("UnlockViewModel") {
             var lastHasDatabase: Boolean? = null
             // ISSUE-P3-464 ②：活动库 id 变化检测（见 collect 内复位/恢复分支）
             var lastSeenDbId: String? = null
@@ -241,7 +241,7 @@ class UnlockViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("UnlockViewModel") {
             val settings = settingsRepository.getSettings().first()
             _uiState.update { state ->
                 state.copy(
@@ -254,7 +254,7 @@ class UnlockViewModel @Inject constructor(
             biometricUnlock.refreshUnlockModeAndAutoPrompt()
         }
 
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("UnlockViewModel") {
             // ISSUE-P3-368 AC①/AC②：打开/保存链路进度桥接——0..1 确定段、null 分段不确定段，
             // 即发即弃只更新 UI 状态（解锁页在 isLoading 期间渲染进度条）
             vaultRepository.ioProgress().collect { value ->
@@ -363,9 +363,9 @@ class UnlockViewModel @Inject constructor(
      * 清除确认记录与声明标记；探测失败（null / UNKNOWN）保持原状（不误清、不误报）。
      */
     private fun refreshQuickUnlockDowngradeFlag(dbId: String) {
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("UnlockViewModel") {
             val settings = settingsRepository.getSettings().first()
-            if (!settings.quickUnlockDowngradeAcknowledged) return@launch
+            if (!settings.quickUnlockDowngradeAcknowledged) return@safeLaunch
             val level = biometricAuthManager?.getKeySecurityLevelForDatabase(dbId)
             if (level == KeystoreManager.KeySecurityLevel.STRONGBOX ||
                 level == KeystoreManager.KeySecurityLevel.TRUSTED_ENVIRONMENT

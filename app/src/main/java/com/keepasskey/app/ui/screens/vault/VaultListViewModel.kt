@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.vault
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -34,7 +35,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -207,7 +207,7 @@ class VaultListViewModel @Inject constructor(
         // H2 整改：订阅冲突会话流，冲突待解决时点亮列表页冲突入口
         // ISSUE-P2-660：分组冲突是独立通道，必须一并计入——否则「只有分组分叉」时入口不亮，
         // 用户进不去冲突页，分组差异只能等下轮同步再撞一次。
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("VaultListViewModel") {
             combine(
                 syncCoordinator.conflictFlow,
                 syncCoordinator.groupConflictFlow,
@@ -217,7 +217,7 @@ class VaultListViewModel @Inject constructor(
             }.collect { pending -> hasPendingConflictFlow.value = pending }
         }
         // PD-47：随设置流刷新防截屏开关快照（顶栏扫码对话框在组合时消费当前值）
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("VaultListViewModel") {
             settingsRepository.getSettings().collect { _flagSecureEnabled.value = it.flagSecureEnabled }
         }
         // 断点11 整改：解锁进入列表页即自动重同步一次（配置了云同步才触发），

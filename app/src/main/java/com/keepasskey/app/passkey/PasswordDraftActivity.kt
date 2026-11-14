@@ -14,6 +14,7 @@ import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetPasswordOption
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.autofill.AndroidAppBindingFields
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 import com.keepasskey.app.data.repository.VaultEntryWriteCoordinator
@@ -27,7 +28,6 @@ import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxUuid
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import java.security.SecureRandom
 import javax.inject.Inject
 
@@ -203,7 +203,7 @@ class PasswordDraftActivity : BaseCredentialActivity() {
             failAndFinish()
             return
         }
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasswordDraftActivity") {
             isSaving = true
             // [VaultRepository.saveEntry] 的实现方在保存收尾擦除传入数组，故此处传入**专用副本**
             val submission = draftPassword.copyOf()
@@ -212,12 +212,12 @@ class PasswordDraftActivity : BaseCredentialActivity() {
                 if (vaultRepository.isLocked() || vaultRepository.isSessionReadOnly()) {
                     AppLog.w(TAG, "交付前复核未通过（锁定或只读），放弃新建")
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
                 if (submission.isEmpty()) {
                     isSaving = false
                     isSaveFailed = true
-                    return@launch
+                    return@safeLaunch
                 }
                 // create-only：预生成 uuid 并显式传入 ⇒ 走 `saveEntryInternal` 的新建分支
                 val entryId = KdbxUuid.random().toHexString()

@@ -13,6 +13,7 @@
     <string name="btn_copy">复制</string>
     <string name="btn_restore">还原</string>
     <string name="btn_undo">撤销</string>
+    <string name="undo_failed">撤销失败，内容未恢复</string>
     <string name="btn_empty">清空</string>
     <string name="btn_create">创建</string>
     <string name="btn_add">添加</string>

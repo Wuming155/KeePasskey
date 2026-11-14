@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.authenticator
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityManager
 import com.keepasskey.app.ui.model.EntryDisplayDispatcher
@@ -18,7 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.keepasskey.app.ui.model.textArg
 
@@ -158,7 +158,7 @@ class AuthenticatorViewModel @Inject constructor(
      * 计数器值，故必须先持久化计数器推进、成功后才交付该码；失败如实上浮，不产出未推进的码。
      */
     fun advanceHotpAndCopy(entryId: String) {
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("AuthenticatorViewModel") {
             when (val result = vaultRepository.advanceEntryHotpCounter(entryId)) {
                 is com.keepasskey.core.result.KdbxResult.Success -> {
                     val code = result.data.code

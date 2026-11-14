@@ -237,8 +237,30 @@ class RecoveryViewModelPreviewBindingTest {
     }
 
     @Test
-    fun `refresh替换payload时旧预览迟到结果不能授权新版本恢复`() = runTest {
+    fun `预览遇到非取消异常时退出busy并给出失败提示`() = runTest {
         Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val (store, coordinator) = createCoordinator()
+        val official = createOfficial("throw.kdbx", byteArrayOf(55, 56))
+        val payload = byteArrayOf(57, 58)
+        writeRecovery(store, "throw-vault", official, "Throw", payload)
+        coordinator.refresh()
+        val pending = coordinator.pending.value.single()
+        val viewModel = MainDispatcherGuard.track(newViewModel(coordinator))
+        viewModel.previewOperation = { _, _ -> throw IllegalStateException("synthetic preview failure") }
+
+        viewModel.select(RecoveryViewModel.keyOf(pending))
+        viewModel.preview(pending, "fake-password".toCharArray())
+        runCurrent()
+
+        assertFalse("预览异常必须撤掉遮罩，否则对话框永久卡在忙态", viewModel.uiState.value.busy)
+        assertNull(viewModel.uiState.value.previewBinding)
+        assertNotNull("失败必须对用户可见，不得静默吞", viewModel.uiState.value.message)
+        assertArrayEquals("异常路径不得改动正式库", byteArrayOf(55, 56), official.readBytes())
+        assertPayloadEquals(payload, store, pending)
+    }
+
+    @Test
+    fun `refresh替换payload时旧预览迟到结果不能授权新版本恢复`() = runTest {        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
         val (store, coordinator) = createCoordinator()
         val officialA = createOfficial("refresh-a.kdbx", byteArrayOf(51, 52))
         val officialB = createOfficial("refresh-b.kdbx", byteArrayOf(61, 62))

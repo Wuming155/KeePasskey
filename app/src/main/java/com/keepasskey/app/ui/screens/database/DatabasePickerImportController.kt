@@ -1,10 +1,10 @@
 package com.keepasskey.app.ui.screens.database
 
+import com.keepasskey.app.coroutines.safeLaunch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 
 /**
  * 「从来源打开已有库」的**提交互斥**（`ISSUE-P3-582` AC③）。
@@ -38,7 +38,7 @@ internal class DatabasePickerImportController(
     fun submit(submission: OpenVaultSubmission) {
         if (_busy.value) return
         _busy.value = true
-        scope.launch {
+        scope.safeLaunch("DatabasePickerImportController") {
             try {
                 when (submission) {
                     is OpenVaultSubmission.Local -> importer.importLocal(submission)

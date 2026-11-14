@@ -28,12 +28,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.security.TrackDialogInteractionEffect
 import com.keepasskey.app.ui.components.BentoCard
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
-import kotlinx.coroutines.launch
 
 /**
  * 4. 数据导入与导出卡片（KP2A 特性；ISSUE-P3-436 自 `DatabaseSettingsComponents.kt`
@@ -84,7 +84,7 @@ internal fun DatabaseImportExportCard(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        keyFileImportScope.launch {
+        keyFileImportScope.safeLaunch("DatabaseImportExportCard") {
             when (val outcome = onReadKeyFile(uri.toString())) {
                 is KeyFileReadResult.Success -> {
                     pendingKeyFileImport?.erase()
@@ -133,7 +133,7 @@ internal fun DatabaseImportExportCard(
                 title = stringResource(R.string.dbset_keyfile_import_title),
                 subtitle = stringResource(R.string.dbset_keyfile_import_sub),
                 onClick = {
-                    keyFileImportScope.launch {
+                    keyFileImportScope.safeLaunch("DatabaseImportExportCard") {
                         if (!onImportRememberedKeyFile()) {
                             importKeyFileLauncher.launch(arrayOf("*/*"))
                         }

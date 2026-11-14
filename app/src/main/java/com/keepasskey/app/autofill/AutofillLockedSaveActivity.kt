@@ -2,6 +2,7 @@ package com.keepasskey.app.autofill
 
 import android.os.Bundle
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.BaseCredentialActivity
@@ -12,7 +13,6 @@ import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -110,7 +110,7 @@ class AutofillLockedSaveActivity : BaseCredentialActivity() {
      * 内长期留驻。
      */
     private fun startSave(token: String, callingPackage: String, webDomain: String?) {
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillLockedSaveActivity") {
             // 解封含 Keystore 解密与私有目录读取，按工程规则离开主线程
             val payload = withContext(Dispatchers.Default) { payloadStore.take(token) }
             if (payload == null) {
@@ -120,7 +120,7 @@ class AutofillLockedSaveActivity : BaseCredentialActivity() {
                 payloadStore.discard(token)
                 settleToken(token)
                 failAndFinish()
-                return@launch
+                return@safeLaunch
             }
             val passwordChars = payload.passwordChars
             try {
@@ -128,7 +128,7 @@ class AutofillLockedSaveActivity : BaseCredentialActivity() {
                     AppLog.w(TAG, "密码库仍未解锁，无法保存密码凭据")
                     settleToken(token)
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
                 // ENG-20261028-05：最终交付处复核自动填充通道开关——服务侧下发时的判定
                 // 不能代表解锁窗口结束时的状态，关闭即不落库。
@@ -138,7 +138,7 @@ class AutofillLockedSaveActivity : BaseCredentialActivity() {
                     AppLog.i(TAG, "自动填充通道或新密码保存已关闭，跳过落库")
                     settleToken(token)
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
                 val result = vaultRepository.saveAutofillCredential(
                     packageName = callingPackage,
@@ -150,7 +150,7 @@ class AutofillLockedSaveActivity : BaseCredentialActivity() {
                     AppLog.e(TAG, "保存密码凭据失败: ${result.error.javaClass.simpleName}")
                     settleToken(token)
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
                 // 与解锁态 onSaveRequest / CM 保存通道同口径：落库成功后建立调用方首次绑定，
                 // 否则 android:// 条目下次仍被 P2-46 绑定门挡住、无法自动出候选。

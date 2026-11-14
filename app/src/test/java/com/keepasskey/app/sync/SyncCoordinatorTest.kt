@@ -820,6 +820,38 @@ class SyncCoordinatorTest {
         assertTrue("真网络错误仍应报 Offline: $outcome", outcome is SyncOutcome.Offline)
     }
 
+    /**
+     * 当前问题清单 P1「首次同步探测失败返回值丢失」：首传探测（`!isCached` 的 `getMetadata`）非 404
+     * 失败时，`establishRemoteBaselineIfMissing` 丢弃了 `remoteFailureOutcome(ex)` 的结果，落到末尾
+     * `return null` ⇒ 调用方判定「本步骤无结论」，继续进入步骤 3 的 `isCached` 快判与步骤 4 的
+     * `handleOpenRemote`，对同一远端再发一次探测（并可能给出与真实原因不符的结论）。
+     *
+     * 判据：结论非 null、错误面为 [SyncOutcome.Error]，且整个周期只发生**一次**远端探测、
+     * 零下载——步骤 3 / 4 未被执行。
+     */
+    @Test
+    fun `首传探测鉴权与5xx失败立即收口不再进入步骤3与4`() = runTest(testDispatcher) {
+        val failures = listOf(
+            "401" to SyncException.AuthenticationError("401 Unauthorized"),
+            "403" to SyncException.AuthenticationError("403 Forbidden"),
+            "500" to SyncException.ProtocolError(500, "Internal Server Error"),
+            "503" to SyncException.ProtocolError(503, "Service Unavailable")
+        )
+        failures.forEach { (label, failure) ->
+            val memoryProvider = MemorySyncProvider()
+            coordinator.testSyncProvider = memoryProvider
+            coordinator.testRemotePath = "/remote/vault_first_upload_$label.kdbx"
+            memoryProvider.metadataFailure = failure
+
+            val outcome = coordinator.syncNow()
+
+            assertTrue("$label 必须给出失败结论而非继续后续步骤: $outcome", outcome is SyncOutcome.Error)
+            assertEquals("$label 只允许一次首传探测，不得再进步骤 4 复探", 1, memoryProvider.metadataCalls)
+            assertEquals("$label 不得触发任何下载", 0, memoryProvider.downloadCalls)
+            assertEquals("$label 不得触发任何上传", 0, memoryProvider.uploadCalls)
+        }
+    }
+
     @Test
     fun `测试provider重抛的Error被遏制为同步失败而非进程崩溃（ISSUE-P0-09）`() = runTest(testDispatcher) {
         val memoryProvider = MemorySyncProvider()

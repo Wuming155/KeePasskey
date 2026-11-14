@@ -7,6 +7,7 @@ import androidx.credentials.PublicKeyCredential
 import androidx.credentials.provider.PendingIntentHandler
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.CallerCertDigests
@@ -18,7 +19,6 @@ import com.keepasskey.core.security.ProtectedString
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -106,7 +106,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
             failAndFinish()
             return
         }
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasskeyAssertionActivity") {
             try {
                 credentialSessionGate.withRequest { performAssertion(context) }
             } catch (t: Throwable) {
@@ -439,13 +439,13 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
         providedClientDataHash: ByteArray?,
         prfEval: WebAuthnRequest.PrfEval?
     ) {
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasskeyAssertionActivity") {
             try {
                 // ENG-20261028-05：用户验证挂起期间通道仍可能被关闭——签名与计数器落盘前复核，
                 // 关闭即拒签（也不推进签名计数器，避免为一次不交付的断言留下副作用）。
                 if (rejectsClosedChannel()) {
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
                 // fail-closed 兜底：凡不可签发的验证结果（理论不可达）一律拒绝产出断言
                 val flags = PasskeyAuthFlags.forAssertion(
@@ -456,7 +456,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 if (flags == null) {
                     AppLog.e(TAG, "用户验证结果不可签发断言: verification=$verification")
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
 
                 // ISSUE-P3-27 子项 2：先把签名计数器**原子递增并落库**，再据其返回值签名。
@@ -480,7 +480,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                                 titleRes = R.string.cred_reject_get_title
                             )
                         }
-                        return@launch
+                        return@safeLaunch
                     }
                 }
 
@@ -503,7 +503,7 @@ class PasskeyAssertionActivity : BaseCredentialActivity() {
                 // 但断言不交给已关闭的通道：RP 侧至多看到一次计数跳跃，不会拿到本应被拒的签名。
                 if (rejectsClosedChannel()) {
                     failAndFinish()
-                    return@launch
+                    return@safeLaunch
                 }
 
                 // ISSUE-P3-27 子项 2：计数器已落库后才回传 RP

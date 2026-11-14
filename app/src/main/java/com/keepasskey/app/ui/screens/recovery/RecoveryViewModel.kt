@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.security.VaultRecoveryCoordinator
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.textArg
@@ -15,7 +16,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 
 /**
  * 恢复副本处置对话框状态机（`ISSUE-P1-592` 步骤 5）。
@@ -130,7 +130,23 @@ class RecoveryViewModel @Inject constructor(
                 awaitingOverwriteConfirm = false
             )
         }
-        viewModelScope.launch {
+        viewModelScope.safeLaunch(
+            tag = "RecoveryViewModel",
+            onError = { failure ->
+                // 预览失败（非取消）同样撤 busy 并如实提示，且只撤本次请求的遮罩——期间已发起
+                // 新预览时不误伤（与上方取消分支同一判据）
+                _uiState.update { state ->
+                    if (previewRequestGate.matches(generation, identity) && state.selectedKey == keyOf(target)) {
+                        state.copy(
+                            busy = false,
+                            message = strings.get(R.string.op_failed, failure.javaClass.simpleName)
+                        )
+                    } else {
+                        state
+                    }
+                }
+            }
+        ) {
             val result = try {
                 previewOperation(target, password)
             } catch (cancelled: CancellationException) {
@@ -168,15 +184,25 @@ class RecoveryViewModel @Inject constructor(
         }
     }
 
+    /** 恢复动作的异常兜底：撤掉遮罩并如实提示（异常原文不入 UI，只出类型名）。 */
+    private fun onRecoveryFailure(failure: Throwable) {
+        _uiState.update {
+            it.copy(
+                busy = false,
+                message = strings.get(R.string.op_failed, failure.javaClass.simpleName)
+            )
+        }
+    }
+
     /** 恢复为正式库；首次（未确认覆盖）失败于 RECOVERY_OVERWRITE_BLOCKED 时要求确认。 */
     fun restore(target: VaultRecoveryCoordinator.Pending, forceOverwrite: Boolean) {
         val current = _uiState.value
         if (!isPreviewBoundTo(current, target) || current.busy) return
         val generation = previewRequestGate.currentGeneration
-        viewModelScope.launch {
+        viewModelScope.safeLaunch(tag = "RecoveryViewModel", onError = ::onRecoveryFailure) {
             _uiState.update { it.copy(busy = true) }
             val result = coordinator.restore(target, forceOverwrite)
-            if (!previewRequestGate.matches(generation, identityOf(target)) || !isPreviewBoundTo(_uiState.value, target)) return@launch
+            if (!previewRequestGate.matches(generation, identityOf(target)) || !isPreviewBoundTo(_uiState.value, target)) return@safeLaunch
             when (result) {
                 is KdbxResult.Success -> finish(strings.get(R.string.recovery_restored_message))
                 is KdbxResult.Failure -> _uiState.update {
@@ -196,7 +222,7 @@ class RecoveryViewModel @Inject constructor(
     }
 
     fun saveAs(target: VaultRecoveryCoordinator.Pending) {
-        viewModelScope.launch {
+        viewModelScope.safeLaunch(tag = "RecoveryViewModel", onError = ::onRecoveryFailure) {
             _uiState.update { it.copy(busy = true) }
             when (val result = coordinator.saveAs(target)) {
                 is KdbxResult.Success -> finish(strings.get(R.string.recovery_saved_as_message, result.data))
@@ -206,7 +232,7 @@ class RecoveryViewModel @Inject constructor(
     }
 
     fun discard(target: VaultRecoveryCoordinator.Pending) {
-        viewModelScope.launch {
+        viewModelScope.safeLaunch(tag = "RecoveryViewModel", onError = ::onRecoveryFailure) {
             _uiState.update { it.copy(busy = true) }
             coordinator.discard(target)
             finish(strings.get(R.string.recovery_discarded_message))

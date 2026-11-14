@@ -17,11 +17,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import com.keepasskey.app.coroutines.safeLaunch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -215,7 +215,7 @@ private fun rememberCreateVaultWizardLaunchers(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
-            scope.launch {
+            scope.safeLaunch("CreateVaultWizardDialog") {
                 onKeyFilePicked(queryDocumentDisplayName(context, uri), uri.toString())
             }
         }
@@ -226,7 +226,7 @@ private fun rememberCreateVaultWizardLaunchers(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri: Uri? ->
         if (uri != null) {
-            scope.launch {
+            scope.safeLaunch("CreateVaultWizardDialog") {
                 if (NewVaultDocumentClaims.record(context, uri)) {
                     val name = try {
                         queryDocumentDisplayName(context, uri)

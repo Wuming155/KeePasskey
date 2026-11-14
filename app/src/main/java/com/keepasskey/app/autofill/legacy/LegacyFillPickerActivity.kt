@@ -16,13 +16,13 @@ import com.keepasskey.app.autofill.AutofillAuthenticationPolicy
 import com.keepasskey.app.autofill.AutofillEntrySearch
 import com.keepasskey.app.autofill.AutofillPickerScreen
 import com.keepasskey.app.autofill.AutofillPickerViewModel
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.AutofillAuthBindingPolicy
 import com.keepasskey.app.security.BiometricStatus
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -98,18 +98,18 @@ class LegacyFillPickerActivity : FragmentActivity() {
     private fun confirmAndSubmit(entryId: String) {
         if (completed) return
         val target = targetPackage ?: return
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("LegacyFillPickerActivity") {
             // 进入交付链路前锁定复核（与框架选择器 ISSUE-P3-201 同口径）：锁定即终止
             if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
                 AppLog.w(TAG, "会话已锁定，放弃旧版通道选择交付")
                 finish()
-                return@launch
+                return@safeLaunch
             }
             val credentials = viewModel.resolveCredentials(entryId)
             if (credentials == null) {
                 AppLog.w(TAG, "选中条目凭据不可用，放弃旧版通道交付")
                 finish()
-                return@launch
+                return@safeLaunch
             }
             // 可用认证器时以 Keystore 认证绑定密钥的 Cipher 发起（CryptoObject）；无可用
             // 认证器 / 密钥不可用时退化为受保护窗口内的显式点选确认（同框架选择器退化语义）
@@ -146,11 +146,11 @@ class LegacyFillPickerActivity : FragmentActivity() {
     private fun submit(target: String, credentials: AutofillPickerViewModel.Credentials) {
         if (completed) return
         completed = true
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("LegacyFillPickerActivity") {
             if (!AutofillAuthenticationPolicy.canDeliverAuthResult(vaultRepository.isLocked())) {
                 AppLog.w(TAG, "会话在交付过程中被锁定，丢弃旧版通道待决载荷")
                 finish()
-                return@launch
+                return@safeLaunch
             }
             coordinator.submit(
                 LegacyAutofillCoordinator.PendingFill(

@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -25,7 +26,6 @@ import com.keepasskey.app.security.BiometricStatus
 import com.keepasskey.app.ui.localizedContextForAppLanguage
 import com.keepasskey.core.log.AppLog
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -130,7 +130,7 @@ class AutofillConfirmActivity : FragmentActivity() {
 
         // ISSUE-P3-390 AC①：确认页不经主外壳——语言快照就绪后经 AppShellLocalization 派生本地化上下文，
         // 页面文案（含系统认证弹窗副标题）一律经它取用，不再回落系统语言。
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillConfirmActivity") {
             val localizedContext = localizedContextForAppLanguage(this@AutofillConfirmActivity, settingsRepository)
             val credentialTitle = intent.getStringExtra(EXTRA_CREDENTIAL_TITLE).orEmpty()
             // ISSUE-P1-24 AC①：解析调用方归属（解析体拆至 resolveAutofillConfirmCallerAttribution）
@@ -254,7 +254,7 @@ class AutofillConfirmActivity : FragmentActivity() {
                 )
             }
         }
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillConfirmActivity") {
             // ISSUE-P3-186：TOTP 二次动作收敛为共用实现（与选择器路径同源一份）；
             // 实现内部自带硬超时与异常兜底，不阻断填充回传
             totpPostFillActions.runAfterFill(intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty())

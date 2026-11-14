@@ -21,9 +21,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.security.SecureDialogWindowEffect
 import com.keepasskey.app.sync.WebDavDefaults
-import kotlinx.coroutines.launch
 
 /**
  * 打开已有 KDBX 文件对话框 (支持本地/WebDAV/S3 自动展示并填写连接配置)
@@ -87,7 +87,7 @@ internal fun OpenExistingVaultDialog(
             // ISSUE-P3-616：展示名查询（外部 Provider 调用）落 IO 调度器；组合作用域随对话框
             // 离场取消。查询完成前不置表单态——确认按钮要求 name+path 同时非空，不存在
             // 「只有路径没有名字」的可提交半态。
-            scope.launch {
+            scope.safeLaunch("OpenExistingVaultDialog") {
                 val name = queryDocumentDisplayName(context, uri)
                 local.name = name
                 local.path = uri.toString()

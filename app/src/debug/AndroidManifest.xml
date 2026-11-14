@@ -85,6 +85,16 @@
             android:exported="false"
             android:theme="@style/Theme.KeePasskey" />
         <!--
+          当前问题清单 P1「UI 协程出口未兜底」：撤销回调抛错的设备验收宿主。挂载**生产**
+          `AppGlobalSnackbarHost` 与生产 `AppSnackbarChannel`，只把撤销回调换成必抛错的注入点；
+          用例以无障碍节点真实点击「撤销」，核对进程存活且出现「撤销失败，内容未恢复」。
+        -->
+        <activity
+            android:name="com.keepasskey.app.ui.SnackbarUndoFailureDeviceHostActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@style/Theme.KeePasskey" />
+        <!--
           ISSUE-P2-651/652：云端同步设置页的真实 UI 验收宿主。挂载的是**生产**组合件
           `CloudSyncScreen`（含 `SecurePasswordField` 与离页 `DisposableEffect`），只把
           生产 `SettingsSyncController` 暴露给用例，以便在测试进程内用真实 HTTPS 接收方

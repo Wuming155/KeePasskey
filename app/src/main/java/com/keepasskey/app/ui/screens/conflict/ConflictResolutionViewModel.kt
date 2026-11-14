@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.conflict
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.sync.userText
 import com.keepasskey.app.sync.SyncCoordinator
 import com.keepasskey.app.sync.SyncOutcome
@@ -30,7 +31,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import java.time.Instant
 import javax.inject.Inject
 
@@ -57,7 +57,7 @@ class ConflictResolutionViewModel @Inject constructor(
     val events: SharedFlow<ConflictResolutionEvent> = _events.asSharedFlow()
 
     init {
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("ConflictResolutionViewModel") {
             syncCoordinator.conflictFlow.collect { conflicts ->
                 if (conflicts.isNotEmpty()) {
                     // ISSUE-P2-281 AC①：差异来源 = 合并器产出的 modifiedFields（单一真相源），
@@ -99,7 +99,7 @@ class ConflictResolutionViewModel @Inject constructor(
         // ISSUE-P2-660：分组冲突与条目冲突分通道到达，独立收集后并进同一份 UI 状态——
         // 两边各自 update 只改自己的字段，互不清空对方。
         // ISSUE-P2-659：库级 Meta 冲突独立通道；与条目 / 分组各自 update 自己的字段。
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("ConflictResolutionViewModel") {
             syncCoordinator.metaConflictFlow.collect { conflicts ->
                 val fields = conflicts.map { conflict -> diffMapper.metaField(conflict) }
                 _uiState.update {
@@ -107,7 +107,7 @@ class ConflictResolutionViewModel @Inject constructor(
                 }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("ConflictResolutionViewModel") {
             syncCoordinator.groupConflictFlow.collect { groups ->
                 val items = groups.map { pair ->
                     ConflictedGroupItem(

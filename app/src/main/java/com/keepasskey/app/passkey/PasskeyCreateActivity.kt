@@ -8,6 +8,7 @@ import androidx.credentials.provider.PendingIntentHandler
 import androidx.credentials.provider.ProviderCreateCredentialRequest
 import androidx.lifecycle.lifecycleScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.CallerCertDigests
@@ -21,7 +22,6 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -171,7 +171,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
 
     /** 解锁后（或库本就解锁）的注册主流程 */
     private fun startCreation() {
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasskeyCreateActivity") {
             try {
                 awaitRegistration()
             } catch (t: Throwable) {
@@ -330,20 +330,20 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
         callerPackage: String?,
         verification: CredentialUserVerification
     ) {
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("PasskeyCreateActivity") {
             try {
                 // ENG-20261028-05：用户验证期间通道可能已被关闭——先按本次开关值复核，关闭即
                 // 不再生成密钥、不落库，也不写调用方绑定（该绑定只在真正交付时成立）。
                 if (rejectsClosedChannel()) {
                     rejectAndFinish(CredentialRejectionReason.CHANNEL_DISABLED)
-                    return@launch
+                    return@safeLaunch
                 }
                 // fail-closed 兜底：凡不可签发的验证结果（理论不可达）一律拒绝创建
                 val flags = PasskeyAuthFlags.forRegistration(verification)
                 if (flags == null) {
                     AppLog.e(TAG, "用户验证结果不可用于注册: verification=$verification")
                     rejectAndFinish(CredentialRejectionReason.INTERNAL_ERROR)
-                    return@launch
+                    return@safeLaunch
                 }
 
                 val requestedAlgorithms = request?.pubKeyCredParams ?: emptyList()
@@ -356,7 +356,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 if (prfEval?.evalByCredentialPresent == true) {
                     AppLog.w(TAG, "注册请求携带 evalByCredential（规范禁止），拒绝创建")
                     rejectAndFinish(CredentialRejectionReason.REQUEST_INVALID)
-                    return@launch
+                    return@safeLaunch
                 }
                 val prfSecret: ProtectedString? = if (prfEval != null) PasskeyPrf.newSecretProtected() else null
 
@@ -384,7 +384,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                         "通行密钥落库失败（${saveResult.error.javaClass.simpleName}），拒绝回传成功"
                     )
                     rejectAndFinish(CredentialRejectionReason.PASSKEY_PERSISTENCE_FAILED)
-                    return@launch
+                    return@safeLaunch
                 }
                 // 落盘确认后才登记 CM 调用方信任绑定（ISSUE-P2-83；次序见 ISSUE-P1-590 步骤 6）
                 bindCallerForRegistration(callerPackage)
@@ -405,7 +405,7 @@ class PasskeyCreateActivity : BaseCredentialActivity() {
                 // 再判一次，关闭即不交付（已落库的密钥不向调用方回传成功，收尾同落库失败型）。
                 if (rejectsClosedChannel()) {
                     rejectAndFinish(CredentialRejectionReason.CHANNEL_DISABLED)
-                    return@launch
+                    return@safeLaunch
                 }
 
                 val resultIntent = Intent()

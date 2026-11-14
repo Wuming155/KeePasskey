@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ChangeKeyFileIntent
 import com.keepasskey.app.security.SecureDialog
 import com.keepasskey.app.ui.components.MasterPasswordPolicy
@@ -35,7 +36,6 @@ import com.keepasskey.app.ui.components.disabledPrimaryButtonBorder
 import com.keepasskey.app.ui.components.disabledPrimaryButtonColors
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
 import com.keepasskey.app.ui.theme.CapsuleShape
-import kotlinx.coroutines.launch
 
 /**
  * 现代主密钥更改对话框（ISSUE-P2-354 AC③ 重写提交链路）。
@@ -94,7 +94,7 @@ internal fun MasterKeyChangeDialog(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        keyFileScope.launch {
+        keyFileScope.safeLaunch("MasterKeyChangeDialog") {
             when (val outcome = onReadKeyFile(uri.toString())) {
                 is KeyFileReadResult.Success -> {
                     pickedKeyFile?.erase()

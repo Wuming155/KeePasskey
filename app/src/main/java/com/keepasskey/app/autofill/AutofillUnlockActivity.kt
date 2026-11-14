@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -26,7 +27,6 @@ import com.keepasskey.core.security.ProtectedStringReclamation
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -85,7 +85,7 @@ class AutofillUnlockActivity : FragmentActivity() {
         // 官方反 overlay 攻击加固：屏蔽其它应用悬浮窗覆盖解锁窗口
         window.setHideOverlayWindows(true)
 
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillUnlockActivity") {
             val settings = settingsRepository.getSettings().first()
             setContent {
                 // ISSUE-P2-09：Compose 侧遮挡触摸过滤（点击劫持防护）
@@ -129,12 +129,12 @@ class AutofillUnlockActivity : FragmentActivity() {
             return
         }
         deliveryStarted = true
-        lifecycleScope.launch {
+        lifecycleScope.safeLaunch("AutofillUnlockActivity") {
             val lease = ProtectedStringReclamation.acquireReadLease()
             try {
                 if (!canDeliver()) {
                     cancelDelivery("会话已锁定或自动填充通道已关闭，丢弃本次解锁候选响应")
-                    return@launch
+                    return@safeLaunch
                 }
                 val callingPackage = intent.getStringExtra(AutofillPickerActivity.EXTRA_CALLING_PACKAGE).orEmpty()
                 val reportedDomain = intent.getStringExtra(AutofillPickerActivity.EXTRA_WEB_DOMAIN)
@@ -160,7 +160,7 @@ class AutofillUnlockActivity : FragmentActivity() {
                 val response = unlockResponseBuilder.build(this@AutofillUnlockActivity, request)
                 if (!canDeliver() || response == null) {
                     cancelDelivery("解锁后无可交付候选或会话已失效")
-                    return@launch
+                    return@safeLaunch
                 }
                 AppLog.i(
                     TAG,

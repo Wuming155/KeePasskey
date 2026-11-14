@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import com.keepasskey.app.R
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.passkey.PasskeyImportDraft
@@ -23,7 +24,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 import java.security.SecureRandom
 
@@ -193,20 +193,20 @@ class EntryEditViewModel @Inject constructor(
                 _uiState.update { it.copy(username = dbDefaultUser) }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("EntryEditViewModel") {
             vaultRepository.getGroups().collect { groups ->
                 _uiState.update { it.copy(availableGroups = groups) }
             }
         }
 
         // TASK-15：加载库内自定义图标池（上传/选择界面数据源）
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("EntryEditViewModel") {
             _customIconOptions.value = vaultRepository.getCustomIconBytes()
         }
 
         // PD-47：随设置流刷新防截屏开关快照（扫码对话框在组合时消费当前值）
         settingsRepository?.let { repo ->
-            viewModelScope.launch {
+            viewModelScope.safeLaunch("EntryEditViewModel") {
                 repo.getSettings().map { it.flagSecureEnabled }.collect { _flagSecureEnabled.value = it }
             }
         }
@@ -215,7 +215,7 @@ class EntryEditViewModel @Inject constructor(
 
         // ISSUE-P3-368 AC②：保存链进度桥接——0..1 确定段、null 分段不确定段，
         // 即发即弃只更新 UI 状态（顶栏进度条在 isSaving 期间渲染）
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("EntryEditViewModel") {
             vaultRepository.ioProgress().collect { value ->
                 _uiState.update { it.copy(saveProgress = value) }
             }
@@ -225,7 +225,12 @@ class EntryEditViewModel @Inject constructor(
     fun loadEntry(id: String) {
         // ISSUE-P3-359 AC⑤：解密预填期间置加载态——入口同步置位，首帧即在遮罩之下
         _uiState.update { it.copy(isLoading = true) }
-        viewModelScope.launch {
+        // 载入中途的未预期异常（投影读取 / 单条解密）会跳过下面的收尾赋值：兜底先撤遮罩，
+        // 避免「加载中」永久悬挂；异常类型与栈帧由 safeLaunch 留痕。
+        viewModelScope.safeLaunch(
+            tag = "EntryEditViewModel",
+            onError = { _uiState.update { it.copy(isLoading = false) } }
+        ) {
             val entry = vaultRepository.getEntry(id).firstOrNull()
             if (entry != null) {
                 // M1 整改：密码明文不随条目投影下发，编辑时按需单条解密为 CharArray
@@ -285,12 +290,15 @@ class EntryEditViewModel @Inject constructor(
     private fun loadTemplate(templateId: String, targetGroupId: String?) {
         // ISSUE-P3-359 AC⑤：模板预填同为异步载入，遮罩口径与 loadEntry 一致
         _uiState.update { it.copy(isLoading = true) }
-        viewModelScope.launch {
+        viewModelScope.safeLaunch(
+            tag = "EntryEditViewModel",
+            onError = { _uiState.update { it.copy(isLoading = false) } }
+        ) {
             val template = vaultRepository.getEntry(templateId).firstOrNull()
             if (template == null) {
                 // 模板不可用（被删除）→ 保持空白新建表单并结束加载态，不报错
                 _uiState.update { it.copy(isLoading = false) }
-                return@launch
+                return@safeLaunch
             }
             _uiState.update { applyTemplateEntry(it, template, targetGroupId) }
         }

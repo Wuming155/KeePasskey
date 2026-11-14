@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.repository.CreateKeyFileFactor
 import com.keepasskey.app.data.repository.CreateVaultPreset
 import com.keepasskey.app.data.repository.VaultRepository
@@ -25,7 +26,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.keepasskey.app.ui.model.textArg
 
@@ -146,7 +146,7 @@ class DatabasePickerViewModel @Inject constructor(
     )
 
     fun selectDatabase(id: String) {
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("DatabasePickerViewModel") {
             vaultRepository.selectDatabase(id)
             _events.emit(DatabasePickerEvent.DatabaseSelected(id))
         }
@@ -205,7 +205,7 @@ class DatabasePickerViewModel @Inject constructor(
         // 入参为借用语义（调用方持有并自行擦除），被拒路径不接管、不擦除。
         if (isCreatingFlow.value) return
         isCreatingFlow.value = true
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("DatabasePickerViewModel") {
             // H2 整改：主密码全程 CharArray——复制私有副本并在 finally 擦除；
             // 入参数组为调用方（弹窗）所有，由其自身生命周期管理擦除
             val pwd = masterPassword.copyOf()
@@ -213,7 +213,7 @@ class DatabasePickerViewModel @Inject constructor(
                 val resolution = resolveKeyFileFactor(keyFile, keyFileSourceUri)
                 if (resolution is KeyFileFactorResolution.Failed) {
                     publishPickerMessage(resolution.message)
-                    return@launch
+                    return@safeLaunch
                 }
                 val resolved = resolution as KeyFileFactorResolution.Resolved
                 // H3 整改：创建失败（写盘失败等）不再谎报创建成功
@@ -247,7 +247,7 @@ class DatabasePickerViewModel @Inject constructor(
                         // 0.78s 即卸载，用户无法点按）。等写盘成功或用户「暂不保存」→ None 再离页。
                         keyFileDeliveryController.requestSave(name, dbId = targetUri ?: fileName)
                         val createdDbId = targetUri ?: fileName
-                        viewModelScope.launch {
+                        viewModelScope.safeLaunch("DatabasePickerViewModel") {
                             keyFileDeliveryController.delivery.first { it is KeyFileDeliveryState.None }
                             debugLog?.info("DatabasePicker", "交付已了结 → 发 DatabaseSelected 事件（离页信号）")
                             _events.emit(DatabasePickerEvent.DatabaseSelected(createdDbId))
@@ -347,7 +347,7 @@ class DatabasePickerViewModel @Inject constructor(
     }
 
     private fun performRemoval(id: String, kind: VaultRemovalKind, saveCopy: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.safeLaunch("DatabasePickerViewModel") {
             val result = vaultRepository.removeDatabase(id, kind, saveCopy)
             if (result is KdbxResult.Success) {
                 // §411（ISSUE-P3-448）：删库成功即清除其密钥文件收编副本（尽力清除，失败不影响回执）

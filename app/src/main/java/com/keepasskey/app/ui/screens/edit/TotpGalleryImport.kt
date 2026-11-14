@@ -33,9 +33,9 @@ import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.ReaderException
 import com.google.zxing.common.HybridBinarizer
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -90,7 +90,7 @@ internal fun TotpGalleryImport(
         if (uri != null) {
             errorMessageRes = null
             isDecoding = true
-            scope.launch {
+            scope.safeLaunch("TotpGalleryImport") {
                 try {
                     val frame = withContext(Dispatchers.IO) { loadGalleryPixels(context, uri) }
                     if (frame == null) {

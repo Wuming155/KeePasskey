@@ -6,6 +6,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.CustomIconAdmin
 import com.keepasskey.app.data.repository.SettingsRepository
@@ -27,7 +28,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
@@ -348,7 +348,7 @@ class EntryDetailViewModel @Inject constructor(
             publishDetailMessage(UiMessage(R.string.detail_attachment_export_warn_title))
             return
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.safeLaunch("EntryDetailViewModel", Dispatchers.IO) {
             publishDetailMessage(attachmentExporter.export(entryId, attachment, targetUri))
         }
     }

@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.ui.components.CustomIconItem
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.vault.PasskeyImportConfirmDialog
@@ -24,7 +25,6 @@ import com.keepasskey.app.util.readBoundedBytes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -201,7 +201,7 @@ private fun rememberAttachmentPicker(
     val context = LocalContext.current
     return rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
-            scope.launch(Dispatchers.IO) {
+            scope.safeLaunch("EntryEditPickers", Dispatchers.IO) {
                 try {
                     // ISSUE-P3-295 AC②：单附件尺寸上界——**先按 ContentResolver 申报长度拦一次**，
                     // 再把整份字节读进内存；顺序反过来就等于「读爆内存之后才判超限」。
@@ -212,7 +212,7 @@ private fun rememberAttachmentPicker(
                     }.getOrNull()
                     if (declaredLength != null && declaredLength > MAX_ATTACHMENT_BYTES) {
                         withContext(Dispatchers.Main) { viewModel.showMessage(attachmentTooLargeMessage()) }
-                        return@launch
+                        return@safeLaunch
                     }
                     // ISSUE-P3-617：整流改带硬上限的分块读取——申报长度未知（UNKNOWN_LENGTH）或
                     // 撒谎（申报小于实际）时，旧 `readBytes()` 会在读后兜底之前分配完整超大缓冲
@@ -222,13 +222,13 @@ private fun rememberAttachmentPicker(
                         context.contentResolver.openInputStream(uri)?.use { it.readBoundedBytes(MAX_ATTACHMENT_BYTES) }
                     } catch (large: StreamLimitExceededException) {
                         withContext(Dispatchers.Main) { viewModel.showMessage(attachmentTooLargeMessage()) }
-                        return@launch
+                        return@safeLaunch
                     }
                     if (bytes == null || bytes.isEmpty()) {
                         withContext(Dispatchers.Main) {
                             viewModel.showMessage(UiMessage(R.string.edit_attachment_empty))
                         }
-                        return@launch
+                        return@safeLaunch
                     }
                     val displayName = queryDisplayName(context, uri) ?: "attachment.bin"
                     withContext(Dispatchers.Main) {
@@ -273,7 +273,7 @@ private fun rememberCustomIconPicker(
     val context = LocalContext.current
     return rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            scope.launch(Dispatchers.IO) {
+            scope.safeLaunch("EntryEditPickers", Dispatchers.IO) {
                 try {
                     // ISSUE-P3-576 闸门①：读前按 ContentResolver 申报长度拦一次——顺序与附件通道
                     // 一致（先拦后读；反过来就是「读爆内存之后才判超限」）。
@@ -283,7 +283,7 @@ private fun rememberCustomIconPicker(
                     }.getOrNull()
                     if (exceedsCustomIconUploadLimit(declaredLength)) {
                         withContext(Dispatchers.Main) { viewModel.showMessage(iconTooLargeMessage()) }
-                        return@launch
+                        return@safeLaunch
                     }
                     // ISSUE-P3-617：与附件通道同型——整流改带硬上限的分块读取（上限为图标专用上界，
                     // 远小于附件上限），累计越过即抛超限异常（内部缓冲已清零）并同文案拒绝；
@@ -292,7 +292,7 @@ private fun rememberCustomIconPicker(
                         context.contentResolver.openInputStream(uri)?.use { it.readBoundedBytes(MAX_CUSTOM_ICON_UPLOAD_BYTES) }
                     } catch (large: StreamLimitExceededException) {
                         withContext(Dispatchers.Main) { viewModel.showMessage(iconTooLargeMessage()) }
-                        return@launch
+                        return@safeLaunch
                     }
                     val pngBytes = rawBytes?.let { decodeAndScaleToPng(it) }
                     withContext(Dispatchers.Main) {
