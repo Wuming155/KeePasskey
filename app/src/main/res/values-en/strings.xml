@@ -162,7 +162,7 @@
     <string name="search_write_back_failed">Failed to update URL</string>
     <!-- ISSUE-P3-571 plan A: "remember this app" prompt inside the autofill delivery chain (Kp2a style, empty-URL pure-app forms only) -->
     <string name="autofill_app_binding_write_back_title">Remember this app?</string>
-    <string name="autofill_app_binding_write_back_message">Write the app binding %1$s into entry \"%2$s\"\'s URL so it fills automatically next time and syncs with your database.</string>
+    <string name="autofill_app_binding_write_back_message">Write the app binding %1$s into entry \"%2$s\"\'s app association fields (AndroidApp) so it syncs with your database. The existing URL stays unchanged.</string>
     <string name="vault_empty_desc">No entries or folders found here. Tap the plus button below to add one</string>
     <string name="vault_new_entry">New Entry</string>
     <string name="vault_new_folder">New Folder</string>
@@ -1297,6 +1297,9 @@
     <string name="debug_log_title">Diagnostic log</string>
     <string name="debug_log_sub">Runtime events and failure stack frames, redacted as they are written; you can turn this off</string>
     <string name="debug_verbose_title">Verbose logging</string>
+    <string name="debug_retention_title">Log retention</string>
+    <string name="debug_retention_sub">Logs stay in app private storage; older entries are removed automatically</string>
+    <string name="debug_retention_days">%1$d d</string>
     <string name="debug_verbose_sub">Adds sync-step details and full exception stack frames for hard-to-reproduce issues</string>
     <string name="debug_preview_title">Log preview</string>
     <string name="debug_cd_refresh">Refresh log</string>

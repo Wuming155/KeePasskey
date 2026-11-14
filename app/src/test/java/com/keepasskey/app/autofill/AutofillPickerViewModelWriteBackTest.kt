@@ -20,8 +20,9 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * `ISSUE-P3-571` 方案 A 询问流的编排级锁定（`AutofillPickerViewModel.offerAppBindingWriteBack`）：
- * 判定不满足 → 不问照常交付；满足 → 置起询问、同意写回 / 拒绝不写；拒绝不持久化。
+ * 应用关联写回询问流的编排级锁定（[AutofillPickerViewModel.offerAppBindingWriteBack]）：
+ * 判定不满足 → 不问照常交付；满足 → 置起询问、同意写 `AndroidApp*` 自定义字段 / 拒绝不写；
+ * 写入成功后同一会话内「该包名已绑定」不再重复询问。
  *
  * 锁定丢弃分支（询问期间 `isLocked()` 翻转 → 返回 false）依赖 `VaultRepository.isLocked`，
  * `FakeVaultRepository` 恒 false 且为 final 不可覆写——该分支与交付链既有「回传前再次校验」
@@ -29,6 +30,8 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AutofillPickerViewModelWriteBackTest {
+
+    private val fingerprint = "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90"
 
     @Before
     fun setUp() {
@@ -45,10 +48,8 @@ class AutofillPickerViewModelWriteBackTest {
 
     /**
      * Fake 的 `databaseSession` 为 null（纯 JVM），锁定观察者不生效；条目即静态 mock 投影。
-     *
      * 等待走 `withContext(Dispatchers.IO)`（与 `AutofillPickerViewModelSessionLockTest` 同法）——
-     * **不得**在 runBlocking 主线程 `Thread.sleep`：那会阻塞 BlockingEventLoop，
-     * 使 `viewModelScope`（Main＝UnconfinedTestDispatcher）侧协程得不到推进。
+     * **不得**在 runBlocking 主线程 `Thread.sleep`：那会阻塞 BlockingEventLoop。
      */
     private fun loadEntriesBlocking(vm: AutofillPickerViewModel) = runBlocking {
         vm.loadEntries()
@@ -61,11 +62,7 @@ class AutofillPickerViewModelWriteBackTest {
         }
     }
 
-    /**
-     * 询问流等待（同上：sleep 必须在 IO 线程，防阻塞 runBlocking event loop）。
-     * [waitForAsk] 返回时询问应已置起（launch 侧用 [CoroutineStart.UNDISPATCHED]
-     * 同步执行到 `decision.await()` 挂起点，ask 必然先于本函数置起）。
-     */
+    /** 询问流等待（同上：sleep 必须在 IO 线程，防阻塞 runBlocking event loop）。 */
     private suspend fun waitForAsk(vm: AutofillPickerViewModel) {
         withContext(Dispatchers.IO) {
             var waited = 0L
@@ -77,7 +74,7 @@ class AutofillPickerViewModelWriteBackTest {
     }
 
     @Test
-    fun `满足条件时置起询问_同意后写回android绑定并清理询问`() = runBlocking {
+    fun `满足条件时置起询问_同意后写入应用关联自定义字段并清理询问`() = runBlocking {
         val fake = FakeVaultRepository()
         val vm = newVm(fake)
         loadEntriesBlocking(vm)
@@ -85,12 +82,10 @@ class AutofillPickerViewModelWriteBackTest {
         val entryId = entry.id.toHexString()
 
         val outcome = CompletableDeferred<Boolean>()
-        // CoroutineStart.UNDISPATCHED：同步执行到 decision.await() 挂起点——否则 launch 在
-        // runBlocking event loop 里排队，主线程 Thread.sleep 阻塞 loop 会令 ask 永不置起（挂死）
         val job = launch(start = CoroutineStart.UNDISPATCHED) {
             outcome.complete(
                 vm.offerAppBindingWriteBack(
-                    CallerCertDigests.ofSingle("aa:bb"),
+                    CallerCertDigests.ofSingle(fingerprint),
                     "com.tencent.mobileqq",
                     formWebDomain = null,
                     entryId = entryId,
@@ -101,19 +96,77 @@ class AutofillPickerViewModelWriteBackTest {
         waitForAsk(vm)
         val ask = vm.bindingWriteBackAsk.value
         assertEquals(entryId, ask?.entryId)
-        assertEquals("android://com.tencent.mobileqq", ask?.proposedUrl)
+        assertEquals("com.tencent.mobileqq", ask?.proposedPackage)
 
         vm.completeBindingWriteBack(true)
         job.join()
 
         assertTrue(outcome.await())
-        // 断言走 Fake 观测点而非 getKdbxEntry 往返：mock 条目 id 非合法 32-hex 时
-        // KdbxUuid 转换回退随机值，getKdbxEntry 永远查不到（生产链路无此坑）
-        assertEquals(
-            "android://com.tencent.mobileqq",
-            fake.lastWrittenUrlByEntry[entryId]
-        )
+        val call = fake.lastAppBindingByEntry[entryId]
+        assertEquals("com.tencent.mobileqq", call?.packageName)
+        assertEquals(fingerprint, call?.fingerprintHex)
+        assertEquals("URL 标准字段不得被改写", "", entry.url)
         assertNull("写回完成后询问必须清空", vm.bindingWriteBackAsk.value)
+    }
+
+    @Test
+    fun `条目已有网址仍询问_网址不被覆盖`() = runBlocking {
+        val fake = FakeVaultRepository()
+        val vm = newVm(fake)
+        loadEntriesBlocking(vm)
+        val entry = vm.entries.value.first { it.url.isNotBlank() }
+        val originalUrl = entry.url
+        val entryId = entry.id.toHexString()
+
+        val outcome = CompletableDeferred<Boolean>()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            outcome.complete(
+                vm.offerAppBindingWriteBack(
+                    CallerCertDigests.ofSingle(fingerprint),
+                    "com.tencent.mobileqq",
+                    formWebDomain = null,
+                    entryId = entryId,
+                    entryTitle = entry.title
+                )
+            )
+        }
+        waitForAsk(vm)
+        assertEquals("com.tencent.mobileqq", vm.bindingWriteBackAsk.value?.proposedPackage)
+        vm.completeBindingWriteBack(true)
+        job.join()
+
+        assertTrue(outcome.await())
+        assertEquals(fingerprint, fake.lastAppBindingByEntry[entryId]?.fingerprintHex)
+        assertEquals("条目投影 URL 必须原样保留", originalUrl, entry.url)
+    }
+
+    @Test
+    fun `表单带自报域仍询问_网页表单同样可写包名`() = runBlocking {
+        val fake = FakeVaultRepository()
+        val vm = newVm(fake)
+        loadEntriesBlocking(vm)
+        val entry = vm.entries.value.first { it.url.isBlank() }
+
+        val outcome = CompletableDeferred<Boolean>()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            outcome.complete(
+                vm.offerAppBindingWriteBack(
+                    CallerCertDigests.ofSingle(fingerprint),
+                    "com.tencent.mobileqq",
+                    formWebDomain = "example.com",
+                    entryId = entry.id.toHexString(),
+                    entryTitle = entry.title
+                )
+            )
+        }
+        waitForAsk(vm)
+        assertEquals("com.tencent.mobileqq", vm.bindingWriteBackAsk.value?.proposedPackage)
+        vm.completeBindingWriteBack(false)
+        job.join()
+
+        assertTrue(outcome.await())
+        assertTrue("拒绝不得触发写回", fake.lastAppBindingByEntry.isEmpty())
+        assertNull(vm.bindingWriteBackAsk.value)
     }
 
     @Test
@@ -122,17 +175,15 @@ class AutofillPickerViewModelWriteBackTest {
         val vm = newVm(fake)
         loadEntriesBlocking(vm)
         val entry = vm.entries.value.first { it.url.isBlank() }
-        val entryId = entry.id.toHexString()
 
         val outcome = CompletableDeferred<Boolean>()
-        // 同上：UNDISPATCHED 同步执行到挂起点，防 runBlocking event loop 阻塞型挂死
         val job = launch(start = CoroutineStart.UNDISPATCHED) {
             outcome.complete(
                 vm.offerAppBindingWriteBack(
-                    CallerCertDigests.ofSingle("aa:bb"),
+                    CallerCertDigests.ofSingle(fingerprint),
                     "com.tencent.mobileqq",
                     formWebDomain = null,
-                    entryId = entryId,
+                    entryId = entry.id.toHexString(),
                     entryTitle = entry.title
                 )
             )
@@ -143,33 +194,45 @@ class AutofillPickerViewModelWriteBackTest {
         job.join()
 
         assertTrue("拒绝＝不写回但照常交付", outcome.await())
-        assertTrue("拒绝不得触发写回", fake.lastWrittenUrlByEntry.isEmpty())
+        assertTrue("拒绝不得触发写回", fake.lastAppBindingByEntry.isEmpty())
         assertNull(vm.bindingWriteBackAsk.value)
     }
 
-    /**
-     * 「条目 URL 非空不询问」一态**不设 VM 层用例**：mock 条目 id 非合法 32-hex 时
-     * `getKdbxEntry` 往返恒空（Fake 转换回退随机 id），「条目当前 URL 非空」在本 VM 层
-     * **不可构造**——该否决态由 [AutofillAppBindingWriteBackPolicyTest] 的策略用例锁定。
-     */
     @Test
-    fun `浏览器表单不询问_域维度不在本条`() = runBlocking {
+    fun `写入成功后同一会话内该包名已绑定_不再重复询问`() = runBlocking {
         val fake = FakeVaultRepository()
         val vm = newVm(fake)
         loadEntriesBlocking(vm)
         val entry = vm.entries.value.first { it.url.isBlank() }
+        val entryId = entry.id.toHexString()
 
-        val proceed = vm.offerAppBindingWriteBack(
-            CallerCertDigests.ofSingle("aa:bb"),
+        val first = CompletableDeferred<Boolean>()
+        val firstJob = launch(start = CoroutineStart.UNDISPATCHED) {
+            first.complete(
+                vm.offerAppBindingWriteBack(
+                    CallerCertDigests.ofSingle(fingerprint),
+                    "com.tencent.mobileqq",
+                    formWebDomain = null,
+                    entryId = entryId,
+                    entryTitle = entry.title
+                )
+            )
+        }
+        waitForAsk(vm)
+        vm.completeBindingWriteBack(true)
+        firstJob.join()
+        assertTrue(first.await())
+
+        val second = vm.offerAppBindingWriteBack(
+            CallerCertDigests.ofSingle(fingerprint),
             "com.tencent.mobileqq",
-            formWebDomain = "example.com",
-            entryId = entry.id.toHexString(),
+            formWebDomain = null,
+            entryId = entryId,
             entryTitle = entry.title
         )
-
-        assertTrue(proceed)
-        assertTrue("浏览器表单不得触发写回", fake.lastWrittenUrlByEntry.isEmpty())
-        assertNull(vm.bindingWriteBackAsk.value)
+        assertTrue("已绑定＝不问但照常交付", second)
+        assertNull("已绑定不得再置起询问", vm.bindingWriteBackAsk.value)
+        assertEquals("不得重复写入", 1, fake.lastAppBindingByEntry.size)
     }
 
     @Test
@@ -181,7 +244,7 @@ class AutofillPickerViewModelWriteBackTest {
         val entry = vm.entries.value.first { it.url.isBlank() }
 
         val proceed = vm.offerAppBindingWriteBack(
-            CallerCertDigests.ofSingle("aa:bb"),
+            CallerCertDigests.ofSingle(fingerprint),
             "com.tencent.mobileqq",
             formWebDomain = null,
             entryId = entry.id.toHexString(),
@@ -189,7 +252,7 @@ class AutofillPickerViewModelWriteBackTest {
         )
 
         assertTrue("只读会话＝不问但照常交付（写回一票否决，不影响填充）", proceed)
-        assertTrue("只读会话不得触发写回", fake.lastWrittenUrlByEntry.isEmpty())
+        assertTrue("只读会话不得触发写回", fake.lastAppBindingByEntry.isEmpty())
         assertNull(vm.bindingWriteBackAsk.value)
     }
 }

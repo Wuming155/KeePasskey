@@ -1,12 +1,14 @@
 package com.keepasskey.app.data.repository
 
 import com.keepasskey.app.R
+import com.keepasskey.app.autofill.AndroidAppBindingFields
 import com.keepasskey.app.autofill.AutofillPackageNames
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.KdbxAttachment
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxUuid
 import com.keepasskey.core.result.KdbxError
@@ -325,6 +327,12 @@ internal class VaultEntryWriteCoordinator(
      * 经 ProtectedString HMAC 等值标签常时比较，不解密、不物化明文）时，保存为
      * 幂等操作：直接返回成功并跳过落库——防止用户在两个保存弹窗各确认一次导致
      * history 修订翻倍与同步脏标记污染。
+     *
+     * 纯 App 场景额外写一组 `AndroidApp` 自定义字段（KeePassDX 口径）：令关联随 `.kdbx`
+     * 同步，换设备 / 清数据后仍可被消费链读出。`URL` 仍保留 `android://<包名>` 旧形态——
+     * CM 通道的候选层（`CredentialCandidateMatcher` / `CredentialResponseAssembler` /
+     * `PasswordFillActivity` / `KeePasskeyCredentialProviderService`）逐字依赖它做包名放行，
+     * 清空会让口令召回整体失效；两条形态并存，旧数据与新数据都不被覆盖。
      */
     suspend fun saveAutofillCredential(
         packageName: String,
@@ -343,14 +351,20 @@ internal class VaultEntryWriteCoordinator(
     ): KdbxResult<Unit> {
         try {
             val binding = resolveCredentialUrlBinding(webDomain, packageName)
+            // 纯 App 场景才写 `AndroidApp` 字段；签名摘要不由本通道写入——保存链已有
+            // `bindCallerAfterAutofillSave` / CM 侧 `callerTrustStore.trust` 做本地签名绑定，
+            // 库内字段只声明包名（KeePassDX 的无签名合法形态），消费侧仍受 P2-46 门约束。
+            val normalizedPackage =
+                if (binding.isWebBinding) null else AutofillPackageNames.normalize(packageName)
             val allEntries = databaseSession.databaseFlow.first()?.rootGroup?.allEntries() ?: emptyList()
 
             val matchedEntry = allEntries.firstOrNull { entry ->
                 val matchDomain = binding.isWebBinding && entry.url.isNotBlank() &&
                         DomainMatcher.isDomainMatch(entry.url, binding.displayDomain)
                 // L1 整改：包名匹配仅走 DomainMatcher 严格点号边界（含 android:// scheme 剥离），
-                // 移除 title/notes.contains 启发式
-                val matchPackage = entry.url.isNotBlank() && DomainMatcher.isPackageMatch(entry.url, packageName)
+                // 移除 title/notes.contains 启发式；另兼容 KeePassDX 自定义字段声明的绑定，
+                // 避免同一条目因两种形态各存一份而被重复新建。
+                val matchPackage = matchesSavedPackage(entry.url, entry.customFields, packageName)
                 (matchDomain || matchPackage) && (entry.userName == username || entry.userName.isEmpty())
             }
 
@@ -358,12 +372,26 @@ internal class VaultEntryWriteCoordinator(
             if (matchedEntry != null) {
                 val passwordUnchanged = matchedEntry.password == pwdProtected
                 val usernameUnchanged = matchedEntry.userName.isNotEmpty() || username.isBlank()
-                if (passwordUnchanged && usernameUnchanged) {
+                val existingValues = VaultEntryAppBindingWriter.bindingFieldValues(matchedEntry.customFields)
+                val mergedFields = if (normalizedPackage != null && existingValues != null) {
+                    // 旧形态（URL 里 android://）条目在被再次保存时顺带补上自定义字段，
+                    // 不改动 URL、不迁移历史条目之外的内容。
+                    VaultEntryAppBindingWriter.mergedBindingFields(
+                        matchedEntry.customFields, existingValues, normalizedPackage, ""
+                    )
+                } else null
+                if (passwordUnchanged && usernameUnchanged && mergedFields == null) {
                     return KdbxResult.Success(Unit)
                 }
                 var updated = matchedEntry.withField(KdbxConstants.Fields.PASSWORD, pwdProtected)
                 if (updated.userName.isEmpty() && username.isNotBlank()) {
                     updated = updated.withField(KdbxConstants.Fields.USER_NAME, username)
+                }
+                if (mergedFields != null) {
+                    updated = updated.copy(
+                        customFields = mergedFields,
+                        times = updated.times.copy(lastModificationTime = Instant.now())
+                    )
                 }
                 databaseSession.saveEntry(updated)
             } else {
@@ -375,10 +403,16 @@ internal class VaultEntryWriteCoordinator(
                     KdbxConstants.Fields.URL to ProtectedString(binding.entryUrl, isProtected = false),
                     KdbxConstants.Fields.NOTES to ProtectedString("Package: $packageName", isProtected = false)
                 )
+                val customFields = if (normalizedPackage != null) {
+                    VaultEntryAppBindingWriter.mergedBindingFields(
+                        emptyList(), emptyMap(), normalizedPackage, ""
+                    ).orEmpty()
+                } else emptyList()
                 val newEntry = KdbxEntry(
                     id = KdbxUuid.random(),
                     parentGroupId = null,
-                    fields = fields
+                    fields = fields,
+                    customFields = customFields
                 )
                 databaseSession.saveEntry(newEntry)
             }
@@ -389,6 +423,27 @@ internal class VaultEntryWriteCoordinator(
     }
 
     companion object {
+
+        /**
+         * upsert 去重的包名维度判据（纯函数）：同时认 `URL` 里的 `android://<包名>` **旧形态**
+         * 与 `AndroidApp*` 自定义字段声明的绑定，避免同一条目以两种形态各存一份。
+         *
+         * URL 侧仍走 [DomainMatcher.isPackageMatch]（严格相等、仅服务保存侧去重，
+         * 不是放行判定）；字段侧按 KeePassDX 连续编号解析，绑定键读取失败即按未命中
+         * （fail-closed，宁可新建也不误合并）。
+         */
+        internal fun matchesSavedPackage(
+            entryUrl: String,
+            customFields: List<KdbxCustomField>,
+            packageName: String
+        ): Boolean {
+            if (entryUrl.isNotBlank() && DomainMatcher.isPackageMatch(entryUrl, packageName)) return true
+            val normalized = AutofillPackageNames.normalize(packageName) ?: return false
+            val values = VaultEntryAppBindingWriter.bindingFieldValues(customFields) ?: return false
+            return AndroidAppBindingFields.nextPosition(
+                AndroidAppBindingFields.parse(values), normalized
+            ) == null
+        }
 
         /**
          * ISSUE-P2-78（威胁建模 T-10）：凭据保存的 **URL 绑定形态分流**（纯函数，JVM 可测）。

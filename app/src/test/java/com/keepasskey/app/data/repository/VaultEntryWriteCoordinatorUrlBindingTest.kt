@@ -2,6 +2,8 @@ package com.keepasskey.app.data.repository
 
 import com.keepasskey.app.passkey.CallingOriginResolver
 import com.keepasskey.app.passkey.DomainMatcher
+import com.keepasskey.core.model.KdbxCustomField
+import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,6 +18,36 @@ import org.junit.Test
  * web 域也不匹配 `android://` 包名（永久无法被域命中的完整性 / 可用性缺陷）。
  */
 class VaultEntryWriteCoordinatorUrlBindingTest {
+
+    @Test
+    fun `upsert包名去重同时认URL旧形态与AndroidApp字段`() {
+        val fields = listOf(
+            KdbxCustomField("AndroidApp", ProtectedString("com.example.app", isProtected = false)),
+            KdbxCustomField("AndroidApp Signature", ProtectedString("AA:BB", isProtected = true))
+        )
+        assertTrue(
+            "URL 旧形态仍参与去重",
+            VaultEntryWriteCoordinator.matchesSavedPackage(
+                "android://com.example.app", emptyList(), "com.example.app"
+            )
+        )
+        assertTrue(
+            "自定义字段声明的绑定同样参与去重，避免同条目重复新建",
+            VaultEntryWriteCoordinator.matchesSavedPackage("", fields, "com.example.app")
+        )
+        assertTrue(
+            "含网址的条目经字段声明仍可去重",
+            VaultEntryWriteCoordinator.matchesSavedPackage(
+                "https://example.com", fields, "com.example.app"
+            )
+        )
+        assertFalse(
+            VaultEntryWriteCoordinator.matchesSavedPackage("", fields, "com.other.app")
+        )
+        assertFalse(
+            VaultEntryWriteCoordinator.matchesSavedPackage("https://example.com", emptyList(), "com.example.app")
+        )
+    }
 
     @Test
     fun `浏览器委派 web origin 原样入库且可被域匹配命中`() {

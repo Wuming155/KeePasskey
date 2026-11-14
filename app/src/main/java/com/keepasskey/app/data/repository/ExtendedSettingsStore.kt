@@ -1,5 +1,7 @@
 package com.keepasskey.app.data.repository
 
+import com.keepasskey.app.data.logger.DiagnosticLogRetention
+
 import android.content.Context
 import android.content.SharedPreferences
 import com.keepasskey.app.ui.screens.settings.ConflictResolution
@@ -83,6 +85,9 @@ class ExtendedSettingsStore @Inject constructor(
             webdavAllowDeleteBeforeMove = p.getBoolean(
                 K_WEBDAV_ALLOW_DELETE_BEFORE_MOVE, defaults.webdavAllowDeleteBeforeMove
             ),
+            diagnosticLogRetentionDays = p.getInt(
+                K_DIAGNOSTIC_LOG_RETENTION_DAYS, defaults.diagnosticLogRetentionDays
+            ).coerceIn(DiagnosticLogRetention.DAYS_MIN, DiagnosticLogRetention.DAYS_MAX),
 
             // 安全锁定规则与环境
             // ISSUE-P3-363：lockWhenScreenOff 键已随字段移除（单源 UserSettings/DataStore）
@@ -172,6 +177,7 @@ class ExtendedSettingsStore @Inject constructor(
             .putBoolean(K_WEBDAV_CHUNKED_UPLOAD, settings.webdavChunkedUpload)
             .putInt(K_WEBDAV_CHUNK_SIZE_MB, settings.webdavChunkSizeMb)
             .putBoolean(K_WEBDAV_ALLOW_DELETE_BEFORE_MOVE, settings.webdavAllowDeleteBeforeMove)
+            .putInt(K_DIAGNOSTIC_LOG_RETENTION_DAYS, settings.diagnosticLogRetentionDays)
             .putBoolean(K_LOCK_WHEN_NAVIGATE_BACK, settings.lockWhenNavigateBack)
             .putBoolean(K_CLEAR_PASSWORD_ON_LEAVE, settings.clearPasswordOnLeave)
             .putBoolean(K_REMEMBER_KEY_FILE_LOCATION, settings.rememberKeyFileLocation)
@@ -228,6 +234,12 @@ class ExtendedSettingsStore @Inject constructor(
      */
     fun isDiagnosticLogEnabled(): Boolean =
         prefs?.getBoolean(K_DEBUG_LOG_ENABLED, true) ?: true
+
+    /** 诊断日志磁盘留存天数（单键读取，供归档裁剪；越界值收敛到合法档位）。 */
+    fun diagnosticLogRetentionDays(): Int =
+        (prefs?.getInt(K_DIAGNOSTIC_LOG_RETENTION_DAYS, DiagnosticLogRetention.DAYS_DEFAULT)
+            ?: DiagnosticLogRetention.DAYS_DEFAULT)
+            .coerceIn(DiagnosticLogRetention.DAYS_MIN, DiagnosticLogRetention.DAYS_MAX)
 
     /**
      * ISSUE-P3-03 (43f)：详细同步日志开关单键读取（同 [isDiagnosticLogEnabled] 的轻量语义）。
@@ -445,6 +457,7 @@ class ExtendedSettingsStore @Inject constructor(
         const val K_BREACH_CHECK_ENABLED = "breach_check_enabled"
         const val K_DEBUG_LOG_ENABLED = "debug_log_enabled"
         const val K_VERBOSE_SYNC_LOG = "verbose_sync_log"
+        const val K_DIAGNOSTIC_LOG_RETENTION_DAYS = "diagnostic_log_retention_days"
         const val K_WIFI_ONLY_SYNC = "wifi_only_sync"
 
         /** ISSUE-P3-444：界面偏好组（等宽字段字体 / 动效降级） */

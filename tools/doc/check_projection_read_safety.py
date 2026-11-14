@@ -150,6 +150,11 @@ ALLOWED_DISPLAY_READ_FILES = frozenset(
         "app/src/main/java/com/keepasskey/app/autofill/AutofillStructuredDatasets.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockActivity.kt",
         "app/src/main/java/com/keepasskey/app/autofill/DuplicateEntryScanner.kt",
+        # 选择器 VM 的非敏感投影缓存：`AndroidApp` 明文包名键由该 VM 自建独立
+        # `ProtectedString`（isProtected=false），只用于「该包名已绑定」的询问去重；
+        # 降级为空串最多多问一次，不参与落盘值 / 下发值 / 候选放行判定
+        # （凭据取数仍走同文件内 fail-fast 的 `getEntryPasswordChars` 路径）。
+        "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerViewModel.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt",
         "app/src/main/java/com/keepasskey/app/autofill/StructuredFieldPolicy.kt",
         # §522：确认页回传构造的交付复检（条目 URL 只进 `entryMatchesDeliveryOrigin` 布尔闸门，

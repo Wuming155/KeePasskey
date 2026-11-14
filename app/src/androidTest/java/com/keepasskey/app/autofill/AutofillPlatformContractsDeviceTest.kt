@@ -2,9 +2,11 @@ package com.keepasskey.app.autofill
 
 import android.os.Build
 import android.os.Bundle
+import android.service.autofill.FillResponse
 import android.text.InputType
 import android.util.Size
 import android.view.autofill.AutofillId
+import android.view.autofill.AutofillValue
 import android.view.inputmethod.InlineSuggestionsRequest
 import android.widget.EditText
 import android.widget.inline.InlinePresentationSpec
@@ -15,6 +17,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -142,6 +145,78 @@ class AutofillPlatformContractsDeviceTest {
         assertNull(
             "IME 样式不支持 v1 模板时必须降级为 null（官方降级链）",
             factory.build(unsupportedRequest, "fakeUser", "fakeTitle")
+        )
+    }
+
+    @Test
+    fun `真实AutofillValue四类取值契约_非文本读取文本必抛_安全取值回退节点文本`() {
+        val textValue = AutofillValue.forText("fictional-current")
+        val nonTextValues = listOf(
+            AutofillValue.forToggle(true),
+            AutofillValue.forList(1),
+            AutofillValue.forDate(1_700_000_000_000L)
+        )
+
+        assertTrue("forText 必须判为 TEXT", textValue.isText)
+        nonTextValues.forEach { assertFalse("非 TEXT 值不得判为文本", it.isText) }
+
+        // 平台契约：无条件调用 getTextValue() 正是 2026-11-14 诊断日志中的崩溃形态
+        nonTextValues.forEach { value ->
+            val threw = try {
+                value.textValue
+                false
+            } catch (e: IllegalStateException) {
+                true
+            }
+            assertTrue("非 TEXT 值调用 getTextValue() 必须抛 IllegalStateException", threw)
+        }
+
+        assertEquals(
+            "fictional-current",
+            resolveAutofillNodeText(textValue.isText, textValue.textValue, "node-fallback")
+        )
+        nonTextValues.forEach { value ->
+            assertEquals(
+                "node-fallback",
+                resolveAutofillNodeText(value.isText, null, "node-fallback")
+            )
+        }
+    }
+
+    @Test
+    fun `锁定态复用的SaveInfo构造在真实平台可构建FillResponse`() {
+        val service = KeePasskeyAutofillService()
+        service.settingsStore = settingsStore
+
+        var usernameId: AutofillId? = null
+        var passwordId: AutofillId? = null
+        instrumentation.runOnMainSync {
+            usernameId = EditText(context).autofillId
+            passwordId = EditText(context).autofillId
+        }
+        val user = checkNotNull(usernameId) { "主线程 EditText 必须产出有效 AutofillId" }
+        val password = checkNotNull(passwordId) { "主线程 EditText 必须产出有效 AutofillId" }
+
+        // FillResponse 没有公开的 getSaveInfo()（平台 stub 核实）。这里改用平台自身的
+        // 构造约束取证：build() 要求至少存在 DataSet / SaveInfo / 认证态之一。
+        settingsStore.save(originalSettings.copy(offerSaveCredentials = true))
+        val enabled = FillResponse.Builder()
+            .also { service.applySaveInfoIfNeeded(it, user, password) }
+            .build()
+        assertNotNull("开启保存提示时必须能构建携带 SaveInfo 的 FillResponse", enabled)
+
+        settingsStore.save(originalSettings.copy(offerSaveCredentials = false))
+        val emptyBuilder = FillResponse.Builder()
+            .also { service.applySaveInfoIfNeeded(it, user, password) }
+        val rejected = try {
+            emptyBuilder.build()
+            false
+        } catch (e: IllegalStateException) {
+            true
+        }
+        assertTrue(
+            "关闭保存提示时不得注册 SaveInfo（空 Builder 必须被平台 build() 拒绝）",
+            rejected
         )
     }
 }

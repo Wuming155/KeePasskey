@@ -55,6 +55,12 @@ class AutofillLockedSaveActivity : BaseCredentialActivity() {
     @Inject
     lateinit var settingsStore: ExtendedSettingsStore
 
+    @Inject
+    lateinit var callerTrustStore: AutofillCallerTrustStore
+
+    @Inject
+    lateinit var autofillOriginResolver: AutofillOriginResolver
+
     private var requestToken: String? = null
 
     /** 已走到明确终态（成功 / 失败均已登记台账）；销毁时不再按「取消」丢弃载体。 */
@@ -146,6 +152,9 @@ class AutofillLockedSaveActivity : BaseCredentialActivity() {
                     failAndFinish()
                     return@launch
                 }
+                // 与解锁态 onSaveRequest / CM 保存通道同口径：落库成功后建立调用方首次绑定，
+                // 否则 android:// 条目下次仍被 P2-46 绑定门挡住、无法自动出候选。
+                bindCallerAfterAutofillSave(callingPackage, autofillOriginResolver, callerTrustStore)
                 settleToken(token)
                 setResult(RESULT_OK)
                 finish()

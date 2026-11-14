@@ -173,9 +173,9 @@
     <string name="search_write_back_cancel">取消</string>
     <string name="search_write_back_done">已写入 URL：%1$s</string>
     <string name="search_write_back_failed">写入失败</string>
-    <!-- ISSUE-P3-571 方案A：自动填充交付链内「记住这个应用与该条目的关联」询问（Kp2a 式，仅空 URL 纯 App 表单） -->
+    <!-- 自动填充交付链内「记住这个应用与该条目的关联」询问：写入 KeePassDX AndroidApp 自定义字段，URL 不动 -->
     <string name="autofill_app_binding_write_back_title">记住这个应用？</string>
-    <string name="autofill_app_binding_write_back_message">把应用关联 %1$s 写入条目「%2$s」的网址后，此应用下次填充即可直接自动匹配，并随库同步到其它设备。</string>
+    <string name="autofill_app_binding_write_back_message">把应用关联 %1$s 写入条目「%2$s」的应用关联字段（AndroidApp），随密码库同步到其它设备；原有网址保持不变。</string>
     <string name="vault_new_entry">新建凭据条目</string>
     <string name="vault_new_folder">新建文件夹</string>
     <string name="vault_folder_name">文件夹名称</string>
@@ -1351,6 +1351,9 @@
     <string name="debug_log_title">诊断日志</string>
     <string name="debug_log_sub">记录运行事件与故障调用栈；写入时自动脱敏，可随时关闭</string>
     <string name="debug_verbose_title">详细日志模式</string>
+    <string name="debug_retention_title">日志保留周期</string>
+    <string name="debug_retention_sub">日志保存在本应用私有目录，超期记录自动清除</string>
+    <string name="debug_retention_days">%1$d 天</string>
     <string name="debug_verbose_sub">追加同步过程细节与完整异常调用栈，便于定位疑难问题</string>
     <string name="debug_preview_title">日志预览</string>
     <string name="debug_cd_refresh">刷新日志</string>

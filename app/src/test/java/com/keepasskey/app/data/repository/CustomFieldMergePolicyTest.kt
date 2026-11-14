@@ -1,5 +1,6 @@
 package com.keepasskey.app.data.repository
 
+import com.keepasskey.app.autofill.AndroidAppBindingFields
 import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.core.model.KdbxConstants
@@ -9,6 +10,7 @@ import com.keepasskey.core.model.PasskeyData
 import com.keepasskey.core.security.ProtectedString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -138,6 +140,45 @@ class CustomFieldMergePolicyTest {
             listOf("X", "SECRET"),
             merged.keys()
         )
+    }
+
+    @Test
+    fun `多端合并保留AndroidApp字段序列及受保护签名值`() {
+        // 另一端写入的 KeePassDX 关联字段：本端编辑页投影没带这些行，合并后逐键保真，
+        // 签名键的受保护位与值都不得被当普通明文处理（否则同步往返会丢保护）。
+        val (appKey, sigKey) = AndroidAppBindingFields.keysFor(0)
+        val (appKey1, sigKey1) = AndroidAppBindingFields.keysFor(1)
+        val existing = KdbxEntry(
+            customFields = listOf(
+                KdbxCustomField(appKey, ProtectedString("com.tencent.mobileqq", isProtected = false)),
+                KdbxCustomField(sigKey, ProtectedString("AA:BB:CC", isProtected = true)),
+                KdbxCustomField(appKey1, ProtectedString("com.example.app", isProtected = false)),
+                KdbxCustomField(sigKey1, ProtectedString("DD:EE:FF", isProtected = true))
+            )
+        )
+        assertNull(
+            "新键不与标准五字段重名、彼此也不重名",
+            CustomFieldMergePolicy.findInvalidKey(
+                existing.customFields.map {
+                    UiCustomField(id = it.key, key = it.key, value = "", isProtected = it.isProtected)
+                }
+            )
+        )
+
+        val merged = CustomFieldMergePolicy.merge(
+            existing = existing,
+            entry = uiEntry(uiField("X", value = "x-value")),
+            protectedFieldChars = emptyMap(),
+            loadedCustomFieldKeys = baseline("X")
+        )
+
+        assertEquals(listOf("X", appKey, sigKey, appKey1, sigKey1), merged.keys())
+        assertEquals("com.tencent.mobileqq", merged[1].value.readString())
+        assertEquals("com.example.app", merged[3].value.readString())
+        assertTrue("签名字段必须保持受保护", merged[2].isProtected && merged[2].value.isProtected)
+        assertTrue("第二组签名字段必须保持受保护", merged[4].isProtected && merged[4].value.isProtected)
+        assertEquals("AA:BB:CC", merged[2].value.readString())
+        assertEquals("DD:EE:FF", merged[4].value.readString())
     }
 
     @Test

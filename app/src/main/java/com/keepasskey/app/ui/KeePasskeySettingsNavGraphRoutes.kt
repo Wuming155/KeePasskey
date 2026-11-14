@@ -326,6 +326,7 @@ internal fun NavGraphBuilder.settingsDebugRoute(navController: NavHostController
             onBackClick = { navController.popBackStack() },
             onDebugLogToggle = settingsViewModel::setDebugLogEnabled,
             onVerboseSyncLogToggle = settingsViewModel::setVerboseSyncLog,
+            onRetentionDaysChange = settingsViewModel::setDiagnosticLogRetentionDays,
             onRefreshLogs = settingsViewModel::refreshDebugLogs,
             onClearLogs = settingsViewModel::clearDebugLogs,
             onExportLogs = settingsViewModel::exportDebugLogs,

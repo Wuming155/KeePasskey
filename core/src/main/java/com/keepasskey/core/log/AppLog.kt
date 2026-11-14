@@ -12,6 +12,15 @@ import kotlin.concurrent.Volatile
  */
 typealias DiagnosticEventSink = (level: String, tag: String, message: String, throwable: Throwable) -> Unit
 
+/**
+ * 普通诊断行出口（由宿主 Application 在冷启动时安装一次）。
+ *
+ * `AppLog.i` 与不带异常的 `e/w` 此前只写 logcat，用户导出的应用内诊断缓冲里看不到；
+ * 带异常的 `e/w` 才经 [DiagnosticEventSink] 转成脱敏栈帧。本出口把纯文案事件也接进
+ * 同一份缓冲，避免「代码里打了日志、导出里没有」的接线错位。出口侧负责脱敏与循环防护。
+ */
+typealias DiagnosticLineSink = (level: String, tag: String, message: String) -> Unit
+
 /** release 诊断栈的帧预算（跨 cause 链累计，每个异常另保底 1 帧定位锚点）与 cause 链深度上限，避免故障路径刷爆日志 */
 const val MAX_DIAGNOSTIC_FRAMES = 32
 const val MAX_DIAGNOSTIC_CAUSES = 4
@@ -47,6 +56,13 @@ object AppLog {
     @Volatile
     var diagnosticSink: DiagnosticEventSink? = null
 
+    /**
+     * 进程级普通诊断行出口；null = 尚未安装（冷启动早期或纯 JVM 单测）。
+     * 与 [diagnosticSink] 同为进程级日志装配状态，只在 Application.onCreate 安装。
+     */
+    @Volatile
+    var diagnosticLineSink: DiagnosticLineSink? = null
+
     fun v(tag: String, message: String) {
         if (debugEnabled) safe { Log.v(tag, message) }
     }
@@ -55,11 +71,15 @@ object AppLog {
         if (debugEnabled) safe { Log.d(tag, message) }
     }
 
-    fun i(tag: String, message: String) = safe { Log.i(tag, message) }
+    fun i(tag: String, message: String) {
+        safe { Log.i(tag, message) }
+        publishLine("INFO", tag, message)
+    }
 
     fun w(tag: String, message: String, t: Throwable? = null) {
         if (t == null) {
             safe { Log.w(tag, message) }
+            publishLine("WARN", tag, message)
         } else if (debugEnabled) {
             safe { Log.w(tag, message, t) }
         } else {
@@ -71,6 +91,7 @@ object AppLog {
     fun e(tag: String, message: String, t: Throwable? = null) {
         if (t == null) {
             safe { Log.e(tag, message) }
+            publishLine("ERROR", tag, message)
         } else if (debugEnabled) {
             safe { Log.e(tag, message, t) }
         } else {
@@ -89,6 +110,16 @@ object AppLog {
             sink(level, tag, message, t)
         } catch (_: Throwable) {
             // 诊断出口自身失败不得冒泡到故障路径
+        }
+    }
+
+    /** 纯文案事件的第二通道；出口侧负责脱敏与缓冲回显的循环防护 */
+    private fun publishLine(level: String, tag: String, message: String) {
+        val sink = diagnosticLineSink ?: return
+        try {
+            sink(level, tag, message)
+        } catch (_: Throwable) {
+            // 诊断出口自身失败不得冒泡到业务路径
         }
     }
 

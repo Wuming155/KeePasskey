@@ -98,11 +98,35 @@ class KeePasskeyAutofillService : AutofillService() {
 
     private val serviceScope = guardedScope(Dispatchers.Default, "KeePasskeyAutofillService")
 
+    override fun onCreate() {
+        super.onCreate()
+        AppLog.i(TAG, "自动填充服务实例已创建")
+    }
+
+    override fun onConnected() {
+        super.onConnected()
+        // 系统绑定本服务时再采一次环境：进程头是冷启动快照，用户可能在进程启动后才启用服务。
+        AppLog.i(
+            TAG,
+            "系统已连接自动填充服务；" + autofillEnvironmentLine(
+                context = this,
+                autofillChannelEnabled = settingsStore.isAutofillServiceEnabled(),
+                offerSaveEnabled = settingsStore.isOfferSaveCredentialsEnabled()
+            )
+        )
+    }
+
+    override fun onDisconnected() {
+        AppLog.i(TAG, "系统已断开自动填充服务连接")
+        super.onDisconnected()
+    }
+
     override fun onFillRequest(
         request: FillRequest,
         cancellationSignal: CancellationSignal,
         callback: FillCallback
     ) {
+        AppLog.i(TAG, "收到填充请求（已取消=${cancellationSignal.isCanceled}）")
         if (cancellationSignal.isCanceled) return
 
         val job = serviceScope.launch {
@@ -141,7 +165,7 @@ class KeePasskeyAutofillService : AutofillService() {
         if (!settingsStore.isAutofillServiceEnabled() ||
             AutofillAccessPolicy.isSelfApp(callingPkg, packageName)
         ) {
-            AppLog.d(TAG, "自动填充通道已关闭或调用方即本应用，跳过下发")
+            AppLog.i(TAG, "自动填充通道已关闭或调用方即本应用，跳过下发")
             callback.onSuccess(null)
             return
         }
@@ -151,6 +175,7 @@ class KeePasskeyAutofillService : AutofillService() {
         }
 
         val targets = resolveTargetFields(structure, callingPkg) ?: run {
+            AppLog.i(TAG, "未识别到可填充目标，本次不下发响应（无候选、无 SaveInfo）")
             callback.onSuccess(null)
             return
         }
@@ -183,7 +208,7 @@ class KeePasskeyAutofillService : AutofillService() {
         // （P2-73 实证的「认证完成后框架重发」语义），本分支如实返回空响应。
         if (usernameId == null && passwordId == null && structuredTargetIds.isNotEmpty()) {
             if (vaultRepository.isLocked()) {
-                AppLog.d(TAG, "纯结构化表单在库锁定态暂不下发（解锁后框架重发请求）")
+                AppLog.i(TAG, "纯结构化表单在库锁定态暂不下发（解锁后框架重发请求）")
                 callback.onSuccess(null)
                 return
             }
@@ -199,7 +224,7 @@ class KeePasskeyAutofillService : AutofillService() {
                 // ISSUE-P2-73 AC③：设备侧核对「库锁定 ⇒ 下发认证引导数据集」的调试留痕。
                 // 用 `AppLog.d`（仅 debug 构建输出，release 静默且被 R8 剥离）——不改变任何语义，
                 // 只为真机链路提供可核对的时序锚点；日志不含包名/条目等敏感标识。
-                AppLog.d(TAG, "onFillRequest 下发解锁引导数据集（密码库锁定，认证由解锁 Activity 承接）")
+                AppLog.i(TAG, "onFillRequest 下发解锁引导数据集（密码库锁定，认证由解锁 Activity 承接）")
                 callback.onSuccess(lockedResponse)
                 return
             }
@@ -287,7 +312,7 @@ class KeePasskeyAutofillService : AutofillService() {
         )
         // ISSUE-P2-73 AC③：设备侧核对「认证完成后框架**重发** onFillRequest」的调试留痕
         // （与库锁定分支的留痕配对即为该结论的直接证据）；仅 debug 构建输出。
-        AppLog.d(TAG, "onFillRequest 下发已解锁数据集（候选/选择器/保存信息）")
+        AppLog.i(TAG, "onFillRequest 下发已解锁数据集（候选/选择器/保存信息）")
         callback.onSuccess(responseBuilder.build())
     }
 
@@ -296,6 +321,7 @@ class KeePasskeyAutofillService : AutofillService() {
         callback: SaveCallback
     ) {
         val contexts = request.fillContexts
+        AppLog.i(TAG, "收到系统保存请求（上下文数=${contexts.size}）")
         if (contexts.isEmpty()) {
             callback.onSuccess()
             return
@@ -406,6 +432,9 @@ class KeePasskeyAutofillService : AutofillService() {
                 )
                 when (result) {
                     is com.keepasskey.core.result.KdbxResult.Success -> {
+                        // 落库成功即建立调用方首次绑定：否则新建/更新的 android:// 条目
+                        // 下次仍被 P2-46 绑定门挡住，用户还得再跳转手动搜索。
+                        bindCallerAfterAutofillSave(callingPkg, autofillOriginResolver, callerTrustStore)
                         callback.onSuccess()
                     }
                     is com.keepasskey.core.result.KdbxResult.Failure -> {
@@ -481,6 +510,7 @@ class KeePasskeyAutofillService : AutofillService() {
     }
 
     override fun onDestroy() {
+        AppLog.i(TAG, "自动填充服务已销毁")
         // 无状态服务契约（官方）：系统解绑即取消全部在途协程，杜绝解绑后空转与迟到回调
         serviceScope.cancel()
         super.onDestroy()

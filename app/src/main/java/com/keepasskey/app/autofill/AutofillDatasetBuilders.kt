@@ -169,7 +169,12 @@ internal fun KeePasskeyAutofillService.buildLockedUnlockDataset(
     }
     dsBuilder.setAuthentication(pendingIntent.intentSender)
 
-    return FillResponse.Builder().apply { addDataset(dsBuilder.build()) }.build()
+    val responseBuilder = FillResponse.Builder().apply { addDataset(dsBuilder.build()) }
+    // 库锁定态同样注册 SaveInfo：否则系统不会弹「保存密码」提示，onSaveRequest 的锁定态
+    // 解锁承接链（dispatchLockedSave）没有触发入口。requiredIds 指向本响应里
+    // setValue(id, null) 的账号 / 密码框，与已解锁分支共用同一构造口径。
+    applySaveInfoIfNeeded(responseBuilder, usernameId, passwordId)
+    return responseBuilder.build()
 }
 
 /**
@@ -449,7 +454,10 @@ internal fun KeePasskeyAutofillService.applySaveInfoIfNeeded(
 ) {
     // 注册 SaveInfo 以便在用户提交时捕获新账密
     // ISSUE-P3-44：仅在用户开启「新密码保存提示」时注册
-    if (!settingsStore.isOfferSaveCredentialsEnabled()) return
+    if (!settingsStore.isOfferSaveCredentialsEnabled()) {
+        AppLog.i(TAG, "新密码保存提示已关闭，本次不注册 SaveInfo")
+        return
+    }
     val saveFlags = SaveInfo.SAVE_DATA_TYPE_PASSWORD or SaveInfo.SAVE_DATA_TYPE_USERNAME
 
     val saveInfo = when {
@@ -471,5 +479,8 @@ internal fun KeePasskeyAutofillService.applySaveInfoIfNeeded(
 
     if (saveInfo != null) {
         responseBuilder.setSaveInfo(saveInfo)
+        AppLog.i(TAG, "SaveInfo 已注册（密码目标=${passwordId != null}）")
+    } else {
+        AppLog.i(TAG, "无账号/密码目标，本次不注册 SaveInfo")
     }
 }

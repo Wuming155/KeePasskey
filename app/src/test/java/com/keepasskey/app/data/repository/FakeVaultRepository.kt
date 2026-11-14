@@ -1,5 +1,6 @@
 package com.keepasskey.app.data.repository
 
+import com.keepasskey.app.autofill.AndroidAppBindingFields
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.ui.model.EntryCategory
 import com.keepasskey.app.ui.model.UiAttachment
@@ -393,6 +394,28 @@ class FakeVaultRepository(
     /** ISSUE-P3-571 观测点：`updateEntryUrl` 收到的入参（entryId → url），供询问流断言使用。 */
     var lastWrittenUrlByEntry: Map<String, String> = emptyMap()
         private set
+
+    /** 一次 `addAppBinding` 的入参观测点（应用关联写回走 KeePassDX 自定义字段，URL 不动）。 */
+    data class AppBindingCall(val packageName: String, val fingerprintHex: String)
+
+    /** 应用关联写回的入参观测点（entryId → 调用入参）；与 `lastWrittenUrlByEntry` 同口径。 */
+    var lastAppBindingByEntry: Map<String, AppBindingCall> = emptyMap()
+        private set
+
+    /**
+     * 应用关联写回的替身实现：替身不建模真实 KDBX 字段表往返，只如实记录入参并返回成功。
+     * 「该包名已存在不再询问」由 [com.keepasskey.app.autofill.AutofillPickerViewModel] 在写入
+     * 成功后同步自己的非敏感投影缓存来驱动，故此处无需伪造 `getKdbxEntry` 的 id 往返。
+     */
+    override suspend fun addAppBinding(
+        entryId: String,
+        packageName: String,
+        fingerprintHex: String
+    ): com.keepasskey.core.result.KdbxResult<Unit> {
+        lastAppBindingByEntry = lastAppBindingByEntry +
+            (entryId to AppBindingCall(packageName, fingerprintHex))
+        return com.keepasskey.core.result.KdbxResult.Success(Unit)
+    }
 
     // TASK-16 Fake 语义：克隆 = 同字段复制 + 新 id + 清历史修订
     override suspend fun duplicateEntry(id: String): com.keepasskey.core.result.KdbxResult<String> {
@@ -826,22 +849,52 @@ class FakeVaultRepository(
             val currentList = entriesFlow.value.toMutableList()
             val existingIndex = currentList.indexOfFirst {
                 val matchDomain = domain != null && it.url.isNotBlank() && DomainMatcher.isDomainMatch(it.url, domain)
-                // L1 整改：与 RealVaultRepository 一致，仅走严格包名边界匹配
-                val matchPackage = it.url.isNotBlank() && DomainMatcher.isPackageMatch(it.url, packageName)
+                // 与 RealVaultRepository 同口径：URL 旧形态 + KeePassDX 自定义字段双形态去重
+                val kdbxCustomFields = it.customFields.map { cf ->
+                    KdbxCustomField(cf.key, ProtectedString(cf.value, isProtected = cf.isProtected))
+                }
+                val matchPackage = VaultEntryWriteCoordinator.matchesSavedPackage(
+                    it.url, kdbxCustomFields, packageName
+                )
                 (matchDomain || matchPackage) && (it.username == username || it.username.isEmpty())
             }
 
             if (existingIndex >= 0) {
                 val old = currentList[existingIndex]
+                val hasAppBinding = old.customFields.any { cf ->
+                    cf.key == AndroidAppBindingFields.APPLICATION_ID_FIELD_NAME ||
+                        cf.key.startsWith(AndroidAppBindingFields.APPLICATION_ID_FIELD_NAME + "_")
+                }
+                val bindingField = if (domain == null && !hasAppBinding) {
+                    listOf(
+                        UiCustomField(
+                            id = "${old.id}_androidapp",
+                            key = AndroidAppBindingFields.APPLICATION_ID_FIELD_NAME,
+                            value = packageName,
+                            isProtected = false
+                        )
+                    )
+                } else emptyList()
                 currentList[existingIndex] = old.copy(
                     passwordMasked = "••••••••••••••••",
-                    username = if (old.username.isEmpty()) username else old.username
+                    username = if (old.username.isEmpty()) username else old.username,
+                    customFields = old.customFields + bindingField
                 )
                 passwordStore.value = passwordStore.value + (old.id to pwdString)
             } else {
                 val titleDomain = domain ?: packageName
                 val title = if (username.isNotBlank()) "$username@$titleDomain" else titleDomain
                 val url = if (domain != null) "https://$domain" else "android://$packageName"
+                val customFields = if (domain == null) {
+                    listOf(
+                        UiCustomField(
+                            id = "auto_androidapp_${System.currentTimeMillis()}",
+                            key = AndroidAppBindingFields.APPLICATION_ID_FIELD_NAME,
+                            value = packageName,
+                            isProtected = false
+                        )
+                    )
+                } else emptyList()
                 val newEntry = UiVaultEntry(
                     id = "auto_${System.currentTimeMillis()}",
                     title = title,
@@ -849,7 +902,8 @@ class FakeVaultRepository(
                     passwordMasked = "••••••••••••••••",
                     url = url,
                     category = EntryCategory.LOGIN,
-                    notes = "Auto-saved from $packageName"
+                    notes = "Auto-saved from $packageName",
+                    customFields = customFields
                 )
                 passwordStore.value = passwordStore.value + (newEntry.id to pwdString)
                 currentList.add(newEntry)

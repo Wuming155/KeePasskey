@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -31,6 +32,8 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -85,6 +88,7 @@ fun DebugSettingsScreen(
     onBackClick: () -> Unit,
     onDebugLogToggle: (Boolean) -> Unit,
     onVerboseSyncLogToggle: (Boolean) -> Unit,
+    onRetentionDaysChange: (Int) -> Unit = {},
     onRefreshLogs: () -> Unit = {},
     onClearLogs: () -> Unit = {},
     onExportLogs: (Uri) -> Unit = {},
@@ -167,6 +171,43 @@ fun DebugSettingsScreen(
                             // 依赖「诊断日志」总开关：关闭时禁用交互并降透明度（M3 disabled 态）
                             enabled = uiState.debugLogEnabled
                         )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DateRange,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = stringResource(R.string.debug_retention_title),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.debug_retention_sub),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                com.keepasskey.app.data.logger.DiagnosticLogRetention.OPTIONS.forEach { days ->
+                                    FilterChip(
+                                        selected = uiState.diagnosticLogRetentionDays == days,
+                                        onClick = { onRetentionDaysChange(days) },
+                                        label = { Text(stringResource(R.string.debug_retention_days, days)) },
+                                        enabled = uiState.debugLogEnabled
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

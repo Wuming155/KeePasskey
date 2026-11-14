@@ -54,6 +54,27 @@ internal data class ScannedStructure(
 )
 
 /**
+ * 节点当前文本的安全取值（纯判定，JVM 可直测）。
+ *
+ * [android.view.autofill.AutofillValue] 除 TEXT 外还有 TOGGLE / LIST / DATE 三类，
+ * `getTextValue()` 仅对 TEXT 合法，无条件调用会抛 [IllegalStateException] 并令整次
+ * `onFillRequest` 失败（2026-11-14 release 诊断日志实证：候选、选择器与 SaveInfo 全部缺失）。
+ * 非文本值一律回退 `ViewNode.getText()`，与「优先取自动填充当前值，否则取节点文本」的既有语义一致。
+ *
+ * @param isTextValue 调用方按 `AutofillValue.isText()` 判定的结果；无自动填充值时传 false
+ * @param autofillText 仅当 [isTextValue] 为 true 时传入的文本值
+ */
+internal fun resolveAutofillNodeText(
+    isTextValue: Boolean,
+    autofillText: CharSequence?,
+    nodeText: CharSequence?
+): String = if (isTextValue) {
+    autofillText?.toString() ?: nodeText?.toString().orEmpty()
+} else {
+    nodeText?.toString().orEmpty()
+}
+
+/**
  * AssistStructure 遍历与节点解析（自 [KeePasskeyAutofillService] 原样抽出）。
  *
  * 纯结构搬运：遍历顺序、children 递归顺序与 `parsedNodes`/`scanNodes` 的构造逻辑
@@ -113,7 +134,20 @@ internal object AutofillStructureScanner {
         val autofillId = node.autofillId
         if (autofillId != null) {
             val hints = node.autofillHints?.toList().orEmpty()
-            val textVal = node.autofillValue?.textValue?.toString() ?: node.text?.toString().orEmpty()
+            val autofillValue = node.autofillValue
+            val textVal = if (autofillValue?.isText == true) {
+                resolveAutofillNodeText(
+                    isTextValue = true,
+                    autofillText = autofillValue.textValue,
+                    nodeText = node.text
+                )
+            } else {
+                resolveAutofillNodeText(
+                    isTextValue = false,
+                    autofillText = null,
+                    nodeText = node.text
+                )
+            }
             // ISSUE-P2-588：原生控件取 idEntry；WebView 提取 HTML name/id 属性；绝不以 hint 污染 htmlName
             val htmlName = node.idEntry ?: extractHtmlName(node)
             val className = node.className

@@ -124,5 +124,8 @@ data class ExtendedSettings(
      * 允许「删除云端旧文件 + 以 `Overwrite: F` 改名」完成写入。开启即接受云端文件短暂消失
      * 与多端并发覆盖风险，仅建议单设备使用场景开启；消费方见 `SyncTransferOptions.allowDeleteBeforeMove`。
      */
-    val webdavAllowDeleteBeforeMove: Boolean = false
+    val webdavAllowDeleteBeforeMove: Boolean = false,
+
+    /** 诊断日志在私有目录的保留天数（默认 3 天；设置页提供 1 / 3 / 7 / 30 档）。 */
+    val diagnosticLogRetentionDays: Int = com.keepasskey.app.data.logger.DiagnosticLogRetention.DAYS_DEFAULT
 )

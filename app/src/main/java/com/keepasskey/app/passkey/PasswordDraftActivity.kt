@@ -13,11 +13,13 @@ import androidx.credentials.provider.PendingIntentHandler
 import androidx.credentials.provider.BeginGetCredentialRequest
 import androidx.credentials.provider.BeginGetPasswordOption
 import androidx.lifecycle.lifecycleScope
+import com.keepasskey.app.autofill.AndroidAppBindingFields
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.PasskeyPrivilegedBrowserStore
 import com.keepasskey.app.data.repository.VaultEntryWriteCoordinator
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ApplyObscuredTouchFilter
+import com.keepasskey.app.ui.model.UiCustomField
 import com.keepasskey.app.ui.model.UiVaultEntry
 import com.keepasskey.app.ui.screens.edit.EntryEditUiState
 import com.keepasskey.app.ui.screens.edit.generatePasswordChars
@@ -219,13 +221,27 @@ class PasswordDraftActivity : BaseCredentialActivity() {
                 }
                 // create-only：预生成 uuid 并显式传入 ⇒ 走 `saveEntryInternal` 的新建分支
                 val entryId = KdbxUuid.random().toHexString()
+                val appBindingFields = if (!isWebBinding && callingPackage.isNotBlank()) {
+                    // 与 `VaultEntryWriteCoordinator` 保存链同口径：纯 App 新条目同时声明
+                    // KeePassDX `AndroidApp` 字段，使关联随库同步；URL 仍保留 `android://` 旧形态
+                    // 供 CM 候选层的包名维度召回。
+                    listOf(
+                        UiCustomField(
+                            id = "${entryId}_androidapp",
+                            key = AndroidAppBindingFields.APPLICATION_ID_FIELD_NAME,
+                            value = callingPackage,
+                            isProtected = false
+                        )
+                    )
+                } else emptyList()
                 val entry = UiVaultEntry(
                     id = entryId,
                     title = userName.trim().ifBlank { displayDomain },
                     username = userName.trim(),
                     url = entryUrl,
                     notes = if (isWebBinding) "" else "Package: $callingPackage",
-                    groupId = null
+                    groupId = null,
+                    customFields = appBindingFields
                 )
                 when (val result = credentialSessionGate.withRequest { vaultRepository.saveEntry(entry, passwordChars = submission) }) {
                     is com.keepasskey.core.result.KdbxResult.Success -> deliver(entryId)

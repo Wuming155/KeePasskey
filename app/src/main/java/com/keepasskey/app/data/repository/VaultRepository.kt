@@ -293,6 +293,23 @@ interface VaultRepository : VaultSecretAccess, VaultPasskeyRepository, VaultWrit
     suspend fun updateEntryUrl(entryId: String, url: String): com.keepasskey.core.result.KdbxResult<Unit>
 
     /**
+     * 把调用方应用关联写入条目**自定义字段**（`AndroidApp` / `AndroidApp Signature`，KeePassDX 口径）。
+     *
+     * 与 [updateEntryUrl] 的关键差别：**绝不改动 `URL` 标准字段**——已有网址、旧的 `android://`
+     * 绑定、`{REF:}` 引用都原样保留；只在自定义字段序列上追加连续编号的一组包名 + 签名摘要。
+     * 包名已存在时幂等返回成功（不重复写、不重复询问）。字段级即时写、不产生历史修订，
+     * 语义与字段面保证见 `VaultEntryAppBindingWriter`。
+     *
+     * [fingerprintHex] 为调用方签名证书 SHA-256（连续大写 hex）；传入空白时按 KeePassDX
+     * 无签名形态只写包名键，消费侧仍受 P2-46 首次绑定门约束。
+     */
+    suspend fun addAppBinding(
+        entryId: String,
+        packageName: String,
+        fingerprintHex: String
+    ): com.keepasskey.core.result.KdbxResult<Unit>
+
+    /**
      * 还原处于回收站中的凭据条目
      */
     suspend fun restoreEntry(id: String): com.keepasskey.core.result.KdbxResult<Unit>

@@ -1,8 +1,10 @@
 package com.keepasskey.app.autofill
 
 import com.keepasskey.app.data.repository.RealVaultRepository
+import com.keepasskey.app.data.repository.VaultEntryAppBindingWriter
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.app.passkey.PublicSuffixList
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.PasskeyData
 
@@ -51,7 +53,7 @@ object AutofillCandidateRanker {
 
     /** 匹配原因（供诊断与单测断言；不参与安全判定） */
     enum class MatchReason {
-        /** 条目 url 以 android:// 绑定调用包名（严格精确，无父子关系；https:// 等 Web 绑定条目不产生本原因） */
+        /** 条目以 `android://` 绑定调用包名，或经 `AndroidApp` 自定义字段声明绑定（严格精确，无父子关系） */
         EXACT_PACKAGE,
 
         /** 条目域名与目标域完全相等（含去 www 归一后相等，ISSUE-P3-372 AC⑤） */
@@ -143,6 +145,9 @@ object AutofillCandidateRanker {
      *   传入时该条目恒成为候选并置首位，但仍受「已过期条目排除」约束。浏览器上下文
      *   （`webDomain != null`）它还须通过当前域匹配（`ISSUE-P2-617`），未通过即不入选。
      *   传 null（未命中）时本参数对结果零影响。
+     * @param callingCertDigests 调用方签名摘要快照：`AndroidApp*` 自定义字段绑定的签名比对用。
+     *   为空（不可读 / 未传入的既有调用点）时字段绑定一律不参与命中（fail-closed）。
+     *   生产链路必须显式传入，与归属解析 / P2-46 首次绑定校验共用同一次读取的快照。
      * @return 按优先级降序排列的候选，长度 ≤ [limit]
      */
     fun rank(
@@ -154,7 +159,8 @@ object AutofillCandidateRanker {
         limit: Int = DEFAULT_LIMIT,
         callingAppLabel: String? = null,
         wifiContext: Boolean = false,
-        rememberedEntryId: String? = null
+        rememberedEntryId: String? = null,
+        callingCertDigests: CallerCertDigests = CallerCertDigests.EMPTY
     ): List<Ranked> {
         if (entries.isEmpty()) return emptyList()
 
@@ -188,7 +194,7 @@ object AutofillCandidateRanker {
             } else {
                 scoreEntry(
                     entry, callingPackage, normalizedDomain, packageDimensionAuthorized,
-                    callingAppLabel, wifiContext
+                    callingAppLabel, wifiContext, callingCertDigests
                 )
             }
         }
@@ -243,7 +249,8 @@ object AutofillCandidateRanker {
         webDomain: String?,
         packageDimensionAuthorized: Boolean,
         callingAppLabel: String?,
-        wifiContext: Boolean
+        wifiContext: Boolean,
+        callingCertDigests: CallerCertDigests
     ): Ranked? {
         // ISSUE-P3-393 AC①：过期条目直接排除出填充候选（对齐 KeePassXC 浏览器扩展
         // 「prior to custom data」检查；两通道一致见调用方过滤）。
@@ -258,13 +265,16 @@ object AutofillCandidateRanker {
         // 与会话整树替换的就地擦除不共享锁 ⇒ 元数据读取一律走展示面读口（裸 getter 会崩进程）
         val entryUrl = entry.displayUrl()
 
-        // ISSUE-P2-46：包名维度必须同时满足「条目显式 android:// 绑定」与「调用方已按
-        // 包名 + 签名摘要完成首次绑定」。仅有前者时，任意以同 applicationId 侧载的应用
-        // 都能命中（原缺陷）；仅有后者时，条目并未声明对该包的绑定，同样不得入选。
+        // ISSUE-P2-46：包名维度必须同时满足「条目显式声明绑定」与「调用方已按
+        // 包名 + 签名摘要完成首次绑定」。声明有两形态：URL 的 `android://<包名>`（旧数据兼容）
+        // 与 KeePassDX `AndroidApp[_N]` 自定义字段（随库同步的新通道）；后者还须通过
+        // 条目内签名字段与本次调用方摘要的归一比对（签名未声明时只按包名，仍受本门约束）。
+        // 仅有前者时，任意以同 applicationId 侧载的应用都能命中（原缺陷）；仅有后者时，
+        // 条目并未声明对该包的绑定，同样不得入选。
         val packageMatch = packageDimensionAuthorized &&
             callingPackage.isNotBlank() &&
-            entryUrl.isNotBlank() &&
-            DomainMatcher.isAndroidPackageMatch(entryUrl, callingPackage)
+            (DomainMatcher.isAndroidPackageMatch(entryUrl, callingPackage) ||
+                matchesAppBindingFields(entry, callingPackage, callingCertDigests))
         if (packageMatch) {
             score += SCORE_EXACT_PACKAGE
             reasons += MatchReason.EXACT_PACKAGE
@@ -323,6 +333,25 @@ object AutofillCandidateRanker {
         }
 
         return Ranked(entry = entry, score = score, reasons = reasons)
+    }
+
+    /**
+     * KeePassDX `AndroidApp*` 自定义字段绑定命中（随 `.kdbx` 同步的关联通道）。
+     *
+     * fail-closed 三层：调用方摘要不可读不参与；绑定键读取失败（实例已被擦除）不参与；
+     * 条目声明了签名却与本次任一摘要都不相等不参与。条目未声明签名时只按包名命中，
+     * 但整个包名维度仍由 [rank] 的 `packageDimensionAuthorized`（P2-46）把门。
+     */
+    private fun matchesAppBindingFields(
+        entry: KdbxEntry,
+        callingPackage: String,
+        callerCertDigests: CallerCertDigests
+    ): Boolean {
+        if (callerCertDigests.isEmpty) return false
+        val values = VaultEntryAppBindingWriter.bindingFieldValues(entry.customFields) ?: return false
+        return AndroidAppBindingFields.matches(
+            AndroidAppBindingFields.parse(values), callingPackage, callerCertDigests
+        )
     }
 
     /** 同站加性档命中结果（分数 + 原因） */

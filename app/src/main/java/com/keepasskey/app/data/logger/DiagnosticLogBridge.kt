@@ -1,12 +1,15 @@
 package com.keepasskey.app.data.logger
 
+import android.content.Context
 import android.os.Build
 import com.keepasskey.app.BuildConfig
+import com.keepasskey.app.autofill.autofillEnvironmentLine
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.log.MAX_DIAGNOSTIC_CAUSES
 import com.keepasskey.core.log.MAX_DIAGNOSTIC_FRAMES
 import com.keepasskey.core.log.diagnosticText
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,8 +32,12 @@ class DiagnosticLogBridge @Inject constructor(
     private val settingsStore: ExtendedSettingsStore
 ) {
 
-    /** 由 MainApplication.onCreate 安装一次；重复安装只替换同一个函数引用，不重复写头。 */
-    fun install() {
+    /**
+     * 由 MainApplication.onCreate 安装一次；重复安装只替换同一个函数引用，不重复写头。
+     *
+     * @param context 生产传入 Application（用于取回上一条进程的诊断历史）；纯 JVM 单测传 null。
+     */
+    fun install(context: Context? = null) {
         AppLog.diagnosticSink = { level, tag, message, throwable ->
             val frameBudget = if (settingsStore.isVerboseSyncLogEnabled()) {
                 MAX_DIAGNOSTIC_FRAMES
@@ -45,7 +52,32 @@ class DiagnosticLogBridge @Inject constructor(
             )
             buffer.log(level, tag, text)
         }
+        // 纯文案的 i / 无异常 e/w 此前只进 logcat，用户导出里看不到；统一接进同一份缓冲。
+        // KpLog 是缓冲回显 logcat 的 tag，必须过滤，否则形成「缓冲 → logcat → 缓冲」回环。
+        AppLog.diagnosticLineSink = { level, tag, message ->
+            if (tag != DebugLogBuffer.LOGCAT_TAG) buffer.log(level, tag, message)
+        }
+        if (context != null) {
+            val dir = File(context.noBackupFilesDir, "diagnostic")
+            DiagnosticLogHistory.configure(dir, settingsStore.diagnosticLogRetentionDays())
+        }
         buffer.audit(TAG, processHeader())
+    }
+
+    /**
+     * 由 `MainApplication.onCreate` 在 [install] 之后调用一次：把系统侧自动填充开关与
+     * 装机时间写进审计通道。导出日志据此可直接判定「系统是否把本应用设为自动填充服务」，
+     * 不必让用户翻系统设置，也能核对设备上跑的是不是刚打的包。
+     */
+    fun logAutofillEnvironment(context: Context) {
+        buffer.audit(
+            TAG,
+            autofillEnvironmentLine(
+                context = context,
+                autofillChannelEnabled = settingsStore.isAutofillServiceEnabled(),
+                offerSaveEnabled = settingsStore.isOfferSaveCredentialsEnabled()
+            )
+        )
     }
 
     private fun processHeader(): String = buildString {

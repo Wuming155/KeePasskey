@@ -21,8 +21,9 @@ data class DiagnosticLogStatus(
  * 稳定版与调试版共用本缓冲：用户遇到故障后必须能导出日志向开发者反馈，故 release 不再
  * 恒关。**所有行在写入时经 [DiagnosticLogRedactor] 脱敏**，缓冲、设置页预览、logcat 直出
  * 与导出文件正文同源，均不含 URL、账号、主机、库/密钥文件名等标识；导出边界再脱敏一次。
- * 缓冲只驻留内存、进程结束即消失；logcat 直出写系统日志缓冲（不写应用文件），落盘只发生在
- * 用户主动选择导出位置时。
+ * 缓冲主存内存供设置页预览；每行同时异步追加到应用私有目录的 [DiagnosticLogHistory]，
+ * 按设置页选择的周期（默认 3 天）留存，导出正文直接取该归档，覆盖周期内所有进程；
+ * 用户主动清除日志时一并删除。导出到用户选择的位置仍只在用户主动导出时发生。
  *
  * 故障可定位性：每行带**日期、时刻、线程名、级别、tag**，并由应用内诊断桥把 `AppLog.e/w`
  * 的异常类型与有界栈帧（[com.keepasskey.core.log.diagnosticText]，不含异常 message）写入同一缓冲。
@@ -97,7 +98,7 @@ class DebugLogBuffer(
         droppedLines = 0
         firstTimestamp = null
         lastTimestamp = null
-    }
+    }.also { DiagnosticLogHistory.clear() }
 
     /** 缓冲当前状态：报告头据此说明时间跨度、保留行数与丢弃行数。 */
     fun status(): DiagnosticLogStatus = synchronized(lock) {
@@ -113,9 +114,13 @@ class DebugLogBuffer(
     /** 进程内预览文本：与导出正文同源，同样只含写入时已脱敏的行 */
     fun exportText(): String = synchronized(lock) { textLocked() }
 
-    /** 导出边界的第二道防线：规则幂等，对写入时已脱敏的行重复调用不改变内容 */
-    fun exportSanitizedText(): String = synchronized(lock) {
-        DiagnosticLogRedactor.redact(textLocked())
+    /**
+     * 导出边界的第二道防线：正文优先取按天留存的磁盘归档（覆盖周期内所有进程），
+     * 未启用磁盘留存（纯 JVM 单测）时退回本进程缓冲；规则幂等，重复调用不改变内容。
+     */
+    fun exportSanitizedText(): String {
+        val text = DiagnosticLogHistory.snapshotForExport() ?: synchronized(lock) { textLocked() }
+        return DiagnosticLogRedactor.redact(text)
     }
 
     private fun append(level: String, tag: String, message: String) {
@@ -149,6 +154,8 @@ class DebugLogBuffer(
             // 故稳定版同样可经 adb logcat 取得脱敏诊断行。
             com.keepasskey.core.log.AppLog.i(LOGCAT_TAG, line)
         }
+        // 跨进程留存：写入时已脱敏的整行异步落盘，下次进程启动灌回缓冲前缀。
+        DiagnosticLogHistory.append(line)
     }
 
     /** 调用方已持锁：快照与导出正文共用，保证「看到什么就能导出什么」。 */
@@ -170,6 +177,6 @@ class DebugLogBuffer(
         private val DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd")
         private val TS_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
         private val FULL_TS_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-        private const val LOGCAT_TAG = "KpLog"
+        internal const val LOGCAT_TAG = "KpLog"
     }
 }

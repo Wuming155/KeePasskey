@@ -1,6 +1,7 @@
 package com.keepasskey.app.autofill
 
 import com.keepasskey.app.data.repository.RealVaultRepository
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
@@ -76,6 +77,107 @@ class AutofillCandidateRankerTest {
 
         val prefix = entry(hexIdOf(2), "android://com.example.app.evil")
         assertTrue(AutofillCandidateRanker.rank(listOf(prefix), "com.example.app", null, packageDimensionAuthorized = true).isEmpty())
+    }
+
+    private val bindingFingerprint = "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90"
+
+    /** 带 KeePassDX `AndroidApp*` 自定义字段的条目；[signature] 为 null 时按无签名形态写入。 */
+    private fun appBoundEntry(
+        url: String = "",
+        packageName: String = "com.example.app",
+        signature: String? = bindingFingerprint,
+        hexId: String = hexIdOf(9)
+    ): KdbxEntry {
+        val (appKey, sigKey) = AndroidAppBindingFields.keysFor(0)
+        val fields = mutableListOf(
+            KdbxCustomField(appKey, ProtectedString(packageName, isProtected = false))
+        )
+        if (signature != null) {
+            fields += KdbxCustomField(
+                sigKey,
+                ProtectedString(AndroidAppBindingFields.toColonHex(signature), isProtected = true)
+            )
+        }
+        return entry(hexId, url).copy(customFields = fields)
+    }
+
+    @Test
+    fun `AndroidApp字段绑定在P2_46门放行且摘要匹配时入选`() {
+        val bound = appBoundEntry()
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(bound), "com.example.app", null,
+            packageDimensionAuthorized = true,
+            callingCertDigests = CallerCertDigests.ofSingle(bindingFingerprint)
+        )
+
+        assertEquals(1, ranked.size)
+        assertTrue(AutofillCandidateRanker.MatchReason.EXACT_PACKAGE in ranked.single().reasons)
+    }
+
+    @Test
+    fun `已有网址的条目经字段绑定命中_URL不再需要整段替换`() {
+        val bound = appBoundEntry(url = "https://example.com")
+        val ranked = AutofillCandidateRanker.rank(
+            listOf(bound), "com.example.app", null,
+            packageDimensionAuthorized = true,
+            callingCertDigests = CallerCertDigests.ofSingle(bindingFingerprint.lowercase())
+        )
+
+        assertEquals(1, ranked.size)
+        assertEquals("https://example.com", ranked.single().entry.url)
+    }
+
+    @Test
+    fun `P2_46门未放行时字段绑定不得入选`() {
+        val bound = appBoundEntry()
+        assertTrue(
+            AutofillCandidateRanker.rank(
+                listOf(bound), "com.example.app", null,
+                packageDimensionAuthorized = false,
+                callingCertDigests = CallerCertDigests.ofSingle(bindingFingerprint)
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun `签名字段不匹配或摘要不可读不得入选`() {
+        val bound = appBoundEntry()
+        assertTrue(
+            "签名不符不得命中",
+            AutofillCandidateRanker.rank(
+                listOf(bound), "com.example.app", null,
+                packageDimensionAuthorized = true,
+                callingCertDigests = CallerCertDigests.ofSingle("00".repeat(32))
+            ).isEmpty()
+        )
+        assertTrue(
+            "摘要不可读不得命中",
+            AutofillCandidateRanker.rank(
+                listOf(bound), "com.example.app", null,
+                packageDimensionAuthorized = true,
+                callingCertDigests = CallerCertDigests.EMPTY
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun `字段未声明签名时按包名命中_仍受P2_46门约束`() {
+        val bound = appBoundEntry(signature = null)
+        assertEquals(
+            1,
+            AutofillCandidateRanker.rank(
+                listOf(bound), "com.example.app", null,
+                packageDimensionAuthorized = true,
+                callingCertDigests = CallerCertDigests.ofSingle(bindingFingerprint)
+            ).size
+        )
+        assertTrue(
+            AutofillCandidateRanker.rank(
+                listOf(bound), "com.example.app", null,
+                packageDimensionAuthorized = false,
+                callingCertDigests = CallerCertDigests.ofSingle(bindingFingerprint)
+            ).isEmpty()
+        )
     }
 
     @Test

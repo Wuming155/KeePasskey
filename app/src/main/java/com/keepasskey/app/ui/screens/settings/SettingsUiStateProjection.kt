@@ -276,6 +276,7 @@ internal fun buildSettingsUiState(
     // 8. 调试日志
     debugLogEnabled = extState.debugLogEnabled,
     verboseSyncLog = extState.verboseSyncLog,
+    diagnosticLogRetentionDays = extState.diagnosticLogRetentionDays,
     debugLogLines = debugLogLines,
 
     // 9. 关于与系统信息（ISSUE-P2-498：版本读数取自 BuildConfig，单一真相源 [AppVersionInfo]）

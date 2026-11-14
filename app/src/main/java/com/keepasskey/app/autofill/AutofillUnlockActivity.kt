@@ -235,14 +235,26 @@ class AutofillUnlockActivity : FragmentActivity() {
             // ISSUE-P3-372 AC④：调用方应用名作排序加成（与服务端装配同口径）
             callingAppLabel = callerAppLabelOrNull(callingPackage),
             // ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成（与服务端装配同口径）
-            wifiContext = WifiFillBoostPolicy.isWifiSettingsPackage(callingPackage)
+            wifiContext = WifiFillBoostPolicy.isWifiSettingsPackage(callingPackage),
+            // KeePassDX `AndroidApp*` 字段绑定必须拿本次摘要快照做签名归一比对。
+            // 不显式传入时 rank 的默认值为 EMPTY ⇒ 字段绑定一律不命中，解锁后候选为空 ⇒
+            // 回落选择器（表现为「先开目标 APP 再解锁必须手选凭据」）；与服务端
+            // `resolveUnlockedCandidates` 同源，两条路径不得漂移。
+            callingCertDigests = certDigests
+        )
+        val route = AutofillUnlockRouter.route(
+            candidates = ranked,
+            packageDimensionAuthorized = packageDimensionAuthorized,
+            hasTargetField = hasTargetField
+        )
+        // 不含调用方 / 条目标识的可导出诊断：区分「字段绑定没命中」与「命中了但路由到选择器」
+        AppLog.i(
+            TAG,
+            "解锁后路由判据: 候选数=${ranked.size}, 包名维度已授权=$packageDimensionAuthorized, " +
+                "路由=${if (route is AutofillUnlockRouter.Route.Confirm) "CONFIRM" else "PICKER"}"
         )
         Routing(
-            route = AutofillUnlockRouter.route(
-                candidates = ranked,
-                packageDimensionAuthorized = packageDimensionAuthorized,
-                hasTargetField = hasTargetField
-            ),
+            route = route,
             verifiedWebDomain = verifiedWebDomain
         )
     } catch (e: CancellationException) {

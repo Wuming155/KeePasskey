@@ -9,9 +9,9 @@ import com.keepasskey.app.R
 import com.keepasskey.app.security.TrackDialogInteractionEffect
 
 /**
- * 「记住这个应用与该条目的关联？」询问载荷（`ISSUE-P3-571` 方案 A，Kp2a 式询问）。
+ * 「记住这个应用与该条目的关联？」询问载荷（KeePassDX 口径，随库持久通道）。
  *
- * 三者均为**非敏感标识**：`entryTitle` / `proposedUrl`（`android://<包名>`）是用户在
+ * 三者均为**非敏感标识**：`entryTitle` / `proposedPackage`（纯包名，不带 `android://`）是用户在
  * 询问对话框上**本就会看到**的内容，`entryId` 仅为回调主键——不落凭据值，无须脱敏 `toString`。
  * 可见性为 public：作为 [AutofillPickerViewModel.bindingWriteBackAsk]（public StateFlow）与
  * `AutofillPickerScreen`（public Composable）的参数类型，不得低半级暴露。
@@ -19,79 +19,71 @@ import com.keepasskey.app.security.TrackDialogInteractionEffect
 data class AppBindingWriteBackAsk(
     val entryId: String,
     val entryTitle: String,
-    val proposedUrl: String
+    val proposedPackage: String
 )
 
 /**
- * 「把调用方应用关联写进条目 URL」的**纯判定内核**（`ISSUE-P3-571` 方案 A；无 Android 依赖，JVM 可直测）。
+ * 是否提出「记住这个应用与该条目的关联？」的**纯判定内核**（无 Android 依赖，JVM 可直测）。
  *
- * 竞品依据（`docs/references/自动填充关联记忆与字段识别的参考项目对照.md` §2 / §6）：
- * Kp2a 在自动填充流内询问「Remember search text?」并把 `androidapp://<包名>` 写进条目 URL；
- * KeePassDX 同语义地写条目本体（`AndroidApp` 自定义字段）。本仓在**手动选择器交付链内**询问，
- * 显式同意才写回 `android://<包名>`——关联随 `.kdbx` 走，换设备 / 重装不失效
- * （与 `ISSUE-P3-528`（§468）落地的本地互动记忆 [AutofillCallerEntryMemory] 并存：后者是
- * 本机快速通道，本写回是随库持久通道）。
+ * ## 现行口径（PD-83 改写后）
  *
- * ## 四否决与「仅空 URL」口径
+ * 关联写入的是条目的 `AndroidApp` / `AndroidApp Signature` **自定义字段**（KeePassDX 同款，
+ * 见 [AndroidAppBindingFields]），**不再整段替换 `URL`**。因此条目**已有网址**、表单**带自报
+ * webDomain** 都不再构成否决：网页表单同样可以声明「这个条目也属于这个应用」，两者互不覆盖。
+ * `URL` 里的旧 `android://<包名>` 形态只做兼容读取，不迁移、不重写。
  *
- * 与应用内搜索侧 `SearchWriteBackPolicy.shouldOffer` 的四否决（只读 / 回收站 / `{REF}` / 已覆盖）
- * **同形且不弱于**：
- * - **只读**：`sessionReadOnly` 一票否决（回收站否决由候选面天然成立——选择器列出的条目来自
- *   `getUsableKdbxEntries()`（P2-341，回收站子树排除），手选交付的条目不可能在回收站内）；
- * - **`{REF}` 与「已覆盖」被「仅空 URL」严格蕴含**：`isAndroidPackageMatch` 语义是
- *   「URL 整段＝`android://<包名>`」的**单值绑定**（[com.keepasskey.app.passkey.DomainMatcher.isAndroidPackageMatch]），
- *   写回走 [com.keepasskey.app.data.repository.VaultEntryUrlWriter.updateUrl] 整段替换且**不产生历史修订**——
- *   任何非空 URL（`https://…` 的 Web 绑定、其它应用的 `android://` 绑定）被替换即静默撤销原绑定且不可回溯，
- *   故仅在**当前 URL 为空**的条目上提供写回。空 URL 不可能含 `{REF}`，也不可能已绑定 ⇒ 两否决蕴含成立；
- * - **包名非法 / 签名摘要不可读**：不询问也不产生降级写入（fail-closed，与 `AndroidPackageBindingPolicy`
- *   的「摘要不可读即不放行」同口径——「只认包名」正是 P2-46 要消灭的形态）；
- * - **浏览器表单（`webDomain` 非空）不在本条**：其域维度由归属校验通道与 CM 保存链承载，
- *   方案 A 询问的「应用关联」仅指纯 App 表单（用户 2026-10-11 点名的 QQ 形态）。
+ * 保留三条 fail-closed 否决（与 `AndroidPackageBindingPolicy`「摘要不可读即不放行」同口径）：
+ * - **只读会话**：一票否决（写盘硬拒绝的会话不得提出写入询问）；
+ * - **包名非法**：[AutofillPackageNames.normalize] 返回 null ⇒ 不询问、不产生降级写入；
+ * - **签名摘要不可读**：不产生「仅包名」形态的库内绑定（P2-46 要消灭的形态）。
  *
- * 写入形态唯一来自 [AutofillPackageNames.boundUrl]（写入侧与 `isAndroidPackageMatch` 判据侧
- * 逐字同源，杜绝「写进去却匹配不上」），消费侧零改动。
+ * 另有**幂等去重**而非安全否决：同编号序列里该包名已存在（[alreadyBound]）⇒ 不再重复询问。
+ * 这是用户拍板的询问频率默认值，避免每次交付都弹窗。
+ *
+ * 本机互动记忆 [AutofillCallerEntryMemory] 与本写回并存：前者是本机「立刻能出候选」的快速通道，
+ * 后者是随 `.kdbx` 同步、换设备 / 重装 / 清数据后仍有效的持久通道。
  */
 internal object AutofillAppBindingWriteBackPolicy {
 
-    /**
-     * 将要写入的绑定 URL（`android://<归一化包名>`）。
-     * 包名非法（[AutofillPackageNames.normalize] 为 null）返回 null——调用方据此跳过询问。
-     */
-    fun proposedBindingUrl(callingPackage: String): String? =
-        AutofillPackageNames.normalize(callingPackage)?.let(AutofillPackageNames::boundUrl)
+    /** 将要写入的归一化包名（纯包名，不含 scheme）；非法返回 null，调用方据此跳过询问。 */
+    fun proposedBindingPackage(callingPackage: String): String? =
+        AutofillPackageNames.normalize(callingPackage)
 
     /**
      * 是否向用户提出「记住这个应用与该条目的关联？」。
      *
      * @param callingPackage 系统背书的调用方包名（来自交付链 `EXTRA_CALLING_PACKAGE`）
      * @param callerDigestsReadable 调用方签名摘要快照是否可读（`!CallerCertDigests.isEmpty`）
-     * @param webDomain 表单自报域（空 / null ＝纯 App 表单）
-     * @param entryUrl 条目当前 URL（交付链按 id 现读）
-     * @param sessionReadOnly 只读会话一票否决（回收站否决由候选面 P2-341 天然成立）
+     * @param webDomain 表单自报域。**不再参与判定**：写入的是独立自定义字段，网页表单同样可写包名；
+     *   保留在签名中是为了让「已有自报域仍询问」这一行为可被用例锁定，防止日后误恢复否决。
+     * @param entryUrl 条目当前 URL。**不再参与判定**：写入不触碰 URL，已有网址 / `{REF:}` /
+     *   旧的 `android://` 绑定都不被覆盖；同上由用例锁定。
+     * @param sessionReadOnly 只读会话一票否决
+     * @param alreadyBound 该包名已在条目的 `AndroidApp*` 序列中（幂等去重，不再重复询问）
      */
     fun shouldOffer(
         callingPackage: String,
         callerDigestsReadable: Boolean,
         webDomain: String?,
         entryUrl: String,
-        sessionReadOnly: Boolean
+        sessionReadOnly: Boolean,
+        alreadyBound: Boolean = false
     ): Boolean {
         if (sessionReadOnly) return false
-        if (proposedBindingUrl(callingPackage) == null) return false
+        if (proposedBindingPackage(callingPackage) == null) return false
         if (!callerDigestsReadable) return false
-        if (!webDomain.isNullOrBlank()) return false
-        if (entryUrl.isNotBlank()) return false
+        if (alreadyBound) return false
         return true
     }
 }
 
 /**
- * 「记住这个应用？」询问对话框（`ISSUE-P3-571` 方案 A）。
+ * 「记住这个应用？」询问对话框（KeePassDX 口径）。
  *
  * 状态与等待桥在 [AutofillPickerViewModel]（交付链挂起等待用户处置）；本组合体只负责渲染——
  * 任何路径离开对话框（取消按钮 / 点外部 / 返回键）一律按**拒绝**处置（不写回、照常交付）；
  * 拒绝不持久化为「永久拒绝」（与应用内搜索侧 `VaultSearchWriteBackCoordinator` 的会话内抑制不同，
- * 本询问每次交付至多出现一次，重复频率由关联记忆的命中自然收敛）。
+ * 本询问每次交付至多出现一次，重复频率由「该包名已绑定」与关联记忆的命中自然收敛）。
  *
  * 按钮文案复用应用内搜索写回对话框的既有词条（「写入」/「取消」）——两通道同一动作语义。
  */
@@ -108,7 +100,7 @@ internal fun AppBindingWriteBackDialog(
             Text(
                 stringResource(
                     R.string.autofill_app_binding_write_back_message,
-                    ask.proposedUrl,
+                    ask.proposedPackage,
                     ask.entryTitle
                 )
             )

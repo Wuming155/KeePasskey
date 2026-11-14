@@ -396,6 +396,7 @@ class SettingsViewModel @Inject constructor(
     // ===== KP2A 扩展：调试日志 =====
     fun setDebugLogEnabled(enabled: Boolean) = extendedPreferences.setDebugLogEnabled(enabled)
     fun setVerboseSyncLog(enabled: Boolean) = extendedPreferences.setVerboseSyncLog(enabled)
+    fun setDiagnosticLogRetentionDays(days: Int) = extendedPreferences.setDiagnosticLogRetentionDays(days)
     fun refreshDebugLogs() = preferences.refreshDebugLogs()
     fun clearDebugLogs() = preferences.clearDebugLogs()
 

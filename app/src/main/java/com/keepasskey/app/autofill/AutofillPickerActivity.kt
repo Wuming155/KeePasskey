@@ -338,14 +338,14 @@ class AutofillPickerActivity : FragmentActivity() {
             }
             // ENG-20261028-05：数据集构造、条目读取与字段复检均为挂起点，通道可能在期间被关闭——
             // 交付前再按本次值判定一次。此判定之后只剩同步的授权/记忆写入与 setResult，不存在
-            // 「已判过、又挂起、再交付」的窗口；同时避免为已关闭的通道做条目 URL 写回。
+            // 「已判过、又挂起、再交付」的窗口；同时避免为已关闭的通道做应用关联写回。
             if (!settingsStore.isAutofillServiceEnabled()) {
                 AppLog.w(TAG, "交付前自动填充通道已关闭，丢弃未决响应（不回传 RESULT_OK）")
                 discardPendingResult()
                 return@launch
             }
-            // ISSUE-P3-571 方案A：询问是否把应用关联写进条目 URL（锁定丢弃口径见 VM 方法 KDoc）
-            // ENG-20261028-11：本段含条目 URL 写回，**刻意不套租约**——写路径的定点擦除不得被推迟。
+            // 询问是否把应用关联写进条目自定义字段（KeePassDX AndroidApp 口径，URL 不动；锁定丢弃口径见 VM 方法 KDoc）
+            // ENG-20261028-11：本段含自定义字段写回，**刻意不套租约**——写路径的定点擦除不得被推迟。
             if (!viewModel.offerAppBindingWriteBack(callerDigests, callingPackage, formDomain, entryId, entryTitle)) {
                 discardPendingResult()
                 return@launch
@@ -357,9 +357,11 @@ class AutofillPickerActivity : FragmentActivity() {
             }
             // ISSUE-P3-528：交付成功即写入关联记忆（Monica「互动记忆」）——下次该调用方无需重选；
             // 摘要复用上文快照（本页不再第二次读取）。
-            // ISSUE-P2-617：同时绑定表单域（自报域，与确认页已校验域同归一口径；召回侧以已校验域查，
-            // 不一致即不命中 fail-closed）。本次是用户显式选中，写入自报域无放行风险。
-            autofillCallerEntryMemory.remember(callingPackage, callerDigests, entryId, formDomain)
+            // 域必须取与召回侧（resolveUnlockedCandidates）同源的**归属校验后域**：表单自报域
+            // 未经校验，若与校验结果不一致会让写入键与召回键错开，记忆静默失效、下次仍要重选。
+            val memoryDomain = autofillOriginResolver.resolveUsableWebDomain(callingPackage, formDomain)
+            autofillCallerEntryMemory.remember(callingPackage, callerDigests, entryId, memoryDomain)
+            AppLog.i(TAG, "调用方关联记忆已写入（归属校验域在场=${memoryDomain != null}）")
             setResult(RESULT_OK, authenticationResultIntent(dataset))
             finish()
         }

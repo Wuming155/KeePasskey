@@ -6,6 +6,7 @@ import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.core.security.ProtectedString
@@ -152,7 +153,9 @@ class AutofillPickerViewModel @Inject constructor(
      * 1. 标题 / 用户名 / 网址等非敏感元数据以独立不可变 String 存入全新 [ProtectedString]（isProtected=false）；
      * 2. 不缓存密码字段，不与数据库会话内部树共享任何敏感 [ProtectedString] 引用；
      * 3. 会话后续改树或就地擦除绝不会使本投影字段失效，搜索与列表渲染无须依赖 clear 降级；
-     * 4. 用户点选后由 [resolveCredentials] 在读租约内向活动库重新定位取密。
+     * 4. 用户点选后由 [resolveCredentials] 在读租约内向活动库重新定位取密；
+     * 5. 仅保留 KeePassDX `AndroidApp` **明文包名键**（独立新建实例）供「该包名已绑定」去重；
+     *    受保护的签名字段与其它自定义字段一概不进投影，不物化任何受保护值。
      */
     private fun toImmutableProjection(entry: KdbxEntry): KdbxEntry = KdbxEntry(
         id = entry.id,
@@ -164,7 +167,22 @@ class AutofillPickerViewModel @Inject constructor(
             KdbxConstants.Fields.TITLE to ProtectedString(runCatching { entry.title }.getOrDefault(""), isProtected = false),
             KdbxConstants.Fields.USER_NAME to ProtectedString(runCatching { entry.userName }.getOrDefault(""), isProtected = false),
             KdbxConstants.Fields.URL to ProtectedString(runCatching { entry.url }.getOrDefault(""), isProtected = false)
-        )
+        ),
+        // 保留 KeePassDX 应用关联的**明文包名键**，供「该包名已绑定」的幂等去重判定。
+        // 受保护的签名字段刻意不进投影：签名摘要不参与去重，且投影不得物化受保护值。
+        customFields = entry.customFields
+            .filter { cf ->
+                cf.key == AndroidAppBindingFields.APPLICATION_ID_FIELD_NAME ||
+                    cf.key.startsWith(AndroidAppBindingFields.APPLICATION_ID_FIELD_NAME + "_")
+            }
+            .mapNotNull { cf ->
+                runCatching {
+                    KdbxCustomField(
+                        cf.key,
+                        ProtectedString(cf.value.readStringForDisplay(), isProtected = false)
+                    )
+                }.getOrNull()
+            }
     )
 
     override fun onCleared() {
@@ -187,15 +205,16 @@ class AutofillPickerViewModel @Inject constructor(
     private var pendingBindingDecision: CompletableDeferred<Boolean>? = null
 
     /**
-     * 交付链内询问「是否把调用方应用关联写进条目 URL」（方案 A，用户 2026-10-11 裁决）。
+     * 交付链内询问「是否把调用方应用关联写进条目自定义字段」（KeePassDX 口径）。
      *
-     * 判定口径见 [AutofillAppBindingWriteBackPolicy]（四否决与「仅空 URL」的推导在该 KDoc，
-     * 本机互动记忆 [AutofillCallerEntryMemory] 与本写回的分工亦然）。行为：
+     * 判定口径见 [AutofillAppBindingWriteBackPolicy]：只读 / 包名非法 / 签名摘要不可读三条
+     * fail-closed，外加「该包名已绑定」的幂等去重；条目已有网址、表单带自报域**不再否决**
+     * （写入不触碰 `URL`）。行为：
      * - 不满足询问条件 → 不问，返回 true（照常交付）；
      * - 满足 → 置起 [bindingWriteBackAsk] 并挂起等待用户处置；拒绝 → 不写回，返回 true
      *   （拒绝不得持久化为「永久拒绝」）；同意 → 复核锁定后经
-     *   [VaultRepository.updateEntryUrl] 写回 `android://<包名>`（只改 URL 一个字段，
-     *   失败如实日志、**不阻断交付**）；
+     *   [VaultRepository.addAppBinding] 写入 `AndroidApp` / `AndroidApp Signature`
+     *   （只改自定义字段、失败如实日志、**不阻断交付**），并同步本地投影缓存使同一会话内不再重复询问；
      * - **询问期间会话可能自动锁定**（与交付链「回传前再次校验」同口径）：锁定即返回 false，
      *   调用方须丢弃未决响应（不写回、不得回传 RESULT_OK）。
      */
@@ -208,28 +227,43 @@ class AutofillPickerViewModel @Inject constructor(
     ): Boolean {
         // ISSUE-P3-570：getKdbxEntry 为挂起调用，取消须沿链重抛（不归一为「空 URL」）
         // ENG-20261028-11：读 URL 与判断同处一条读租约（`withKdbxEntry`）——否则并发整树替换
-        // 会把条目下线擦除，`runCatching` 把失败折叠成空 URL，反而误判成「可以询问是否写回」。
+        // 会把条目下线擦除，`runCatching` 把失败折叠成空 URL。URL 已不参与询问判定，
+        // 此处保留读仅为把条目当前网址如实下传给策略签名（由用例锁定它不构成否决）。
         val currentUrl = runCatching {
             vaultRepository.withKdbxEntry(entryId) { entry -> entry?.url.orEmpty() }
         }
             .onFailure { if (it is CancellationException) throw it }
             .getOrNull().orEmpty()
+        val proposedPackage = AutofillAppBindingWriteBackPolicy.proposedBindingPackage(callerPackage)
+        val alreadyBound = isAlreadyBound(entryId, proposedPackage)
         if (!AutofillAppBindingWriteBackPolicy.shouldOffer(
                 callingPackage = callerPackage,
                 callerDigestsReadable = !callerDigests.isEmpty,
                 webDomain = formWebDomain,
                 entryUrl = currentUrl,
-                sessionReadOnly = vaultRepository.isSessionReadOnly()
+                sessionReadOnly = vaultRepository.isSessionReadOnly(),
+                alreadyBound = alreadyBound
             )
         ) {
+            // 否决是静默的既有口径；留一条不含任何调用方 / 条目标识的痕迹，把「没询问」与
+            //「弹窗未渲染 / 装机版本落后」区分开，并写明是哪几条门槛挡住的，不改变放行与写回行为。
+            val reasons = buildList {
+                if (vaultRepository.isSessionReadOnly()) add("只读会话")
+                if (proposedPackage == null) add("包名非法")
+                if (callerDigests.isEmpty) add("签名摘要不可读")
+                if (alreadyBound) add("该包名已绑定")
+            }
+            AppLog.i(TAG, "应用关联询问未提出（${reasons.joinToString("、")}），按既有口径跳过（不写回）")
             return true
         }
-        val proposedUrl = AutofillAppBindingWriteBackPolicy
-            .proposedBindingUrl(callerPackage).orEmpty()
+        val normalizedPackage = proposedPackage.orEmpty()
         val decision = CompletableDeferred<Boolean>()
         pendingBindingDecision = decision
-        _bindingWriteBackAsk.value =
-            AppBindingWriteBackAsk(entryId = entryId, entryTitle = entryTitle, proposedUrl = proposedUrl)
+        _bindingWriteBackAsk.value = AppBindingWriteBackAsk(
+            entryId = entryId,
+            entryTitle = entryTitle,
+            proposedPackage = normalizedPackage
+        )
         val agreed = try {
             decision.await()
         } finally {
@@ -238,13 +272,59 @@ class AutofillPickerViewModel @Inject constructor(
         }
         if (!vaultRepository.isLocked()) {
             if (agreed) {
-                val written = vaultRepository.updateEntryUrl(entryId, proposedUrl)
-                AppLog.i(TAG, "应用关联写回条目 URL 结果=${written is KdbxResult.Success}（不阻断交付）")
+                val written = vaultRepository.addAppBinding(
+                    entryId = entryId,
+                    packageName = normalizedPackage,
+                    fingerprintHex = callerDigests.primary.orEmpty()
+                )
+                if (written is KdbxResult.Success) {
+                    rememberAppBindingInProjection(entryId, normalizedPackage)
+                }
+                AppLog.i(TAG, "应用关联写回条目自定义字段结果=${written is KdbxResult.Success}（不阻断交付）")
             }
             return true
         }
         AppLog.w(TAG, "会话在关联询问期间被锁定，丢弃未决响应（不回传 RESULT_OK）")
         return false
+    }
+
+    /**
+     * 「该包名已绑定」判定：只读选择器自己的非敏感投影缓存（签名摘要不参与去重）。
+     * 缓存未命中一律按未绑定处理——最坏结果是多问一次，不会漏写。
+     */
+    private fun isAlreadyBound(entryId: String, packageName: String?): Boolean {
+        if (packageName == null) return false
+        val entry = _entries.value.firstOrNull {
+            it.id.toHexString().equals(entryId, ignoreCase = true)
+        } ?: return false
+        val values = entry.customFields.associate {
+            it.key to runCatching { it.value.readStringForDisplay() }.getOrDefault("")
+        }
+        return AndroidAppBindingFields.nextPosition(
+            AndroidAppBindingFields.parse(values), packageName
+        ) == null
+    }
+
+    /**
+     * 写入成功后把新绑定同步进投影缓存：使同一次会话内再次交付不再重复询问，
+     * 无需等会话树换代事件（该事件在无会话观察者的路径上不保证及时到达）。
+     * 只补明文包名键；受保护签名值刻意不进投影。
+     */
+    private fun rememberAppBindingInProjection(entryId: String, packageName: String) {
+        _entries.value = _entries.value.map { entry ->
+            if (!entry.id.toHexString().equals(entryId, ignoreCase = true)) return@map entry
+            val values = entry.customFields.associate {
+                it.key to runCatching { it.value.readStringForDisplay() }.getOrDefault("")
+            }
+            val position = AndroidAppBindingFields.nextPosition(
+                AndroidAppBindingFields.parse(values), packageName
+            ) ?: return@map entry
+            val (appKey, _) = AndroidAppBindingFields.keysFor(position)
+            entry.copy(
+                customFields = entry.customFields +
+                    KdbxCustomField(appKey, ProtectedString(packageName, isProtected = false))
+            )
+        }
     }
 
     /** 对话框按钮回传用户处置（true＝写入 / false＝拒绝或对话框被取消） */

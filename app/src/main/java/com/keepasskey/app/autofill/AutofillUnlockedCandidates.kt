@@ -68,7 +68,7 @@ internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
     val rememberedEntryId = autofillCallerEntryMemory.recall(callingPkg, callerCertDigests, webDomain)
     if (rememberedEntryId != null) {
         // 只记事实（不含条目名 / 包名 / 摘要等标识）
-        AppLog.d(TAG, "调用方关联记忆命中，本条候选含该条目")
+        AppLog.i(TAG, "调用方关联记忆命中，本条候选含该条目")
     }
     // ENG-20261028-11：候选条目在返回后仍要被逐条读取（值解析 / TOTP / 结构化字段），
     // 故读租约由**调用方**跨「解析 → 装配」整段持有；此处保持裸读口，不自行登记再在返回时撤销。
@@ -87,7 +87,9 @@ internal suspend fun KeePasskeyAutofillService.resolveUnlockedCandidates(
             // ISSUE-P3-373 AC①：Wi-Fi 设置上下文加成（清单外恒 false）
             wifiContext = WifiFillBoostPolicy.isWifiSettingsPackage(callingPkg),
             // ISSUE-P3-528：关联记忆命中条目（未命中传 null，对本条零影响）
-            rememberedEntryId = rememberedEntryId
+            rememberedEntryId = rememberedEntryId,
+            // KeePassDX `AndroidApp*` 字段绑定的签名比对：复用本请求已读取的同一份摘要快照
+            callingCertDigests = callerCertDigests
         )
     )
 }

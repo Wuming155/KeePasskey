@@ -251,6 +251,7 @@ data class SettingsUiState(
     val debugLogEnabled: Boolean = true, // 诊断日志默认开启（写入即脱敏）；首帧与持久化缺省一致
     val debugLogLines: List<String> = emptyList(), // KP2A: 进程内真实调试日志环形缓冲快照
     val verboseSyncLog: Boolean = false, // KP2A: 详细同步与网络日志
+    val diagnosticLogRetentionDays: Int = com.keepasskey.app.data.logger.DiagnosticLogRetention.DAYS_DEFAULT, // 私有目录留存周期
     // ISSUE-P3-512（照 ISSUE-P3-126③ 先例）：此处原有 `debugLogRecordsCount: Int = 128`
     // 字段——自引入起**全仓零消费方**（projection 不产、UI 不读，恒走默认值），属死状态字段。
     // 删除而非保留：它与「调试日志上限」这类真实配置极易混淆，留着只会误导后续维护者

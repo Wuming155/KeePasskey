@@ -1,5 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.data.logger.DiagnosticLogHistory
+import com.keepasskey.app.data.logger.DiagnosticLogRetention
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.sync.PeriodicSyncScheduler
 import com.keepasskey.database.session.DatabaseSession
@@ -69,6 +71,16 @@ internal class SettingsExtendedPreferencesController(
 
     // ========== KP2A 扩展：表单自动填充与体验 ==========
     fun setOfferSaveCredentials(enabled: Boolean) = updateExtended { it.copy(offerSaveCredentials = enabled) }
+
+    /** 诊断日志私有目录留存天数（UI 只给 1 / 3 / 7 / 30 档，此处再按 Store 边界收敛并即时下传）。 */
+    fun setDiagnosticLogRetentionDays(days: Int) {
+        val bounded = days.coerceIn(
+            DiagnosticLogRetention.DAYS_MIN,
+            DiagnosticLogRetention.DAYS_MAX
+        )
+        DiagnosticLogHistory.setRetentionDays(bounded)
+        updateExtended { it.copy(diagnosticLogRetentionDays = bounded) }
+    }
 
     // ISSUE-P3-376：候选呈现面两开关（读写键成对，见 ExtendedSettingsStore）
     fun setAutofillManualPickerEnabled(enabled: Boolean) =

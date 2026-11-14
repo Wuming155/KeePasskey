@@ -126,7 +126,8 @@ class MainApplication : Application(), Configuration.Provider {
         AppLog.debugEnabled = BuildConfig.DEBUG
         // 稳定版同样安装：release 里 AppLog.e/w 的类型与栈帧不再只留在 logcat。
         // 装在所有其它冷启动动作之前，使后续初始化失败的异常也能进入可导出缓冲。
-        diagnosticLogBridge.install()
+        diagnosticLogBridge.install(this)
+        diagnosticLogBridge.logAutofillEnvironment(this)
         // ISSUE-P3-459 续：灌应用内语言**启动种子**——SharedPreferences 冷读 1~5ms、早于任何首帧渲染，
         // 后续所有语言读取（Compose 首帧 / StringsProvider / 非 UI 装配点）都退化为一次 volatile 读，
         // 冷启动不再先闪一帧系统语言。此处**刻意不**等 DataStore 冷读（主线程阻塞 → 启动期 ANR 风险）。

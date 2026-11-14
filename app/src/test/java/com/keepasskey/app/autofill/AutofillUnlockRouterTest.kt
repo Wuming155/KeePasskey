@@ -1,6 +1,8 @@
 package com.keepasskey.app.autofill
 
+import com.keepasskey.app.security.CallerCertDigests
 import com.keepasskey.core.model.KdbxConstants
+import com.keepasskey.core.model.KdbxCustomField
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.model.KdbxTimes
 import com.keepasskey.core.model.KdbxUuid
@@ -56,6 +58,68 @@ class AutofillUnlockRouterTest {
         )
 
     // ── CONFIRM 侧 ──
+
+    private val bindingFingerprint = "A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90"
+
+    /** 已有网址 + `AndroidApp*` 自定义字段绑定的条目（URL 未被改写）。 */
+    private fun fieldBoundEntry(): KdbxEntry {
+        val (appKey, sigKey) = AndroidAppBindingFields.keysFor(0)
+        return entry(hexIdOf(7), url = "https://example.com").copy(
+            customFields = listOf(
+                KdbxCustomField(appKey, ProtectedString("com.example.app", isProtected = false)),
+                KdbxCustomField(
+                    sigKey,
+                    ProtectedString(
+                        AndroidAppBindingFields.toColonHex(bindingFingerprint),
+                        isProtected = true
+                    )
+                )
+            )
+        )
+    }
+
+    /**
+     * 锁定态解锁路径的端到端行为契约：解锁页把本次摘要快照显式下传给 rank，
+     * 字段绑定才产出唯一 EXACT_PACKAGE 强匹配并路由到确认页（不必手选）。
+     * 漏传摘要会退化为零候选 ⇒ PICKER，下面用反例一并锁定。
+     */
+    @Test
+    fun `字段绑定条目在传入签名摘要时经rank路由到CONFIRM`() {
+        val ranked = AutofillCandidateRanker.rank(
+            entries = listOf(fieldBoundEntry()),
+            callingPackage = "com.example.app",
+            webDomain = null,
+            packageDimensionAuthorized = true,
+            callingCertDigests = CallerCertDigests.ofSingle(bindingFingerprint)
+        )
+
+        assertEquals(1, ranked.size)
+        assertTrue(
+            AutofillCandidateRanker.MatchReason.EXACT_PACKAGE in ranked.single().reasons
+        )
+        val route = AutofillUnlockRouter.route(
+            candidates = ranked,
+            packageDimensionAuthorized = true,
+            hasTargetField = true
+        )
+        assertTrue("应免选择器直达确认页：$route", route is AutofillUnlockRouter.Route.Confirm)
+    }
+
+    @Test
+    fun `字段绑定条目漏传签名摘要时零候选并回落PICKER`() {
+        val ranked = AutofillCandidateRanker.rank(
+            entries = listOf(fieldBoundEntry()),
+            callingPackage = "com.example.app",
+            webDomain = null,
+            packageDimensionAuthorized = true
+        )
+
+        assertTrue("漏传摘要不得命中字段绑定", ranked.isEmpty())
+        assertTrue(
+            AutofillUnlockRouter.route(ranked, packageDimensionAuthorized = true, hasTargetField = true)
+                is AutofillUnlockRouter.Route.Picker
+        )
+    }
 
     @Test
     fun `唯一精确域名强匹配且已绑定且有目标框 → CONFIRM`() {

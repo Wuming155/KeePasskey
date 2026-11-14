@@ -109,6 +109,8 @@ class RealVaultRepository @Inject constructor(
     private val entryWriter = VaultEntryWriteCoordinator(strings, databaseSession, entryMapper) { persistence.persist() }
     // ISSUE-P3-442：URL 字段级写入口（搜索词自愈回灌；独立成器，见 VaultEntryUrlWriter KDoc）
     private val entryUrlWriter = VaultEntryUrlWriter(strings, databaseSession) { persistence.persist() }
+    // 应用关联自定义字段的字段级写入口（KeePassDX AndroidApp 口径，URL 不动；见 VaultEntryAppBindingWriter KDoc）
+    private val entryAppBindingWriter = VaultEntryAppBindingWriter(strings, databaseSession) { persistence.persist() }
     private val secretReader = VaultEntrySecretReader(
         databaseSession,
         entryMapper,
@@ -279,6 +281,13 @@ class RealVaultRepository @Inject constructor(
     /** ISSUE-P3-442：搜索词自愈回灌（字段级写 URL，不产生历史修订） */
     override suspend fun updateEntryUrl(entryId: String, url: String): KdbxResult<Unit> =
         entryUrlWriter.updateUrl(entryId, url)
+
+    /** 应用关联写回（字段级写 `AndroidApp*`，URL 不动，不产生历史修订） */
+    override suspend fun addAppBinding(
+        entryId: String,
+        packageName: String,
+        fingerprintHex: String
+    ): KdbxResult<Unit> = entryAppBindingWriter.addAppBinding(entryId, packageName, fingerprintHex)
 
     override suspend fun deleteEntry(id: String): KdbxResult<Unit> = recycleBin.deleteEntry(id)
 
