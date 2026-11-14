@@ -1376,7 +1376,7 @@
     <string name="debug_export_dialog_title">导出诊断日志</string>
     <string name="debug_export_dialog_desc">确认后将呼起系统保存对话框选择导出位置。日志在记录时已自动移除网址、账号、主机与文件名等标识，导出内容同样经过脱敏，不含密码与密钥；报告头附版本、平台与记录范围摘要</string>
     <string name="debug_export_confirm_btn">确认导出</string>
-    <string name="debug_privacy_desc">日志仅保存在应用内存中，退出进程即清空；记录、复制与导出均自动脱敏，异常只保留类型与栈帧，可在上方关闭记录</string>
+    <string name="debug_privacy_desc">日志保存在应用私有目录，记录、复制与导出均自动脱敏，不含密码与密钥</string>
 
     <!-- ===== 密码健康检查子页 (HealthCheckScreen) ===== -->
     <string name="health_total_score">综合健康评分</string>

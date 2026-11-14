@@ -1322,7 +1322,7 @@
     <string name="debug_export_dialog_title">Export diagnostic log</string>
     <string name="debug_export_dialog_desc">A system save dialog will open to choose the destination. URLs, account names, hosts and file names are stripped when events are recorded, and the export is redacted again. No passwords or keys are included. The report header lists app version, platform and log range.</string>
     <string name="debug_export_confirm_btn">Confirm export</string>
-    <string name="debug_privacy_desc">Logs live only in app memory and disappear when the process ends; recording, copying and export are redacted, exceptions keep type and stack frames only, and you can turn recording off above.</string>
+    <string name="debug_privacy_desc">Logs are stored in this app\'s private directory; recording, copying and export are redacted and never include passwords or keys.</string>
 
     <!-- ===== Password health check subscreen ===== -->
     <string name="health_total_score">Overall health score</string>
