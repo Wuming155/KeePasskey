@@ -179,9 +179,7 @@ class NotificationLockUnlockDeviceTest {
                 activeDbId = { databaseId },
                 biometricAuthManager = auth,
                 biometricCredentialStorage = storage,
-                debugLog = DebugLogBuffer(),
-                prompt = prompt
-            )
+                prompt = prompt)
             try {
                 instrumentation.runOnMainSync {
                     assertTrue(activity.supportFragmentManager.isStateSaved)

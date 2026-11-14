@@ -133,16 +133,16 @@ class SyncAssemblyOffMainThreadTest {
 
         val debugLog = DebugLogBuffer()
         val session = SyncSessionState()
-        val preferences = SyncPreferences(debugLog, null)
+        val preferences = SyncPreferences(null)
         val credentialsStore = SyncCredentialsStore(fakeContext, null)
         credentialsStore.customEncryptor = { plain -> Pair(byteArrayOf(1), plain) }
         credentialsStore.customDecryptor = { _, cipher ->
             record(PROBE_CREDENTIAL)
             cipher
         }
-        val providerResolver = SyncProviderResolver(credentialsStore, preferences, debugLog)
-        val codec = SyncDatabaseCodec(databaseSession, debugLog)
-        val conflicts = SyncConflictController(databaseSession, codec, TEST_STRINGS, session, debugLog)
+        val providerResolver = SyncProviderResolver(credentialsStore, preferences)
+        val codec = SyncDatabaseCodec(databaseSession)
+        val conflicts = SyncConflictController(databaseSession, codec, TEST_STRINGS, session)
         val changes = SyncContentChangeDetector(codec, session)
         val cycle = SyncCycleRunner(
             context = fakeContext,

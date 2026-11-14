@@ -5,6 +5,7 @@ import com.keepasskey.app.testutil.InMemorySharedPreferences
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import com.keepasskey.core.log.AppLog
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,6 +22,8 @@ class DiagnosticLogBridgeTest {
     @After
     fun tearDown() {
         AppLog.diagnosticSink = null
+        AppLog.diagnosticLineSink = null
+        AppLog.diagnosticAuditSink = null
         AppLog.debugEnabled = false
     }
 
@@ -81,6 +84,49 @@ class DiagnosticLogBridgeTest {
             buffer.snapshot().none { it.contains("[ERROR]") }
         )
         assertTrue("审计通道的进程头不受用户开关约束", buffer.exportText().contains("进程诊断头"))
+    }
+
+    @Test
+    fun `诊断日志关闭时治理审计仍留痕`() {
+        store.save(ExtendedSettings(debugLogEnabled = false))
+        val buffer = DebugLogBuffer(DiagnosticLogModule.provideDiagnosticLogGate(store))
+        DiagnosticLogBridge(buffer, store).install()
+
+        AppLog.i("T", "普通事件应被丢弃")
+        AppLog.audit("Export", "导出审计: 类型=诊断日志, 目标=下载, 结果=成功")
+
+        val text = buffer.exportText()
+        assertTrue("普通事件须随开关一起消失：$text", !text.contains("普通事件应被丢弃"))
+        assertTrue("治理审计不得随开关消失：$text", text.contains("导出审计"))
+        assertTrue("审计行须带 AUDIT 级别：$text", text.contains("[AUDIT]"))
+    }
+
+    @Test
+    fun `审计通道与普通通道互不回环`() {
+        val buffer = DebugLogBuffer()
+        DiagnosticLogBridge(buffer, store).install()
+
+        AppLog.audit(DebugLogBuffer.LOGCAT_TAG, "回显行不得再进缓冲")
+
+        assertTrue(
+            "KpLog 回显的审计行不得二次进入缓冲：${buffer.exportText()}",
+            buffer.snapshot().none { it.contains("回显行不得再进缓冲") }
+        )
+    }
+
+    @Test
+    fun `缓冲回显的 KpLog 行不会再次进入缓冲`() {
+        val buffer = DebugLogBuffer()
+        DiagnosticLogBridge(buffer, store).install()
+        val before = buffer.snapshot().size
+
+        AppLog.i(DebugLogBuffer.LOGCAT_TAG, "[2026-11-14] [10:00:00.000] [main] [INFO] [X] echo")
+
+        assertEquals(
+            "KpLog 是缓冲回显 logcat 的 tag，必须过滤以阻断「缓冲 → logcat → 缓冲」回环",
+            before,
+            buffer.snapshot().size
+        )
     }
 
     private fun captureFrameCount(verbose: Boolean): Int {

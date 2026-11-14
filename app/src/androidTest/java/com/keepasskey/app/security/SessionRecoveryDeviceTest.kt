@@ -55,7 +55,7 @@ class SessionRecoveryDeviceTest {
         val settingsRepository = RealSettingsRepository(context)
         val oldLockWhenScreenOff = settingsRepository.getSettings().first().lockWhenScreenOff
         val vaultId = vaultFile.absolutePath
-        val recoveryStore = VaultRecoveryStore(context, debugLog)
+        val recoveryStore = VaultRecoveryStore(context)
         val alertStore = RecoveryAlertStore(context)
 
         try {
@@ -86,27 +86,23 @@ class SessionRecoveryDeviceTest {
             assertEquals(DatabaseSession.SessionState.DIRTY, session.state.value)
 
             settingsRepository.setLockWhenScreenOff(true)
-            val recovery = SessionRecoveryCoordinator(session, recoveryStore, alertStore, debugLog)
+            val recovery = SessionRecoveryCoordinator(session, recoveryStore, alertStore)
             val guard = AutoLockSessionGuard(
                 databaseSession = session,
                 settingsRepository = settingsRepository,
-                debugLog = debugLog,
-                recovery = recovery
-            )
+                recovery = recovery)
             guard.lockOnScreenOff()
             assertEquals("模拟 ACTION_SCREEN_OFF 的 guard 入口必须保全修改", DatabaseSession.SessionState.LOCKED, session.state.value)
             assertTrue(guard.isLocked.value)
             assertTrue("恢复副本必须已写入", recoveryStore.list().any { it.vaultId == vaultId })
 
             // 新 Store / 新 Coordinator 从实际 filesDir/recovery 扫描，验证状态不依赖旧进程内存。
-            val coldStore = VaultRecoveryStore(context, DebugLogBuffer())
+            val coldStore = VaultRecoveryStore(context)
             val coldCoordinator = VaultRecoveryCoordinator(
                 context = context,
                 store = coldStore,
                 alertStore = alertStore,
-                keyFileCopyStore = KeyFileVaultCopyStore(context, null),
-                debugLog = DebugLogBuffer()
-            )
+                keyFileCopyStore = KeyFileVaultCopyStore(context, null))
             coldCoordinator.refresh()
             val pending = coldCoordinator.pending.value.single { it.entry.vaultId == vaultId }
             assertTrue("正式库应仍存在，覆盖前必须由用户确认", pending.officialFileExists)
@@ -150,7 +146,7 @@ class SessionRecoveryDeviceTest {
         val settings = RealSettingsRepository(context)
         val oldSettings = settings.getSettings().first()
         val vaultId = vaultFile.absolutePath
-        val recoveryStore = VaultRecoveryStore(context, DebugLogBuffer())
+        val recoveryStore = VaultRecoveryStore(context)
         try {
             assertTrue("系统熄屏夹具建库失败", session.create(vaultFile, "P1-592 screen off", password, useArgon2 = false) is KdbxResult.Success)
             session.lock()
@@ -215,7 +211,7 @@ class SessionRecoveryDeviceTest {
         val settings = RealSettingsRepository(context)
         val oldSettings = settings.getSettings().first()
         val vaultId = vaultFile.absolutePath
-        val recoveryStore = VaultRecoveryStore(context, DebugLogBuffer())
+        val recoveryStore = VaultRecoveryStore(context)
         var externalBytes: ByteArray? = null
         var bgExternalBytes: ByteArray? = null
 

@@ -95,6 +95,30 @@ class DebugLogBufferTest {
             ),
             RedactionCase("裸主机名", "探测 nas.example.com 超时", listOf("nas.example.com"), "<redacted-host>"),
             RedactionCase("IPv4", "连接 192.168.1.10 失败", listOf("192.168.1.10"), "<redacted-host>"),
+            RedactionCase(
+                "IPv6 带端口",
+                "连接 [fe80::1]:8080 失败",
+                listOf("fe80::1", "8080"),
+                "<redacted-host>"
+            ),
+            RedactionCase(
+                "内网域名",
+                "探测 nas.internal 超时",
+                listOf("nas.internal"),
+                "<redacted-host>"
+            ),
+            RedactionCase(
+                "多级目录路径",
+                "打开 /work/dept/vault 失败",
+                listOf("/work/dept/vault", "dept", "vault"),
+                "<redacted-path>"
+            ),
+            RedactionCase(
+                "访问密钥赋值",
+                "请求失败 accessKey=AKIAFakeExample01",
+                listOf("AKIAFakeExample01"),
+                "<redacted-secret>"
+            ),
             RedactionCase("库文件名", "打开 私人库.kdbx 失败", listOf("私人库.kdbx"), "<redacted-file>"),
             RedactionCase("密钥文件名", "密钥文件 vault.keyx 不可读", listOf("vault.keyx"), "<redacted-file>"),
             RedactionCase("密值赋值", "请求失败 token=abc123def", listOf("abc123def"), "<redacted-secret>")
@@ -225,6 +249,50 @@ class DebugLogBufferTest {
         off.recordCrash("main", IllegalStateException("boom"))
 
         assertTrue("用户关闭诊断日志即不记录", off.snapshot().isEmpty())
+    }
+
+    @Test
+    fun `连续相同异常折叠为两行且不占用缓冲容量`() {
+        repeat(100) { buffer.error("Sync", "同步失败: java.lang.IllegalStateException") }
+
+        val snapshot = buffer.snapshot()
+        assertEquals("100 条相同事件只保留首行与汇总行", 2, snapshot.size)
+        assertTrue(snapshot.first().contains("[ERROR] [Sync]"))
+        assertTrue(snapshot.last().contains("连续相同事件已折叠 99 次"))
+        assertEquals("重复行不得逐条占用环形缓冲", 1, buffer.status().retained)
+        assertTrue("导出正文同样带折叠提示", buffer.exportText().contains("连续相同事件已折叠 99 次"))
+    }
+
+    @Test
+    fun `不同 tag 的 ERROR 不被合并`() {
+        repeat(50) { buffer.error("TagA", "boom") }
+        repeat(50) { buffer.error("TagB", "boom") }
+
+        val snapshot = buffer.snapshot()
+        assertTrue("TagA 的首行须保留", snapshot.any { it.contains("[ERROR] [TagA] boom") })
+        assertTrue("TagB 的首行须保留", snapshot.any { it.contains("[ERROR] [TagB] boom") })
+        assertTrue(
+            "上一段重复应以汇总行收尾",
+            snapshot.any { it.contains("[ERROR] [TagA] 上一条相同事件共重复 50 次") }
+        )
+        assertTrue(
+            "当前段重复保持可查",
+            snapshot.last().contains("[ERROR] [TagB] 连续相同事件已折叠 49 次")
+        )
+    }
+
+    @Test
+    fun `AppLog 来源的行不再二次回显 logcat`() {
+        val echoes = mutableListOf<String>()
+        buffer.logcatEchoEnabled = true
+        buffer.logcatWriter = { echoes += it }
+
+        buffer.info("T", "直接写入")
+        buffer.logFromAppLog("INFO", "T", "来自 AppLog")
+
+        assertEquals("AppLog 已写过 logcat，缓冲不得再回显", 1, echoes.size)
+        assertTrue(echoes.single().contains("直接写入"))
+        assertTrue("两条都必须仍进入缓冲", buffer.exportText().contains("来自 AppLog"))
     }
 
     private data class RedactionCase(

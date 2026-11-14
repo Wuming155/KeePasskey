@@ -1,5 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.net.Uri
 import androidx.fragment.app.FragmentActivity
@@ -7,7 +9,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.importer.ImportSource
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -47,6 +48,7 @@ class SettingsViewModel @Inject constructor(
     private val vaultRepository: VaultRepository,
     private val syncCredentialsStore: SyncCredentialsStore,
     private val syncCoordinator: SyncCoordinator,
+    // ISSUE-P3-395：诊断日志的导出 / 复制 / 清除与浏览宿主都需要缓冲本体
     private val debugLogBuffer: DebugLogBuffer,
     // TASK-12：进阶偏好持久化仓库（冷启动不再静默回落默认值）
     private val extendedSettingsStore: com.keepasskey.app.data.repository.ExtendedSettingsStore,
@@ -102,7 +104,6 @@ class SettingsViewModel @Inject constructor(
         vaultImportController = vaultImportController,
         childDatabaseSessionManager = childDatabaseSessionManager,
         keyFileAccess = keyFileAccess,
-        debugLogBuffer = debugLogBuffer,
         scope = viewModelScope,
         stateSubscribeTimeoutMillis = STATE_SUBSCRIBE_TIMEOUT_MILLIS,
         appContext = appContext
@@ -110,7 +111,6 @@ class SettingsViewModel @Inject constructor(
     private val importPresenter = features.importPresenter
     // ISSUE-P3-395：浏览凭据回退注入——表单密码被保存流程清零后，与「测试连接」同源读已保存凭据
     private val remoteBrowseHost = SettingsRemoteBrowseHost(
-        debugLogBuffer,
         viewModelScope,
         savedWebDavPassword = { syncCredentialsStore.loadWebDavConfig()?.password },
         loadS3Snapshot = {
@@ -304,7 +304,7 @@ class SettingsViewModel @Inject constructor(
     fun setKdfAlgorithm(kdf: String) = preferences.setKdfAlgorithm(kdf)
     fun setArgon2Parameters(iterations: Long, memoryMb: Long, parallelism: Int) = preferences.setArgon2Parameters(iterations, memoryMb, parallelism)
     fun noteWeakMasterPasswordConfirmed() {
-        debugLogBuffer.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（改密）")
+        AppLog.w("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（改密）")
     }
     val kdfBenchmark: StateFlow<KdfBenchmarkUiState> get() = kdfBenchmarkController.state
     fun runKdfBenchmark() = kdfBenchmarkController.run()

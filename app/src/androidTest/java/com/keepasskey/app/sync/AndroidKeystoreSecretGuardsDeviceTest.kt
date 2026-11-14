@@ -44,10 +44,8 @@ class AndroidKeystoreSecretGuardsDeviceTest {
     @Test
     fun 同步凭据封印在真机往返且密文与IV篡改必拒() {
         val sealer = SyncCredentialSealer(
-            KeystoreManager(context, DebugLogBuffer()),
-            DebugLogBuffer(),
-            SyncCredentialsStore.SYNC_KEY_ALIAS
-        )
+            KeystoreManager(context),
+            SyncCredentialsStore.SYNC_KEY_ALIAS)
         val password = "Seal-测试-口令!".toCharArray()
         val sealed = requireNotNull(
             sealer.encrypt(password, null)
@@ -82,7 +80,7 @@ class AndroidKeystoreSecretGuardsDeviceTest {
     fun 封印密钥规格在真机可核验_不绑定用户认证() {
         // 先确保密钥已由生产路径生成
         val alias = SyncCredentialsStore.SYNC_KEY_ALIAS
-        val key = KeystoreManager(context, DebugLogBuffer()).getOrCreateKey(alias, requireUserAuth = false)
+        val key = KeystoreManager(context).getOrCreateKey(alias, requireUserAuth = false)
         val info = SecretKeyFactory.getInstance(KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
             .getKeySpec(key, KeyInfo::class.java) as KeyInfo
         assertFalse(

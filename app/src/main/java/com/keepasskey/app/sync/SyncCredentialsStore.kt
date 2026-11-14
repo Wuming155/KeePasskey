@@ -1,8 +1,8 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import androidx.annotation.VisibleForTesting
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.ActiveDatabaseIdStore
 import com.keepasskey.app.security.KeystoreManager
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
@@ -31,7 +31,6 @@ class SyncCredentialsStore @Inject constructor(
     @ApplicationContext private val context: Context,
     private val keystoreManager: KeystoreManager? = null,
     // 允许为 null 仅用于 JVM 单测注入；生产 DI 恒定注入真实实现
-    private val debugLog: DebugLogBuffer? = null,
     // ISSUE-P1-07：凭据销毁必须连带销毁同步缓存中的 KDBX 密文快照。
     // 允许为 null 仅用于 JVM 单测注入；生产 DI 恒定注入真实实现（构造无环：
     // SyncCacheEvictor 仅依赖 ApplicationContext 与调试日志）。
@@ -77,7 +76,7 @@ class SyncCredentialsStore @Inject constructor(
 
     // ISSUE-P3-29：封印 / 解除封印已拆至 SyncCredentialSealer（同模块 internal）；
     // 测试注入钩子仍由本类持有并逐次传入，语义不变。
-    private val sealer = SyncCredentialSealer(keystoreManager, debugLog, SYNC_KEY_ALIAS)
+    private val sealer = SyncCredentialSealer(keystoreManager, SYNC_KEY_ALIAS)
 
     /**
      * ISSUE-P2-285 AC①／AC②：同步凭据封印密钥的**实测**硬件落位等级
@@ -95,7 +94,7 @@ class SyncCredentialsStore @Inject constructor(
     private fun resolveScope(dbId: String?): String? =
         dbId?.let { vaultNamespace.idFor(it) }
             ?: vaultNamespace.currentId().also {
-                SyncCredentialKeys.adoptLegacyInto(prefs, it, debugLog)
+                SyncCredentialKeys.adoptLegacyInto(prefs, it)
             }
 
     /** 命名空间键名：`dbId` 为 null（无活动库）时即旧全局键（见 [SyncCredentialKeys]） */
@@ -234,7 +233,7 @@ class SyncCredentialsStore @Inject constructor(
         // ISSUE-P2-403：非空但全 '0' 的凭据 = 擦除后误存的「擦零指纹」（真机实证：云端打开后
         // 同步 401，设置页预填整串 0）——拒绝封印，绝不把垃圾密文落盘顶掉既有可用凭据
         if (isAllZero(password)) {
-            debugLog?.warn(TAG, "拒绝封印 WebDAV 密码：内容为全零串（疑似擦除后误存）")
+            AppLog.w(TAG, "拒绝封印 WebDAV 密码：内容为全零串（疑似擦除后误存）")
             return false
         }
         try {
@@ -348,7 +347,7 @@ class SyncCredentialsStore @Inject constructor(
     ): Boolean {
         // ISSUE-P2-403：全零串拒绝封印（语义同 saveWebDavConfig）
         if (isAllZero(accessKey) || isAllZero(secretKey)) {
-            debugLog?.warn(TAG, "拒绝封印 S3 密钥：内容为全零串（疑似擦除后误存）")
+            AppLog.w(TAG, "拒绝封印 S3 密钥：内容为全零串（疑似擦除后误存）")
             return false
         }
         try {

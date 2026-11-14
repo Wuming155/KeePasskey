@@ -1,8 +1,8 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.core.log.AppLog
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
@@ -63,7 +63,6 @@ internal class BiometricResealCoordinator(
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val strings: StringsProvider,
-    private val debugLog: DebugLogBuffer,
     /** ISSUE-P1-429：重封印 keystore 密算与供给的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
     private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
     /** 仅包同步存储发布；票据核验由调用方完成，不能持会话锁等待密算或生物识别。 */
@@ -92,7 +91,7 @@ internal class BiometricResealCoordinator(
                 )
             }
         } catch (e: Throwable) {
-            debugLog.warn(TAG, "重封印密钥不可用: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "重封印密钥不可用: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -126,7 +125,7 @@ internal class BiometricResealCoordinator(
         // 先摘除陈旧封印：内含旧密码，已确定失效；此后任何失败都不残留「注定失败态」
         if (hadCredential) {
             if (!publishSeal { storage.clearCredential(dbId) }) return
-            debugLog.info(TAG, "改密成功，摘除陈旧封印凭据并尝试重封印")
+            AppLog.i(TAG, "改密成功，摘除陈旧封印凭据并尝试重封印")
         }
 
         // ISSUE-P1-429：供给含 keystore binder 调用（建钥 / 落位探测），移 IO 线程执行
@@ -134,7 +133,7 @@ internal class BiometricResealCoordinator(
             (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
         }
         if (provision == null) {
-            debugLog.warn(TAG, "重封印中止：封印密钥供给失败（下次主密码解锁后自动重新封印）")
+            AppLog.w(TAG, "重封印中止：封印密钥供给失败（下次主密码解锁后自动重新封印）")
             return
         }
         // 软件级降级未经显式确认时不建立封印：登记路径的确认闸门未走过，
@@ -142,7 +141,7 @@ internal class BiometricResealCoordinator(
         if (UnlockAuthPolicy.requiresDowngradeConsent(provision.securityLevel) &&
             !settings.quickUnlockDowngradeAcknowledged
         ) {
-            debugLog.warn(TAG, "重封印中止：封印密钥落位 ${provision.securityLevel} 未经降级确认")
+            AppLog.w(TAG, "重封印中止：封印密钥落位 ${provision.securityLevel} 未经降级确认")
             return
         }
         val authManager = biometricAuthManager ?: return
@@ -152,7 +151,7 @@ internal class BiometricResealCoordinator(
             UnlockAuthPolicy.canSeal(authManager.canAuthenticate(host, BiometricAuthManager.UNLOCK_AUTHENTICATORS))
         }
         if (!biometricOk) {
-            debugLog.warn(TAG, "重封印中止：设备无可用强生物识别（fail-closed）")
+            AppLog.w(TAG, "重封印中止：设备无可用强生物识别（fail-closed）")
             return
         }
 
@@ -167,7 +166,7 @@ internal class BiometricResealCoordinator(
         } else {
             val snapshot = sessionPasswordChars()
             if (snapshot == null) {
-                debugLog.warn(TAG, "重封印中止：密码分量未变但取不到会话主密码快照")
+                AppLog.w(TAG, "重封印中止：密码分量未变但取不到会话主密码快照")
                 return
             }
             passwordChars = snapshot
@@ -178,12 +177,12 @@ internal class BiometricResealCoordinator(
                 // 弹窗挂起期间开关可能已被关闭（关闭 = 删除）：落库前复核偏好，
                 // 杜绝「撤销刚执行、重封印又写回」的竞态（与登记路径 ISSUE-P2-253 同一批关闸）
                 if (!settingsRepository.getSettings().first().biometricEnabled) {
-                    debugLog.info(TAG, "重封印授权挂起期间生物识别开关已关闭，放弃落库")
+                    AppLog.i(TAG, "重封印授权挂起期间生物识别开关已关闭，放弃落库")
                     return
                 }
                 if (publishSeal { storage.saveEncryptedCredential(dbId, sealed.first, sealed.second) }) {
-                    debugLog.info(TAG, "生物识别封印凭据已随改密重封印")
-                } else debugLog.info(TAG, "会话或凭据代次已改变，放弃过期重封印")
+                    AppLog.i(TAG, "生物识别封印凭据已随改密重封印")
+                } else AppLog.i(TAG, "会话或凭据代次已改变，放弃过期重封印")
             }
         } finally {
             if (erasePassword) passwordChars.fill('0')
@@ -212,7 +211,7 @@ internal class BiometricResealCoordinator(
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            debugLog.warn(TAG, "生物识别重封印异常: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "生物识别重封印异常: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -228,7 +227,7 @@ internal class BiometricResealCoordinator(
             is BiometricResult.Success -> {
                 val authedCipher = authResult.cipher
                 if (authedCipher == null) {
-                    debugLog.warn(TAG, "重封印未取得授权 Cipher，跳过")
+                    AppLog.w(TAG, "重封印未取得授权 Cipher，跳过")
                     null
                 } else {
                     // ISSUE-P1-429：授权 Cipher 的 keystore 密算（StrongBox 分块加密可达秒级）
@@ -237,15 +236,15 @@ internal class BiometricResealCoordinator(
                 }
             }
             is BiometricResult.Cancelled -> {
-                debugLog.info(TAG, "用户取消重封印（下次主密码解锁后自动重新封印）")
+                AppLog.i(TAG, "用户取消重封印（下次主密码解锁后自动重新封印）")
                 null
             }
             is BiometricResult.Error -> {
-                debugLog.warn(TAG, "重封印授权失败: code=${authResult.errorCode}")
+                AppLog.w(TAG, "重封印授权失败: code=${authResult.errorCode}")
                 null
             }
             is BiometricResult.Failed -> {
-                debugLog.warn(TAG, "重封印授权未通过")
+                AppLog.w(TAG, "重封印授权未通过")
                 null
             }
         }

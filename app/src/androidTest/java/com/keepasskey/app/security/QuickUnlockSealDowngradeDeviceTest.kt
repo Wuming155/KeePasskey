@@ -73,13 +73,11 @@ class QuickUnlockSealDowngradeDeviceTest {
         // ISSUE-P1-431（§431）封印载荷瘦身：协调器已不再接收 keyFileBytes（密钥文件字节不进
         // Keystore 载荷），原具名实参残留致 `:app:androidTest` 编译失败 → 第四层真机实跑被卡死。
         biometricAuthManager = authManager,
-        biometricCredentialStorage = BiometricCredentialStorage(context),
-        debugLog = DebugLogBuffer()
-    )
+        biometricCredentialStorage = BiometricCredentialStorage(context))
 
     @Test
     fun `AndroidKeyStore真实密钥落位在设备侧返回真实等级`() {
-        val keystoreManager = KeystoreManager(context, DebugLogBuffer())
+        val keystoreManager = KeystoreManager(context)
         val authManager = BiometricAuthManager(keystoreManager)
         try {
             // 生产同规格生成（落位属性与授权规格无关）：无认证门控密钥，
@@ -124,7 +122,7 @@ class QuickUnlockSealDowngradeDeviceTest {
 
     @Test
     fun `未录入强生物识别时封印fail-closed且不请求降级确认`() = runBlocking<Unit> {
-        val keystoreManager = KeystoreManager(context, DebugLogBuffer())
+        val keystoreManager = KeystoreManager(context)
         val authManager = BiometricAuthManager(keystoreManager)
         val settings = RealSettingsRepository(context)
         settings.setBiometricEnabled(true)
@@ -173,7 +171,7 @@ class QuickUnlockSealDowngradeDeviceTest {
      */
     @Test
     fun `SOFTWARE落位降级确认闸门在设备侧闭环`() = runBlocking<Unit> {
-        val keystoreManager = KeystoreManager(context, DebugLogBuffer())
+        val keystoreManager = KeystoreManager(context)
         val authManager = BiometricAuthManager(keystoreManager)
         val settings = RealSettingsRepository(context)
         val storage = BiometricCredentialStorage(context)
@@ -266,7 +264,7 @@ class QuickUnlockSealDowngradeDeviceTest {
     fun `生物迁移生命周期在设备侧闭环`() {
         val prefs = context.getSharedPreferences("com.keepasskey.biometric_credentials", Context.MODE_PRIVATE)
         val originalDone = if (prefs.contains("legacy_migration_done")) prefs.getBoolean("legacy_migration_done", false) else null
-        val keystoreManager = KeystoreManager(context, DebugLogBuffer())
+        val keystoreManager = KeystoreManager(context)
         val keyStore = KeyStore.getInstance(KeystoreManager.ANDROID_KEY_STORE).apply { load(null) }
 
         val testPasskeyAlias = KeystoreManager.legacyUnlockPasskeyAliasFor(MIGRATION_TEST_DB_ID)
@@ -397,7 +395,7 @@ class QuickUnlockSealDowngradeDeviceTest {
     fun `主线程构造实际耗时量化`() {
         val prefs = context.getSharedPreferences("com.keepasskey.biometric_credentials", Context.MODE_PRIVATE)
         val originalDone = if (prefs.contains("legacy_migration_done")) prefs.getBoolean("legacy_migration_done", false) else null
-        val keystoreManager = KeystoreManager(context, DebugLogBuffer())
+        val keystoreManager = KeystoreManager(context)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
 
         val perfPasskeyAlias = KeystoreManager.legacyUnlockPasskeyAliasFor(MIGRATION_PERF_DB_ID)

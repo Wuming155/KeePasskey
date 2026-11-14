@@ -1,5 +1,6 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.content.pm.PackageManager
 import android.security.keystore.KeyGenParameterSpec
@@ -7,7 +8,6 @@ import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -31,7 +31,6 @@ import javax.crypto.spec.GCMParameterSpec
  */
 internal class KeystoreKeyMaterial(
     private val context: Context?,
-    private val debugLog: DebugLogBuffer?,
     private val onDeleteKey: (String) -> Unit
 ) {
 
@@ -116,7 +115,7 @@ internal class KeystoreKeyMaterial(
         // 生成即校验硬件落位：诊断性告警（不硬失败，兼容模拟器/CI 的软件 Keystore）
         val level = probeSecurityLevel(alias)
         if (level == KeyProperties.SECURITY_LEVEL_SOFTWARE) {
-            debugLog?.warn(
+            AppLog.w(
                 TAG,
                 "密钥 $alias 落位软件 Keystore（非 TEE/StrongBox），硬件隔离未生效"
             )

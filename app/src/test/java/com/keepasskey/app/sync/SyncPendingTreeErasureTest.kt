@@ -296,10 +296,8 @@ class SyncPendingTreeErasureTest {
             context = context,
             databaseSession = session,
             syncCredentialsStore = SyncCredentialsStore(context, null),
-            debugLog = DebugLogBuffer(),
             strings = ERASURE_TEST_STRINGS,
-            syncConflicts = controller
-        )
+            syncConflicts = controller)
 
         session.lock()
 
@@ -614,11 +612,9 @@ class SyncPendingTreeErasureTest {
 
     private fun controllerFor(session: DatabaseSession) = SyncConflictController(
         databaseSession = session,
-        codec = SyncDatabaseCodec(session, DebugLogBuffer()),
+        codec = SyncDatabaseCodec(session),
         strings = ERASURE_TEST_STRINGS,
-        session = SyncSessionState(),
-        debugLog = DebugLogBuffer()
-    )
+        session = SyncSessionState())
 
     private fun engineFor(workDir: File, remoteBytes: ByteArray): SyncEngine {
         val provider = MemorySyncProvider()
@@ -655,7 +651,7 @@ class SyncPendingTreeErasureTest {
         )
         assertTrue("建库必须成功: $created", created is KdbxResult.Success)
 
-        val codec = SyncDatabaseCodec(session, DebugLogBuffer())
+        val codec = SyncDatabaseCodec(session)
         val commonEntry = KdbxEntry(
             id = UUID_COMMON,
             fields = mapOf(

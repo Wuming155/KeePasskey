@@ -1,6 +1,6 @@
 package com.keepasskey.app.data.repository
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.passkey.DomainMatcher
 import com.keepasskey.core.model.KdbxConstants
 import com.keepasskey.core.model.KdbxCustomField
@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.first
  */
 internal class PasskeyEntryCoordinator(
     private val databaseSession: DatabaseSession,
-    private val debugLog: DebugLogBuffer,
     private val persistSession: suspend () -> KdbxResult<Unit>
 ) {
 
@@ -61,7 +60,7 @@ internal class PasskeyEntryCoordinator(
 
     /** 落盘交付（`ISSUE-P1-590`，实现见 [PasskeyWriteCommit.commit]） */
     private suspend fun commitEntry(entry: KdbxEntry, what: String): KdbxResult<KdbxEntry> =
-        PasskeyWriteCommit.commit(entry, what, debugLog, persistSession)
+        PasskeyWriteCommit.commit(entry, what, persistSession)
 
     private fun missingEntryFailure(): KdbxResult.Failure = PasskeyWriteCommit.missingEntry()
 
@@ -226,7 +225,7 @@ internal class PasskeyEntryCoordinator(
             )
         }
         if (replacement == null) {
-            debugLog.warn(TAG, "按 entryId 替换通行密钥字段未命中条目，未做任何写入")
+            AppLog.w(TAG, "按 entryId 替换通行密钥字段未命中条目，未做任何写入")
             return missingEntryFailure()
         }
         return commitEntry(replacement, "通行密钥字段替换")
@@ -270,7 +269,7 @@ internal class PasskeyEntryCoordinator(
             }
         }
         if (cleared == null) {
-            debugLog.warn(TAG, "解除通行密钥绑定未命中条目，未做任何写入")
+            AppLog.w(TAG, "解除通行密钥绑定未命中条目，未做任何写入")
             return missingEntryFailure()
         }
         return commitEntry(cleared, "通行密钥字段摘除")
@@ -363,7 +362,7 @@ internal class PasskeyEntryCoordinator(
         return when (val saved = persistSession()) {
             is KdbxResult.Success -> KdbxResult.Success(checkNotNull(applied) { "计数器读回值缺失" })
             is KdbxResult.Failure -> {
-                debugLog.warn(TAG, "签名计数器已更新但落盘失败，拒绝回传已提交值: ${saved.error.javaClass.simpleName}")
+                AppLog.w(TAG, "签名计数器已更新但落盘失败，拒绝回传已提交值: ${saved.error.javaClass.simpleName}")
                 saved
             }
         }
@@ -406,7 +405,7 @@ internal class PasskeyEntryCoordinator(
             PasskeyCryptoEngine.legacyPrivateKeyTextToPemChars(raw, data.algorithmId)
         }
         if (pemChars == null) {
-            debugLog.warn(TAG, "v1 旧条目私钥无法重包为 PKCS#8 PEM，保持旧 schema 不迁移")
+            AppLog.w(TAG, "v1 旧条目私钥无法重包为 PKCS#8 PEM，保持旧 schema 不迁移")
             return entry
         }
         val pemKey = try {

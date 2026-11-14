@@ -50,7 +50,7 @@ class AutoLockSessionGuardTest {
         settings: FakeSettingsRepository = FakeSettingsRepository().apply {
             runBlocking { setLockWhenScreenOff(true) }
         }
-    ): AutoLockSessionGuard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+    ): AutoLockSessionGuard = AutoLockSessionGuard(session, settings)
 
     @Test
     fun `仅经解锁入口打开会话后熄屏即触发会话锁定`() = runBlocking {
@@ -69,7 +69,7 @@ class AutoLockSessionGuardTest {
         val settings = FakeSettingsRepository()
         settings.setLockWhenScreenOff(false)
         settings.setAutoLockBackground(true)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         guard.lockOnScreenOff()
 
@@ -83,7 +83,7 @@ class AutoLockSessionGuardTest {
         val settings = FakeSettingsRepository()
         settings.setLockWhenScreenOff(false)
         settings.setAutoLockBackground(false)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         guard.lockOnScreenOff()
 
@@ -98,7 +98,7 @@ class AutoLockSessionGuardTest {
         settings.setLockWhenScreenOff(false)
         settings.setAutoLockBackground(true)
         settings.setAutoLockTimeoutSeconds(30)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         val now = System.currentTimeMillis()
         guard.lockOnBackgroundResume(backgroundTimestamp = now - 31_000L, now = now)
@@ -114,7 +114,7 @@ class AutoLockSessionGuardTest {
         settings.setLockWhenScreenOff(false)
         settings.setAutoLockBackground(true)
         settings.setAutoLockTimeoutSeconds(30)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         val now = System.currentTimeMillis()
         guard.lockOnBackgroundResume(backgroundTimestamp = now - 10_000L, now = now)
@@ -128,7 +128,7 @@ class AutoLockSessionGuardTest {
         val (session, _) = unlockViaUnlockEntry()
         val settings = FakeSettingsRepository()
         settings.setAutoLockBackground(true)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         guard.lockOnBackgroundResume(backgroundTimestamp = 0L)
 
@@ -212,7 +212,7 @@ class AutoLockSessionGuardTest {
     fun `补存成功时结果标记 Saved 且不触发恢复策略`() = runBlocking {
         val (session, _) = unlockViaUnlockEntry()
         val recovery = RecordingRecovery(LockOutcome.RecoveryCommitted)
-        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, recovery = recovery)
         makeDirty(session)
 
         val outcome = guard.triggerLock("测试")
@@ -226,7 +226,7 @@ class AutoLockSessionGuardTest {
     fun `无未落盘修改时结果标记 NoPendingChanges`() = runBlocking {
         val (session, _) = unlockViaUnlockEntry()
         val recovery = RecordingRecovery(LockOutcome.RecoveryCommitted)
-        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, recovery = recovery)
 
         val outcome = guard.triggerLock("测试")
 
@@ -238,7 +238,7 @@ class AutoLockSessionGuardTest {
     fun `补存失败时触发恢复策略并回传其明确结果`() = runBlocking {
         val (session, _) = unlockWithFailingSave()
         val recovery = RecordingRecovery(LockOutcome.RecoveryCommitted)
-        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, recovery = recovery)
         makeDirty(session)
 
         val outcome = guard.triggerLock("测试")
@@ -253,7 +253,7 @@ class AutoLockSessionGuardTest {
     fun `全部保全失败时回传 PreservationFailed 并携带告警持久化标志`() = runBlocking {
         val (session, _) = unlockWithFailingSave()
         val recovery = RecordingRecovery(LockOutcome.PreservationFailed(alertPersisted = false))
-        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, DebugLogBuffer(), recovery = recovery)
+        val guard = AutoLockSessionGuard(session, FakeSettingsRepository().apply { setLockWhenScreenOff(true) }, recovery = recovery)
         makeDirty(session)
 
         val outcome = guard.triggerLock("测试")
@@ -306,16 +306,15 @@ class AutoLockSessionGuardTest {
 
             assertTrue("统一漂移判据必须检出外部文件已被修改", coordinator.checkDrift(file.absolutePath, file))
 
-            val recoveryStore = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+            val recoveryStore = VaultRecoveryStore(null).apply {
                 baseDirOverride = tempFolder.newFolder("recovery")
             }
             val alertStore = RecoveryAlertStore(null)
-            val recovery = SessionRecoveryCoordinator(session, recoveryStore, alertStore, DebugLogBuffer())
+            val recovery = SessionRecoveryCoordinator(session, recoveryStore, alertStore)
             val settings = FakeSettingsRepository().apply { setLockWhenScreenOff(true) }
             val guard = AutoLockSessionGuard(
                 databaseSession = session,
                 settingsRepository = settings,
-                debugLog = DebugLogBuffer(),
                 recovery = recovery,
                 driftCoordinator = coordinator
             )
@@ -373,7 +372,6 @@ class AutoLockSessionGuardTest {
             val guard = AutoLockSessionGuard(
                 databaseSession = session,
                 settingsRepository = settings,
-                debugLog = DebugLogBuffer(),
                 recovery = SessionRecoveryPolicy.Disabled,
                 driftCoordinator = coordinator
             )
@@ -396,15 +394,14 @@ class AutoLockSessionGuardTest {
         val coordinator = VaultFileDriftCoordinator(holder, session)
         val driftGuard = VaultFileDriftGuard(coordinator, null)
 
-        val recoveryStore = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+        val recoveryStore = VaultRecoveryStore(null).apply {
             baseDirOverride = tempFolder.newFolder("recovery_boundary")
         }
-        val recovery = SessionRecoveryCoordinator(session, recoveryStore, RecoveryAlertStore(null), DebugLogBuffer())
+        val recovery = SessionRecoveryCoordinator(session, recoveryStore, RecoveryAlertStore(null))
         val settings = FakeSettingsRepository().apply { setLockWhenScreenOff(true) }
         val guard = AutoLockSessionGuard(
             databaseSession = session,
             settingsRepository = settings,
-            debugLog = DebugLogBuffer(),
             recovery = recovery,
             driftCoordinator = coordinator
         )
@@ -452,14 +449,13 @@ class AutoLockSessionGuardTest {
         makeDirty(session)
         assertFalse("未修改时不应判漂移", coordinator.checkDrift(file.absolutePath, file))
 
-        val recoveryStore = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+        val recoveryStore = VaultRecoveryStore(null).apply {
             baseDirOverride = tempFolder.newFolder("recovery_clean")
         }
-        val recovery = SessionRecoveryCoordinator(session, recoveryStore, RecoveryAlertStore(null), DebugLogBuffer())
+        val recovery = SessionRecoveryCoordinator(session, recoveryStore, RecoveryAlertStore(null))
         val guard = AutoLockSessionGuard(
             databaseSession = session,
             settingsRepository = FakeSettingsRepository().apply { setLockWhenScreenOff(true) },
-            debugLog = DebugLogBuffer(),
             recovery = recovery,
             driftCoordinator = coordinator
         )
@@ -490,7 +486,7 @@ class AutoLockSessionGuardTest {
         registry.register(owner) { dirty }
         val settings = FakeSettingsRepository()
         settings.setLockWhenScreenOff(true)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer(), registry)
+        val guard = AutoLockSessionGuard(session, settings, registry)
 
         guard.lockOnScreenOff()
 
@@ -511,7 +507,7 @@ class AutoLockSessionGuardTest {
         val registry = UnsavedEditRegistry()
         val settings = FakeSettingsRepository()
         settings.setLockWhenScreenOff(true)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer(), registry)
+        val guard = AutoLockSessionGuard(session, settings, registry)
 
         guard.lockOnScreenOff()
 
@@ -527,7 +523,7 @@ class AutoLockSessionGuardTest {
         val settings = FakeSettingsRepository()
         settings.setAutoLockBackground(true)
         settings.setAutoLockTimeoutSeconds(AutoLockTimeoutPolicy.NEVER_SECONDS)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         val now = System.currentTimeMillis()
         // 停留 24 小时（旧实现因 timeoutMillis <= 0 会立即误锁，本断言锁定 ZT-18 回归）
@@ -546,7 +542,7 @@ class AutoLockSessionGuardTest {
         val settings = FakeSettingsRepository()
         settings.setAutoLockBackground(true)
         settings.setAutoLockTimeoutSeconds(AutoLockTimeoutPolicy.IMMEDIATE_SECONDS)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         val now = System.currentTimeMillis()
         // 仅离开 1 毫秒也必须锁定：0 档语义 = 退后台即超时
@@ -562,7 +558,7 @@ class AutoLockSessionGuardTest {
         val settings = FakeSettingsRepository()
         settings.setAutoLockBackground(false)
         settings.setAutoLockTimeoutSeconds(AutoLockTimeoutPolicy.IMMEDIATE_SECONDS)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         val now = System.currentTimeMillis()
         guard.lockOnBackgroundResume(backgroundTimestamp = now - ONE_DAY_MILLIS, now = now)
@@ -608,7 +604,7 @@ class AutoLockSessionGuardTest {
         val settings = FakeSettingsRepository()
         settings.setAutoLockBackground(true)
         settings.setAutoLockTimeoutSeconds(30)
-        val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(session, settings)
 
         val now = System.currentTimeMillis()
         guard.beginLongTask()

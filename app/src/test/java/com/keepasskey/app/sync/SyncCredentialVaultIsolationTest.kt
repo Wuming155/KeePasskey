@@ -202,7 +202,7 @@ class SyncCredentialVaultIsolationTest {
         )
         store.saveProvider(CloudSyncProvider.S3_COMPATIBLE)
 
-        val resolver = SyncProviderResolver(store, SyncPreferences(DebugLogBuffer(), null), DebugLogBuffer())
+        val resolver = SyncProviderResolver(store, SyncPreferences(null))
 
         activateVault(VAULT_A)
         assertEquals("/a.kdbx", resolver.resolveRemotePath("fallback.kdbx"))

@@ -408,9 +408,7 @@ class SettingsThinOrchestrationTest {
             context,
             DatabaseSession(),
             credentials,
-            DebugLogBuffer(),
-            TEST_STRINGS
-        )
+            TEST_STRINGS)
         coordinator.testSyncProvider = provider
         return SettingsSyncController(
             credentials, coordinator, ExtendedSettingsStore(null), TEST_STRINGS, scope

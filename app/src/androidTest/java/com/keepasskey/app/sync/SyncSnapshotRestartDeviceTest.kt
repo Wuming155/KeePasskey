@@ -417,13 +417,13 @@ class SyncSnapshotRestartDeviceTest {
         failHighWaterDigest: String? = null
     ): SyncCoordinator {
         val log = DebugLogBuffer()
-        val preferences = SyncPreferences(log, null)
-        val credentials = SyncCredentialsStore(context, null, log)
-        val providerResolver = SyncProviderResolver(credentials, preferences, log)
+        val preferences = SyncPreferences(null)
+        val credentials = SyncCredentialsStore(context, null)
+        val providerResolver = SyncProviderResolver(credentials, preferences)
         val sessionState = SyncSessionState().apply { testRemotePath = provider.remotePath }
         val strings = StringsProvider { id, args -> context.getString(id, *args) }
-        val codec = SyncDatabaseCodec(session, log)
-        val conflicts = SyncConflictController(session, codec, strings, sessionState, log)
+        val codec = SyncDatabaseCodec(session)
+        val conflicts = SyncConflictController(session, codec, strings, sessionState)
         val changes = SyncContentChangeDetector(codec, sessionState)
         val cycle = SyncCycleRunner(
             context = context,
@@ -454,7 +454,6 @@ class SyncSnapshotRestartDeviceTest {
             context = context,
             databaseSession = session,
             syncCredentialsStore = credentials,
-            debugLog = log,
             strings = strings,
             syncSession = sessionState,
             syncPreferences = preferences,
@@ -462,8 +461,7 @@ class SyncSnapshotRestartDeviceTest {
             syncDatabaseCodec = codec,
             syncContentChanges = changes,
             syncConflicts = conflicts,
-            syncCycle = cycle
-        ).also { it.testSyncProvider = provider }
+            syncCycle = cycle).also { it.testSyncProvider = provider }
     }
 
     private fun titles(sessionDb: KdbxDatabase): List<String> =

@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.database
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.net.Uri
 import com.keepasskey.app.R
@@ -39,7 +40,6 @@ internal class DatabasePickerKeyFileDeliveryController(
     /** ISSUE-P2-460 AC③：私有目录收编副本通道（可空 = 单测未装配） */
     private val vaultCopyStore: KeyFileVaultCopyStore? = null,
     /** 取证日志通道（可空 = 单测未装配；只记状态与布尔值，不记库名 / Uri / 文件名） */
-    private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer? = null,
     /** ISSUE-P2-460 AC②：按库登记所需的密钥文件访问契约（可空 = 单测未装配） */
     private val keyFileAccess: com.keepasskey.app.ui.screens.unlock.KeyFileAccess? = null
 ) {
@@ -55,7 +55,7 @@ internal class DatabasePickerKeyFileDeliveryController(
     fun requestSave(vaultName: String, dbId: String) {
         pendingDbId = dbId
         deliveryFlow.value = KeyFileDeliveryState.PendingSave(suggestedFileName = suggestedFileName(vaultName))
-        debugLog?.info(TAG, "交付状态机: None→PendingSave（挂出一次性提示）")
+        AppLog.i(TAG, "交付状态机: None→PendingSave（挂出一次性提示）")
     }
 
     /**
@@ -66,19 +66,19 @@ internal class DatabasePickerKeyFileDeliveryController(
      * 绝不写空文件冒充成功、也不得只报一句「保存失败」。
      */
     fun saveTo(targetUri: Uri) {
-        debugLog?.info(TAG, "交付状态机: saveTo 进入（写盘开始）")
+        AppLog.i(TAG, "交付状态机: saveTo 进入（写盘开始）")
         scope.launch {
             val bytes = resolveDeliveryBytes()
             if (bytes == null) {
                 // AC③：两级都取不到 ⇒ 密钥文件确已丢失，显式分型提示（不得静默「保存失败」）
-                debugLog?.info(TAG, "交付状态机: 两级字节源均空 → 判定丢失（PendingSave 驻留）")
+                AppLog.i(TAG, "交付状态机: 两级字节源均空 → 判定丢失（PendingSave 驻留）")
                 publish(UiMessage(R.string.db_picker_keyfile_lost))
                 return@launch
             }
             val resolver = appContext?.contentResolver
             if (resolver == null) {
                 // 禁止静默失败：没有写盘上下文时如实告知用户，提示保持驻留
-                debugLog?.warn(TAG, "交付状态机: 无写盘上下文（resolver=null）→ 报保存失败（PendingSave 驻留）")
+                AppLog.w(TAG, "交付状态机: 无写盘上下文（resolver=null）→ 报保存失败（PendingSave 驻留）")
                 bytes.fill(0)
                 publish(UiMessage(R.string.db_picker_keyfile_save_failed))
                 return@launch
@@ -92,7 +92,7 @@ internal class DatabasePickerKeyFileDeliveryController(
                     } ?: false
                 } catch (_: Exception) { // cancel-n/a: 保护段为阻塞式 SAF 写盘（无挂起点）
                     // 异常不外泄内容（可能是提供方拒绝/磁盘满），统一由下方语义化提示承接
-                    debugLog?.warn(TAG, "交付状态机: SAF 写盘抛异常（细节不外泄）")
+                    AppLog.w(TAG, "交付状态机: SAF 写盘抛异常（细节不外泄）")
                     false
                 }
                 if (ok) {
@@ -103,7 +103,7 @@ internal class DatabasePickerKeyFileDeliveryController(
                     val actualName = appContext?.let { querySafDisplayName(it, targetUri) }.orEmpty()
                     if (!pendingDbId.isNullOrBlank() && vaultCopyStore != null && actualName.isNotBlank()) {
                         vaultCopyStore.save(pendingDbId!!, bytes, actualName)
-                        debugLog?.info(TAG, "交付状态机: 副本显示名已按用户保存命名回写")
+                        AppLog.i(TAG, "交付状态机: 副本显示名已按用户保存命名回写")
                     }
                     // ISSUE-P3-464 ①（KeePassDX 对齐）：记住的密钥文件＝用户实际保存的那个文件。
                     // 写盘成功即按「保存位置 + 实际显示名」登记本库记忆（尊重偏好与持久授权，
@@ -115,7 +115,7 @@ internal class DatabasePickerKeyFileDeliveryController(
                             access.persistReadPermission(targetUri.toString())
                         if (registered) {
                             access.remember(dbIdForMemory, targetUri.toString(), actualName)
-                            debugLog?.info(TAG, "交付状态机: 已按保存位置登记本库密钥文件记忆")
+                            AppLog.i(TAG, "交付状态机: 已按保存位置登记本库密钥文件记忆")
                         }
                     }
                 }
@@ -124,11 +124,11 @@ internal class DatabasePickerKeyFileDeliveryController(
                 ok
             }
             if (written) {
-                debugLog?.info(TAG, "交付状态机: 写盘成功 → PendingSave→None（提示关闭）")
+                AppLog.i(TAG, "交付状态机: 写盘成功 → PendingSave→None（提示关闭）")
                 deliveryFlow.value = KeyFileDeliveryState.None
                 publish(UiMessage(R.string.db_picker_keyfile_saved))
             } else {
-                debugLog?.warn(TAG, "交付状态机: 写盘失败 → PendingSave 驻留（用户可重试/搁置）")
+                AppLog.w(TAG, "交付状态机: 写盘失败 → PendingSave 驻留（用户可重试/搁置）")
                 publish(UiMessage(R.string.db_picker_keyfile_save_failed))
             }
         }
@@ -143,18 +143,18 @@ internal class DatabasePickerKeyFileDeliveryController(
     internal suspend fun resolveDeliveryBytes(): ByteArray? {
         val sessionBytes = vaultRepository.exportKeyFileBytes().getOrNull()
         if (sessionBytes != null) {
-            debugLog?.info(TAG, "交付状态机: 字节源=会话导出")
+            AppLog.i(TAG, "交付状态机: 字节源=会话导出")
             return sessionBytes
         }
-        debugLog?.info(TAG, "交付状态机: 会话导出为空（会话未绑定/已失效）→ 试本库副本（dbId 在位=${!pendingDbId.isNullOrBlank()}）")
+        AppLog.i(TAG, "交付状态机: 会话导出为空（会话未绑定/已失效）→ 试本库副本（dbId 在位=${!pendingDbId.isNullOrBlank()}）")
         val copy = vaultCopyStore?.load(pendingDbId.orEmpty())?.bytes
-        debugLog?.info(TAG, "交付状态机: 字节源=${if (copy != null) "本库副本" else "无（判定丢失）"}")
+        AppLog.i(TAG, "交付状态机: 字节源=${if (copy != null) "本库副本" else "无（判定丢失）"}")
         return copy
     }
 
     /** 用户显式选择「暂不保存密钥文件」：关闭一次性提示（不清会话缓存，可经设置页导出补存） */
     fun dismiss() {
-        debugLog?.info(TAG, "交付状态机: 用户暂不保存 → PendingSave→None（提示关闭）")
+        AppLog.i(TAG, "交付状态机: 用户暂不保存 → PendingSave→None（提示关闭）")
         deliveryFlow.value = KeyFileDeliveryState.None
     }
 
@@ -177,10 +177,10 @@ internal class DatabasePickerKeyFileDeliveryController(
             val saved = vaultCopyStore?.save(dbId, bytes, displayName)
             bytes.fill(0)
             if (saved != true) {
-                debugLog?.warn(TAG, "建库密钥文件副本收编失败（库已建成，交付提示仍有效）")
+                AppLog.w(TAG, "建库密钥文件副本收编失败（库已建成，交付提示仍有效）")
             }
         } else {
-            debugLog?.warn(TAG, "建库后取不到密钥文件字节，副本未收编")
+            AppLog.w(TAG, "建库后取不到密钥文件字节，副本未收编")
         }
         val access = keyFileAccess
         val sourceUri = resolution.sourceUri

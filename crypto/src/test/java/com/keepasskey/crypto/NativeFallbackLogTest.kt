@@ -1,89 +1,141 @@
 package com.keepasskey.crypto
 
+import com.keepasskey.core.log.AppLog
+import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
 /**
- * ISSUE-P3-392 / ISSUE-P2-499：原生探活失败回落的**一次性可观测**登记。
+ * `ISSUE-P2` C4：原生回落按内核各记一次，且原因可区分「so 缺失」与「KAT/运行期失败」。
  *
- * 判据：进程内只记一次；第二次回落不再改写 lastLoggedKernel；resetForTest 可清零闸门供多用例隔离。
- * ISSUE-P2-499 由 KDF 专有泛化为七内核共用（`NativeKdfFallbackLog` → [NativeFallbackLog]），
- * 本文件由原 `NativeKdfFallbackLogTest` 改名并以新增用例覆盖五个新内核名，**未删除任何原用例**。
+ * 旧实现是进程级单闸门，先回落的内核遮蔽后续内核；本文件锁定新的按内核语义。
  */
 class NativeFallbackLogTest {
 
-    /** ISSUE-P2-499 新增的五个内核名（与各回落决策点传入的字符串逐字一致）。 */
-    private val newKernels = listOf("AES-CBC", "Twofish", "ChaCha20", "口令强度", "Passkey 签名")
+    private val lines = mutableListOf<String>()
 
     @Before
-    fun reset() {
+    fun setUp() {
+        NativeFallbackLog.resetForTest()
+        lines.clear()
+        AppLog.diagnosticLineSink = { _, tag, message ->
+            if (tag == "NativeFallback") lines += message
+        }
+    }
+
+    @After
+    fun tearDown() {
+        AppLog.diagnosticLineSink = null
         NativeFallbackLog.resetForTest()
     }
 
     @Test
-    fun `首次回落记录内核名`() {
-        assertNull(NativeFallbackLog.lastLoggedKernel)
+    fun `不同内核各输出一行且同一内核不重复`() {
+        NativeFallbackLog.noteFallbackOnce("AES-CBC")
         NativeFallbackLog.noteFallbackOnce("Argon2")
-        assertEquals("Argon2", NativeFallbackLog.lastLoggedKernel)
+        NativeFallbackLog.noteFallbackOnce("AES-CBC")
+
+        assertEquals(setOf("AES-CBC", "Argon2"), NativeFallbackLog.loggedKernels())
+        assertEquals("每个内核首次回落各一行", 2, lines.size)
+        assertTrue(lines[0].contains("AES-CBC"))
+        assertTrue(lines[1].contains("Argon2"))
     }
 
     @Test
-    fun `第二次回落不覆盖首次记录`() {
+    fun `so 缺失与 KAT 失败使用不同原因枚举`() {
+        NativeFallbackLog.libraryLoadedProbe = { false }
+        NativeFallbackLog.noteFallbackOnce("AES-CBC")
+
+        NativeFallbackLog.resetForTest()
+        NativeFallbackLog.libraryLoadedProbe = { true }
+        NativeFallbackLog.errorCodeProbe = { NativeErrorCode.NONE }
         NativeFallbackLog.noteFallbackOnce("Argon2")
+
+        assertEquals(2, lines.size)
+        assertTrue("so 缺失须标 LIBRARY_UNAVAILABLE：${lines[0]}", lines[0].contains("reason=LIBRARY_UNAVAILABLE"))
+        assertTrue("自测失败须标 KAT_MISMATCH_OR_ERROR：${lines[1]}", lines[1].contains("reason=KAT_MISMATCH_OR_ERROR"))
+        // 库未加载时不做原因码查询（调用只会再抛一次 UnsatisfiedLinkError）
+        assertFalse("so 缺失行不得带 code=：${lines[0]}", lines[0].contains("code="))
+        // 库已加载：原因码可读，NONE 即「调用成功但结果不符」，正是真正的 KAT 不匹配
+        assertTrue("库已加载须带 code=：${lines[1]}", lines[1].contains("code=NONE"))
+    }
+
+    @Test
+    fun `库已加载时失败原因码可区分入参非法与 panic`() {
+        NativeFallbackLog.libraryLoadedProbe = { true }
+
+        NativeFallbackLog.errorCodeProbe = { NativeErrorCode.INVALID_ARGUMENT }
+        NativeFallbackLog.noteFallbackOnce("AES-CBC")
+
+        NativeFallbackLog.resetForTest()
+        NativeFallbackLog.libraryLoadedProbe = { true }
+        NativeFallbackLog.errorCodeProbe = { NativeErrorCode.PANIC }
+        NativeFallbackLog.noteFallbackOnce("Twofish-CBC")
+
+        assertEquals(2, lines.size)
+        assertTrue(lines[0].contains("code=INVALID_ARGUMENT"))
+        assertTrue(lines[1].contains("code=PANIC"))
+    }
+
+    @Test
+    fun `原因码不可查询时不写 code 且仍输出 reason`() {
+        NativeFallbackLog.libraryLoadedProbe = { true }
+        NativeFallbackLog.errorCodeProbe = { null }
+
+        NativeFallbackLog.noteFallbackOnce("ChaCha20")
+
+        assertEquals(1, lines.size)
+        assertTrue(lines[0].contains("reason=KAT_MISMATCH_OR_ERROR"))
+        assertFalse("不可查询时不得凭空给码：${lines[0]}", lines[0].contains("code="))
+    }
+
+    @Test
+    fun `原因码枚举名稳定`() {
+        assertEquals("NONE", NativeErrorCode.nameOf(NativeErrorCode.NONE))
+        assertEquals("INVALID_ARGUMENT", NativeErrorCode.nameOf(NativeErrorCode.INVALID_ARGUMENT))
+        assertEquals("JNI", NativeErrorCode.nameOf(NativeErrorCode.JNI))
+        assertEquals("KERNEL", NativeErrorCode.nameOf(NativeErrorCode.KERNEL))
+        assertEquals("PANIC", NativeErrorCode.nameOf(NativeErrorCode.PANIC))
+        assertEquals("UNKNOWN(99)", NativeErrorCode.nameOf(99))
+    }
+
+    @Test
+    fun `模拟 UnsatisfiedLinkError 与 KAT 不匹配各输出一行`() {
+        // 关闭条件①的两个形态：库不可用（UnsatisfiedLinkError 被 NativeCryptoLibrary 归一为
+        // loaded=false）与库可用但自测不符（调用都成功、结果与参照不一致 ⇒ code=NONE）。
+        NativeFallbackLog.libraryLoadedProbe = { false }
         NativeFallbackLog.noteFallbackOnce("AES-KDF")
-        assertEquals("进程内只记一次，后续回落不得覆盖", "Argon2", NativeFallbackLog.lastLoggedKernel)
+
+        NativeFallbackLog.resetForTest()
+        NativeFallbackLog.libraryLoadedProbe = { true }
+        NativeFallbackLog.errorCodeProbe = { NativeErrorCode.NONE }
+        NativeFallbackLog.noteFallbackOnce("AES-KDF")
+
+        assertEquals("同一内核两次不同原因各记一行", 2, lines.size)
+        assertTrue(
+            "UnsatisfiedLinkError 形态须为 LIBRARY_UNAVAILABLE：${lines[0]}",
+            lines[0].contains("AES-KDF") && lines[0].contains("reason=LIBRARY_UNAVAILABLE")
+        )
+        assertTrue(
+            "KAT 不匹配形态须为 KAT_MISMATCH_OR_ERROR + code=NONE：${lines[1]}",
+            lines[1].contains("AES-KDF") &&
+                lines[1].contains("reason=KAT_MISMATCH_OR_ERROR") &&
+                lines[1].contains("code=NONE")
+        )
     }
 
     @Test
-    fun `reset后可再次记录`() {
-        NativeFallbackLog.noteFallbackOnce("Argon2")
-        NativeFallbackLog.resetForTest()
-        assertNull(NativeFallbackLog.lastLoggedKernel)
+    fun `reset 后同一内核可再次登记`() {
         NativeFallbackLog.noteFallbackOnce("AES-KDF")
         assertEquals("AES-KDF", NativeFallbackLog.lastLoggedKernel)
-    }
 
-    /**
-     * ISSUE-P2-499 AC②：新增五内核共用**同一**一次性闸门——首个回落内核名即唯一登记项，
-     * 其余内核（含新内核之间互不覆盖）不再重复刷屏。
-     */
-    @Test
-    fun `新增五内核回落同样被一次性闸门收敛`() {
-        val first = newKernels.first()
-        NativeFallbackLog.noteFallbackOnce(first)
-        assertEquals(first, NativeFallbackLog.lastLoggedKernel)
-        for (kernel in newKernels.drop(1)) {
-            NativeFallbackLog.noteFallbackOnce(kernel)
-            assertEquals(
-                "进程内只记一次，新内核 [$kernel] 回落不得覆盖首次记录",
-                first,
-                NativeFallbackLog.lastLoggedKernel
-            )
-        }
-    }
-
-    /** ISSUE-P2-499 AC②：reset 后新内核名同样可再次进入登记通道。 */
-    @Test
-    fun `reset后新内核可再次记录`() {
-        NativeFallbackLog.noteFallbackOnce(newKernels.first())
         NativeFallbackLog.resetForTest()
-        assertNull(NativeFallbackLog.lastLoggedKernel)
-        NativeFallbackLog.noteFallbackOnce(newKernels.last())
-        assertEquals(newKernels.last(), NativeFallbackLog.lastLoggedKernel)
-    }
 
-    /**
-     * ISSUE-P2-499 AC①：登记载荷**只有内核名**——`lastLoggedKernel` 恒等于传入值本身
-     * （接口只收一个字符串，结构上无 KDF 参数 / 密钥材料通道）。
-     */
-    @Test
-    fun `登记载荷恒等于传入内核名`() {
-        for (kernel in listOf("Argon2", "AES-KDF") + newKernels) {
-            NativeFallbackLog.resetForTest()
-            NativeFallbackLog.noteFallbackOnce(kernel)
-            assertEquals(kernel, NativeFallbackLog.lastLoggedKernel)
-        }
+        assertEquals(emptySet<String>(), NativeFallbackLog.loggedKernels())
+        NativeFallbackLog.noteFallbackOnce("AES-KDF")
+        assertEquals("AES-KDF", NativeFallbackLog.lastLoggedKernel)
     }
 }

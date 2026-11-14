@@ -194,16 +194,16 @@ class SyncVaultBindingTest {
             testSyncProvider = harness.provider
             testRemotePath = harness.remotePath
         }
-        val preferences = SyncPreferences(debugLog, null)
+        val preferences = SyncPreferences(null)
         val credentialsStore = SyncCredentialsStore(harness.context, null)
-        val codec = SyncDatabaseCodec(databaseSession, debugLog)
+        val codec = SyncDatabaseCodec(databaseSession)
         return SyncCycleRunner(
             context = harness.context,
             databaseSession = databaseSession,
             session = session,
-            providerResolver = SyncProviderResolver(credentialsStore, preferences, debugLog),
+            providerResolver = SyncProviderResolver(credentialsStore, preferences),
             codec = codec,
-            conflicts = SyncConflictController(databaseSession, codec, BINDING_TEST_STRINGS, session, debugLog),
+            conflicts = SyncConflictController(databaseSession, codec, BINDING_TEST_STRINGS, session),
             changes = SyncContentChangeDetector(codec, session),
             preferences = preferences,
             strings = BINDING_TEST_STRINGS,
@@ -240,16 +240,16 @@ class SyncVaultBindingTest {
         )
         credentialsStore.saveProvider(CloudSyncProvider.S3_COMPATIBLE)
 
-        val preferences = SyncPreferences(debugLog, null)
-        val codec = SyncDatabaseCodec(databaseSession, debugLog)
+        val preferences = SyncPreferences(null)
+        val codec = SyncDatabaseCodec(databaseSession)
         val factory = OwnedProviderFactory(harness.provider)
         val cycle = SyncCycleRunner(
             context = harness.context,
             databaseSession = databaseSession,
             session = session,
-            providerResolver = SyncProviderResolver(credentialsStore, preferences, debugLog, factory),
+            providerResolver = SyncProviderResolver(credentialsStore, preferences, factory),
             codec = codec,
-            conflicts = SyncConflictController(databaseSession, codec, BINDING_TEST_STRINGS, session, debugLog),
+            conflicts = SyncConflictController(databaseSession, codec, BINDING_TEST_STRINGS, session),
             changes = SyncContentChangeDetector(codec, session),
             preferences = preferences,
             strings = BINDING_TEST_STRINGS,

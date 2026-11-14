@@ -81,7 +81,6 @@ class VaultListChildDatabaseTest {
         credentials = ChildDatabaseCredentialStore(),
         streamSource = childSource,
         databaseSession = rootSession,
-        debugLog = DebugLogBuffer(),
         unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore()),
         binaryStore = RecordingBinaryStore()
     )
@@ -98,9 +97,7 @@ class VaultListChildDatabaseTest {
         return com.keepasskey.app.sync.SyncCoordinator(
             context,
             com.keepasskey.database.session.DatabaseSession(),
-            com.keepasskey.app.sync.SyncCredentialsStore(context, null),
-            DebugLogBuffer()
-        )
+            com.keepasskey.app.sync.SyncCredentialsStore(context, null))
     }
 
     /** 创建被测 ViewModel 并后台订阅 uiState；展示装配调度器落在虚拟时间轴上以保证断言确定性 */

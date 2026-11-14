@@ -33,6 +33,8 @@ data class DiagnosticLogStatus(
  * 覆盖「服务被系统重启但归档里没有原因」的取证缺口。
  * 容量放宽到 [MAX_LINES] 行；溢出时在快照首行给出明确的丢弃提示，并可由 [status] 精确查询，
  * 避免关键故障被静默冲掉而排查者误以为日志完整。
+ * 连续相同事件（级别、tag、线程与正文全同）只保留首行并把重复次数汇总到快照尾行，
+ * 防止同步 / 自动填充的高频同质报错在数分钟内冲掉早期现场；不同 tag 或线程的事件不合并。
  *
  * 铁律：调用方只允许写入非敏感运行时事件（同步结果、解锁成败、状态迁移），且只留异常
  * **类型**、布尔判定与计数，绝不写入主密码、密钥、用户字段、库别名或异常 message。
@@ -67,16 +69,48 @@ class DebugLogBuffer(
      */
     internal var logcatEchoEnabled: Boolean = false
 
+    /** logcat 出口（测试可替换以计数）：默认真机 logcat，避免业务代码直引平台 Log 类。 */
+    internal var logcatWriter: (String) -> Unit = { line ->
+        com.keepasskey.core.log.AppLog.i(LOGCAT_TAG, line)
+    }
+
     /** 溢出提示：缓冲被裁掉过历史行时作为快照首行呈现，不占正文容量、也不重复进 logcat。 */
     private var overflowNotice: String? = null
     private var droppedLines = 0
     private var firstTimestamp: String? = null
     private var lastTimestamp: String? = null
 
+    /** 连续相同事件的折叠状态：签名相同的事件只留首行，重复次数汇总为一行提示。 */
+    private var lastSignature: String? = null
+    private var repeatedCount = 0
+    private var repeatNotice: String? = null
+    private var repeatLevel: String? = null
+    private var repeatTag: String? = null
+    private var repeatThread: String? = null
+
     /** 普通诊断事件入口：受 [DiagnosticLogGate] 约束（关闭时整条丢弃，不占缓冲容量）。 */
     fun log(level: String, tag: String, message: String) {
         if (!gate.isEnabled()) return
         append(level, tag, message)
+    }
+
+    /** 当前是否记录普通诊断事件（供副作用较大的附加采集先判开关，如现场快照）。 */
+    internal fun isRecordingEnabled(): Boolean = gate.isEnabled()
+
+    /**
+     * 来自 `AppLog` 的事件入口：`AppLog` 已把同一事件写到 logcat，缓冲不得再回显一次
+     * （`ISSUE-P2` B4/B5：消除「AppLog → 缓冲 → logcat」的双写）。
+     */
+    internal fun logFromAppLog(level: String, tag: String, message: String) {
+        if (!gate.isEnabled()) return
+        appendLine(
+            level = level,
+            tag = tag,
+            message = message,
+            threadName = Thread.currentThread().name,
+            persistSynchronously = false,
+            echoToLogcat = false
+        )
     }
 
     fun info(tag: String, message: String) = log("INFO", tag, message)
@@ -101,6 +135,12 @@ class DebugLogBuffer(
         droppedLines = 0
         firstTimestamp = null
         lastTimestamp = null
+        lastSignature = null
+        repeatedCount = 0
+        repeatNotice = null
+        repeatLevel = null
+        repeatTag = null
+        repeatThread = null
     }.also { DiagnosticLogHistory.clear() }
 
     /** 缓冲当前状态：报告头据此说明时间跨度、保留行数与丢弃行数。 */
@@ -118,13 +158,28 @@ class DebugLogBuffer(
     fun exportText(): String = synchronized(lock) { textLocked() }
 
     /**
-     * 导出边界的第二道防线：正文优先取按天留存的磁盘归档（覆盖周期内所有进程），
-     * 未启用磁盘留存（纯 JVM 单测）时退回本进程缓冲；规则幂等，重复调用不改变内容。
+     * 导出边界的一次脱敏与正文选取：**一次**归档读取产出正文与报告头元数据，
+     * 不再由报告层重复脱敏；未启用磁盘留存（纯 JVM 单测）或归档为空时退回本进程缓冲。
      */
-    fun exportSanitizedText(): String {
-        val text = DiagnosticLogHistory.snapshotForExport() ?: synchronized(lock) { textLocked() }
-        return DiagnosticLogRedactor.redact(text)
+    internal fun exportDocument(): DiagnosticLogDocument {
+        val archive = DiagnosticLogHistory.snapshotDocument()
+        if (archive != null && archive.retained > 0) {
+            return archive.copy(text = DiagnosticLogRedactor.redact(archive.text))
+        }
+        return synchronized(lock) {
+            DiagnosticLogDocument(
+                text = DiagnosticLogRedactor.redact(snapshotLocked().joinToString("\n")),
+                retained = lines.size,
+                dropped = droppedLines,
+                firstTimestamp = firstTimestamp,
+                lastTimestamp = lastTimestamp,
+                fromArchive = false
+            )
+        }
     }
+
+    /** 导出/复制正文（已完成脱敏与裁剪），供只需要正文的调用方使用。 */
+    fun exportSanitizedText(): String = exportDocument().text
 
     private fun append(level: String, tag: String, message: String) =
         appendLine(level, tag, message, Thread.currentThread().name, persistSynchronously = false)
@@ -156,7 +211,8 @@ class DebugLogBuffer(
         tag: String,
         message: String,
         threadName: String,
-        persistSynchronously: Boolean
+        persistSynchronously: Boolean,
+        echoToLogcat: Boolean = true
     ) {
         val now = LocalDateTime.now()
         val date = now.format(DATE_FORMAT)
@@ -167,26 +223,77 @@ class DebugLogBuffer(
         // 写入即脱敏：整行（含 tag / 线程名 / 栈帧）过一遍规则，不留任何「导出前才清理」的窗口。
         // 导出边界的二次脱敏是幂等的第二道防线，不依赖本调用点的历史正确性。
         val line = DiagnosticLogRedactor.redact("[$date] [$time] [$thread] [$level] [$tag] $message")
+        val signature = "$level\u0000$tag\u0000$thread\u0000$message"
+        var folded = false
+        var summary: String? = null
         synchronized(lock) {
-            lines.addLast(line)
-            if (firstTimestamp == null) firstTimestamp = fullTimestamp
-            lastTimestamp = fullTimestamp
-            while (lines.size > MAX_LINES) {
-                lines.removeFirst()
-                droppedLines++
-            }
-            if (droppedLines > 0) {
-                overflowNotice = DiagnosticLogRedactor.redact(
-                    "[$date] [$time] [$thread] [WARN] [Diagnostics] " +
-                        "日志缓冲已达上限 $MAX_LINES 行，已丢弃较早的 $droppedLines 行；完整记录请及时复制或导出"
+            if (signature == lastSignature) {
+                // 风暴抑制：连续相同事件只留首行，重复次数汇总到快照尾行；
+                // 不再逐条占用环形缓冲、logcat 与归档。不同 tag / 线程 / 级别的行签名不同，
+                // 因此不会被折叠（ERROR 不因限流被丢弃）。
+                repeatedCount++
+                repeatNotice = DiagnosticLogRedactor.redact(
+                    "[$date] [$time] [$thread] [$level] [$tag] 连续相同事件已折叠 $repeatedCount 次"
                 )
+                folded = true
+            } else {
+                summary = flushRepeatsLocked(date, time, fullTimestamp)
+                lastSignature = signature
+                repeatLevel = level
+                repeatTag = tag
+                repeatThread = thread
+                repeatedCount = 0
+                repeatNotice = null
+                appendToRingLocked(line, fullTimestamp, date, time, thread)
             }
         }
-        if (logcatEchoEnabled) {
+        if (folded) return
+        summary?.let { emit(it, persistSynchronously, echoToLogcat) }
+        emit(line, persistSynchronously, echoToLogcat)
+    }
+
+    /** 出现新的不同事件：把上一段连续重复汇总为一行写入环内，返回该行（无重复时 null）。 */
+    private fun flushRepeatsLocked(date: String, time: String, fullTimestamp: String): String? {
+        val level = repeatLevel ?: return null
+        val tag = repeatTag ?: return null
+        val thread = repeatThread ?: return null
+        if (repeatedCount <= 0) return null
+        val summary = DiagnosticLogRedactor.redact(
+            "[$date] [$time] [$thread] [$level] [$tag] 上一条相同事件共重复 ${repeatedCount + 1} 次"
+        )
+        appendToRingLocked(summary, fullTimestamp, date, time, thread)
+        return summary
+    }
+
+    private fun appendToRingLocked(
+        line: String,
+        fullTimestamp: String,
+        date: String,
+        time: String,
+        thread: String
+    ) {
+        lines.addLast(line)
+        if (firstTimestamp == null) firstTimestamp = fullTimestamp
+        lastTimestamp = fullTimestamp
+        while (lines.size > MAX_LINES) {
+            lines.removeFirst()
+            droppedLines++
+        }
+        if (droppedLines > 0) {
+            overflowNotice = DiagnosticLogRedactor.redact(
+                "[$date] [$time] [$thread] [WARN] [Diagnostics] " +
+                    "日志缓冲已达上限 $MAX_LINES 行，已丢弃较早的 $droppedLines 行；完整记录请及时复制或导出"
+            )
+        }
+    }
+
+    /** 单行出口：logcat 回显与跨进程归档同源，保证两侧看到的内容一致。 */
+    private fun emit(line: String, persistSynchronously: Boolean, echoToLogcat: Boolean) {
+        if (echoToLogcat && logcatEchoEnabled) {
             // 取证桥（§411）：内容与缓冲同源；经统一包装器 AppLog 输出（生产源码不得直引
             // 平台 Log 类；AppLog.safe 自带 JVM fail-safe）。release 保留 i 级输出，
             // 故稳定版同样可经 adb logcat 取得脱敏诊断行。
-            com.keepasskey.core.log.AppLog.i(LOGCAT_TAG, line)
+            logcatWriter(line)
         }
         // 跨进程留存：写入时已脱敏的整行落盘，下次进程启动灌回缓冲前缀。
         if (persistSynchronously) {
@@ -197,9 +304,10 @@ class DebugLogBuffer(
     }
 
     /** 调用方已持锁：快照与导出正文共用，保证「看到什么就能导出什么」。 */
-    private fun snapshotLocked(): List<String> = buildList(lines.size + 1) {
+    private fun snapshotLocked(): List<String> = buildList(lines.size + 2) {
         overflowNotice?.let(::add)
         addAll(lines)
+        repeatNotice?.let(::add)
     }
 
     private fun textLocked(): String = snapshotLocked().joinToString("\n")

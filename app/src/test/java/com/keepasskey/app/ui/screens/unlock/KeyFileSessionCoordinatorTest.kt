@@ -37,7 +37,6 @@ class KeyFileSessionCoordinatorTest {
             scope = scope,
             uiState = MutableStateFlow(UnlockUiState()),
             keyFileAccess = null,
-            debugLog = DebugLogBuffer()
         )
 
     @Test
@@ -131,7 +130,6 @@ class KeyFileSessionCoordinatorTest {
             scope = scope,
             uiState = uiState,
             keyFileAccess = access,
-            debugLog = DebugLogBuffer(),
             vaultCopyStore = store,
             activeDbId = { dbId }
         )

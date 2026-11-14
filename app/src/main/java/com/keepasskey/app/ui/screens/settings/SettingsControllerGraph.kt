@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.coroutines.catchAndLog
 import android.content.Context
 import com.keepasskey.app.data.breach.BreachCheckCoordinator
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
@@ -79,7 +80,6 @@ internal class SettingsControllerGraph(
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
-        debugLog = debugLogBuffer,
         // 仅改绑密钥文件时的密码快照由协调器擦除；封印载荷只含主密码。
         sessionPasswordChars = { databaseSession?.passwordSnapshot() }
     )
@@ -227,7 +227,7 @@ internal class SettingsControllerGraph(
         coldStartSyncGate.checkAndTrigger()
         // ISSUE-P2-212：跟踪活动库（开启生物识别开关时据此判定封印凭据是否就绪）
         scope.launch {
-            vaultRepository.getDatabases().collect { databases ->
+            vaultRepository.getDatabases().catchAndLog("SettingsControllerGraph").collect { databases ->
                 biometricGate.onActiveDatabaseChanged(
                     (databases.firstOrNull { it.isActive } ?: databases.firstOrNull())?.id
                 )
@@ -236,11 +236,11 @@ internal class SettingsControllerGraph(
         // ISSUE-P2-378：观察漂移待决提示并下发到 UI（全局三选对话框）
         vaultFileDriftCoordinator?.let { coord ->
             scope.launch {
-                coord.pending.collect { issueWiring::publishPending }
+                coord.pending.catchAndLog("SettingsControllerGraph").collect { issueWiring::publishPending }
             }
             // ISSUE-P1-631：观察漂移合并冲突待决裁决状态并下发到 UI（与三选互斥呈现）
             scope.launch {
-                coord.mergeConflict.collect { issueWiring::publishMergeConflict }
+                coord.mergeConflict.catchAndLog("SettingsControllerGraph").collect { issueWiring::publishMergeConflict }
             }
         }
     }

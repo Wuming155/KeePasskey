@@ -13,13 +13,16 @@
 
 ## 判据（唯一，命中即退出码 1）
 
-**`*/src/main/**` 内的 `CoroutineScope(` 只允许出现在 `ALLOWED_FILES` 登记的文件里。**
+**五个生产模块的 `src/main/**`、`src/debug/**`、`src/androidTest/**` 内出现的 `CoroutineScope(`
+只允许出现在 `ALLOWED_FILES` 登记的文件里。**
 
-- 扫描面＝**五个生产模块**（`MODULES`）各自的 `src/main/**` 下的 `.kt` 文件（与 `count_line_tiers.py` 同口径）。
+- 扫描面＝**五个生产模块**（`MODULES`）的上述三个源集（`SOURCE_SETS`）下的 `.kt` 文件
+  （与 `count_line_tiers.py` 同口径）。`src/debug` 随调试包进入设备联调，裸构造会在联调中
+  直接闪退；`src/androidTest` 只在用例自持作用域时登记豁免（见 `ALLOWED_FILES` 理由）。
   **不用 `*/src/main/**` 通配**：本机存在**未跟踪的只读参考树** `参考项目/`（2410 个 `.kt`），
   通配会把第三方代码算进扫描面与命中数（实测：本机 2430 文件 / 50 命中，排除后 731 文件 / 0 命中）⇒
   本机红、CI 绿，读数不可复现（2026-10-08 §479 更正，见该批批次文档「过程留痕」）。
-  测试源集与生成物不参与生产数据路径。
+  扫描面为空（`--root` 传错 / 模块改名）判红，不静默显绿。
 - 判据正则 `\\bCoroutineScope\\s*\\(`：`\\b` 保证**不误伤** `rememberCoroutineScope()`
   （其 `C` 前是 `r`，同为词字符 ⇒ 无词边界；Compose 生命周期作用域不属本判据）。
   类型引用（`import` / `: CoroutineScope`）不含 `(`，同样不命中。
@@ -48,13 +51,24 @@ import tempfile
 ALLOWED_FILES = (
     # 工厂自身的定义处（其内部 `CoroutineScope(SupervisorJob() + dispatcher + handler)`）
     "app/src/main/java/com/keepasskey/app/coroutines/GuardedScope.kt",
+    # 以下 androidTest 条目均为**用例自持**的作用域：用例需要一个不经产品异常处理器的 scope，
+    # 才能观察 safeLaunch / 锁态切换的真实行为，并在 `@After` 中显式 `cancel()`。
+    # 它们不进入应用进程的常驻路径，协程失败表现为测试失败而非产品缺陷。
+    "app/src/androidTest/java/com/keepasskey/app/coroutines/SafeLaunchMainThreadDeviceTest.kt",
+    "app/src/androidTest/java/com/keepasskey/app/security/QuickUnlockSealDowngradeDeviceTest.kt",
+    "app/src/androidTest/java/com/keepasskey/app/sync/SyncCheckpointIoDeviceTest.kt",
+    "app/src/androidTest/java/com/keepasskey/app/sync/SyncSlowHttpsScreenOffLockDeviceTest.kt",
+    "app/src/androidTest/java/com/keepasskey/app/ui/NotificationLockUnlockDeviceTest.kt",
+    "app/src/androidTest/java/com/keepasskey/app/ui/settings/CloudSyncFormUiDeviceTest.kt",
 )
 
 # 判据：真正的 `CoroutineScope(` 构造调用。`\b` 排除 `rememberCoroutineScope(`。
 RAW_SCOPE_RE = re.compile(r"\bCoroutineScope\s*\(")
 
-# 扫描面：五个生产模块的 `src/main`（与 `count_line_tiers.py` 同口径，不随未跟踪目录漂移）。
+# 扫描面：五个生产模块的 `src/main` + `src/debug` + `src/androidTest`
+# （与 `count_line_tiers.py` 同口径，不随未跟踪目录漂移）。
 MODULES = ("app", "database", "crypto", "sync", "core")
+SOURCE_SETS = ("main", "debug", "androidTest")
 
 
 def _is_comment(line: str) -> bool:
@@ -67,22 +81,25 @@ def scan(root: pathlib.Path) -> tuple[list[str], int]:
     hits: list[str] = []
     checked = 0
     for module in MODULES:
-        src = root / module / "src" / "main"
-        if not src.is_dir():
-            continue
-        for path in sorted(src.rglob("*.kt")):
-            rel = path.relative_to(root).as_posix()
-            checked += 1
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+        for source_set in SOURCE_SETS:
+            src = root / module / "src" / source_set
+            if not src.is_dir():
                 continue
-            for lineno, raw in enumerate(text.splitlines(), 1):
-                if _is_comment(raw) or not RAW_SCOPE_RE.search(raw):
+            for path in sorted(src.rglob("*.kt")):
+                rel = path.relative_to(root).as_posix()
+                checked += 1
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
                     continue
-                if rel in ALLOWED_FILES:
-                    continue
-                hits.append("RAW_SCOPE %s:%d  %s" % (rel, lineno, raw.strip()))
+                for lineno, raw in enumerate(text.splitlines(), 1):
+                    if _is_comment(raw) or not RAW_SCOPE_RE.search(raw):
+                        continue
+                    if rel in ALLOWED_FILES:
+                        continue
+                    hits.append("RAW_SCOPE %s:%d  %s" % (rel, lineno, raw.strip()))
+    if checked == 0:
+        hits.append("EMPTY_SCAN 扫描面为空（模块改名或 --root 指向错误）")
     return hits, checked
 
 
@@ -140,7 +157,8 @@ def main(argv: list[str]) -> int:
     root = pathlib.Path(args.root).resolve()
     hits, checked = scan(root)
     print(
-        "[check_raw_coroutine_scope] 检查文件 %d 个（*/src/main/**）；允许清单 %d 个；命中 %d 处"
+        "[check_raw_coroutine_scope] 检查文件 %d 个（*/src/{main,debug,androidTest}/**）；"
+        "允许清单 %d 个；命中 %d 处"
         % (checked, len(ALLOWED_FILES), len(hits))
     )
     for hit in hits:

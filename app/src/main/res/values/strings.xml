@@ -498,6 +498,7 @@
     <string name="edit_scan_gallery_no_qr">未在所选图片中识别到二维码，请更换图片重试</string>
     <string name="edit_scan_gallery_read_error">图片读取失败，请更换图片重试</string>
     <string name="edit_attachment_empty">附件内容为空，未添加</string>
+    <string name="edit_attachment_read_failed">附件读取失败，请检查文件访问权限后重试</string>
     <string name="edit_attachment_too_large">附件超过 %1$d MB，未添加</string>
     <string name="edit_icon_too_large">图片超过 %1$d MB，未上传为图标</string>
     <string name="edit_save_failed">保存失败：%1$s</string>
@@ -1350,7 +1351,7 @@
     <!-- ===== 诊断与日志子页 (DebugSettingsScreen) ===== -->
     <string name="debug_section_options">诊断选项</string>
     <string name="debug_log_title">诊断日志</string>
-    <string name="debug_log_sub">记录运行事件与故障调用栈；写入时自动脱敏，可随时关闭</string>
+    <string name="debug_log_sub">记录运行事件与故障调用栈；写入时自动脱敏，可随时关闭；关闭后未捕获异常（崩溃）也不会留痕</string>
     <string name="debug_verbose_title">详细日志模式</string>
     <string name="debug_retention_title">日志保留周期</string>
     <string name="debug_retention_sub">日志保存在本应用私有目录，超期记录自动清除</string>
@@ -1365,6 +1366,7 @@
     <string name="debug_export_done">日志已导出</string>
     <string name="debug_export_failed">日志导出失败，请重试</string>
     <string name="debug_copy_btn">复制日志</string>
+    <string name="debug_copy_clipboard_notice">复制的日志不含密码等敏感内容，但会留在系统剪贴板及其历史中，停留时间不受本应用控制。粘贴完成后建议手动清除剪贴板。</string>
     <string name="debug_copy_done">日志已复制到剪贴板</string>
     <string name="debug_copy_empty">暂无日志可复制</string>
     <string name="debug_copy_truncated">（日志较长，剪贴板仅保留报告头与最近的记录；完整日志请导出）</string>

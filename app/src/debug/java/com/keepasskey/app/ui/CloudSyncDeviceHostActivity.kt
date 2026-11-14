@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import com.keepasskey.app.coroutines.guardedScope
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.sync.SyncCoordinator
@@ -20,7 +21,6 @@ import com.keepasskey.app.ui.theme.KeePasskeyTheme
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 
 /**
@@ -38,7 +38,7 @@ import kotlinx.coroutines.cancel
  */
 class CloudSyncDeviceHostActivity : ComponentActivity() {
 
-    private val hostScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val hostScope = guardedScope(Dispatchers.Main.immediate, tag = "CloudSyncDeviceHost")
     private var controller: SettingsSyncController? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -147,14 +147,12 @@ class CloudSyncDeviceHostActivity : ComponentActivity() {
             // 与用例装配的凭据库不是同一份（设备用例因此拿不到注入的 Provider 构造行为）。
             val resolver = SyncProviderResolver(
                 credentials,
-                SyncPreferences(debugLog, null),
-                debugLog
+                SyncPreferences(null)
             )
             val coordinator = SyncCoordinator(
                 context = applicationContext,
                 databaseSession = session,
                 syncCredentialsStore = credentials,
-                debugLog = debugLog,
                 strings = strings,
                 syncProviderResolver = resolver
             )

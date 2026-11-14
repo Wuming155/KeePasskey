@@ -260,15 +260,11 @@ class SyncSavedConfigFailureAndCancelTest {
         private val debugLog = DebugLogBuffer()
         private val resolver = SyncProviderResolver(
             credentials,
-            SyncPreferences(debugLog, null),
-            debugLog,
-            factory
-        )
-        private val coordinator = SyncCoordinator(
-            context = context,
+            SyncPreferences(null),
+            factory)
+        private val coordinator = SyncCoordinator(context = context,
             databaseSession = session,
             syncCredentialsStore = credentials,
-            debugLog = debugLog,
             strings = StringsProvider { id, _ -> "s$id" },
             syncProviderResolver = resolver
         )

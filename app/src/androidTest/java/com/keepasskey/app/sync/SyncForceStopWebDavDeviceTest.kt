@@ -48,8 +48,8 @@ class SyncForceStopWebDavDeviceTest {
         val rollbackDir = File(context.filesDir, "p1-613-rollback-$runId")
         val password = SYNC_PASSWORD.toCharArray()
         val log = DebugLogBuffer()
-        val preferences = SyncPreferences(log, null)
-        val credentialStore = SyncCredentialsStore(context, KeystoreManager(context, log), log)
+        val preferences = SyncPreferences(null)
+        val credentialStore = SyncCredentialsStore(context, KeystoreManager(context))
         val remotePath = "p1-613-$runId.kdbx"
         val session = DatabaseSession()
 
@@ -62,7 +62,7 @@ class SyncForceStopWebDavDeviceTest {
                     configureWebDav(credentialStore, remotePath)
                     val uploadGate = WebDavUploadGate()
                     val uploadProvider = GatedWebDavProvider(
-                        requireNotNull(SyncProviderResolver(credentialStore, preferences, log).resolveProvider()),
+                        requireNotNull(SyncProviderResolver(credentialStore, preferences).resolveProvider()),
                         uploadGate
                     )
                     val first = coordinator(session, preferences, credentialStore, log, cacheDir, rollbackDir, uploadProvider)
@@ -72,7 +72,7 @@ class SyncForceStopWebDavDeviceTest {
                     assertTrue("上传后 B 未写入正式库", session.save() is KdbxResult.Success)
                     uploadGate.release.complete(Unit)
                     assertEquals("A 上传完成时窗口内的 B 必须仍待同步", SyncOutcome.LocalPendingChanges, withTimeout(60_000) { upload.await() })
-                    val independentClient = requireNotNull(SyncProviderResolver(credentialStore, preferences, log).resolveProvider())
+                    val independentClient = requireNotNull(SyncProviderResolver(credentialStore, preferences).resolveProvider())
                     val remoteA = ByteArrayOutputStream()
                     assertTrue("独立 WebDAV 客户端读取 A 失败", independentClient.download(remotePath, remoteA).isSuccess)
                     val databaseA = load(remoteA.toByteArray(), password)
@@ -105,7 +105,7 @@ class SyncForceStopWebDavDeviceTest {
                     val outcome = withTimeout(60_000) { next.coordinator.syncNow() }
                     assertTrue("force-stop 后 WebDAV 三方恢复同步失败：$outcome", outcome is SyncOutcome.MergedAndUploaded)
 
-                    val provider = requireNotNull(SyncProviderResolver(credentialStore, preferences, log).resolveProvider())
+                    val provider = requireNotNull(SyncProviderResolver(credentialStore, preferences).resolveProvider())
                     val remoteBytes = ByteArrayOutputStream()
                     assertTrue("生产 WebDAV Provider 下载远端文件失败", provider.download(remotePath, remoteBytes).isSuccess)
                     val remoteData = remoteBytes.toByteArray()
@@ -148,13 +148,13 @@ class SyncForceStopWebDavDeviceTest {
         rollbackDir: File,
         testProvider: SyncProvider? = null
     ): SyncHarness {
-        val resolver = SyncProviderResolver(credentials, preferences, log)
+        val resolver = SyncProviderResolver(credentials, preferences)
         val sessionState = SyncSessionState().apply { testRemotePath = requireNotNull(credentials.loadWebDavConfig()).let {
             try { it.remotePath } finally { it.password.fill('0') }
         } }
         val strings = StringsProvider { id, args -> context.getString(id, *args) }
-        val codec = SyncDatabaseCodec(session, log)
-        val conflicts = SyncConflictController(session, codec, strings, sessionState, log)
+        val codec = SyncDatabaseCodec(session)
+        val conflicts = SyncConflictController(session, codec, strings, sessionState)
         val changes = SyncContentChangeDetector(codec, sessionState)
         val cycle = SyncCycleRunner(
             context = context,
@@ -172,7 +172,6 @@ class SyncForceStopWebDavDeviceTest {
             context = context,
             databaseSession = session,
             syncCredentialsStore = credentials,
-            debugLog = log,
             strings = strings,
             syncSession = sessionState,
             syncPreferences = preferences,
@@ -180,8 +179,7 @@ class SyncForceStopWebDavDeviceTest {
             syncDatabaseCodec = codec,
             syncContentChanges = changes,
             syncConflicts = conflicts,
-            syncCycle = cycle
-        )
+            syncCycle = cycle)
         syncCoordinator.testSyncProvider = testProvider
         return SyncHarness(syncCoordinator, sessionState)
     }

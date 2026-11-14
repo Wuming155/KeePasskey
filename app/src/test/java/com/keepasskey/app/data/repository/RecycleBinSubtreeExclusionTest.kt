@@ -224,7 +224,6 @@ class RecycleBinSubtreeExclusionTest {
         session.setDatabaseForTesting(databaseWithBin(binUuid = binId, enabled = true))
         val coordinator = PasskeyEntryCoordinator(
             databaseSession = session,
-            debugLog = com.keepasskey.app.data.logger.DebugLogBuffer(),
             persistSession = { com.keepasskey.core.result.KdbxResult.Success(Unit) }
         )
 

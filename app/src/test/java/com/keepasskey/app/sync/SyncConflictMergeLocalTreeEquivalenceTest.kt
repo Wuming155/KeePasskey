@@ -183,7 +183,7 @@ class SyncConflictMergeLocalTreeEquivalenceTest {
         )
         assertTrue("建库必须成功: $created", created is KdbxResult.Success)
 
-        val codec = SyncDatabaseCodec(session, DebugLogBuffer())
+        val codec = SyncDatabaseCodec(session)
         val commonId = UUID_COMMON
         val commonEntry = KdbxEntry(
             id = commonId,
@@ -262,11 +262,9 @@ class SyncConflictMergeLocalTreeEquivalenceTest {
         )
         val controller = SyncConflictController(
             databaseSession = session,
-            codec = SyncDatabaseCodec(session, DebugLogBuffer()),
+            codec = SyncDatabaseCodec(session),
             strings = MERGE_TEST_STRINGS,
-            session = SyncSessionState(),
-            debugLog = DebugLogBuffer()
-        )
+            session = SyncSessionState())
 
         val outcome = controller.handleConflictMerge(
             syncEngine = engine,
@@ -362,11 +360,9 @@ class SyncConflictMergeLocalTreeEquivalenceTest {
             )
             val controller = SyncConflictController(
                 databaseSession = session,
-                codec = SyncDatabaseCodec(session, DebugLogBuffer()),
+                codec = SyncDatabaseCodec(session),
                 strings = MERGE_TEST_STRINGS,
-                session = SyncSessionState(),
-                debugLog = DebugLogBuffer()
-            )
+                session = SyncSessionState())
 
             val outcome = controller.handleConflictMerge(
                 syncEngine = engine,

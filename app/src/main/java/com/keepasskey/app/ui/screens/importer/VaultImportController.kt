@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.importer
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -12,7 +13,6 @@ import com.keepasskey.app.data.importer.ImporterRegistry
 import com.keepasskey.app.data.importer.ImportSource
 import com.keepasskey.app.data.importer.KdbxMergeController
 import com.keepasskey.app.data.importer.VaultImporter
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.result.KdbxResult
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
@@ -52,7 +52,6 @@ class VaultImportController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val registry: ImporterRegistry,
     private val vaultImporter: VaultImporter,
-    private val debugLog: DebugLogBuffer,
     /** ISSUE-P3-384：`.kdbx` 并入执行体（KDBX_MERGE 路径，不经 EntryImporter）。 */
     private val kdbxMergeController: KdbxMergeController
 ) {
@@ -199,7 +198,7 @@ class VaultImportController @Inject constructor(
                     // 只归入异常**类型**：设备侧 SAX 解析器实现差异只能靠异常类型定位
                     // （宿主 JVM 与 Android 解析器实现不同）；异常 message 可能回显文件片段 /
                     // 路径等外部输入内容，按日志卫生铁律不得写入日志（ISSUE-P2-69）。
-                    debugLog.warn(
+                    AppLog.w(
                         TAG,
                         "导入解析失败: ${parsed.error.javaClass.name}"
                     )
@@ -222,7 +221,7 @@ class VaultImportController @Inject constructor(
                         request = request
                     )) {
                         is KdbxResult.Failure -> {
-                            debugLog.warn(
+                            AppLog.w(
                                 TAG,
                                 "导入落库失败: ${persisted.error.javaClass.name}"
                             )
@@ -247,7 +246,7 @@ class VaultImportController @Inject constructor(
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (t: Throwable) {
-            debugLog.warn(TAG, "读取导入文件失败: ${t.javaClass.simpleName}")
+            AppLog.w(TAG, "读取导入文件失败: ${t.javaClass.simpleName}")
             KdbxResult.Failure(t)
         }
     }
@@ -259,7 +258,7 @@ class VaultImportController @Inject constructor(
             if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
         }
     } catch (t: Throwable) {
-        debugLog.warn(TAG, "读取文件名失败: ${t.javaClass.simpleName}")
+        AppLog.w(TAG, "读取文件名失败: ${t.javaClass.simpleName}")
         null
     }
 

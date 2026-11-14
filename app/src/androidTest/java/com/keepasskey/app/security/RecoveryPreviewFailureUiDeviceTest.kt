@@ -63,7 +63,7 @@ class RecoveryPreviewFailureUiDeviceTest {
     private val automation by lazy { instrumentation.uiAutomation }
     private val password = "P2-638-Recovery-Ui".toCharArray()
 
-    private val store = VaultRecoveryStore(context, DebugLogBuffer())
+    private val store = VaultRecoveryStore(context)
     private val createdVaultIds = mutableListOf<String>()
     private val createdFiles = mutableListOf<File>()
 

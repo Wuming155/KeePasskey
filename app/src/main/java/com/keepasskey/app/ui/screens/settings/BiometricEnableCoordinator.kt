@@ -1,8 +1,8 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.core.log.AppLog
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
@@ -74,7 +74,6 @@ internal class BiometricEnableCoordinator(
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
     private val strings: StringsProvider,
-    private val debugLog: DebugLogBuffer,
     private val state: MutableStateFlow<BiometricToggleUiState> = MutableStateFlow(BiometricToggleUiState()),
     /**
      * §411 走查（用户回执③）：验证通过、偏好落库后、但封印凭据未就绪（[onVerified] 的
@@ -119,7 +118,7 @@ internal class BiometricEnableCoordinator(
         state.update { it.copy(verifying = true, notice = null) }
         try {
             if (!isStrongBiometricAvailable(activity)) {
-                debugLog.warn(TAG, "启用生物识别解锁被拒：设备无可用强生物识别（fail-closed，不写偏好）")
+                AppLog.w(TAG, "启用生物识别解锁被拒：设备无可用强生物识别（fail-closed，不写偏好）")
                 state.update { it.copy(notice = UiMessage(R.string.sec_biometric_enable_unavailable)) }
                 return
             }
@@ -146,11 +145,11 @@ internal class BiometricEnableCoordinator(
                     }
                 }
                 is BiometricResult.Cancelled -> {
-                    debugLog.info(TAG, "用户取消生物识别验证，开关保持关闭")
+                    AppLog.i(TAG, "用户取消生物识别验证，开关保持关闭")
                     state.update { it.copy(notice = UiMessage(R.string.sec_biometric_auth_failed)) }
                 }
                 is BiometricResult.Error -> {
-                    debugLog.warn(TAG, "生物识别验证失败: code=${result.errorCode}")
+                    AppLog.w(TAG, "生物识别验证失败: code=${result.errorCode}")
                     state.update { it.copy(notice = BiometricFailureMessagePolicy.of(result)) }
                 }
                 // Failed 不是终态（系统弹窗驻留等待重试），awaitVerification 已忽略该回调
@@ -167,7 +166,7 @@ internal class BiometricEnableCoordinator(
         state.update {
             it.copy(notice = if (sealReady) null else UiMessage(R.string.sec_biometric_enable_pending_seal))
         }
-        debugLog.info(TAG, "生物识别解锁已启用（封印凭据就绪=$sealReady）")
+        AppLog.i(TAG, "生物识别解锁已启用（封印凭据就绪=$sealReady）")
     }
 
     /**
@@ -196,7 +195,7 @@ internal class BiometricEnableCoordinator(
     ): Cipher? = try {
         biometricAuthManager?.prepareDecryptCipher(databaseId, iv)
     } catch (e: Exception) {
-        debugLog.warn(TAG, "封印凭据不可用（${e.javaClass.simpleName}），清除陈旧凭据并退化为纯身份验证")
+        AppLog.w(TAG, "封印凭据不可用（${e.javaClass.simpleName}），清除陈旧凭据并退化为纯身份验证")
         storage.clearCredential(databaseId)
         null
     }

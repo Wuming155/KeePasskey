@@ -72,12 +72,10 @@ class SavedSyncConfigSnapshotFlowTest {
             cipher.map { (it.toInt() xor XOR_MASK).toByte() }.toByteArray()
         }
         val factory = SnapshotRecordingFactory()
-        val resolver = SyncProviderResolver(credentials, SyncPreferences(debugLog, null), debugLog, factory)
-        val coordinator = SyncCoordinator(
-            context = context,
+        val resolver = SyncProviderResolver(credentials, SyncPreferences(null), factory)
+        val coordinator = SyncCoordinator(context = context,
             databaseSession = databaseSession,
             syncCredentialsStore = credentials,
-            debugLog = debugLog,
             strings = { id, _ -> "s$id" },
             syncProviderResolver = resolver
         )

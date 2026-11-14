@@ -115,8 +115,8 @@ class AlgorithmSelectionApplyTest {
             autofillBlocklistStore = AutofillBlocklistStore(null),
             autofillSaveBlocklistStore = AutofillSaveBlocklistStore(null),
             autofillFieldBlocklistStore = AutofillFieldBlocklistStore(null),
-            debugLogBuffer = DebugLogBuffer(),
             databaseSession = session,
+            debugLogBuffer = DebugLogBuffer(),
             scope = scope
         )
 

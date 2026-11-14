@@ -1,9 +1,9 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import androidx.annotation.VisibleForTesting
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultCopyNaming
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
@@ -100,8 +100,6 @@ interface CloudVaultImporter {
 class RealCloudVaultImporter @Inject constructor(
     @ApplicationContext private val context: Context,
     private val syncCredentialsStore: SyncCredentialsStore,
-    // 允许 null 仅为 JVM 单测构造；生产 DI 恒注入真实实现（与 SyncCredentialsStore 同范式）
-    private val debugLog: DebugLogBuffer? = null
 ) : CloudVaultImporter {
 
     /** Provider 构建缝（单测注入假实现；生产恒为 TLS-only 工厂） */

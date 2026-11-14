@@ -1,9 +1,9 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.core.log.AppLog
 import androidx.biometric.BiometricManager
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
@@ -34,7 +34,6 @@ internal class BiometricEnrollmentCoordinator(
     private val activeDbId: () -> String?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val debugLog: DebugLogBuffer,
     /** ISSUE-P1-429：封印 keystore 密算与供给的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
     private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) {
@@ -59,7 +58,7 @@ internal class BiometricEnrollmentCoordinator(
                 )
             }
         } catch (e: Throwable) {
-            debugLog.warn(TAG, "封印密钥不可用: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "封印密钥不可用: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -116,7 +115,7 @@ internal class BiometricEnrollmentCoordinator(
             (sealKeyProvisionOverride ?: defaultSealKeyProvision)(dbId)
         }
         if (provision == null) {
-            debugLog.warn(TAG, "生物识别凭据未登记：封印密钥不可用，跳过封印（fail-closed）")
+            AppLog.w(TAG, "生物识别凭据未登记：封印密钥不可用，跳过封印（fail-closed）")
             return
         }
         // ISSUE-P1-22 降级确认闸门：未放行即中止，绝不静默封印
@@ -127,7 +126,7 @@ internal class BiometricEnrollmentCoordinator(
         val authManager = biometricAuthManager ?: return
         // 缺少宿主 Activity 亦 fail-closed（仅留痕，不影响本次解锁）
         val hostActivity = activity ?: run {
-            debugLog.warn(TAG, "生物识别凭据未登记：缺少宿主 Activity，本次跳过（fail-closed，不影响解锁）")
+            AppLog.w(TAG, "生物识别凭据未登记：缺少宿主 Activity，本次跳过（fail-closed，不影响解锁）")
             return
         }
         if (!hasStrongBiometric(authManager, hostActivity)) return
@@ -136,7 +135,7 @@ internal class BiometricEnrollmentCoordinator(
         // ISSUE-P2-253：封印弹窗挂起期间开关可能已被关闭（关闭 = 删除），落库前复核偏好，
         // 杜绝「撤销刚执行、陈旧封印又写回」的竞态（acquireDowngradeConsent 拒绝路径亦同批关闸）
         if (!settingsRepository.getSettings().first().biometricEnabled) {
-            debugLog.info(TAG, "封印挂起期间生物识别开关已关闭，放弃落库")
+            AppLog.i(TAG, "封印挂起期间生物识别开关已关闭，放弃落库")
             return
         }
         persistSealedCredential(storage, dbId, encrypted, downgradedSeal)
@@ -154,19 +153,19 @@ internal class BiometricEnrollmentCoordinator(
     ): Boolean {
         if (!UnlockAuthPolicy.requiresDowngradeConsent(provision.securityLevel)) return true
         if (acknowledged) return true
-        debugLog.warn(
+        AppLog.w(
             TAG,
             "封印密钥落位 ${provision.securityLevel}：请求用户显式降级确认（未确认不封印）"
         )
         return when (awaitDowngradeConsent()) {
             null -> {
-                debugLog.info(TAG, "降级确认超时未决，本次跳过封印（fail-closed）")
+                AppLog.i(TAG, "降级确认超时未决，本次跳过封印（fail-closed）")
                 false
             }
             false -> {
                 // 用户拒绝软件级降级路径：关闭生物识别开关（用户唯一可用路径已拒绝，
                 // 关闭可避免后续每次解锁重复弹窗），不封印、不留确认记录
-                debugLog.info(TAG, "用户拒绝软件级快速解锁，关闭生物识别并不封印")
+                AppLog.i(TAG, "用户拒绝软件级快速解锁，关闭生物识别并不封印")
                 settingsRepository.setBiometricEnabled(false)
                 uiState.update { it.copy(isBiometricEnabled = false) }
                 // ISSUE-P2-253：关闭 = 删除——先落偏好关闸，再撤销各库既有封印数据
@@ -191,7 +190,7 @@ internal class BiometricEnrollmentCoordinator(
             BiometricManager.Authenticators.BIOMETRIC_STRONG
         )
         if (!UnlockAuthPolicy.canSeal(biometricStatus)) {
-            debugLog.warn(TAG, "生物识别凭据未登记：设备无可用强生物识别（$biometricStatus），禁用封印（fail-closed）")
+            AppLog.w(TAG, "生物识别凭据未登记：设备无可用强生物识别（$biometricStatus），禁用封印（fail-closed）")
             return false
         }
         return true
@@ -222,7 +221,7 @@ internal class BiometricEnrollmentCoordinator(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             // 禁止静默失败：任何异常一律留痕，绝不 catch(ignored)
-            debugLog.warn(TAG, "生物识别凭据登记异常: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "生物识别凭据登记异常: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -238,7 +237,7 @@ internal class BiometricEnrollmentCoordinator(
             is BiometricResult.Success -> {
                 val authedCipher = authResult.cipher
                 if (authedCipher == null) {
-                    debugLog.warn(TAG, "生物识别登记未取得授权 Cipher，跳过封印")
+                    AppLog.w(TAG, "生物识别登记未取得授权 Cipher，跳过封印")
                     null
                 } else {
                     // ISSUE-P1-429：授权 Cipher 的 keystore 密算（StrongBox 分块加密可达秒级）
@@ -247,15 +246,15 @@ internal class BiometricEnrollmentCoordinator(
                 }
             }
             is BiometricResult.Cancelled -> {
-                debugLog.info(TAG, "用户取消生物识别登记")
+                AppLog.i(TAG, "用户取消生物识别登记")
                 null
             }
             is BiometricResult.Error -> {
-                debugLog.warn(TAG, "生物识别登记失败: code=${authResult.errorCode}")
+                AppLog.w(TAG, "生物识别登记失败: code=${authResult.errorCode}")
                 null
             }
             is BiometricResult.Failed -> {
-                debugLog.warn(TAG, "生物识别登记未通过")
+                AppLog.w(TAG, "生物识别登记未通过")
                 null
             }
         }
@@ -277,7 +276,7 @@ internal class BiometricEnrollmentCoordinator(
                 quickUnlockDowngraded = downgradedSeal
             )
         }
-        debugLog.info(TAG, "生物识别凭据登记成功")
+        AppLog.i(TAG, "生物识别凭据登记成功")
     }
 
     /**

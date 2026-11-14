@@ -15,6 +15,8 @@
 //!    `jint` 复刻闸门（`params_valid`），再转 `u32` 调 [`crate::derive_into`]，杜绝负值经 `as u32`
 //!    变巨值绕过下界检查。
 
+use crate::error_code;
+use crate::error_code::{note_jni_error, note_kernel_if_unset};
 use crate::{
     derive_into, ARGON2_VERSION_10, ARGON2_VERSION_13, OUT_LEN, TYPE_ARGON2D, TYPE_ARGON2ID,
 };
@@ -70,11 +72,14 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey<'lo
     alg_type: jint,
 ) -> jbyteArray {
     // C: if (password == NULL || salt == NULL) return NULL;
+    error_code::reset();
     if password.is_null() || salt.is_null() {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return null_mut();
     }
     // C: 参数闸门（有符号先行）
     if !params_valid(alg_type, version, iterations, memory_kib, parallelism) {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return null_mut();
     }
 
@@ -82,17 +87,29 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey<'lo
     let outcome = catch_unwind(AssertUnwindSafe(|| -> Option<jbyteArray> {
         // 拷入即受管：敏感输入全部 Zeroizing，任何返回路径（含 ? 提前返回）确定性擦除。
         // convert_byte_array 对 null 数组会 Err，故 secret/AD 先判空再拷贝。
-        let pwd = Zeroizing::new(env.convert_byte_array(&password).ok()?);
-        let salt_buf = Zeroizing::new(env.convert_byte_array(&salt).ok()?);
+        let pwd = Zeroizing::new(
+            env.convert_byte_array(&password)
+                .map_err(note_jni_error)
+                .ok()?,
+        );
+        let salt_buf = Zeroizing::new(env.convert_byte_array(&salt).map_err(note_jni_error).ok()?);
         let secret_buf = if secret.is_null() {
             None
         } else {
-            Some(Zeroizing::new(env.convert_byte_array(&secret).ok()?))
+            Some(Zeroizing::new(
+                env.convert_byte_array(&secret)
+                    .map_err(note_jni_error)
+                    .ok()?,
+            ))
         };
         let ad_buf = if associated_data.is_null() {
             None
         } else {
-            Some(Zeroizing::new(env.convert_byte_array(&associated_data).ok()?))
+            Some(Zeroizing::new(
+                env.convert_byte_array(&associated_data)
+                    .map_err(note_jni_error)
+                    .ok()?,
+            ))
         };
 
         // 闸门已在上面以有符号 jint 通过，此处 as u32 安全；derive_into 内部另有冗余闸门。
@@ -112,19 +129,31 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeArgon2_deriveKey<'lo
         )?;
 
         // 输出缓冲受管：写入 Java 数组后，Zeroizing 在闭包返回时归零本地副本。
-        let java_out = env.new_byte_array(OUT_LEN as jint).ok()?;
+        let java_out = env
+            .new_byte_array(OUT_LEN as jint)
+            .map_err(note_jni_error)
+            .ok()?;
         // u8 → jbyte(i8)：同宽同对齐的位重解释（SetByteArrayRegion 需要 &[i8]）。
         // SAFETY: out 为 [u8; 32] 有效内存，i8 与 u8 布局一致，长度取自 out.len()。
         let as_jbyte: &[i8] =
             unsafe { std::slice::from_raw_parts(out.as_ptr().cast::<i8>(), out.len()) };
-        env.set_byte_array_region(&java_out, 0, as_jbyte).ok()?;
+        env.set_byte_array_region(&java_out, 0, as_jbyte)
+            .map_err(note_jni_error)
+            .ok()?;
         Some(java_out.into_raw())
     }));
 
     match outcome {
         Ok(Some(arr)) => arr,
-        // panic 或任何失败 → null（对齐 C 桥失败返回 NULL；Kotlin 归一为 KdfException）
-        _ => null_mut(),
+        Ok(None) => {
+            // panic 或任何失败 → null（对齐 C 桥失败返回 NULL；Kotlin 归一为 KdfException）
+            note_kernel_if_unset();
+            null_mut()
+        }
+        Err(_) => {
+            error_code::record(error_code::ERR_PANIC);
+            null_mut()
+        }
     }
 }
 

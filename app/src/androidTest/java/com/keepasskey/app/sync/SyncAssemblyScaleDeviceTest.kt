@@ -146,23 +146,21 @@ class SyncAssemblyScaleDeviceTest {
 
         val debugLog = DebugLogBuffer()
         val session = SyncSessionState()
-        val preferences = SyncPreferences(debugLog, null)
+        val preferences = SyncPreferences(null)
         val credentialsStore = SyncCredentialsStore(
             context,
             // 真机面关键差异：JVM 守卫传 null + 恒等加解密桩，本用例注入**真实 KeystoreManager**，
             // 让凭据封印/解除封印真的走 AndroidKeyStore（`keystoreManager == null` 时
             // `SyncCredentialSealer.encrypt` 直接静默返回 null，JVM 侧从未暴露这一点）。
-            KeystoreManager(context, debugLog),
-            debugLog
-        )
-        val codec = SyncDatabaseCodec(databaseSession, debugLog)
+            KeystoreManager(context))
+        val codec = SyncDatabaseCodec(databaseSession)
         val cycle = SyncCycleRunner(
             context = context,
             databaseSession = databaseSession,
             session = session,
-            providerResolver = SyncProviderResolver(credentialsStore, preferences, debugLog),
+            providerResolver = SyncProviderResolver(credentialsStore, preferences),
             codec = codec,
-            conflicts = SyncConflictController(databaseSession, codec, SCALE_STRINGS, session, debugLog),
+            conflicts = SyncConflictController(databaseSession, codec, SCALE_STRINGS, session),
             changes = SyncContentChangeDetector(codec, session),
             preferences = preferences,
             strings = SCALE_STRINGS

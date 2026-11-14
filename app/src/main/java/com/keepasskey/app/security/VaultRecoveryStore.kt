@@ -1,8 +1,8 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import androidx.annotation.VisibleForTesting
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.security.SecureFileWrite
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -19,8 +19,7 @@ import kotlinx.coroutines.withContext
 /** 标准 KDBX 密文恢复材料；载荷先 fsync，索引原子提交后才可发现。 */
 @Singleton
 class VaultRecoveryStore @Inject constructor(
-    @ApplicationContext private val context: Context?,
-    private val debugLog: DebugLogBuffer? = null
+    @ApplicationContext private val context: Context?
 ) {
     enum class Purpose { LOCK_FAILURE, CRASH_DRAFT }
 
@@ -76,7 +75,7 @@ class VaultRecoveryStore @Inject constructor(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            debugLog?.warn(TAG, "恢复载荷阶段写入失败: ${error.javaClass.simpleName}")
+            AppLog.w(TAG, "恢复载荷阶段写入失败: ${error.javaClass.simpleName}")
             return null
         } finally {
             pending?.close()
@@ -95,7 +94,7 @@ class VaultRecoveryStore @Inject constructor(
             pruneOlderPayloads(dir, key, entry.payloadFileName)
             true
         } catch (error: Exception) {
-            debugLog?.warn(TAG, "恢复索引提交失败: ${error.javaClass.simpleName}")
+            AppLog.w(TAG, "恢复索引提交失败: ${error.javaClass.simpleName}")
             false
         }
     }
@@ -132,7 +131,7 @@ class VaultRecoveryStore @Inject constructor(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            debugLog?.warn(TAG, "恢复副本读取失败: ${error.javaClass.simpleName}")
+            AppLog.w(TAG, "恢复副本读取失败: ${error.javaClass.simpleName}")
             return null
         } finally { pending?.fill(0) }
     }
@@ -216,7 +215,7 @@ class VaultRecoveryStore @Inject constructor(
             props.getProperty("payloadLength")?.toLongOrNull() ?: -1L,
             props.getProperty("payloadSha256").orEmpty(), purpose)
     } catch (error: Exception) {
-        debugLog?.warn(TAG, "恢复索引读取失败: ${error.javaClass.simpleName}")
+        AppLog.w(TAG, "恢复索引读取失败: ${error.javaClass.simpleName}")
         null
     }
 

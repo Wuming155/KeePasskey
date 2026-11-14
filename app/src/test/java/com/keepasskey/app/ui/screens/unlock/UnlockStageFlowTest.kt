@@ -78,7 +78,6 @@ class UnlockStageFlowTest {
             settingsRepository = FakeSettingsRepository(),
             biometricAuthManager = null,
             biometricCredentialStorage = null,
-            debugLog = DebugLogBuffer(),
             cryptoDispatcher = testDispatcher,
             keyFileAccess = keyFileAccess
         )

@@ -56,7 +56,6 @@ class UnlockKeyFileFlowTest {
             settingsRepository = FakeSettingsRepository(),
             biometricAuthManager = null,
             biometricCredentialStorage = null,
-            debugLog = DebugLogBuffer(),
             keyFileAccess = access
         )
         // 订阅 uiState，驱动 init 中的数据库流与密钥文件恢复协程

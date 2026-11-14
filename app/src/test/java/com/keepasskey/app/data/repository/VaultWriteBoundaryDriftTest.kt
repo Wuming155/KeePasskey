@@ -77,7 +77,7 @@ class VaultWriteBoundaryDriftTest {
             databaseSession = session,
             driftGuard = VaultFileDriftGuard(coordinator, null),
             strings = StringsProvider { _, _ -> "库文件已被外部修改" },
-            autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository(), DebugLogBuffer())
+            autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository())
         )
         // 等同「打开成功后留存基线」
         holder.capture(VaultFileBaseline.fromFile(file))
@@ -180,7 +180,7 @@ class VaultWriteBoundaryDriftTest {
                 databaseSession = session,
                 driftGuard = VaultFileDriftGuard(null, null),
                 strings = StringsProvider { _, _ -> "" },
-                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository(), DebugLogBuffer())
+                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository())
             )
 
             val result = withContext(accepted) { ticketOnlyBoundary.persist() }
@@ -227,7 +227,7 @@ class VaultWriteBoundaryDriftTest {
                 databaseSession = session,
                 driftGuard = VaultFileDriftGuard(null, null),
                 strings = StringsProvider { _, _ -> "" },
-                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository(), DebugLogBuffer())
+                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository())
             )
 
             val result = withContext(accepted) {
@@ -270,7 +270,7 @@ class VaultWriteBoundaryDriftTest {
                 databaseSession = session,
                 driftGuard = VaultFileDriftGuard(null, null),
                 strings = StringsProvider { _, _ -> "" },
-                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository(), DebugLogBuffer())
+                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository())
             )
 
             val result = withContext(accepted) {
@@ -301,7 +301,7 @@ class VaultWriteBoundaryDriftTest {
                 databaseSession = session,
                 driftGuard = VaultFileDriftGuard(null, null),
                 strings = StringsProvider { _, _ -> "" },
-                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository(), DebugLogBuffer())
+                autoLockGuard = AutoLockSessionGuard(session, FakeSettingsRepository())
             )
             // 占用会话锁，使后续写入请求在临界区外排队
             val mutexHeld = CompletableDeferred<Unit>()

@@ -183,7 +183,7 @@ class EntryEditPasskeyLockUiDeviceTest {
             userDisplayName = "Synthetic Passkey"
         )
         passkeyData = data
-        val coordinator = PasskeyEntryCoordinator(session, DebugLogBuffer()) { session.save() }
+        val coordinator = PasskeyEntryCoordinator(session) { session.save() }
         val result = runBlocking { coordinator.saveNewPasskeyEntry(data, boundPackage = null) }
         assertTrue("生成的测试 Passkey 必须成功落盘: $result", result is KdbxResult.Success)
         passkeyEntryId = (result as KdbxResult.Success).data.id.toHexString()

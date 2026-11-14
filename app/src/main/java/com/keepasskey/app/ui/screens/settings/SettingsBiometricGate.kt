@@ -1,7 +1,6 @@
 package com.keepasskey.app.ui.screens.settings
 
 import androidx.fragment.app.FragmentActivity
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
@@ -23,7 +22,6 @@ internal class SettingsBiometricGate(
     biometricAuthManager: BiometricAuthManager?,
     biometricCredentialStorage: BiometricCredentialStorage?,
     strings: StringsProvider,
-    debugLog: DebugLogBuffer,
     /** ISSUE-P3-430：仅改绑密钥文件（密码分量未变）重封印的会话主密码快照来源（null 仅单测注入） */
     private val sessionPasswordChars: () -> CharArray? = { null }
 ) {
@@ -46,7 +44,6 @@ internal class SettingsBiometricGate(
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
-        debugLog = debugLog
     )
 
     private val coordinator = BiometricEnableCoordinator(
@@ -56,7 +53,6 @@ internal class SettingsBiometricGate(
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
         strings = strings,
-        debugLog = debugLog,
         state = toggleState,
         // §411 走查（用户回执③）：开启验证通过但凭据未登记 → 当场以会话密码快照封印
         // （第二次 BiometricPrompt 完成授权），消灭「开关已开、须再解锁一次才生效」的断裂
@@ -85,7 +81,6 @@ internal class SettingsFeatureControllers(
     vaultImportController: com.keepasskey.app.ui.screens.importer.VaultImportController?,
     childDatabaseSessionManager: com.keepasskey.app.data.childdb.ChildDatabaseSessionManager?,
     keyFileAccess: com.keepasskey.app.ui.screens.unlock.KeyFileAccess?,
-    debugLogBuffer: DebugLogBuffer,
     scope: CoroutineScope,
     stateSubscribeTimeoutMillis: Long,
     appContext: android.content.Context? = null
@@ -95,7 +90,6 @@ internal class SettingsFeatureControllers(
     val childDatabaseController = SettingsChildDatabaseController(
         manager = childDatabaseSessionManager,
         keyFileAccess = keyFileAccess,
-        debugLogBuffer = debugLogBuffer,
         scope = scope,
         stateSubscribeTimeoutMillis = stateSubscribeTimeoutMillis
     )

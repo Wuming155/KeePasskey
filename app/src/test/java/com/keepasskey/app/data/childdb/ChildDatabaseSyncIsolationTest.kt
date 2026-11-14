@@ -40,7 +40,6 @@ class ChildDatabaseSyncIsolationTest {
         credentials = credentials,
         streamSource = source,
         databaseSession = databaseSession,
-        debugLog = DebugLogBuffer(),
         unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore()),
         binaryStore = RecordingBinaryStore()
     )

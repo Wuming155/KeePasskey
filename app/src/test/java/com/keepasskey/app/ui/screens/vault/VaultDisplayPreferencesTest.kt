@@ -68,9 +68,7 @@ class VaultDisplayPreferencesTest {
         return com.keepasskey.app.sync.SyncCoordinator(
             context,
             com.keepasskey.database.session.DatabaseSession(),
-            com.keepasskey.app.sync.SyncCredentialsStore(context, null),
-            com.keepasskey.app.data.logger.DebugLogBuffer()
-        )
+            com.keepasskey.app.sync.SyncCredentialsStore(context, null))
     }
 
     private fun TestScope.createViewModel(

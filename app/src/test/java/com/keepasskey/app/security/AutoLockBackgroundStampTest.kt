@@ -50,7 +50,7 @@ class AutoLockBackgroundStampTest {
     private fun newGuard(
         session: DatabaseSession,
         settings: FakeSettingsRepository
-    ): AutoLockSessionGuard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+    ): AutoLockSessionGuard = AutoLockSessionGuard(session, settings)
 
     @Test
     fun `后台时间戳持久化后重建的实例可读回同一值`() {

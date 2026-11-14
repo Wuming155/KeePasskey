@@ -220,7 +220,6 @@ class BiometricResealCoordinatorTest {
             biometricAuthManager = BiometricAuthManager(KeystoreManager(null)),
             biometricCredentialStorage = storage,
             strings = StringsProvider { _, _ -> "" },
-            debugLog = DebugLogBuffer()
         )
         coordinator.sealKeyProvisionOverride = { provisionOf(KeystoreManager.KeySecurityLevel.SOFTWARE) }
         coordinator.strongBiometricCheckOverride = { true }
@@ -278,7 +277,6 @@ class BiometricResealCoordinatorTest {
             biometricAuthManager = BiometricAuthManager(KeystoreManager(null)),
             biometricCredentialStorage = storage,
             strings = StringsProvider { _, _ -> "" },
-            debugLog = DebugLogBuffer(),
             publishSeal = publishSeal ?: { publish -> publish(); true }
         )
         // 桌面 JVM AES/GCM 替身封印密钥（测试密钥，仅存于测试进程），落位按硬件放行；

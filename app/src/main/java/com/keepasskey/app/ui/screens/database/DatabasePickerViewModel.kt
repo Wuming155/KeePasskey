@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.database
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -43,7 +44,6 @@ class DatabasePickerViewModel @Inject constructor(
     // 生产 DI 注入 @ApplicationContext（与 SettingsViewModel 同一既有范式）
     @ApplicationContext private val appContext: Context? = null,
     // ISSUE-P2-288：弱主口令「显式二次确认」留痕通道。nullable 仅为单测构造；生产 DI 恒注入
-    private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer? = null,
     // ISSUE-P2-399：云端打开导入器（下载远端库 → 落凭据）。nullable 仅为单测构造；生产 DI 恒注入
     private val cloudVaultImporter: com.keepasskey.app.sync.CloudVaultImporter? = null,
     // ISSUE-P3-400：远端目录浏览控制器（打开对话框「浏览远端目录」共用设置页同一单例）。
@@ -63,7 +63,7 @@ class DatabasePickerViewModel @Inject constructor(
 
     /** ISSUE-P2-288 AC②：弱主口令「显式二次确认」的留痕（不落明文） */
     fun noteWeakMasterPasswordConfirmed() {
-        debugLog?.warn("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（建库）")
+        AppLog.w("MasterPasswordPolicy", "用户显式确认使用低于强度门槛的主密码（建库）")
     }
     // ISSUE-P3-359 AC④：放宽 internal 供同包 publishPickerMessage 双写
     internal val userMessageFlow = MutableStateFlow<UiMessage?>(null)
@@ -80,7 +80,6 @@ class DatabasePickerViewModel @Inject constructor(
         scope = viewModelScope,
         publish = { publishPickerMessage(it) },
         vaultCopyStore = keyFileVaultCopyStore,
-        debugLog = debugLog,
         keyFileAccess = keyFileAccess
     )
     val keyFileDelivery: StateFlow<KeyFileDeliveryState>
@@ -225,7 +224,7 @@ class DatabasePickerViewModel @Inject constructor(
                 }
                 if (result is KdbxResult.Success) {
                     val fileName = if (name.endsWith(".kdbx", ignoreCase = true)) name else "$name.kdbx"
-                    debugLog?.info(
+                    AppLog.i(
                         "DatabasePicker",
                         "建库成功: generated=${resolved.generated} hasSourceUri=${!resolved.sourceUri.isNullOrBlank()} " +
                             "targetUri=${!targetUri.isNullOrBlank()} dbIdInRegistry=targetUri?:fileName"
@@ -238,7 +237,7 @@ class DatabasePickerViewModel @Inject constructor(
                         keyFileDeliveryController.adoptOnCreate(
                             dbId = targetUri ?: fileName, vaultName = name, resolution = resolved
                         )
-                        debugLog?.info("DatabasePicker", "副本收编 + 按库登记流程已返回（成败见副本通道日志）")
+                        AppLog.i("DatabasePicker", "副本收编 + 按库登记流程已返回（成败见副本通道日志）")
                     }
                     if (resolved.generated) {
                         // ISSUE-P3-21 验收 2：生成型密钥文件必须一次性交付（丢失即无法解锁）。
@@ -249,13 +248,13 @@ class DatabasePickerViewModel @Inject constructor(
                         val createdDbId = targetUri ?: fileName
                         viewModelScope.safeLaunch("DatabasePickerViewModel") {
                             keyFileDeliveryController.delivery.first { it is KeyFileDeliveryState.None }
-                            debugLog?.info("DatabasePicker", "交付已了结 → 发 DatabaseSelected 事件（离页信号）")
+                            AppLog.i("DatabasePicker", "交付已了结 → 发 DatabaseSelected 事件（离页信号）")
                             _events.emit(DatabasePickerEvent.DatabaseSelected(createdDbId))
                         }
                     } else {
                         // ISSUE-P2-229：自选位置库在目录中的标识就是 uri 字符串（`importExternalDatabase` 同口径），
                         // 以文件名下行的选中事件对这类库无效
-                        debugLog?.info("DatabasePicker", "发 DatabaseSelected 事件（离页信号）: idIsUri=${!targetUri.isNullOrBlank()}")
+                        AppLog.i("DatabasePicker", "发 DatabaseSelected 事件（离页信号）: idIsUri=${!targetUri.isNullOrBlank()}")
                         _events.emit(DatabasePickerEvent.DatabaseSelected(targetUri ?: fileName))
                     }
                 } else {
@@ -381,7 +380,7 @@ class DatabasePickerViewModel @Inject constructor(
      * 组合层时序经此落 `KpLog`——只记状态与布尔值，绝不记库名 / Uri / 文件名。
      */
     fun logUiEvent(message: String) {
-        debugLog?.info("PickerUI", message)
+        AppLog.i("PickerUI", message)
     }
 
     /**

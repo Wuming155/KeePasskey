@@ -64,7 +64,6 @@ class BiometricEnableCoordinatorTest {
             biometricAuthManager = authManager,
             biometricCredentialStorage = storage,
             strings = StringsProvider { _, _ -> "" },
-            debugLog = DebugLogBuffer(),
             state = state
         )
         return Fixture(settings, state, coordinator)

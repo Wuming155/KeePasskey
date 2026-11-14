@@ -59,8 +59,8 @@ class MergeKeyFileDeviceTest {
         val session = DatabaseSession()
         val password = "Synthetic-Merge-2026".toCharArray()
         val log = DebugLogBuffer()
-        val reader = SafKeyFileAccess(context, RealSettingsRepository(context), ExtendedSettingsStore(context), log)
-        val merge = KdbxMergeController(context, session, SyncSessionState(), debugLog = log, keyFileAccess = reader)
+        val reader = SafKeyFileAccess(context, RealSettingsRepository(context), ExtendedSettingsStore(context))
+        val merge = KdbxMergeController(context, session, SyncSessionState(), keyFileAccess = reader)
         try {
             assertTrue(session.create(File(directory, "target.kdbx"), "Target", password, useArgon2 = false).isSuccess)
             block(directory, session, merge, password)

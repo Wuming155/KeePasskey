@@ -143,7 +143,6 @@ class UnlockViewModelBiometricAutoPromptTest {
             // 生物识别管理器需宿主 Activity 与 Android Keystore，JVM 侧注入 null 以走 fail-closed 分支
             biometricAuthManager = null,
             biometricCredentialStorage = storage,
-            debugLog = DebugLogBuffer(),
             // ISSUE-P1-429：keystore 密算调度器注入 TestDispatcher，保证 withContext 段的测试确定性
             cryptoDispatcher = testDispatcher,
             keyFileAccess = keyFileAccess
@@ -227,7 +226,6 @@ class UnlockViewModelBiometricAutoPromptTest {
             activeDbId = { activeDbId },
             biometricAuthManager = null,
             biometricCredentialStorage = storage,
-            debugLog = DebugLogBuffer(),
             cryptoDispatcher = testDispatcher,
             prompt = prompt
         )

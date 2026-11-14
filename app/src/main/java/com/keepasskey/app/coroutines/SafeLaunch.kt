@@ -5,6 +5,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
@@ -66,3 +68,22 @@ private fun reportSafeLaunchFailure(tag: String, onError: (Throwable) -> Unit, f
         AppLog.e(tag, "协程兜底的 onError 自身抛异常（已吞，避免二次逃逸）", failureInFallback)
     }
 }
+
+/**
+ * 长驻 Flow 收集的失败出口：上游抛错时**留痕并结束收集**，不再静默消失。
+ *
+ * `safeLaunch` 只兜底「协程启动」这一段：收集体内部抛错时它确实能拦住进程崩溃，但该协程
+ * 随即终止——界面上表现为「状态停在最后一次快照，之后再也不更新」，而日志里没有任何一行
+ * 说明为什么。此类收集多为 `StateFlow` / 仓库缓存，正常不会抛，一旦抛出就是上游缺陷，
+ * 恰恰最需要留痕。
+ *
+ * 语义：捕获非取消异常 → `AppLog.e` 记录类型与有界栈帧 → 收集正常完成（不重抛）。
+ * 不重试：上游流抛错后重订阅会立刻再撞同一次错误，形成忙循环。
+ *
+ * @param tag 归因标签（调用点自身名字）
+ */
+internal fun <T> Flow<T>.catchAndLog(tag: String): Flow<T> =
+    catch { failure ->
+        if (failure is CancellationException) throw failure
+        AppLog.e(tag, "流收集中断（该界面将停止更新）：${failure.javaClass.simpleName}", failure)
+    }

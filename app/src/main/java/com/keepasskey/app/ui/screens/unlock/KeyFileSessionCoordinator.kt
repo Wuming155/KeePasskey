@@ -1,7 +1,7 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -27,7 +27,6 @@ internal class KeyFileSessionCoordinator(
     private val scope: CoroutineScope,
     private val uiState: MutableStateFlow<UnlockUiState>,
     private val keyFileAccess: KeyFileAccess?,
-    private val debugLog: DebugLogBuffer,
     /**
      * §411（ISSUE-P3-448）：应用私有目录收编副本通道（可空 = 单测未装配）。
      * 冷启动恢复**优先消费副本**（不依赖 SAF 持久授权），解锁成功且使用密钥文件时收编字节。
@@ -66,7 +65,6 @@ internal class KeyFileSessionCoordinator(
         uiState = uiState,
         keyFileAccess = keyFileAccess,
         vaultCopyStore = vaultCopyStore,
-        debugLog = debugLog
     )
 
     /** 在途恢复任务（活动库切换 / 回前台重新发起时取消旧任务，防并发恢复互踩） */
@@ -95,7 +93,7 @@ internal class KeyFileSessionCoordinator(
         scope.launch {
             val access = keyFileAccess
             if (access == null) {
-                debugLog.warn(TAG, "密钥文件读取通道不可用，拒绝以未读取的字节参与解锁")
+                AppLog.w(TAG, "密钥文件读取通道不可用，拒绝以未读取的字节参与解锁")
                 onKeyFileReadFailed()
                 return@launch
             }
@@ -241,7 +239,7 @@ internal class KeyFileSessionCoordinator(
      */
     fun restoreOnResumeIfIdle() {
         if (!restoreChain.shouldRestoreOnResume()) return
-        debugLog.info(TAG, "解锁页回前台：按当前库记录再恢复密钥文件")
+        AppLog.i(TAG, "解锁页回前台：按当前库记录再恢复密钥文件")
         restoreJob?.cancel()
         restoreJob = scope.launch { restoreChain.restoreRememberedKeyFile() }
     }
@@ -278,14 +276,14 @@ internal class KeyFileSessionCoordinator(
                     access.remember(dbId, sourceUri, displayName)
                 } else {
                     // ISSUE-P2-460 AC①：无库维度就无归属——宁可不记，绝不退回全局槽
-                    debugLog.warn(TAG, "活动库 id 缺失，密钥文件记忆放弃登记（不落全局槽）")
+                    AppLog.w(TAG, "活动库 id 缺失，密钥文件记忆放弃登记（不落全局槽）")
                 }
             }
             // §411（ISSUE-P3-448 AC②）：收编字节进私有目录（副本密钥经 Keystore 封 DEK + 软件层加密）
             val bytes = keyFileData
             if (dbId != null && bytes != null && vaultCopyStore != null) {
                 val saved = vaultCopyStore.save(dbId, bytes, displayName)
-                debugLog.info(TAG, "密钥文件副本收编: $saved")
+                AppLog.i(TAG, "密钥文件副本收编: $saved")
             }
         } else {
             access.forget(dbId)
@@ -316,7 +314,7 @@ internal class KeyFileSessionCoordinator(
                 errorMessage = null
             )
         }
-        debugLog.info(TAG, "活动库切换：密钥文件表单态已复位（驻留字节清零）")
+        AppLog.i(TAG, "活动库切换：密钥文件表单态已复位（驻留字节清零）")
     }
 
     /**

@@ -3,6 +3,7 @@ package com.keepasskey.app.ui.screens.conflict
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.catchAndLog
 import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.sync.userText
 import com.keepasskey.app.sync.SyncCoordinator
@@ -58,7 +59,7 @@ class ConflictResolutionViewModel @Inject constructor(
 
     init {
         viewModelScope.safeLaunch("ConflictResolutionViewModel") {
-            syncCoordinator.conflictFlow.collect { conflicts ->
+            syncCoordinator.conflictFlow.catchAndLog("ConflictResolutionVM").collect { conflicts ->
                 if (conflicts.isNotEmpty()) {
                     // ISSUE-P2-281 AC①：差异来源 = 合并器产出的 modifiedFields（单一真相源），
                     // 本类不再自造五字段 diff（此前自定义字段 / 图标等分歧在界面不可见、无从裁决）
@@ -100,7 +101,7 @@ class ConflictResolutionViewModel @Inject constructor(
         // 两边各自 update 只改自己的字段，互不清空对方。
         // ISSUE-P2-659：库级 Meta 冲突独立通道；与条目 / 分组各自 update 自己的字段。
         viewModelScope.safeLaunch("ConflictResolutionViewModel") {
-            syncCoordinator.metaConflictFlow.collect { conflicts ->
+            syncCoordinator.metaConflictFlow.catchAndLog("ConflictResolutionVM").collect { conflicts ->
                 val fields = conflicts.map { conflict -> diffMapper.metaField(conflict) }
                 _uiState.update {
                     it.copy(meta = if (fields.isEmpty()) null else ConflictedMetaItem(fields = fields))
@@ -108,7 +109,7 @@ class ConflictResolutionViewModel @Inject constructor(
             }
         }
         viewModelScope.safeLaunch("ConflictResolutionViewModel") {
-            syncCoordinator.groupConflictFlow.collect { groups ->
+            syncCoordinator.groupConflictFlow.catchAndLog("ConflictResolutionVM").collect { groups ->
                 val items = groups.map { pair ->
                     ConflictedGroupItem(
                         id = pair.groupId,

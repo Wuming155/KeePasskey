@@ -143,7 +143,7 @@ class VaultWriteBoundarySafDeviceTest {
             databaseSession = session,
             driftGuard = VaultFileDriftGuard(coordinator = null, context = context),
             strings = StringsProvider { id, args -> context.getString(id, *args) },
-            autoLockGuard = AutoLockSessionGuard(session, RealSettingsRepository(context), log),
+            autoLockGuard = AutoLockSessionGuard(session, RealSettingsRepository(context)),
             logPersistFailure = { log.warn("P1-601", "SAF synthetic save failed (${it.error.javaClass.simpleName})") }
         )
     }

@@ -336,6 +336,16 @@ fun DebugSettingsScreen(
                             Text(stringResource(R.string.debug_copy_btn))
                         }
 
+                        // ISSUE-P2（剪贴板留存）：日志不标记敏感属性、不参与自动擦除——用户需要把
+                        // 它粘贴到反馈渠道，定时擦除会与这一用途直接冲突。代价是内容会进入系统
+                        // 剪贴板历史或输入法缓存，停留时间不受本应用控制；该风险就地披露，
+                        // 不靠用户去读隐私政策才发现。
+                        Text(
+                            text = stringResource(R.string.debug_copy_clipboard_notice),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
                         OutlinedButton(
                             onClick = {
                                 onClearLogs()

@@ -23,7 +23,7 @@ class VaultRecoveryStoreTest {
     val tempFolder = TemporaryFolder()
 
     private fun store(dir: File = tempFolder.root) =
-        VaultRecoveryStore(null, DebugLogBuffer()).apply { baseDirOverride = dir }
+        VaultRecoveryStore(null).apply { baseDirOverride = dir }
 
     @Test
     fun `写入后可发现且载荷原样读回`() = runBlocking {

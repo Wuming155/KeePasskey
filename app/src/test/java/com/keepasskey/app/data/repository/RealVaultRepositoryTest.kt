@@ -112,7 +112,6 @@ class RealVaultRepositoryTest {
     ): RealVaultRepository = RealVaultRepository(
         createMockContext(filesDir),
         session,
-        com.keepasskey.app.data.logger.DebugLogBuffer(),
         createTestStrings(),
         projectionDispatcher,
         // ISSUE-P3-273：TOTP 解析参数通道（本测试不涉解析参数语义，注入内置缺省快照）
@@ -120,8 +119,7 @@ class RealVaultRepositoryTest {
         // ISSUE-P3-366 AC②：保存挂锁闸（本测试不涉自动锁语义，注入独立实例即可）
         com.keepasskey.app.security.AutoLockSessionGuard(
             session,
-            FakeSettingsRepository(),
-            com.keepasskey.app.data.logger.DebugLogBuffer()
+            FakeSettingsRepository()
         )
     )
 
@@ -162,14 +160,12 @@ class RealVaultRepositoryTest {
     ): RealVaultRepository = RealVaultRepository(
         createMockContext(tempFolder.root),
         session,
-        com.keepasskey.app.data.logger.DebugLogBuffer(),
         createTestStrings(),
         projectionDispatcher,
         TotpPreferencesSource { TotpPreferences.DEFAULT },
         com.keepasskey.app.security.AutoLockSessionGuard(
             session,
-            FakeSettingsRepository(),
-            com.keepasskey.app.data.logger.DebugLogBuffer()
+            FakeSettingsRepository()
         )
     )
 

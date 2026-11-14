@@ -80,7 +80,7 @@ class ForegroundIdleLockDeviceTest {
             assertTrue("合成数据库初始写入失败", session.save() is KdbxResult.Success)
             val persistedBytes = file.readBytes()
 
-            val guard = AutoLockSessionGuard(session, settings, DebugLogBuffer())
+            val guard = AutoLockSessionGuard(session, settings)
             val manager = AutoLockManager(context, guard, settings)
             manager.onUserInteraction()
             withTimeout(10_000) { guard.isLocked.first { it } }

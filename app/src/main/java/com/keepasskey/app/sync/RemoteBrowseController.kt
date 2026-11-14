@@ -1,6 +1,6 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.sync.model.RemoteListEntry
 import com.keepasskey.sync.model.RemoteListPage
@@ -52,7 +52,6 @@ sealed interface RemoteBrowseUiState {
  */
 @Singleton
 class RemoteBrowseController @Inject constructor(
-    private val debugLog: DebugLogBuffer
 ) {
     private val mutableState = MutableStateFlow<RemoteBrowseUiState>(RemoteBrowseUiState.Idle)
     val state: StateFlow<RemoteBrowseUiState> = mutableState.asStateFlow()
@@ -86,7 +85,7 @@ class RemoteBrowseController @Inject constructor(
                 transferOptions = SyncTransferOptions.DISABLED
             )
         } catch (t: Throwable) { // cancel-n/a: 保护段为非挂起 Provider 构造
-            debugLog.warn(TAG, "WebDAV 浏览 Provider 构造失败: ${t.javaClass.simpleName}")
+            AppLog.w(TAG, "WebDAV 浏览 Provider 构造失败: ${t.javaClass.simpleName}")
             publishBrowseFailure(t.javaClass.simpleName)
             return
         }
@@ -129,7 +128,7 @@ class RemoteBrowseController @Inject constructor(
         } catch (t: Throwable) { // cancel-n/a: 保护段为非挂起 Provider 构造
             accessClone.fill('0')
             secretClone.fill('0')
-            debugLog.warn(TAG, "S3 浏览 Provider 构造失败: ${t.javaClass.simpleName}")
+            AppLog.w(TAG, "S3 浏览 Provider 构造失败: ${t.javaClass.simpleName}")
             publishBrowseFailure(t.javaClass.simpleName)
             return
         }
@@ -175,7 +174,7 @@ class RemoteBrowseController @Inject constructor(
         val result = provider.listRemoteDirectory(browsePath, cursor = cursor, pageSize = PAGE_SIZE)
         // 配置路径列举失败且非分页续拉时：回退端点根（默认路径），避免「设了远程路径后浏览打不开」
         val effective = if (result.isFailure && cursor == null && browsePath.isNotEmpty()) {
-            debugLog.warn(TAG, "列举配置路径失败，回退默认路径（端点根）")
+            AppLog.w(TAG, "列举配置路径失败，回退默认路径（端点根）")
             provider.listRemoteDirectory("", cursor = null, pageSize = PAGE_SIZE)
         } else {
             result
@@ -184,7 +183,7 @@ class RemoteBrowseController @Inject constructor(
             effective.isFailure -> {
                 val err = effective.exceptionOrNull()
                 val errorType = err?.javaClass?.simpleName ?: "UnknownError"
-                debugLog.warn(TAG, "远端目录浏览失败: $errorType")
+                AppLog.w(TAG, "远端目录浏览失败: $errorType")
                 publishBrowseFailure(errorType)
             }
             else -> {

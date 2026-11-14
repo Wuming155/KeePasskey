@@ -60,14 +60,14 @@ class SessionRecoveryCoordinatorTest {
     }
 
     private fun store(dir: File) =
-        VaultRecoveryStore(null, DebugLogBuffer()).apply { baseDirOverride = dir }
+        VaultRecoveryStore(null).apply { baseDirOverride = dir }
 
     @Test
     fun `补存失败时写出可用会话凭据解开的恢复副本`() = runBlocking {
         val (session, file) = dirtySessionWithFailingSave()
         val recoveryStore = store(tempFolder.root)
         val coordinator = SessionRecoveryCoordinator(
-            session, recoveryStore, RecoveryAlertStore(null), DebugLogBuffer()
+            session, recoveryStore, RecoveryAlertStore(null)
         )
 
         val outcome = coordinator.onSaveFailedBeforeLock()
@@ -96,7 +96,7 @@ class SessionRecoveryCoordinatorTest {
         val blocker = File(tempFolder.root, "blocker").apply { writeText("x") }
         val brokenStore = store(File(blocker, "unreachable"))
         val alertStore = RecoveryAlertStore(null)
-        val coordinator = SessionRecoveryCoordinator(session, brokenStore, alertStore, DebugLogBuffer())
+        val coordinator = SessionRecoveryCoordinator(session, brokenStore, alertStore)
 
         val outcome = coordinator.onSaveFailedBeforeLock()
 

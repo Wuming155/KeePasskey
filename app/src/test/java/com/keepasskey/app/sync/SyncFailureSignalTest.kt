@@ -1,5 +1,6 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.sync.engine.SyncCacheEvent
 import com.keepasskey.sync.model.SyncException
 import org.junit.Assert.assertFalse
@@ -99,5 +100,38 @@ class SyncFailureSignalTest {
         assertFalse(SyncFailureSignal.shouldNotifyOutcome(SyncOutcome.UploadedLocal))
         assertFalse(SyncFailureSignal.shouldNotifyOutcome(SyncOutcome.MergedAndUploaded))
         assertFalse(SyncFailureSignal.shouldNotifyOutcome(SyncOutcome.VaultBindingMismatch("/vault.kdbx")))
+    }
+
+    @Test
+    fun `锁态探测失败产生可通知结论且恢复后撤下`() {
+        val strings = StringsProvider { id, _ -> "s$id" }
+
+        listOf(
+            PeriodicSyncWorkResult.AuthenticationRequired,
+            PeriodicSyncWorkResult.ConfigurationInvalid,
+            PeriodicSyncWorkResult.RemoteRejected("IOException")
+        ).forEach { result ->
+            assertTrue(
+                "锁态探测失败必须进入通知状态：$result",
+                SyncFailureSignal.shouldNotifyOutcome(periodicProbeOutcome(result, strings))
+            )
+        }
+        assertFalse(
+            "真断网属设计内降级，保持 Offline 不亮通知",
+            SyncFailureSignal.shouldNotifyOutcome(
+                periodicProbeOutcome(PeriodicSyncWorkResult.TemporaryNetworkFailure, strings)
+            )
+        )
+        listOf(
+            PeriodicSyncWorkResult.MetadataUnchanged,
+            PeriodicSyncWorkResult.EncryptedUploadCompleted,
+            PeriodicSyncWorkResult.NotConfigured,
+            PeriodicSyncWorkResult.NeedsUnlock(PeriodicSyncNeedsUnlockReason.REMOTE_CHANGED)
+        ).forEach { result ->
+            assertFalse(
+                "探测恢复或只是等待解锁时应撤下上一周期的失败通知：$result",
+                SyncFailureSignal.shouldNotifyOutcome(periodicProbeOutcome(result, strings))
+            )
+        }
     }
 }

@@ -1,9 +1,9 @@
 package com.keepasskey.app.ui.screens.detail
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.net.Uri
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiAttachment
 import com.keepasskey.app.ui.model.UiMessage
@@ -26,7 +26,6 @@ internal class EntryDetailAttachmentExporter(
     private val vaultRepository: VaultRepository,
     private val appContext: Context?,
     private val exportAuditRecorder: ExportAuditRecorder?,
-    private val debugLog: DebugLogBuffer?
 ) {
 
     /**
@@ -62,7 +61,7 @@ internal class EntryDetailAttachmentExporter(
             if (e is CancellationException) throw e
             // 只留痕异常类型，不落异常消息或附件名（防御性，避免敏感内容回流日志缓冲）
             exportAuditRecorder?.record(ExportArtifactKind.ATTACHMENT, rawTarget, success = false)
-            debugLog?.warn(TAG, "附件导出失败: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "附件导出失败: ${e.javaClass.simpleName}")
             SafDocumentCleanup.deleteCreatedDocument(appContext, targetUri)
             UiMessage(R.string.detail_attachment_export_failed)
         }

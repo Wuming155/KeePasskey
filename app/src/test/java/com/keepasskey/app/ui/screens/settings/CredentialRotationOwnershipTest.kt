@@ -45,8 +45,7 @@ class CredentialRotationOwnershipTest {
     @Test fun `取消页面作用域不取消应用任务且挂锁成对释放`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val holdoff = AutoLockHoldoff()
-        val runtime = CredentialRotationRuntime(AutoLockSessionGuard(
-            DatabaseSession(), FakeSettingsRepository(), DebugLogBuffer(), holdoff = holdoff))
+        val runtime = CredentialRotationRuntime(AutoLockSessionGuard(DatabaseSession(), FakeSettingsRepository(), holdoff = holdoff))
         val page = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -98,8 +97,7 @@ class CredentialRotationOwnershipTest {
     @Test fun `应用作用域取消导致launch未进入时输入和挂锁均收尾`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val holdoff = AutoLockHoldoff()
-        val runtime = CredentialRotationRuntime(AutoLockSessionGuard(
-            DatabaseSession(), FakeSettingsRepository(), DebugLogBuffer(), holdoff = holdoff))
+        val runtime = CredentialRotationRuntime(AutoLockSessionGuard(DatabaseSession(), FakeSettingsRepository(), holdoff = holdoff))
         runtime.scope.cancel()
         val controller = SettingsMasterKeyChangeController(FakeVaultRepository(), backgroundScope, runtime = runtime)
         val password = "Queued#NeverRun".toCharArray()
@@ -302,8 +300,7 @@ class CredentialRotationOwnershipTest {
     }
     @Test fun `首任务完成触发下一受理时旧完成钩子不得覆盖新忙态`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        val runtime = CredentialRotationRuntime(AutoLockSessionGuard(
-            DatabaseSession(), FakeSettingsRepository(), DebugLogBuffer()))
+        val runtime = CredentialRotationRuntime(AutoLockSessionGuard(DatabaseSession(), FakeSettingsRepository()))
         val pending = CompletableDeferred<Unit>()
         var calls = 0
         val repository = object : VaultRepository by FakeVaultRepository() {

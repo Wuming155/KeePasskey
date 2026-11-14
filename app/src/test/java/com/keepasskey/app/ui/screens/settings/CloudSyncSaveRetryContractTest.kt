@@ -290,9 +290,7 @@ class CloudSyncSaveRetryContractTest {
             context = context,
             databaseSession = session,
             syncCredentialsStore = credentials,
-            debugLog = DebugLogBuffer(),
-            strings = StringsProvider { id, _ -> "s$id" }
-        )
+            strings = StringsProvider { id, _ -> "s$id" })
         private val scope = CoroutineScope(Dispatchers.Unconfined)
         val controller = SettingsSyncController(
             credentials,

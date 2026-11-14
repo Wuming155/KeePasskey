@@ -1,10 +1,10 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.core.log.AppLog
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
 import com.keepasskey.app.security.BiometricCredentialStorage
@@ -37,7 +37,6 @@ internal class BiometricUnlockCoordinator(
     private val activeDbId: () -> String?,
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val debugLog: DebugLogBuffer,
     /** ISSUE-P1-429：解封 keystore 密算的调度器（生产恒 IO；单测注入 TestDispatcher 保确定性） */
     private val cryptoDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
     /**
@@ -148,7 +147,7 @@ internal class BiometricUnlockCoordinator(
 
         if (activity == null || storage == null || authManager == null || dbId == null) {
             // fail-closed：无真实生物识别上下文时不得伪造解锁成功（§411 补日志：此前完全静默）
-            debugLog.warn(
+            AppLog.w(
                 TAG,
                 "生物识别解锁 fail-closed: hasActivity=${activity != null}, hasStorage=${storage != null}, " +
                     "hasAuthManager=${authManager != null}, hasDbId=${dbId != null}"
@@ -171,7 +170,7 @@ internal class BiometricUnlockCoordinator(
         val cred = storage.getEncryptedCredential(dbId)
         if (cred == null) {
             // §411 补日志：凭据缺失（被清除 / 键不一致）此前完全静默，真机无从定位
-            debugLog.warn(TAG, "快速解锁凭据缺失，回落主密码模式")
+            AppLog.w(TAG, "快速解锁凭据缺失，回落主密码模式")
             uiState.update {
                 it.copy(
                     isQuickUnlockAvailable = false,
@@ -215,7 +214,7 @@ internal class BiometricUnlockCoordinator(
             fallbackToMasterPasswordMode()
         } catch (e: Exception) {
             // 禁止静默失败：留痕异常类型（不外传裸异常 message），并由结果路径统一提示
-            debugLog.warn(TAG, "生物识别解锁启动异常: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "生物识别解锁启动异常: ${e.javaClass.simpleName}")
             uiState.update {
                 it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
             }
@@ -248,7 +247,7 @@ internal class BiometricUnlockCoordinator(
             }
             is BiometricResult.Error -> {
                 // ISSUE-P3-14：errString 为内部诊断标识，仅落日志；用户可见文案经错误码映射到已资源化字符串
-                debugLog.warn(TAG, "生物识别认证失败: code=${result.errorCode}")
+                AppLog.w(TAG, "生物识别认证失败: code=${result.errorCode}")
                 uiState.update {
                     it.copy(isLoading = false, loadStage = null, errorMessage = BiometricFailureMessagePolicy.of(result))
                 }
@@ -258,7 +257,7 @@ internal class BiometricUnlockCoordinator(
                 // ISSUE-P2-355 AC①：快速解锁比对失败不再静默——置失败提示并回落主密码模式
                 // （原实现在 QUICK 模式仅置 errorMessage，卡片无错误槽位 ⇒ 全程静默）
                 // §411 补日志：单次比对未通过此前零留痕，真机无从区分「未按指纹」与「传感器拒识」
-                debugLog.info(TAG, "生物识别单次比对未通过（指纹不匹配），回落主密码模式")
+                AppLog.i(TAG, "生物识别单次比对未通过（指纹不匹配），回落主密码模式")
                 uiState.update {
                     it.copy(isLoading = false, loadStage = null, errorMessage = UiMessage(R.string.sec_biometric_auth_failed))
                 }
@@ -307,7 +306,7 @@ internal class BiometricUnlockCoordinator(
                 // 或旧「BIOMETRIC_STRONG|DEVICE_CREDENTIAL」密钥迁移重建后，
                 // 旧封印密文解密必然失败（AEADBadTagException 等）——清除陈旧凭据，
                 // 下次主密码解锁自动重新封印，杜绝「永远解不开又永不重登记」的死循环态
-                debugLog.warn(TAG, "生物识别解封失败: ${e.javaClass.simpleName}")
+                AppLog.w(TAG, "生物识别解封失败: ${e.javaClass.simpleName}")
                 storage.clearCredential(dbId)
                 uiState.update {
                     it.copy(
@@ -376,7 +375,7 @@ internal class BiometricUnlockCoordinator(
                         // ISSUE-P1-431 迁移：存量复合封印（大载荷）解锁成功后清除，
                         // 下次主密码解锁将以「仅主密码」小载荷重新登记（一次性过渡）
                         storage.clearCredential(dbId)
-                        debugLog.info(TAG, "存量复合封印已迁移清除，下次主密码解锁后以小载荷重登记")
+                        AppLog.i(TAG, "存量复合封印已迁移清除，下次主密码解锁后以小载荷重登记")
                     }
                     uiState.update {
                         it.copy(

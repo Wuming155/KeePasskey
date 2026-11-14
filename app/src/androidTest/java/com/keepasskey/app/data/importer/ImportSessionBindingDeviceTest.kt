@@ -47,10 +47,12 @@ class ImportSessionBindingDeviceTest {
                 return result
             }
         }
-        val debugLog = DebugLogBuffer()
-        val controller = VaultImportController(context, ImporterRegistry(setOf(BrowserCsvImporter()), debugLog),
-            VaultImporter(repository, StringsProvider { _, _ -> "未命名" }, debugLog, session), debugLog,
-            KdbxMergeController(context, session, SyncSessionState(), debugLog = debugLog))
+        val controller = VaultImportController(
+            context,
+            ImporterRegistry(setOf(BrowserCsvImporter())),
+            VaultImporter(repository, StringsProvider { _, _ -> "未命名" }, session),
+            KdbxMergeController(context, session, SyncSessionState())
+        )
         try {
             val first = File(directory, "A.kdbx")
             val later = File(directory, "B.kdbx")

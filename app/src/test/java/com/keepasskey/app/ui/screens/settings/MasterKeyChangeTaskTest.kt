@@ -449,9 +449,7 @@ class MasterKeyChangeTaskTest {
             context,
             DatabaseSession(),
             credentialsStore,
-            DebugLogBuffer(),
-            TEST_STRINGS
-        )
+            TEST_STRINGS)
         return SettingsViewModel(
             settingsRepository,
             repository,

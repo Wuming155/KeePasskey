@@ -157,6 +157,11 @@ ALLOWED_DISPLAY_READ_FILES = frozenset(
         "app/src/main/java/com/keepasskey/app/autofill/AutofillPickerViewModel.kt",
         "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockedCandidates.kt",
         "app/src/main/java/com/keepasskey/app/autofill/StructuredFieldPolicy.kt",
+        # `8c3d2fc4`：锁定态解锁成功后的候选 `FillResponse` 装配——`displayTitle()` /
+        # `displayUserName()` 只进 `RemoteViews` 的候选标题与副标题（与 `AutofillDatasetBuilders`
+        # 同型展示面），值字段一律 `null` 占位，明文只在二次确认页构造；并发整树替换撞上时
+        # 上游 `hasClearedFields()` 已跳过该候选，本读口不承载任何落盘值 / 下发值 / 裁决判据。
+        "app/src/main/java/com/keepasskey/app/autofill/AutofillUnlockResponseBuilder.kt",
         # §522：确认页回传构造的交付复检（条目 URL 只进 `entryMatchesDeliveryOrigin` 布尔闸门，
         # 空串降级为拒绝；凭据值仍走 fail-fast 取数路径，本读口不承载任何下发值）
         "app/src/main/java/com/keepasskey/app/autofill/AutofillConfirmAuthResolver.kt",

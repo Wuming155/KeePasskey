@@ -171,6 +171,7 @@ class VaultFileDriftUiPathDeviceTest {
         try {
             repository.lockDatabase()
         } catch (_: Throwable) {
+            // 收尾尽力而为：已锁定 / 已关闭时 lockDatabase 抛错可忽略
         }
     }
 

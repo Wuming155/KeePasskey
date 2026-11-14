@@ -1,7 +1,7 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.model.DeletedObject
 import com.keepasskey.core.model.KdbxGroup
@@ -61,7 +61,6 @@ class SyncConflictController @Inject constructor(
     internal val codec: SyncDatabaseCodec,
     internal val strings: StringsProvider,
     private val session: SyncSessionState,
-    private val debugLog: DebugLogBuffer
 ) {
 
     // 缓存发生冲突时的上下文，供用户确认合并后提交
@@ -188,7 +187,7 @@ class SyncConflictController @Inject constructor(
         localDbSnapshot: KdbxDatabase
     ): SyncOutcome? = when (ConflictStrategyPolicy.dispositionOf(strategy)) {
         ConflictDisposition.TakeRemote -> {
-            debugLog.warn(SYNC_LOG_TAG, "冲突解决策略=以云端为准：放弃本地未同步修改，采用远端版本")
+            AppLog.w(SYNC_LOG_TAG, "冲突解决策略=以云端为准：放弃本地未同步修改，采用远端版本")
             // ISSUE-P2-278：用户显式「以云端为准」策略（覆盖语义已在设置页声明，不计入该条
             // 整改面），不带校验快照直采
             when (val applied = codec.loadAndApplyRemoteBytes(remoteBytes)) {
@@ -201,7 +200,7 @@ class SyncConflictController @Inject constructor(
             }
         }
         ConflictDisposition.TakeLocal -> {
-            debugLog.warn(SYNC_LOG_TAG, "冲突解决策略=以本地为准：本地版本覆盖云端")
+            AppLog.w(SYNC_LOG_TAG, "冲突解决策略=以本地为准：本地版本覆盖云端")
             when (val forcedCommit = syncEngine.commitLocalForce(remotePath, localBytes)) {
                 is SyncCommitResult.Uploaded -> {
                     val saveResult = databaseSession.save()

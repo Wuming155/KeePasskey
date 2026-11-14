@@ -11,6 +11,7 @@ import com.keepasskey.app.sync.launchGuarded
 import com.keepasskey.app.ui.model.RelativeTimeFormatter
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,8 @@ import kotlinx.coroutines.launch
  * `ISSUE-P2-645`：凭据表单面（预填通道 / WebDAV 与 S3 配置保存 / 封印密钥实测）拆到
  * [SettingsSyncCredentialForm]，本类保留状态流与同步编排；公开 API 形状不变。
  */
+private const val TAG = "SettingsSyncController"
+
 internal class SettingsSyncController(
     private val syncCredentialsStore: SyncCredentialsStore,
     private val syncCoordinator: SyncCoordinator,
@@ -38,7 +41,9 @@ internal class SettingsSyncController(
 
     fun isSyncConfigured(): Boolean = try {
         syncCoordinator.isSyncConfigured()
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        // 配置检查失败按未配置处理，但必须留痕：否则「自动同步不触发」无任何线索。
+        AppLog.w(TAG, "同步配置检查失败: ${e.javaClass.simpleName}")
         false
     }
 

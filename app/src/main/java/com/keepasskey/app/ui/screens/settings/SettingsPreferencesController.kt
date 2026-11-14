@@ -1,8 +1,9 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.coroutines.catchAndLog
 import com.keepasskey.app.autofill.AutofillFieldBlocklistStore
 import com.keepasskey.app.autofill.AutofillSaveBlocklistStore
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.AppLanguage
 import com.keepasskey.app.data.repository.AutofillBlocklistStore
 import com.keepasskey.app.data.repository.SettingsRepository
@@ -43,9 +44,9 @@ internal class SettingsPreferencesController(
     private val autofillSaveBlocklistStore: AutofillSaveBlocklistStore,
     // ISSUE-P3-43 ②：字段签名级屏蔽（写入方在手动选择器；此处仅计数回显与整体清除）
     private val autofillFieldBlocklistStore: AutofillFieldBlocklistStore,
-    debugLogBuffer: DebugLogBuffer,
     // ISSUE-P2-19 / P3-59：活动库会话（可为 null——单测注入；null 时加密配置保持空态占位）
     private val databaseSession: DatabaseSession?,
+    private val debugLogBuffer: DebugLogBuffer,
     private val scope: CoroutineScope
 ) {
 
@@ -134,7 +135,7 @@ internal class SettingsPreferencesController(
     init {
         // 动态订阅活动数据库，更新设置页数据库名称与文件路径（ISSUE-P3-59：路径此前恒空）
         scope.launch {
-            vaultRepository.getDatabases().collect { databases ->
+            vaultRepository.getDatabases().catchAndLog("SettingsPreferences").collect { databases ->
                 val active = databases.firstOrNull { it.isActive } ?: databases.firstOrNull()
                 databaseConfigStateFlow.update {
                     it.copy(
@@ -148,7 +149,7 @@ internal class SettingsPreferencesController(
         // 压缩）与 Meta（默认用户名）下发到设置页，替换此前的硬编码占位值。
         // 用 copy 合并而非整体替换：databasePath（来自库记录）与用户开关状态不被覆盖。
         scope.launch {
-            databaseSession?.databaseFlow?.collect { db ->
+            databaseSession?.databaseFlow?.catchAndLog("SettingsPreferences")?.collect { db ->
                 if (db != null) {
                     val header = databaseConfigFromHeader(db)
                     databaseConfigStateFlow.update {

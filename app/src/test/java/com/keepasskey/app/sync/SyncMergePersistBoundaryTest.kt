@@ -194,7 +194,7 @@ class SyncMergePersistBoundaryTest {
             "前置：建库必须成功",
             bootstrap.create(vaultFile, key, masterPassword, useArgon2 = false) is KdbxResult.Success
         )
-        val codec = SyncDatabaseCodec(bootstrap, DebugLogBuffer())
+        val codec = SyncDatabaseCodec(bootstrap)
         val common = newEntry("Common", UUID_COMMON, "Base#1")
         val baseRoot = KdbxGroup(id = UUID_ROOT, name = "Root", entries = listOf(common))
         val baseDb = bootstrap.databaseFlow.value!!.copy(rootGroup = baseRoot)
@@ -251,11 +251,9 @@ class SyncMergePersistBoundaryTest {
         val syncState = SyncSessionState()
         val controller = SyncConflictController(
             databaseSession = session,
-            codec = SyncDatabaseCodec(session, DebugLogBuffer()),
+            codec = SyncDatabaseCodec(session),
             strings = PERSIST_TEST_STRINGS,
-            session = syncState,
-            debugLog = DebugLogBuffer()
-        )
+            session = syncState)
         return Fixture(
             session, controller, syncState, engine, cache, provider, writer, vaultFile,
             remotePath, baseBytes, localBytes, remoteBytes, UUID_COMMON

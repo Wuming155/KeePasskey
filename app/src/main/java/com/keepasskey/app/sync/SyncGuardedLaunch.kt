@@ -37,6 +37,9 @@ internal fun CoroutineScope.launchGuarded(
     } catch (e: CancellationException) {
         throw e
     } catch (e: Throwable) {
+        // 守护自身先留痕再交给调用方：多数 onFailure 只把异常类名塞进 UI，归档里否则只剩
+        // 「同步开始/结束」。AppLog 只带类型与有界栈帧（不含 message），不泄露凭据或 URL。
+        AppLog.e(TAG, "同步入口未捕获异常: ${e.javaClass.simpleName}", e)
         // `ISSUE-P3-535`（§473 复核 #6）：兜底**自身**抛异常会从本守护里再次逃逸——恰是本函数要
         // 消除的形态（`onFailure` 内的状态更新 / 文案装配同样可能抛）。故此处吞掉并留痕：守护的
         // 职责是「不让进程死」，不得成为新的崩溃源。留痕经 AppLog，不含任何敏感明文。

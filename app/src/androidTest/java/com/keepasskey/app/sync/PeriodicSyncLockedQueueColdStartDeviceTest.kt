@@ -100,9 +100,7 @@ class PeriodicSyncLockedQueueColdStartDeviceTest {
                 context,
                 databaseSession,
                 credentials,
-                log,
-                periodicSyncProbeStore = probeStore
-            )
+                periodicSyncProbeStore = probeStore)
             assertEquals("设备验收不得注入测试 Provider", null, coordinator.testSyncProvider)
             assertEquals("初始 revision A 必须走生产 WebDAV 上传", SyncOutcome.UploadedLocal, coordinator.syncNow())
             val baseline = requireNotNull(
@@ -307,7 +305,7 @@ class PeriodicSyncLockedQueueColdStartDeviceTest {
             }
 
             val downloaded = ByteArrayOutputStream()
-            val productionResolver = SyncProviderResolver(credentials, SyncPreferences(log), log)
+            val productionResolver = SyncProviderResolver(credentials, SyncPreferences(null))
             val providerResult = productionResolver.useProvider { provider ->
                 provider.download(remotePath, downloaded).getOrThrow()
             }
@@ -368,9 +366,7 @@ class PeriodicSyncLockedQueueColdStartDeviceTest {
                             context,
                             databaseSession,
                             credentials,
-                            log,
-                            periodicSyncProbeStore = probeStore
-                        )
+                            periodicSyncProbeStore = probeStore)
                         val manualOutcome = manualRecoveryCoordinator.syncNow()
                         val recoveryRecord = (probeStore.read(vaultFile.absolutePath) as? PeriodicSyncProbeRead.Stored)?.record
                         val recoveryQueueStore = PeriodicSyncPendingUploadStore(
@@ -426,9 +422,7 @@ class PeriodicSyncLockedQueueColdStartDeviceTest {
                         context,
                         databaseSession,
                         credentials,
-                        log,
-                        periodicSyncProbeStore = probeStore
-                    )
+                        periodicSyncProbeStore = probeStore)
                     val converged = unlockedCoordinator.runPeriodicSync()
                     val fullSync = converged as? PeriodicSyncWorkResult.FullSync
                     assertNotNull("解锁后必须执行完整同步: $converged", fullSync)
@@ -553,11 +547,9 @@ class PeriodicSyncLockedQueueColdStartDeviceTest {
     private fun productionCredentials(databaseSession: DatabaseSession, log: DebugLogBuffer): SyncCredentialsStore =
         SyncCredentialsStore(
             context,
-            KeystoreManager(context, log),
-            log,
-            SyncCacheEvictor(context, log),
-            databaseSession
-        )
+            KeystoreManager(context),
+            SyncCacheEvictor(context),
+            databaseSession)
 
     private fun stateStore() = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
 

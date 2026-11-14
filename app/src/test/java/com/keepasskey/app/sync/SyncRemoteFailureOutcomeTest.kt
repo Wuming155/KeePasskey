@@ -63,6 +63,27 @@ class SyncRemoteFailureOutcomeTest {
     }
 
     @Test
+    fun `日志字段只含归类枚举与状态码`() {
+        assertEquals(
+            "kind=AUTH, code=AuthenticationError",
+            remoteFailureLogFields(SyncException.AuthenticationError("401 secret token=abc"))
+        )
+        assertEquals(
+            "kind=REJECTED, code=503",
+            remoteFailureLogFields(SyncException.ProtocolError(503, "Service Unavailable at nas.example.com"))
+        )
+        assertEquals(
+            "kind=OFFLINE, code=NetworkError",
+            remoteFailureLogFields(SyncException.NetworkError("timeout"))
+        )
+        assertEquals("kind=REJECTED, code=Unknown", remoteFailureLogFields(null))
+        assertTrue(
+            "不得携带异常 message",
+            !remoteFailureLogFields(SyncException.AuthenticationError("token=abc")).contains("token")
+        )
+    }
+
+    @Test
     fun `结论映射与既有文案一致`() {
         assertTrue(
             strings.remoteFailureOutcome(SyncException.NetworkError("down")) is SyncOutcome.Offline

@@ -4,17 +4,22 @@ import android.os.Build
 import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.logger.DiagnosticLogDocument
 import com.keepasskey.app.ui.model.StringsProvider
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * 诊断日志**报告**：导出文件与剪贴板复制共用同一份文本（正文恒为 [DebugLogBuffer.exportSanitizedText]）。
+ * 诊断日志**报告**：导出文件与剪贴板复制共用同一份文本（正文恒为
+ * [DebugLogBuffer.exportDocument] 产出的同一次归档快照）。
  *
  * 缓冲里只有事件行，排查者还需要知道「这是哪个版本、哪个平台、日志有没有被环形缓冲截掉」。
  * 故在正文之前附一段只读报告头；它不属于日志正文，不进缓冲、不占容量、也不会被 logcat 直出。
  * 稳定版故障定位所需的异常类型与栈帧由 [com.keepasskey.app.data.logger.DiagnosticLogBridge]
  * 以事件形式写进正文，与本头不重复。
+ *
+ * 报告头的行数与记录范围**取自正文同一份快照**：此前头读内存状态、正文读磁盘归档，
+ * 进程重启后会导出「头说 2 行、正文有 3 天」的自相矛盾报告。
  *
  * 剪贴板是跨进程 Binder 通道，单次写入不能承载任意长度文本：超限时保留报告头与**最近**的
  * 整行日志（故障现场通常最新的信息最有用），并明确标注已截断，引导用户改用导出取全文。
@@ -27,9 +32,11 @@ internal object DiagnosticLogReport {
     private const val SEPARATOR = "------------------------------"
     private val GENERATED_AT_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
-    fun build(buffer: DebugLogBuffer, strings: StringsProvider): String {
-        val status = buffer.status()
-        return buildString {
+    fun build(buffer: DebugLogBuffer, strings: StringsProvider): String =
+        build(buffer.exportDocument(), strings)
+
+    fun build(document: DiagnosticLogDocument, strings: StringsProvider): String =
+        buildString {
             appendLine(strings.get(R.string.debug_report_title))
             appendLine(
                 strings.get(
@@ -45,20 +52,16 @@ internal object DiagnosticLogReport {
             appendLine(
                 strings.get(
                     R.string.debug_report_state,
-                    status.retained,
-                    status.capacity,
-                    status.dropped,
-                    status.firstTimestamp ?: "-",
-                    status.lastTimestamp ?: "-"
+                    document.retained,
+                    DebugLogBuffer.MAX_LINES,
+                    document.dropped,
+                    document.firstTimestamp ?: "-",
+                    document.lastTimestamp ?: "-"
                 )
             )
             appendLine(SEPARATOR)
-            append(buffer.exportSanitizedText())
+            append(document.text)
         }
-    }
-
-    /** 报告正文是否为空（无日志时不写空剪贴板、也不生成空文件） */
-    fun isEmpty(buffer: DebugLogBuffer): Boolean = buffer.status().retained == 0
 
     /**
      * 超长报告按行裁剪：头部（含版本与状态）恒保留，正文只取尾部整行。

@@ -1,6 +1,6 @@
 package com.keepasskey.app.data.importer
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,7 +19,6 @@ import javax.inject.Singleton
 @Singleton
 class ImporterRegistry @Inject constructor(
     importers: Set<@JvmSuppressWildcards EntryImporter>,
-    private val debugLog: DebugLogBuffer
 ) {
 
     private val bySource: Map<ImportSource, EntryImporter> = buildIndex(importers)
@@ -38,7 +37,7 @@ class ImporterRegistry @Inject constructor(
     private fun buildIndex(importers: Set<EntryImporter>): Map<ImportSource, EntryImporter> {
         val grouped = importers.sortedBy { it::class.java.name }.groupBy { it.source }
         grouped.filterValues { it.size > 1 }.forEach { (source, duplicated) ->
-            debugLog.warn(TAG, "数据源 ${source.id} 注册了多个解析器，保留首个: " +
+            AppLog.w(TAG, "数据源 ${source.id} 注册了多个解析器，保留首个: " +
                 duplicated.map { it::class.java.simpleName })
         }
         return grouped.mapValues { it.value.first() }

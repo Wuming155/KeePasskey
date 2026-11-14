@@ -45,7 +45,7 @@ class RecoveryPreviewInterleavingDeviceTest {
         val officialBytesB = byteArrayOf(21, 22, 23)
         val payloadBytesA = byteArrayOf(31, 32, 33, 34)
         val payloadBytesB = byteArrayOf(41, 42, 43, 44)
-        val store = VaultRecoveryStore(context, DebugLogBuffer())
+        val store = VaultRecoveryStore(context)
         val enteredA = CompletableDeferred<Unit>()
         val releaseA = CompletableDeferred<Unit>()
         var scenario: ActivityScenario<MainActivity>? = null

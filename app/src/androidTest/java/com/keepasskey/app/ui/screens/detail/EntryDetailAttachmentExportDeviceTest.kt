@@ -47,7 +47,6 @@ class EntryDetailAttachmentExportDeviceTest {
                 vaultRepository = repositoryReturning(delivered),
                 appContext = context,
                 exportAuditRecorder = null,
-                debugLog = null
             ).export(ENTRY_ID, attachment(), Uri.fromFile(target))
 
             assertEquals("成功导出必须回报成功提示", R.string.detail_attachment_export_toast, message.resId)
@@ -71,7 +70,6 @@ class EntryDetailAttachmentExportDeviceTest {
                 // null 上下文 ⇒ `appContext?.contentResolver` 早退，命中 finally 前的失败分支
                 appContext = null,
                 exportAuditRecorder = null,
-                debugLog = null
             ).export(ENTRY_ID, attachment(), Uri.fromFile(target))
 
             assertEquals("早退必须回报失败提示", R.string.detail_attachment_export_failed, message.resId)

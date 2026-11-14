@@ -109,7 +109,7 @@ class CloudSyncFormUiDeviceTest {
         session = DatabaseSession()
         credentials = SyncCredentialsStore(
             context = context,
-            keystoreManager = KeystoreManager(context, DebugLogBuffer())
+            keystoreManager = KeystoreManager(context)
         )
         // 每个用例都从**无已保存配置**起步：残留配置会被 hydrate() 异步回灌进表单，
         // 覆盖用例刚写入的字段（曾因此把「http 应被拒」变成「https 保存成功」）。

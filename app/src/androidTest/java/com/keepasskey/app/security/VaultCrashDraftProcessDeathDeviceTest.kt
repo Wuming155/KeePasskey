@@ -75,7 +75,7 @@ class VaultCrashDraftProcessDeathDeviceTest {
             assertEquals("本地修改必须进入脏树", DatabaseSession.SessionState.DIRTY, session.state.value)
 
             // ② 以会话复合凭据保全加密草稿（与生产保存路径同一实现）
-            val store = VaultRecoveryStore(context, DebugLogBuffer())
+            val store = VaultRecoveryStore(context)
             val drafts = VaultCrashDrafts(session, store)
             val preserved = drafts.capture()
             assertTrue("加密草稿必须已保全: $preserved", preserved is KdbxResult.Success)
@@ -110,7 +110,7 @@ class VaultCrashDraftProcessDeathDeviceTest {
             )
 
             // ② 冷启动可发现草稿，且目的唯一
-            val store = VaultRecoveryStore(context, DebugLogBuffer())
+            val store = VaultRecoveryStore(context)
             val drafts = store.list().filter {
                 it.purpose == VaultRecoveryStore.Purpose.CRASH_DRAFT && it.pathIdentifier == vault.absolutePath
             }
@@ -122,9 +122,7 @@ class VaultCrashDraftProcessDeathDeviceTest {
                 context,
                 store,
                 RecoveryAlertStore(context),
-                KeyFileVaultCopyStore(context, null, DebugLogBuffer()),
-                DebugLogBuffer()
-            )
+                KeyFileVaultCopyStore(context, null))
             coordinator.refresh()
             val pending = coordinator.pending.value.single { it.entry.payloadFileName == draft.payloadFileName }
             val wrong = "P2-661-Wrong".toCharArray()

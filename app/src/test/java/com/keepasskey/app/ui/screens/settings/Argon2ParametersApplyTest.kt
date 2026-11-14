@@ -66,8 +66,8 @@ class Argon2ParametersApplyTest {
             autofillBlocklistStore = AutofillBlocklistStore(null),
             autofillSaveBlocklistStore = AutofillSaveBlocklistStore(null),
             autofillFieldBlocklistStore = AutofillFieldBlocklistStore(null),
-            debugLogBuffer = DebugLogBuffer(),
             databaseSession = session,
+            debugLogBuffer = DebugLogBuffer(),
             scope = scope
         )
 

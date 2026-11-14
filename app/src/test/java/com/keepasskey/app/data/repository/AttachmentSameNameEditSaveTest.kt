@@ -99,15 +99,10 @@ class AttachmentSameNameEditSaveTest {
     ): RealVaultRepository = RealVaultRepository(
         createMockContext(filesDir),
         session,
-        DebugLogBuffer(),
         createTestStrings(),
         projectionDispatcher,
         TotpPreferencesSource { TotpPreferences.DEFAULT },
-        AutoLockSessionGuard(
-            session,
-            FakeSettingsRepository(),
-            DebugLogBuffer()
-        )
+        AutoLockSessionGuard(session, FakeSettingsRepository())
     )
 
     private fun createInitialDatabase(): Pair<KdbxDatabase, KdbxEntry> {

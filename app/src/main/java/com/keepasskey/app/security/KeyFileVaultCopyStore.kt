@@ -2,7 +2,7 @@ package com.keepasskey.app.security
 
 import android.content.Context
 import androidx.annotation.VisibleForTesting
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.security.SecureFileWrite
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -45,8 +45,7 @@ class KeyFileVaultCopyStore @Inject constructor(
     // 允许为 null 仅用于单测注入；生产 DI 注入 @ApplicationContext
     @ApplicationContext private val context: Context?,
     // 允许为 null 仅用于单测手动构造；生产 DI 注入
-    private val keystoreManager: KeystoreManager?,
-    private val debugLog: DebugLogBuffer? = null
+    private val keystoreManager: KeystoreManager?
 ) {
 
     /** 收编副本（解密产物）：字节（调用方用毕清零）+ 非敏感显示名 */
@@ -105,12 +104,12 @@ class KeyFileVaultCopyStore @Inject constructor(
                 }
                 if (!delivered) {
                     tmp.delete()
-                    debugLog?.warn(TAG, "副本原子改名失败")
+                    AppLog.w(TAG, "副本原子改名失败")
                     return@withContext false
                 }
                 true
             } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式加密封装与写盘（无挂起点）
-                debugLog?.warn(TAG, "副本写入失败: ${e.javaClass.simpleName}")
+                AppLog.w(TAG, "副本写入失败: ${e.javaClass.simpleName}")
                 false
             } finally {
                 dek.fill(0)
@@ -149,7 +148,7 @@ class KeyFileVaultCopyStore @Inject constructor(
             payload.fill(0)
             copy
         } catch (e: Exception) {
-            debugLog?.warn(TAG, "副本读取失败: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "副本读取失败: ${e.javaClass.simpleName}")
             corrupt(target)
         }
     }
@@ -161,7 +160,7 @@ class KeyFileVaultCopyStore @Inject constructor(
         try {
             fileFor(dir, databaseId).delete()
         } catch (e: Exception) {
-            debugLog?.warn(TAG, "副本清除失败: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "副本清除失败: ${e.javaClass.simpleName}")
         }
     }
 
@@ -184,7 +183,7 @@ class KeyFileVaultCopyStore @Inject constructor(
         try {
             dir.listFiles()?.forEach { it.delete() }
         } catch (e: Exception) {
-            debugLog?.warn(TAG, "副本全清失败: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "副本全清失败: ${e.javaClass.simpleName}")
         }
     }
 
@@ -193,7 +192,7 @@ class KeyFileVaultCopyStore @Inject constructor(
     /** Keystore 封 DEK（requireUserAuth = false 的安全取舍声明见类 KDoc；仅 32 B 小载荷） */
     private fun sealWithKeystore(dek: ByteArray): Pair<ByteArray, ByteArray>? {
         val km = keystoreManager ?: run {
-            debugLog?.warn(TAG, "Keystore 通道缺失，副本未写入")
+            AppLog.w(TAG, "Keystore 通道缺失，副本未写入")
             return null
         }
         val key = km.getOrCreateKey(KEY_ALIAS, requireUserAuth = false)
@@ -247,10 +246,10 @@ class KeyFileVaultCopyStore @Inject constructor(
 
     /** 损坏处置：就地删除（下次解锁回落 SAF 记忆通道），绝不反复失败 */
     private fun corrupt(target: File): StoredCopy? {
-        debugLog?.warn(TAG, "副本损坏，就地删除")
+        AppLog.w(TAG, "副本损坏，就地删除")
         try {
             target.delete()
-        } catch (_: Exception) {
+        } catch (_: Exception) { // cancel-n/a: 非挂起删除；删除失败不改变「按损坏回落」的结论
         }
         return null
     }

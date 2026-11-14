@@ -5,6 +5,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.di.RollbackStateDir
 import com.keepasskey.app.ui.model.StringsProvider
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCache
@@ -93,6 +94,13 @@ class SyncCycleRunner @Inject constructor(
     /** ISSUE-P2-625：只在本地快照准备段挂锁；网络等待不延迟自动锁定。 */
     internal val autoLockGuard: AutoLockSessionGuard? = null
 ) {
+
+    /**
+     * 当前同步周期的链路标识（`ISSUE-P2` B1）：由 `SyncCoordinator` 在取锁后设置、周期结束清除。
+     * 周期由互斥锁串行化，故单字段即可；仅用于日志 `op=`，不参与任何同步判定。
+     */
+    @Volatile
+    internal var activeOpId: String? = null
 
     /**
      * `ISSUE-P2-536`：本轮周期已解析的远端路径（检查点记录与判定的归属键）。
@@ -253,6 +261,13 @@ class SyncCycleRunner @Inject constructor(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
+            // 同步编排段的异常此前只归一为通用失败文案，导出归档里没有原因；
+            // 这里只留类型与有界栈帧，不记录可能携带服务器可控串的 message。
+            AppLog.e(
+                SYNC_LOG_TAG,
+                "同步周期编排异常: op=${activeOpId ?: "-"}, kind=UNEXPECTED, code=${failure.javaClass.simpleName}",
+                failure
+            )
             SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
         } finally {
             if (holdoffActive) autoLockGuard?.endLongTask()
@@ -376,7 +391,13 @@ class SyncCycleRunner @Inject constructor(
             // ISSUE-P0-09：openRemote 之外的周期步骤（本地序列化 / 首传基线 / 快速提交与冲突合并）
             // 同样存在 provider-引擎重抛链未覆盖的 Error 面（如合并超深结构栈溢出），
             // 一律遏制为「本次同步失败」而非进程崩溃，与 handleOpenRemote 的归一口径一致
-            // ISSUE-P3-311 项 3：异常 message 可能携带服务器可控串，UI 只出固定通用文案
+            // ISSUE-P3-311 项 3：异常 message 可能携带服务器可控串，UI 只出固定通用文案；
+            // 归档只留类型与有界栈帧，使「某步失败」仍可定位到具体方法。
+            AppLog.e(
+                SYNC_LOG_TAG,
+                "同步周期步骤异常: op=${activeOpId ?: "-"}, kind=UNEXPECTED, code=${e.javaClass.simpleName}",
+                e
+            )
             SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
         } finally {
             if (holdoffActive) {

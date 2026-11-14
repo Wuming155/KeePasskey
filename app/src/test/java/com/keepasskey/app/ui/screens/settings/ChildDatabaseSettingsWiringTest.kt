@@ -105,7 +105,6 @@ class ChildDatabaseSettingsWiringTest {
         credentials = credentials,
         streamSource = streamSource,
         databaseSession = databaseSession,
-        debugLog = DebugLogBuffer(),
         unlockThrottleManager = UnlockThrottleManager(FakeUnlockThrottleStore()),
         binaryStore = RecordingBinaryStore()
     )
@@ -433,9 +432,7 @@ class ChildDatabaseSettingsWiringTest {
             fakeContext,
             DatabaseSession(),
             credentialsStore,
-            DebugLogBuffer(),
-            TEST_STRINGS
-        )
+            TEST_STRINGS)
         return SettingsViewModel(
             settingsRepository,
             FakeVaultRepository(),

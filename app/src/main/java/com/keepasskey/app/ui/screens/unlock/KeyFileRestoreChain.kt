@@ -1,7 +1,7 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.security.KeyFileVaultCopyStore
 import com.keepasskey.app.ui.model.UiMessage
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,7 +47,6 @@ internal class KeyFileRestoreChain(
     private val uiState: MutableStateFlow<UnlockUiState>,
     private val keyFileAccess: KeyFileAccess?,
     private val vaultCopyStore: KeyFileVaultCopyStore?,
-    private val debugLog: DebugLogBuffer
 ) {
 
     /**
@@ -113,7 +112,7 @@ internal class KeyFileRestoreChain(
      * dbId 只以 SHA-256 前 4 字节十六进制呈现。
      */
     private fun probeRestore(branch: String, dbId: String?) {
-        debugLog.info(TAG, "密钥文件恢复探针: branch=$branch, dbIdHash=${dbId?.let(::shortDigest) ?: "-"}")
+        AppLog.i(TAG, "密钥文件恢复探针: branch=$branch, dbIdHash=${dbId?.let(::shortDigest) ?: "-"}")
     }
 
     /** dbId 摘要短哈希（非可逆、非密钥元数据；仅用于把同一库的多条探针串起来） */
@@ -195,7 +194,7 @@ internal class KeyFileRestoreChain(
     ) {
         val permissionValid = access.hasPersistedReadPermission(remembered.uri)
         if (!KeyFileRememberPolicy.canRestore(rememberEnabled, remembered, permissionValid)) {
-            debugLog.info(
+            AppLog.i(
                 TAG,
                 "密钥文件记忆不可用（偏好=$rememberEnabled，持久授权有效=$permissionValid），静默降级为未记住"
             )
@@ -233,7 +232,7 @@ internal class KeyFileRestoreChain(
                     }
                 }
                 else -> {
-                    debugLog.warn(TAG, "记忆的密钥文件已不可读（授权有效但读取失败），清除记录并降级为未记住")
+                    AppLog.w(TAG, "记忆的密钥文件已不可读（授权有效但读取失败），清除记录并降级为未记住")
                     probeRestore("memory_unreadable", dbId)
                     access.forget(dbId)
                 }

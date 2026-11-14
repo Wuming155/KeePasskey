@@ -1,10 +1,12 @@
 package com.keepasskey.app
 
 import android.app.Application
+import android.content.Context
 import androidx.work.Configuration
 import com.keepasskey.app.data.binary.FileBinaryStore
 import com.keepasskey.app.data.logger.CrashLogRecorder
 import com.keepasskey.app.data.logger.DiagnosticLogBridge
+import com.keepasskey.app.data.logger.EarlyCrashHandler
 import com.keepasskey.app.ui.AppLaunchLanguageSeed
 import com.keepasskey.app.notification.NotificationChannels
 import com.keepasskey.app.notification.UnlockedNotificationController
@@ -81,6 +83,12 @@ class MainApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var crashLogRecorder: CrashLogRecorder
 
+    @Inject
+    lateinit var databaseSession: com.keepasskey.database.session.DatabaseSession
+
+    @Inject
+    lateinit var processExitReporter: com.keepasskey.app.data.logger.ProcessExitReporter
+
     // ISSUE-P3-116：同步缓存销毁器（`cacheDir/sync` 的 KDBX 密文快照）。
     // 与 fileBinaryStore 一起构成「彻底退出应用」前的易失缓存清理面。
     @Inject
@@ -122,6 +130,16 @@ class MainApplication : Application(), Configuration.Provider {
         return attachmentsCleared && syncCleared
     }
 
+    /**
+     * 早期崩溃处理器安装点（`ISSUE-P2` A5）：必须早于 `androidx.startup` 的 ContentProvider
+     * 初始化。处理器本身无 Hilt 依赖，只写脱敏行到与诊断归档相同的文件；主处理器就绪后
+     * 由 [onCreate] 调 `markReady()` 收敛为单一写入口。
+     */
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        runCatching { EarlyCrashHandler.install(base) }
+    }
+
     override fun onCreate() {
         super.onCreate()
         // ISSUE-P1-10 (ZT-10)：统一日志包装器调试开关——debug 构建开放 v/d 与完整异常堆栈，
@@ -131,11 +149,20 @@ class MainApplication : Application(), Configuration.Provider {
         AppLog.debugEnabled = BuildConfig.DEBUG
         // 稳定版同样安装：release 里 AppLog.e/w 的类型与栈帧不再只留在 logcat。
         // 装在所有其它冷启动动作之前，使后续初始化失败的异常也能进入可导出缓冲。
-        diagnosticLogBridge.install(this)
+        // ERROR 时附一行只含枚举/数值的现场快照（锁定态、内存、存储、省电、前后台）。
+        diagnosticLogBridge.install(
+            context = this,
+            isVaultLocked = { databaseSession.databaseFlow.value == null }
+        )
         // APP-CRASH-01：紧跟诊断桥安装——归档目录此刻已配置，未捕获异常才能在进程退出前
         // 同步写入归档（异步队列来不及冲刷）。处理器原样转交安装前的默认处理器，不改变崩溃语义。
         crashLogRecorder.install()
+        // A5：主处理器已接管，早期处理器此后只转交，不再重复写归档。
+        EarlyCrashHandler.markReady()
         diagnosticLogBridge.logAutofillEnvironment(this)
+        // C2：读取上次进程退出原因（系统回收 / 低内存 / ANR / native 崩溃 / 用户划掉），
+        // 经审计通道写入归档；后台线程执行，不阻塞冷启动。
+        processExitReporter.reportNewExits()
         // ISSUE-P3-459 续：灌应用内语言**启动种子**——SharedPreferences 冷读 1~5ms、早于任何首帧渲染，
         // 后续所有语言读取（Compose 首帧 / StringsProvider / 非 UI 装配点）都退化为一次 volatile 读，
         // 冷启动不再先闪一帧系统语言。此处**刻意不**等 DataStore 冷读（主线程阻塞 → 启动期 ANR 风险）。

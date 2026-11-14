@@ -2,6 +2,7 @@ package com.keepasskey.app.ui.screens.vault
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.keepasskey.app.coroutines.catchAndLog
 import com.keepasskey.app.coroutines.safeLaunch
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
 import com.keepasskey.app.data.repository.SettingsRepository
@@ -214,11 +215,12 @@ class VaultListViewModel @Inject constructor(
                 syncCoordinator.metaConflictFlow
             ) { entries, groups, meta ->
                 entries.isNotEmpty() || groups.isNotEmpty() || meta.isNotEmpty()
-            }.collect { pending -> hasPendingConflictFlow.value = pending }
+            }.catchAndLog("VaultListViewModel").collect { pending -> hasPendingConflictFlow.value = pending }
         }
         // PD-47：随设置流刷新防截屏开关快照（顶栏扫码对话框在组合时消费当前值）
         viewModelScope.safeLaunch("VaultListViewModel") {
-            settingsRepository.getSettings().collect { _flagSecureEnabled.value = it.flagSecureEnabled }
+            settingsRepository.getSettings().catchAndLog("VaultListViewModel")
+                .collect { _flagSecureEnabled.value = it.flagSecureEnabled }
         }
         // 断点11 整改：解锁进入列表页即自动重同步一次（配置了云同步才触发），
         // 避免解锁后停留在缓存旧数据直到手动下拉刷新。

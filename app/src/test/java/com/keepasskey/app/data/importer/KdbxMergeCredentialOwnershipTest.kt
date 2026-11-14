@@ -36,20 +36,17 @@ class KdbxMergeCredentialOwnershipTest {
     private fun newMergeController(): KdbxMergeController = KdbxMergeController(
         context = fakeContext,
         databaseSession = DatabaseSession(),
-        syncSessionState = SyncSessionState(),
-        debugLog = DebugLogBuffer()
+        syncSessionState = SyncSessionState()
     )
 
     private fun newVaultImportController(merge: KdbxMergeController): VaultImportController =
         VaultImportController(
             context = fakeContext,
-            registry = ImporterRegistry(emptySet(), DebugLogBuffer()),
+            registry = ImporterRegistry(emptySet()),
             vaultImporter = VaultImporter(
                 FakeVaultRepository(),
-                StringsProvider { _, _ -> "" },
-                DebugLogBuffer()
+                StringsProvider { _, _ -> "" }
             ),
-            debugLog = DebugLogBuffer(),
             kdbxMergeController = merge
         )
 

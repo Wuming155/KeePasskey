@@ -1,5 +1,16 @@
 package com.keepasskey.app.ui.screens.vault
 
+import com.keepasskey.app.R
+import com.keepasskey.app.data.repository.FakeVaultRepository
+import com.keepasskey.app.data.repository.VaultRepository
+import com.keepasskey.app.ui.model.UiMessage
+import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.core.log.AppLog
+import com.keepasskey.core.result.KdbxResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,6 +22,44 @@ import org.junit.Test
  * `{REF}` 保护（URL 含引用即拒绝）、以及 `shouldOffer` 的合成矩阵。
  */
 class SearchWriteBackPolicyTest {
+
+    @After
+    fun tearDown() {
+        AppLog.diagnosticSink = null
+        AppLog.diagnosticLineSink = null
+    }
+
+    @Test
+    fun `写回异常留痕并向用户回报失败`() {
+        val logged = mutableListOf<String>()
+        AppLog.diagnosticLineSink = { _, _, message -> logged += message }
+        val entryId = "entry-1"
+        val entry = UiVaultEntry(id = entryId, title = "示例", username = "", url = "")
+        val repository = object : VaultRepository by FakeVaultRepository() {
+            override suspend fun updateEntryUrl(entryId: String, url: String): KdbxResult<Unit> =
+                throw IllegalStateException("write-back failure")
+        }
+        val messages = mutableListOf<UiMessage>()
+        val coordinator = VaultSearchWriteBackCoordinator(
+            repository = repository,
+            scope = CoroutineScope(UnconfinedTestDispatcher()),
+            currentQuery = { "example.com" },
+            currentEntry = { entry },
+            isReadOnly = { false },
+            isInsideRecycleBin = { false },
+            onMessage = { messages += it }
+        )
+
+        assertTrue(coordinator.prepareEntryOpen(entryId))
+        coordinator.confirm(rememberChoice = false)
+
+        assertTrue(
+            "异常类型须进入诊断归档：$logged",
+            logged.any { it.contains("搜索词写回条目失败") && it.contains("IllegalStateException") }
+        )
+        assertEquals(R.string.search_write_back_failed, messages.single().resId)
+        assertTrue("失败反馈须标错误", messages.single().isError)
+    }
 
     // ===== 域名形态 =====
 

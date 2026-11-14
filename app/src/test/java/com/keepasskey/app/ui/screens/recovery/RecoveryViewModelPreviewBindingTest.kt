@@ -311,15 +311,14 @@ class RecoveryViewModelPreviewBindingTest {
     }
 
     private fun createCoordinator(): Pair<VaultRecoveryStore, VaultRecoveryCoordinator> {
-        val store = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+        val store = VaultRecoveryStore(null).apply {
             baseDirOverride = tempFolder.newFolder("recovery")
         }
         val coordinator = VaultRecoveryCoordinator(
             context = null,
             store = store,
             alertStore = RecoveryAlertStore(null),
-            keyFileCopyStore = KeyFileVaultCopyStore(null, null, DebugLogBuffer()),
-            debugLog = DebugLogBuffer()
+            keyFileCopyStore = KeyFileVaultCopyStore(null, null)
         ).apply { filesDirOverride = tempFolder.root }
         return store to coordinator
     }

@@ -52,7 +52,6 @@ class BiometricUnlockBufferCleanupTest {
         activeDbId = { "db-1" },
         biometricAuthManager = null,
         biometricCredentialStorage = null,
-        debugLog = DebugLogBuffer()
     )
 
     @Test
@@ -122,7 +121,6 @@ class BiometricUnlockBufferCleanupTest {
         activeDbId = { "db-1" },
         biometricAuthManager = null,
         biometricCredentialStorage = null,
-        debugLog = DebugLogBuffer(),
         restoreRememberedKeyFile = restore
     )
 

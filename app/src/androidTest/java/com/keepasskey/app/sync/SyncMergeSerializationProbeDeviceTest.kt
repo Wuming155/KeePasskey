@@ -421,16 +421,16 @@ class SyncMergeSerializationProbeDeviceTest {
         val remotePath = "/eng31/$label.kdbx"
         val provider = CensusProvider(census)
         val debugLog = DebugLogBuffer()
-        val preferences = SyncPreferences(debugLog, null)
-        val credentialsStore = SyncCredentialsStore(probeContext, null, debugLog)
-        val resolver = SyncProviderResolver(credentialsStore, preferences, debugLog)
+        val preferences = SyncPreferences(null)
+        val credentialsStore = SyncCredentialsStore(probeContext, null)
+        val resolver = SyncProviderResolver(credentialsStore, preferences)
         val syncState = SyncSessionState().apply {
             testSyncProvider = provider
             testRemotePath = remotePath
         }
         val strings = StringsProvider { id, args -> probeContext.getString(id, *args) }
-        val codec = SyncDatabaseCodec(session, debugLog)
-        val conflicts = SyncConflictController(session, codec, strings, syncState, debugLog)
+        val codec = SyncDatabaseCodec(session)
+        val conflicts = SyncConflictController(session, codec, strings, syncState)
         val changes = SyncContentChangeDetector(codec, syncState)
         val cycle = SyncCycleRunner(
             context = probeContext,
@@ -450,7 +450,6 @@ class SyncMergeSerializationProbeDeviceTest {
             probeContext,
             session,
             credentialsStore,
-            debugLog,
             strings,
             syncSession = syncState,
             syncPreferences = preferences,
@@ -458,8 +457,7 @@ class SyncMergeSerializationProbeDeviceTest {
             syncDatabaseCodec = codec,
             syncContentChanges = changes,
             syncConflicts = conflicts,
-            syncCycle = cycle
-        )
+            syncCycle = cycle)
 
         // ---- 首轮建立远端基线（不计入读数）----
         val baselineOutcome = coordinator.syncNow()

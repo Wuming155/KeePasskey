@@ -145,9 +145,7 @@ class SettingsSessionLockEraseTest {
             context,
             session,
             credentialsStore,
-            DebugLogBuffer(),
-            TEST_STRINGS
-        )
+            TEST_STRINGS)
         return SettingsViewModel(
             settingsRepository,
             FakeVaultRepository(),

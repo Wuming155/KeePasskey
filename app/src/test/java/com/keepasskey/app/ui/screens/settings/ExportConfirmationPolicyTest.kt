@@ -1,5 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.testutil.resetAppLogBridge
+import com.keepasskey.app.testutil.installAppLogBridge
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -176,7 +178,8 @@ class ExportConfirmationPolicyTest {
     @Test
     fun `审计条目含时间类型与脱敏目标但不含敏感内容`() {
         val buffer = DebugLogBuffer()
-        val recorder = ExportAuditRecorder(buffer)
+        installAppLogBridge(buffer)
+        val recorder = ExportAuditRecorder()
 
         recorder.record(ExportArtifactKind.PLAINTEXT_XML, SENSITIVE_TARGET, success = true)
 
@@ -191,7 +194,8 @@ class ExportConfirmationPolicyTest {
     @Test
     fun `审计对附件类型与失败结果同样留痕`() {
         val buffer = DebugLogBuffer()
-        val recorder = ExportAuditRecorder(buffer)
+        installAppLogBridge(buffer)
+        val recorder = ExportAuditRecorder()
 
         recorder.record(ExportArtifactKind.ATTACHMENT, SENSITIVE_TARGET, success = false)
 

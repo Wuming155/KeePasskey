@@ -107,7 +107,7 @@ class HealthCheckViewModelTest {
                 } as android.content.SharedPreferences
         }
         val credentialsStore = com.keepasskey.app.sync.SyncCredentialsStore(fakeContext, null)
-        val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer(), TEST_STRINGS)
+        val coordinator = com.keepasskey.app.sync.SyncCoordinator(fakeContext, com.keepasskey.database.session.DatabaseSession(), credentialsStore, TEST_STRINGS)
 
         val testRepo = TestAuditVaultRepository(listOf(entryWeak1, entryEmpty, entryReused1, entryReused2))
         // TASK-12/08：补注入扩展偏好持久化仓库（null 上下文=内存语义）与周期同步调度器

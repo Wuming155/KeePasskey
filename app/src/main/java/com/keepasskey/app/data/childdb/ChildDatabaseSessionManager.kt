@@ -1,6 +1,6 @@
 package com.keepasskey.app.data.childdb
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.security.ThrottleGate
 import com.keepasskey.app.security.UnlockThrottleManager
 import com.keepasskey.core.result.KdbxResult
@@ -89,7 +89,6 @@ class ChildDatabaseSessionManager @Inject constructor(
     private val credentials: ChildDatabaseCredentialStore,
     private val streamSource: ChildDatabaseStreamSource,
     private val databaseSession: DatabaseSession,
-    private val debugLog: DebugLogBuffer,
     // ISSUE-P2-17：子库解锁失败节流（与主库共用同一状态机，按 mountId 计次）
     private val unlockThrottleManager: UnlockThrottleManager,
     // ISSUE-P2-243（2026-09-21）：子库装载同样传入应用级 FileBinaryStore（与根库 DatabaseSession
@@ -206,7 +205,7 @@ class ChildDatabaseSessionManager @Inject constructor(
             return@withLock mountFailure(ChildDatabaseFailureReason.DUPLICATE_MOUNT)
         }
         publish()
-        debugLog.info(TAG, "子库挂载成功（别名长度=${mount.alias.length}）")
+        AppLog.i(TAG, "子库挂载成功（别名长度=${mount.alias.length}）")
         KdbxResult.Success(mount)
     }
 
@@ -264,7 +263,7 @@ class ChildDatabaseSessionManager @Inject constructor(
         if (session == null && !existed) {
             KdbxResult.Failure(ChildDatabaseException(ChildDatabaseFailureReason.MOUNT_NOT_FOUND))
         } else {
-            registered?.let { debugLog.info(TAG, "子库已卸载（别名长度=${it.alias.length}）") }
+            registered?.let { AppLog.i(TAG, "子库已卸载（别名长度=${it.alias.length}）") }
             KdbxResult.Success(Unit)
         }
     }

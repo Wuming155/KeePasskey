@@ -1,6 +1,6 @@
 package com.keepasskey.app.data.repository
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.model.KdbxEntry
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
@@ -22,12 +22,11 @@ internal object PasskeyWriteCommit {
     suspend fun commit(
         entry: KdbxEntry,
         what: String,
-        debugLog: DebugLogBuffer,
         persistSession: suspend () -> KdbxResult<Unit>
     ): KdbxResult<KdbxEntry> = when (val saved = persistSession()) {
         is KdbxResult.Success -> KdbxResult.Success(entry)
         is KdbxResult.Failure -> {
-            debugLog.warn(TAG, "$what 已改内存但落盘失败，未回传成功: ${saved.error.javaClass.simpleName}")
+            AppLog.w(TAG, "$what 已改内存但落盘失败，未回传成功: ${saved.error.javaClass.simpleName}")
             saved
         }
     }

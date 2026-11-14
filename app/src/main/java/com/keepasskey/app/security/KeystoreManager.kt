@@ -1,9 +1,9 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.KeyPair
 import javax.crypto.Cipher
@@ -33,15 +33,13 @@ import javax.inject.Singleton
 @Singleton
 class KeystoreManager @Inject constructor(
     // 允许为 null 仅用于单测注入空实现；生产 DI 注入 @ApplicationContext
-    @ApplicationContext private val context: Context?,
-    // 允许为 null 仅用于单测手动构造；生产 DI 注入
-    private val debugLog: DebugLogBuffer? = null
+    @ApplicationContext private val context: Context?
 ) {
 
     // 密钥生成/探测/迁移实现下沉至同包 internal 协作者（ISSUE-P3-29 纯结构性拆分）；
     // 迁移路径的删除经 onDeleteKey 回调至本类 @Synchronized deleteKey，保持原同步语义
     private val keyMaterial: KeystoreKeyMaterial by lazy {
-        KeystoreKeyMaterial(context, debugLog, onDeleteKey = ::deleteKey)
+        KeystoreKeyMaterial(context, onDeleteKey = ::deleteKey)
     }
 
     /**

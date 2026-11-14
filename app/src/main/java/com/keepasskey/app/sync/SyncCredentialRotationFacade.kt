@@ -1,6 +1,6 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.session.DatabaseSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,7 +17,6 @@ internal class SyncCredentialRotationFacade(
     private val syncCredentialsStore: SyncCredentialsStore,
     private val session: SyncSessionState,
     private val store: SyncCredentialRotationStore?,
-    private val debugLog: DebugLogBuffer
 ) {
 
     /** 受理时同步捕获当前凭据票据对应的非秘密远端路径快照。 */
@@ -43,10 +42,10 @@ internal class SyncCredentialRotationFacade(
         if (remotePath == null) return@withContext false
         try {
             store.markRecrypted(remotePath)
-            debugLog.info(SYNC_LOG_TAG, "主凭据已轮换：已登记云端副本待替换")
+            AppLog.i(SYNC_LOG_TAG, "主凭据已轮换：已登记云端副本待替换")
             true
         } catch (e: Exception) { // cancel-n/a: 非挂起偏好登记
-            debugLog.warn(SYNC_LOG_TAG, "登记云端副本待替换失败: ${e.javaClass.simpleName}")
+            AppLog.w(SYNC_LOG_TAG, "登记云端副本待替换失败: ${e.javaClass.simpleName}")
             false
         }
     }

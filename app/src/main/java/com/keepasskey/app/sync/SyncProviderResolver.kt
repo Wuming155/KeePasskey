@@ -1,6 +1,6 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.ui.screens.settings.CloudSyncProvider
 import com.keepasskey.sync.network.SyncNetworkOptions
 import com.keepasskey.sync.network.SyncTransferOptions
@@ -24,16 +24,14 @@ import javax.inject.Singleton
 class SyncProviderResolver @Inject constructor(
     private val syncCredentialsStore: SyncCredentialsStore,
     private val preferences: SyncPreferences,
-    private val debugLog: DebugLogBuffer,
     private val providerFactory: SyncProviderFactory
 ) {
 
     /** 保留既有 JVM 单测三参数构造入口。 */
     constructor(
         syncCredentialsStore: SyncCredentialsStore,
-        preferences: SyncPreferences,
-        debugLog: DebugLogBuffer
-    ) : this(syncCredentialsStore, preferences, debugLog, ProductionSyncProviderFactory())
+        preferences: SyncPreferences
+    ) : this(syncCredentialsStore, preferences, ProductionSyncProviderFactory())
 
     /**
      * ENG-20261028-42：作用域退出时的**保留判定**（未接线时恒 false = 作用域独占所有权）。
@@ -154,7 +152,7 @@ class SyncProviderResolver @Inject constructor(
                                 } catch (e: Exception) {
                                     // 持久化失败仅丢失跨进程记忆：本会话内存偏移仍即时生效，
                                     // 下次同步按 fail-closed 重新学习，不阻断本次同步
-                                    debugLog.warn(SYNC_LOG_TAG, "S3 时钟偏移持久化失败: ${e.javaClass.simpleName}")
+                                    AppLog.w(SYNC_LOG_TAG, "S3 时钟偏移持久化失败: ${e.javaClass.simpleName}")
                                 }
                             }
                         )
@@ -247,7 +245,7 @@ class SyncProviderResolver @Inject constructor(
                             try {
                                 syncCredentialsStore.saveS3ClockOffsetForSnapshot(snapshot, offset)
                             } catch (failure: Exception) {
-                                debugLog.warn(
+                                AppLog.w(
                                     SYNC_LOG_TAG,
                                     "S3 时钟偏移持久化失败: ${failure.javaClass.simpleName}"
                                 )

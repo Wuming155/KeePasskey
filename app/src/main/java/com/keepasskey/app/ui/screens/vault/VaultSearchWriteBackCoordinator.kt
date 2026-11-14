@@ -4,6 +4,7 @@ import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.UiVaultEntry
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -11,6 +12,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+private const val TAG = "SearchWriteBack"
 
 /**
  * 「搜索词写回条目 URL」自愈链的编排（`ISSUE-P3-442`）。
@@ -89,6 +92,8 @@ internal class VaultSearchWriteBackCoordinator(
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
+                // 写回失败不能静默：用户看到失败提示的同时，导出日志要能给出原因类型。
+                AppLog.w(TAG, "搜索词写回条目失败: ${t.javaClass.simpleName}")
                 null
             }
             onMessage(

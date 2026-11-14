@@ -3,11 +3,10 @@ package com.keepasskey.app.sync
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.keepasskey.app.coroutines.guardedScope
 import dagger.hilt.android.EntryPointAccessors
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -18,7 +17,7 @@ class P3_628ScenarioReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         File(context.filesDir, RECEIVED_MARKER).writeText(intent.action.orEmpty())
         val result = goAsync()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        guardedScope(Dispatchers.IO, tag = "P3_628Scenario").launch {
             try {
                 val appContext = context.applicationContext
                 val services = EntryPointAccessors.fromApplication(

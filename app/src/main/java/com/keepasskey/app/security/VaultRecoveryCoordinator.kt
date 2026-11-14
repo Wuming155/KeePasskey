@@ -1,7 +1,7 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.files.NewVaultNames
 import com.keepasskey.core.result.KdbxError
 import com.keepasskey.core.result.KdbxResult
@@ -35,8 +35,7 @@ class VaultRecoveryCoordinator @Inject constructor(
     @ApplicationContext private val context: Context?,
     private val store: VaultRecoveryStore,
     private val alertStore: RecoveryAlertStore,
-    private val keyFileCopyStore: KeyFileVaultCopyStore,
-    private val debugLog: DebugLogBuffer
+    private val keyFileCopyStore: KeyFileVaultCopyStore
 ) {
 
     /**
@@ -109,10 +108,10 @@ class VaultRecoveryCoordinator @Inject constructor(
             } catch (unavailable: RecoveryEntryContentComparator.AttachmentComparisonUnavailable) {
                 // `ISSUE-P2-638`：附件无法逐字节确认差异（预算耗尽 / 读取失败 / 长度虚报）。
                 // 与「凭据不匹配」分型上报——否则用户会照着「换凭据」的提示徒劳重试。
-                debugLog.warn(TAG, "恢复附件比较无法完成: ${unavailable.javaClass.simpleName}")
+                AppLog.w(TAG, "恢复附件比较无法完成: ${unavailable.javaClass.simpleName}")
                 failure(KdbxError.RECOVERY_PREVIEW_BUDGET_EXCEEDED)
             } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式解密（KdbxFile.load 内部无挂起点）
-                debugLog.warn(TAG, "恢复副本解锁失败: ${t.javaClass.simpleName}")
+                AppLog.w(TAG, "恢复副本解锁失败: ${t.javaClass.simpleName}")
                 failure(KdbxError.RECOVERY_UNLOCK_FAILED)
             } finally {
                 // 预览只取条目计数；解出的明文树与凭据副本用毕即擦（不等待 GC）
@@ -145,7 +144,7 @@ class VaultRecoveryCoordinator @Inject constructor(
             try {
                 AtomicFileWriter.writeAtomic(file, createBackup = true) { it.write(bytes) }
             } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式写盘（无挂起点）
-                debugLog.warn(TAG, "恢复副本写回正式库失败: ${t.javaClass.simpleName}")
+                AppLog.w(TAG, "恢复副本写回正式库失败: ${t.javaClass.simpleName}")
                 return@withContext failure(KdbxError.RECOVERY_WRITE_FAILED)
             } finally {
                 bytes.fill(0)
@@ -171,7 +170,7 @@ class VaultRecoveryCoordinator @Inject constructor(
         try {
             AtomicFileWriter.writeAtomic(destination, createBackup = false) { it.write(bytes) }
         } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式写盘（无挂起点）
-            debugLog.warn(TAG, "恢复副本另存失败: ${t.javaClass.simpleName}")
+            AppLog.w(TAG, "恢复副本另存失败: ${t.javaClass.simpleName}")
             return@withContext failure(KdbxError.RECOVERY_WRITE_FAILED)
         } finally {
             bytes.fill(0)
@@ -213,7 +212,7 @@ class VaultRecoveryCoordinator @Inject constructor(
             bytes = file.readBytes()
             loadDatabase(bytes, passwordChars, keyFile)
         } catch (t: Throwable) { // cancel-n/a: 保护段为阻塞式解密（无挂起点）
-            debugLog.warn(TAG, "正式库读取失败: ${t.javaClass.simpleName}")
+            AppLog.w(TAG, "正式库读取失败: ${t.javaClass.simpleName}")
             null
         } finally {
             bytes?.fill(0)

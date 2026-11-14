@@ -1,11 +1,11 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.net.Uri
 import com.keepasskey.app.R
 import com.keepasskey.app.data.export.SpreadsheetTextWorkbookExporter
-import com.keepasskey.app.data.logger.DebugLogBuffer
-import com.keepasskey.app.data.logger.DiagnosticLogRedactor
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ClipboardSecurityChannel
 import com.keepasskey.app.security.tryWrite
@@ -14,8 +14,10 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.app.ui.model.clipboardCopyFailedMessage
 import java.security.MessageDigest
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,16 +32,19 @@ import java.util.concurrent.CancellationException
  */
 internal class SettingsExportController(
     private val vaultRepository: VaultRepository,
+    // 诊断日志的导出 / 复制 / 清除需要缓冲本体：报告正文与归档快照都取自它
     private val debugLogBuffer: DebugLogBuffer,
     private val appContext: Context?,
     private val strings: StringsProvider,
     private val scope: CoroutineScope,
     // 诊断日志复制的统一剪贴板出口；null 仅用于纯 JVM 单测（复制如实报失败，不假装成功）
-    private val clipboard: ClipboardSecurityChannel? = null
+    private val clipboard: ClipboardSecurityChannel? = null,
+    // 报告构建与归档读取必须离开主线程；测试注入 Unconfined 以便同步断言
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
     /** ISSUE-P2-10 (ZT-15)：导出审计记录器（复用 DebugLogBuffer，仅写类型与脱敏目标标识） */
-    private val exportAuditRecorder = ExportAuditRecorder(debugLogBuffer)
+    private val exportAuditRecorder = ExportAuditRecorder()
 
     companion object {
         private const val TAG = "SettingsViewModel"
@@ -60,31 +65,49 @@ internal class SettingsExportController(
     fun exportDebugLogs(targetUri: Uri) {
         val resolver = appContext?.contentResolver
         if (resolver == null) {
+            // 治理动作失败必须可自证：否则用户只能看到「导出失败」，无从判断是环境还是实现问题
+            AppLog.w(TAG, "调试日志导出失败: contentResolver 不可用")
             debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed, isError = true)
             return
         }
         scope.launch(Dispatchers.IO) {
-            try {
-                val report = DiagnosticLogRedactor.redact(DiagnosticLogReport.build(debugLogBuffer, strings))
-                val written = resolver.openOutputStream(targetUri)?.use { os ->
-                    os.write(report.toByteArray(Charsets.UTF_8))
-                    os.flush()
-                    true
-                } ?: false
-                debugExportFeedbackFlow.value =
-                    if (written) UiMessage(R.string.debug_export_done)
-                    else UiMessage(R.string.debug_export_failed, isError = true)
-            } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式日志导出写盘（无挂起点）
-                // 只留痕异常类型，不落异常消息（防御性，避免潜在敏感内容回流日志缓冲）
-                debugLogBuffer.warn(TAG, "调试日志导出失败: ${e.javaClass.simpleName}")
-                debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed, isError = true)
-            }
+            val written = writeDiagnosticReport { resolver.openOutputStream(targetUri) }
+            debugExportFeedbackFlow.value =
+                if (written) UiMessage(R.string.debug_export_done)
+                else UiMessage(R.string.debug_export_failed, isError = true)
         }
     }
 
     /**
-     * 复制诊断日志到剪贴板：与导出共用同一份 [DiagnosticLogReport]，正文同样是写入即脱敏、
-     * 出域再脱敏一次的文本（不含密码与密钥）。
+     * 报告构建 + 写盘内核（可注入流工厂，JVM 用例直接覆盖「流不可得 / 写盘异常」两条分支）。
+     * 必须在 IO 线程调用：报告正文取自跨进程归档。
+     */
+    internal fun writeDiagnosticReport(openStream: () -> java.io.OutputStream?): Boolean {
+        return try {
+            // 正文与报告头来自同一次归档读取；脱敏只在 DebugLogBuffer.exportDocument 内做一次
+            val report = DiagnosticLogReport.build(debugLogBuffer, strings)
+            openStream()?.use { os ->
+                os.write(report.toByteArray(Charsets.UTF_8))
+                os.flush()
+                true
+            } ?: run {
+                AppLog.w(TAG, "调试日志导出失败: SAF 目标不可写")
+                false
+            }
+        } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式日志导出写盘（无挂起点）
+            // 只留痕异常类型，不落异常消息（防御性，避免潜在敏感内容回流日志缓冲）
+            AppLog.w(TAG, "调试日志导出失败: ${e.javaClass.simpleName}")
+            false
+        }
+    }
+
+    /**
+     * 复制诊断日志到剪贴板：与导出共用同一份 [DiagnosticLogDocument]（正文写入即脱敏，
+     * 导出边界只脱敏一次），报告头的行数/时间范围与正文同源。
+     *
+     * 归档读取与报告拼装放在 [ioDispatcher]：此前在 UI 回调里同步执行，
+     * `snapshotForExport` 的 2 秒等待会把主线程一起拖住（ANR 风险）。
+     * 是否为空以**磁盘归档**为准，进程重启后「内存 0 行 + 归档有记录」仍可复制。
      *
      * 必须经 [ClipboardSecurityChannel.copyPlainText]：该通道为自身写入记账并复位敏感值
      * 待清状态，绕过它会让上一次敏感复制被误判为「外部覆盖」而漏清（ISSUE-P3-553 口径）。
@@ -93,22 +116,41 @@ internal class SettingsExportController(
      * 复制属数据出域行为，成功与失败都留审计（[DebugLogBuffer.audit] 不受诊断开关约束）。
      */
     fun copyDebugLogs() {
-        if (DiagnosticLogReport.isEmpty(debugLogBuffer)) {
-            debugExportFeedbackFlow.value = UiMessage(R.string.debug_copy_empty, isError = true)
-            return
-        }
-        val report = DiagnosticLogRedactor.redact(DiagnosticLogReport.build(debugLogBuffer, strings))
-        val text = DiagnosticLogReport.forClipboard(report, strings)
-        val label = strings.get(R.string.debug_clip_label)
-        val copied = clipboard.tryWrite { copyPlainText(label, text) }
-        debugLogBuffer.audit(
-            LOG_COPY_AUDIT_TAG,
-            "日志复制: 结果=${if (copied) "成功" else "失败"}, 字符数=${text.length}"
-        )
-        debugExportFeedbackFlow.value = if (copied) {
-            UiMessage(R.string.debug_copy_done)
-        } else {
-            clipboardCopyFailedMessage()
+        scope.launch {
+            val text = try {
+                withContext(ioDispatcher) {
+                    val document = debugLogBuffer.exportDocument()
+                    if (document.retained == 0) {
+                        null
+                    } else {
+                        DiagnosticLogReport.forClipboard(
+                            DiagnosticLogReport.build(document, strings),
+                            strings
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式归档读取（无挂起点）
+                AppLog.w(TAG, "读取诊断日志失败: ${e.javaClass.simpleName}")
+                debugExportFeedbackFlow.value = UiMessage(R.string.debug_export_failed, isError = true)
+                return@launch
+            }
+            if (text == null) {
+                debugExportFeedbackFlow.value = UiMessage(R.string.debug_copy_empty, isError = true)
+                return@launch
+            }
+            val label = strings.get(R.string.debug_clip_label)
+            val copied = clipboard.tryWrite { copyPlainText(label, text) }
+            AppLog.audit(
+                LOG_COPY_AUDIT_TAG,
+                "日志复制: 结果=${if (copied) "成功" else "失败"}, 字符数=${text.length}"
+            )
+            debugExportFeedbackFlow.value = if (copied) {
+                UiMessage(R.string.debug_copy_done)
+            } else {
+                clipboardCopyFailedMessage()
+            }
         }
     }
 
@@ -196,7 +238,7 @@ internal class SettingsExportController(
             KdbxResult.Success(SpreadsheetTextWorkbookExporter.exportCsv(csvBytes))
         } catch (error: Exception) {
             if (error is CancellationException) throw error
-            debugLogBuffer.warn(TAG, "表格文本导出失败: ${error.javaClass.simpleName}")
+            AppLog.w(TAG, "表格文本导出失败: ${error.javaClass.simpleName}")
             KdbxResult.Failure(
                 error,
                 strings.get(R.string.repo_export_spreadsheet_failed, strings.get(R.string.err_unknown))
@@ -300,7 +342,7 @@ internal class SettingsExportController(
                             true
                         } ?: false
                     } catch (e: Exception) { // cancel-n/a: 保护段为阻塞式 SAF 写盘（无挂起点）
-                        debugLogBuffer.warn(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
+                        AppLog.w(TAG, "SAF 导出写盘失败: ${e.javaClass.simpleName}")
                         false
                     }
                 } else {
@@ -510,12 +552,12 @@ internal object ExportAuditSanitizer {
  * ISSUE-P3-03 (43f)：改用 [DebugLogBuffer.audit] 审计通道——审计留痕是治理要求，
  * 不能被用户侧「诊断日志」开关静默关闭（普通诊断事件才受该开关约束）。
  */
-internal class ExportAuditRecorder(private val debugLog: DebugLogBuffer) {
+internal class ExportAuditRecorder {
 
     fun record(kind: ExportArtifactKind, rawTarget: String, success: Boolean) {
         val resultLabel = if (success) RESULT_SUCCESS else RESULT_FAILURE
         val marker = ExportAuditSanitizer.targetMarker(rawTarget)
-        debugLog.audit(AUDIT_TAG, "导出审计: 类型=${kind.auditLabel}, 目标=$marker, 结果=$resultLabel")
+        AppLog.audit(AUDIT_TAG, "导出审计: 类型=${kind.auditLabel}, 目标=$marker, 结果=$resultLabel")
     }
 
     private companion object {

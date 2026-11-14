@@ -2,7 +2,6 @@ package com.keepasskey.app.ui.screens.settings
 
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.coroutines.guardedScope
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.security.BiometricAuthManager
@@ -45,7 +44,6 @@ class CredentialRotationCompletion @Inject constructor(
     internal val session: DatabaseSession,
     private val sync: SyncCoordinator,
     private val strings: StringsProvider,
-    private val debugLog: DebugLogBuffer
 ) {
     fun invalidate(databaseId: String?) {
         databaseId?.let { storage.clearCredential(it) }
@@ -85,7 +83,6 @@ class CredentialRotationCompletion @Inject constructor(
                     biometricAuthManager = auth,
                     biometricCredentialStorage = storage,
                     strings = strings,
-                    debugLog = debugLog,
                     publishSeal = { publish -> session.useCredentialTicket(ticket) { publish() } }
                 )
                 withTimeoutOrNull(RESEAL_TIMEOUT_MILLIS) {

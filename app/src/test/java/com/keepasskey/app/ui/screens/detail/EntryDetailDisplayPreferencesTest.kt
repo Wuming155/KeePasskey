@@ -63,7 +63,6 @@ class EntryDetailDisplayPreferencesTest {
             clipboardSecurityManager = null,
             autofillBlocklistStore = AutofillBlocklistStore(null),
             stringsProvider = null,
-            debugLog = null,
             customIconAdmin = null,
             displayDispatcher = UnconfinedTestDispatcher(testScheduler),
             extendedSettingsSource = settingsSource,

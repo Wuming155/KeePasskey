@@ -32,6 +32,8 @@
 use crate::aes_cbc;
 use crate::aes_kdf::{self, COMPOSITE_KEY_LEN, OUT_LEN};
 use crate::chacha20_stream;
+use crate::error_code;
+use crate::error_code::{note_jni_error, note_kernel_if_unset};
 use crate::passkey_sign;
 use crate::strength;
 use crate::twofish_cbc::{self, BLOCK_LEN};
@@ -95,30 +97,54 @@ fn emit_int_array(env: &JNIEnv, values: &[i32]) -> Option<jintArray> {
 
 /// panic 护栏 + 失败归一（`ISSUE-P3-476`）：`body` 内 panic 或返回 `None` 一律归一为 `null`
 /// `jbyteArray`，**绝不**把 Rust unwind 过 FFI 边界（那会 abort 进程）。
+///
+/// `ISSUE-P2` C4：同时标注失败原因——panic 记 [`error_code::ERR_PANIC`]，`body` 返回 `None`
+/// 时若其内部未记录更具体的原因则记 [`error_code::ERR_KERNEL`]。
 #[inline]
 fn guard_byte_array(body: impl FnOnce() -> Option<jbyteArray>) -> jbyteArray {
-    catch_unwind(AssertUnwindSafe(body))
-        .ok()
-        .flatten()
-        .unwrap_or(null_mut())
+    match catch_unwind(AssertUnwindSafe(body)) {
+        Ok(Some(arr)) => arr,
+        Ok(None) => {
+            note_kernel_if_unset();
+            null_mut()
+        }
+        Err(_) => {
+            error_code::record(error_code::ERR_PANIC);
+            null_mut()
+        }
+    }
 }
 
 /// 同 [`guard_byte_array`]，返回型为 `jintArray`（定长布局 `estimate` 用）。
 #[inline]
 fn guard_int_array(body: impl FnOnce() -> Option<jintArray>) -> jintArray {
-    catch_unwind(AssertUnwindSafe(body))
-        .ok()
-        .flatten()
-        .unwrap_or(null_mut())
+    match catch_unwind(AssertUnwindSafe(body)) {
+        Ok(Some(arr)) => arr,
+        Ok(None) => {
+            note_kernel_if_unset();
+            null_mut()
+        }
+        Err(_) => {
+            error_code::record(error_code::ERR_PANIC);
+            null_mut()
+        }
+    }
 }
 
 /// 同 [`guard_byte_array`]，返回型为 `jint`（失败归一为 `-1`，direct 路径用）。
 #[inline]
 fn guard_int(body: impl FnOnce() -> Option<jint>) -> jint {
-    catch_unwind(AssertUnwindSafe(body))
-        .ok()
-        .flatten()
-        .unwrap_or(-1)
+    match catch_unwind(AssertUnwindSafe(body)) {
+        Ok(Some(n)) => n,
+        Ok(None) => {
+            note_kernel_if_unset();
+            -1
+        }
+        Err(_) => {
+            error_code::record(error_code::ERR_PANIC);
+            -1
+        }
+    }
 }
 
 // ============================================================================
@@ -138,14 +164,17 @@ pub extern "system" fn Java_com_keepasskey_crypto_kdf_NativeAesKdf_deriveKey<'lo
     rounds: jlong,
 ) -> jbyteArray {
     // 有符号闸门先行：负数在窄化前即被拒绝（对齐 `jni_bridge.rs` 的 params_valid 语义）
+    error_code::reset();
     if composite_key.is_null() || seed.is_null() || rounds < 1 {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return null_mut();
     }
 
     guard_byte_array(|| -> Option<jbyteArray> {
-        let key = Zeroizing::new(env.convert_byte_array(&composite_key).ok()?);
-        let seed_buf = Zeroizing::new(env.convert_byte_array(&seed).ok()?);
+        let key = Zeroizing::new(env.convert_byte_array(&composite_key).map_err(note_jni_error).ok()?);
+        let seed_buf = Zeroizing::new(env.convert_byte_array(&seed).map_err(note_jni_error).ok()?);
         if key.len() != COMPOSITE_KEY_LEN || seed_buf.len() != COMPOSITE_KEY_LEN {
+            error_code::record(error_code::ERR_INVALID_ARGUMENT);
             return None;
         }
 
@@ -202,16 +231,21 @@ fn block_cbc_jni<'local>(
     block_len: usize,
     kernel: CbcKernelFn,
 ) -> jbyteArray {
+    error_code::reset();
     if key.is_null() || iv.is_null() || data.is_null() {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return null_mut();
     }
 
     guard_byte_array(|| -> Option<jbyteArray> {
-        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
-        let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
-        let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).map_err(note_jni_error).ok()?);
+        let mut iv_buf =
+            Zeroizing::new(env.convert_byte_array(&iv).map_err(note_jni_error).ok()?);
+        let data_buf =
+            Zeroizing::new(env.convert_byte_array(&data).map_err(note_jni_error).ok()?);
 
         if iv_buf.len() != block_len || data_buf.len() % block_len != 0 {
+            error_code::record(error_code::ERR_INVALID_ARGUMENT);
             return None;
         }
 
@@ -220,6 +254,7 @@ fn block_cbc_jni<'local>(
         // 回写演化后的链值（IV 非秘密，但仍在 Zeroizing 缓冲中处理）
         // SAFETY：iv_buf 长度已校验为 block_len 且为有效内存
         env.set_byte_array_region(&iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
+            .map_err(note_jni_error)
             .ok()?;
         emit_byte_array(&env, &out[..])
     })
@@ -316,13 +351,16 @@ fn aes_cbc_direct_jni<'local>(
     data: JByteBuffer<'local>,
     encrypt: bool,
 ) -> jint {
+    error_code::reset();
     if key.is_null() || iv.is_null() {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return -1;
     }
 
     guard_int(|| -> Option<jint> {
-        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
-        let mut iv_buf = Zeroizing::new(env.convert_byte_array(&iv).ok()?);
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).map_err(note_jni_error).ok()?);
+        let mut iv_buf =
+            Zeroizing::new(env.convert_byte_array(&iv).map_err(note_jni_error).ok()?);
         // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null / 空缓冲 → None → -1）。
         // SAFETY：见 [`direct_buffer_slice`]；切片仅在本调用内使用，不逃逸。
         let slice = unsafe { direct_buffer_slice(&env, &data)? };
@@ -334,6 +372,7 @@ fn aes_cbc_direct_jni<'local>(
         }
         // 回写演化后的链值（iv 出口契约；IV 非秘密，但仍在 Zeroizing 缓冲中处理）
         env.set_byte_array_region(&iv, 0, unsafe { as_jbyte(&iv_buf[..]) })
+            .map_err(note_jni_error)
             .ok()?;
         Some(len)
     })
@@ -354,12 +393,18 @@ pub extern "system" fn Java_com_keepasskey_crypto_strength_NativePasswordStrengt
     _thiz: JObject<'local>,
     password: JByteArray<'local>,
 ) -> jintArray {
+    error_code::reset();
     if password.is_null() {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return null_mut();
     }
 
     guard_int_array(|| -> Option<jintArray> {
-        let pw = Zeroizing::new(env.convert_byte_array(&password).ok()?);
+        let pw = Zeroizing::new(
+            env.convert_byte_array(&password)
+                .map_err(note_jni_error)
+                .ok()?,
+        );
         let result = strength::estimate(&pw);
 
         let layout = [result.score, result.guesses_log10_x100, result.flags];
@@ -386,14 +431,18 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
     byte_offset: jlong,
     data: JByteArray<'local>,
 ) -> jbyteArray {
+    error_code::reset();
     if key.is_null() || nonce.is_null() || data.is_null() || byte_offset < 0 {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return null_mut();
     }
 
     guard_byte_array(|| -> Option<jbyteArray> {
-        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
-        let nonce_buf = Zeroizing::new(env.convert_byte_array(&nonce).ok()?);
-        let mut data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).map_err(note_jni_error).ok()?);
+        let nonce_buf =
+            Zeroizing::new(env.convert_byte_array(&nonce).map_err(note_jni_error).ok()?);
+        let mut data_buf =
+            Zeroizing::new(env.convert_byte_array(&data).map_err(note_jni_error).ok()?);
 
         chacha20_stream::apply_keystream_at(
             &key_buf,
@@ -439,13 +488,16 @@ pub extern "system" fn Java_com_keepasskey_crypto_cipher_NativeChaCha20_applyKey
     byte_offset: jlong,
     data: JByteBuffer<'local>,
 ) -> jint {
+    error_code::reset();
     if key.is_null() || nonce.is_null() || byte_offset < 0 {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return -1;
     }
 
     guard_int(|| -> Option<jint> {
-        let key_buf = Zeroizing::new(env.convert_byte_array(&key).ok()?);
-        let nonce_buf = Zeroizing::new(env.convert_byte_array(&nonce).ok()?);
+        let key_buf = Zeroizing::new(env.convert_byte_array(&key).map_err(note_jni_error).ok()?);
+        let nonce_buf =
+            Zeroizing::new(env.convert_byte_array(&nonce).map_err(note_jni_error).ok()?);
         // 堆外地址直取：无拷贝、无分配（非 direct 缓冲 / null / 空缓冲 → None → -1）。
         // SAFETY：见 [`direct_buffer_slice`]；切片仅在本调用内使用，不逃逸。
         let slice = unsafe { direct_buffer_slice(&env, &data)? };
@@ -488,13 +540,23 @@ fn passkey_sign_jni<'local>(
     data: JByteArray<'local>,
     es256: bool,
 ) -> jbyteArray {
+    error_code::reset();
     if private_key.is_null() || data.is_null() {
+        error_code::record(error_code::ERR_INVALID_ARGUMENT);
         return null_mut();
     }
 
     guard_byte_array(|| -> Option<jbyteArray> {
-        let key_buf = Zeroizing::new(env.convert_byte_array(&private_key).ok()?);
-        let data_buf = Zeroizing::new(env.convert_byte_array(&data).ok()?);
+        let key_buf = Zeroizing::new(
+            env.convert_byte_array(&private_key)
+                .map_err(note_jni_error)
+                .ok()?,
+        );
+        let data_buf = Zeroizing::new(
+            env.convert_byte_array(&data)
+                .map_err(note_jni_error)
+                .ok()?,
+        );
 
         let out = if es256 {
             passkey_sign::es256_sign_der(&key_buf, &data_buf)?

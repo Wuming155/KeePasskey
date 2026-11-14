@@ -1,10 +1,10 @@
 package com.keepasskey.app.data.importer
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.sync.SyncSessionState
 import com.keepasskey.app.sync.eraseDiscardedDatabase
 import com.keepasskey.app.ui.model.StringsProvider
@@ -63,7 +63,6 @@ class KdbxMergeController @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val syncSessionState: SyncSessionState,
     stringsProvider: StringsProvider? = null,
-    private val debugLog: DebugLogBuffer,
     private val keyFileAccess: KeyFileAccess? = null
 ) {
     private val strings: StringsProvider = stringsProvider.orFallback(context)
@@ -100,7 +99,7 @@ class KdbxMergeController @Inject constructor(
             source = ImportSource.KDBX_MERGE,
             displayName = pendingDisplayName
         )
-        debugLog.info(TAG, "KDBX 并入已选择文件，等待第二库凭据")
+        AppLog.i(TAG, "KDBX 并入已选择文件，等待第二库凭据")
         return true
     }
 
@@ -166,7 +165,7 @@ class KdbxMergeController @Inject constructor(
             } catch (c: CancellationException) {
                 throw c
             } catch (e: Exception) {
-                debugLog.warn(TAG, "并入凭据读取失败: ${e.javaClass.simpleName}")
+                AppLog.w(TAG, "并入凭据读取失败: ${e.javaClass.simpleName}")
                 if (gen == generation) {
                     mutableUiState.value = ImportUiState.Failed(ImportSource.KDBX_MERGE, ImportFailureReason.KEY_FILE)
                 }
@@ -222,7 +221,7 @@ class KdbxMergeController @Inject constructor(
                 } catch (c: CancellationException) {
                     throw c
                 } catch (t: Throwable) {
-                    debugLog.warn(TAG, "第二库打开失败: ${t.javaClass.simpleName}")
+                    AppLog.w(TAG, "第二库打开失败: ${t.javaClass.simpleName}")
                     return failMerge(generation, t.javaClass.simpleName)
                 }
 
@@ -240,7 +239,7 @@ class KdbxMergeController @Inject constructor(
                         ImportUiState.Done(outcome.data)
                     }
                     is KdbxResult.Failure -> {
-                        debugLog.warn(TAG, "KDBX 并入落库失败: ${outcome.error.javaClass.simpleName}")
+                        AppLog.w(TAG, "KDBX 并入落库失败: ${outcome.error.javaClass.simpleName}")
                         failMerge(generation, outcome.error.javaClass.simpleName)
                     }
                 }
@@ -314,7 +313,7 @@ class KdbxMergeController @Inject constructor(
             }
 
             val outcome = KdbxMergeOutcomeFactory.mergeOutcome(delta)
-            debugLog.info(
+            AppLog.i(
                 TAG,
                 "KDBX 并入完成 entriesAdded=${delta.entriesAdded} groupsAdded=${delta.groupsAdded} " +
                     "conflicts=${delta.conflicts} icons=${delta.customIconsAdded}"
@@ -365,7 +364,7 @@ class KdbxMergeController @Inject constructor(
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
-            debugLog.warn(TAG, "读取并入文件失败: ${t.javaClass.simpleName}")
+            AppLog.w(TAG, "读取并入文件失败: ${t.javaClass.simpleName}")
             KdbxResult.Failure(t)
         }
     }

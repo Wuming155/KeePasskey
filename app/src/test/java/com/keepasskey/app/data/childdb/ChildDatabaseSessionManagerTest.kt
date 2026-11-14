@@ -48,7 +48,6 @@ class ChildDatabaseSessionManagerTest {
         credentials = credentials,
         streamSource = source,
         databaseSession = databaseSession,
-        debugLog = DebugLogBuffer(),
         unlockThrottleManager = UnlockThrottleManager(throttleStore),
         binaryStore = RecordingBinaryStore()
     )
@@ -206,7 +205,7 @@ class ChildDatabaseSessionManagerTest {
         val record = mountOnce(manager)
         val settings = FakeSettingsRepository()
         settings.setLockWhenScreenOff(true)
-        val guard = AutoLockSessionGuard(databaseSession, settings, DebugLogBuffer())
+        val guard = AutoLockSessionGuard(databaseSession, settings)
 
         guard.lockOnScreenOff()
 
@@ -228,7 +227,6 @@ class ChildDatabaseSessionManagerTest {
             credentials = ChildDatabaseCredentialStore(),
             streamSource = source,
             databaseSession = databaseSession,
-            debugLog = DebugLogBuffer(),
             unlockThrottleManager = UnlockThrottleManager(throttleStore),
             binaryStore = RecordingBinaryStore()
         )

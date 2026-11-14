@@ -82,8 +82,9 @@ class ConflictResolutionCustomFieldTest {
 
         lateinit var harness: Harness
         val mockCoordinator = object : SyncCoordinator(
-            fakeContext, session, creds, com.keepasskey.app.data.logger.DebugLogBuffer()
-        ) {
+            fakeContext,
+            session,
+            creds) {
             override val conflictFlow: StateFlow<List<ConflictedEntryPair>>
                 get() = conflictFlowInternal.asStateFlow()
 

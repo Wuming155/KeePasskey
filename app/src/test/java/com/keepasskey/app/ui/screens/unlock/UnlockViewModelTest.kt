@@ -48,7 +48,7 @@ class UnlockViewModelTest {
     }
 
     private fun TestScope.createViewModel(): UnlockViewModel {
-        val viewModel = UnlockViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, null, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val viewModel = UnlockViewModel(FakeVaultRepository(), FakeSettingsRepository(), null, null)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -156,7 +156,7 @@ class UnlockViewModelTest {
     @Test
     fun `无活动数据库时hasDatabase为false`() = runTest {
         val emptyRepo = FakeVaultRepository(initialDatabases = emptyList())
-        val viewModel = UnlockViewModel(emptyRepo, FakeSettingsRepository(), null, null, com.keepasskey.app.data.logger.DebugLogBuffer())
+        val viewModel = UnlockViewModel(emptyRepo, FakeSettingsRepository(), null, null)
         MainDispatcherGuard.track(viewModel)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
@@ -179,9 +179,7 @@ class UnlockViewModelTest {
             FakeSettingsRepository(),
             null,
             null,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
-            unlockThrottleManager = manager
-        )
+            unlockThrottleManager = manager)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }
@@ -331,9 +329,7 @@ class UnlockViewModelTest {
             FakeSettingsRepository(),
             null,
             null,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
-            unlockThrottleManager = manager
-        )
+            unlockThrottleManager = manager)
         MainDispatcherGuard.track(viewModel)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
@@ -427,9 +423,7 @@ class UnlockViewModelTest {
             FakeSettingsRepository(),
             null,
             null,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
-            unsavedEditRegistry = registry
-        )
+            unsavedEditRegistry = registry)
         MainDispatcherGuard.track(first)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { first.uiState.collect {} }
         testScheduler.runCurrent()
@@ -440,9 +434,7 @@ class UnlockViewModelTest {
             FakeSettingsRepository(),
             null,
             null,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
-            unsavedEditRegistry = registry
-        )
+            unsavedEditRegistry = registry)
         MainDispatcherGuard.track(second)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { second.uiState.collect {} }
         testScheduler.runCurrent()
@@ -464,9 +456,7 @@ class UnlockViewModelTest {
             FakeSettingsRepository(),
             null,
             null,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
-            keyFileAccess = access
-        )
+            keyFileAccess = access)
     }
 
     @Test

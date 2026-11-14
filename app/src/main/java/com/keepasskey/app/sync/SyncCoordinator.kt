@@ -1,9 +1,10 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.data.repository.ActiveDatabaseIdStore
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.logger.OpTrace
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.security.AutoLockSessionGuard
 import com.keepasskey.app.ui.model.StringsProvider
@@ -51,7 +52,6 @@ open class SyncCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val databaseSession: DatabaseSession,
     private val syncCredentialsStore: SyncCredentialsStore,
-    private val debugLog: DebugLogBuffer,
     // TASK-21：用户可见错误消息经 StringsProvider 资源解析（P3-23；单测注入假实现）
     private val strings: StringsProvider? = null,
     /**
@@ -105,13 +105,13 @@ open class SyncCoordinator @Inject constructor(
         )
     }
     private val preferences: SyncPreferences = syncPreferences
-        ?: SyncPreferences(debugLog, extendedSettingsStore)
+        ?: SyncPreferences(extendedSettingsStore)
     private val providers: SyncProviderResolver = syncProviderResolver
-        ?: SyncProviderResolver(syncCredentialsStore, preferences, debugLog)
+        ?: SyncProviderResolver(syncCredentialsStore, preferences)
     private val codec: SyncDatabaseCodec = syncDatabaseCodec
-        ?: SyncDatabaseCodec(databaseSession, debugLog)
+        ?: SyncDatabaseCodec(databaseSession)
     private val conflicts: SyncConflictController = syncConflicts
-        ?: SyncConflictController(databaseSession, codec, effectiveStrings, session, debugLog)
+        ?: SyncConflictController(databaseSession, codec, effectiveStrings, session)
     private val changes: SyncContentChangeDetector = syncContentChanges
         ?: SyncContentChangeDetector(codec, session)
     private val cycle: SyncCycleRunner = syncCycle
@@ -157,7 +157,6 @@ open class SyncCoordinator @Inject constructor(
             context = context,
             databaseSession = databaseSession,
             syncCredentialsStore = syncCredentialsStore,
-            debugLog = debugLog,
             pendingUploads = { pendingEncryptedUploads },
             probeStore = periodicSyncProbeStore,
             rollbackStateDirectory = { cycle.rollbackStateDirectory() },
@@ -170,7 +169,6 @@ open class SyncCoordinator @Inject constructor(
             syncCredentialsStore = syncCredentialsStore,
             session = session,
             store = syncCredentialRotationStore,
-            debugLog = debugLog
         )
     }
 
@@ -272,7 +270,7 @@ open class SyncCoordinator @Inject constructor(
         return try {
             providers.hasConfiguredProvider()
         } catch (e: Exception) {
-            debugLog.warn(SYNC_LOG_TAG, "探测同步配置失败，按未配置处理: ${e.javaClass.simpleName}")
+            AppLog.w(SYNC_LOG_TAG, "探测同步配置失败，按未配置处理: ${e.javaClass.simpleName}")
             false
         }
     }
@@ -327,22 +325,31 @@ open class SyncCoordinator @Inject constructor(
 
     private suspend fun syncNowForConfig(snapshot: SyncProviderConfigSnapshot?): SyncOutcome =
         withSessionLockCancellation {
-        debugLog.info(SYNC_LOG_TAG, "手动/自动同步开始")
+        val op = OpTrace.start("sync")
+        AppLog.i(SYNC_LOG_TAG, "手动/自动同步开始 op=${op.id}")
         // 保存回执周期内 providerTarget 来自提交快照，不能在此重新解析当前全局配置作探测归档。
         val probeTargetBefore = if (snapshot == null && periodicSyncProbeStore != null && databaseSession.databaseFlow.value != null) {
             resolveProbeTarget()
         } else {
             null
         }
-        val outcome = if (snapshot == null) cycle.runSyncCycle() else cycle.runSyncCycle(snapshot)
-        publishSyncEvents()
+        val outcome = try {
+            cycle.activeOpId = op.id
+            if (snapshot == null) cycle.runSyncCycle() else cycle.runSyncCycle(snapshot)
+        } finally {
+            cycle.activeOpId = null
+        }
+        publishSyncEvents(op.id)
         _lastOutcome.value = outcome
         if (probeTargetBefore != null) {
             probeRunner.persistAfterSync(probeTargetBefore, outcome)
         }
         // ISSUE-P3-381：远端 ETag 探测基线不在本周期直接读引擎 cache（internal）；
         // 锁态 Worker 与 ResumeSyncProbeCoordinator 共用 P2-627 的持久化元数据基线。
-        debugLog.info(SYNC_LOG_TAG, "同步结束: ${syncOutcomeDescription(outcome)}")
+        AppLog.i(
+            SYNC_LOG_TAG,
+            "同步结束: ${syncOutcomeDescription(outcome)} op=${op.id}, durMs=${op.elapsedMs()}"
+        )
         outcome
     }
 
@@ -380,7 +387,14 @@ open class SyncCoordinator @Inject constructor(
         val probeResult = session.mutex.withLock {
             if (databaseSession.databaseFlow.value != null) null else probeRunner.runProbe()
         }
-        return probeResult ?: PeriodicSyncWorkResult.FullSync(syncNow())
+        if (probeResult != null) {
+            // 锁态探测同样是「一个同步周期」：结论必须写入通知所订阅的状态，否则后台连续
+            // 401/5xx/未知失败时通知永不亮出，网络或凭据恢复后也无从撤销。
+            _lastOutcome.value = periodicProbeOutcome(probeResult, effectiveStrings)
+            logProbeResult(probeResult)
+            return probeResult
+        }
+        return PeriodicSyncWorkResult.FullSync(syncNow())
     }
 
     /**
@@ -389,11 +403,11 @@ open class SyncCoordinator @Inject constructor(
      * 整库上传，云端原属另一库的副本被整体替换）。与 [syncNow] 共享同一互斥锁。
      */
     suspend fun confirmVaultBindingTakeover(): SyncOutcome = withSessionLockCancellation {
-        debugLog.info(SYNC_LOG_TAG, "库身份改绑确认：整库覆盖上传开始")
+        AppLog.i(SYNC_LOG_TAG, "库身份改绑确认：整库覆盖上传开始")
         val outcome = cycle.takeoverVaultBinding()
         publishSyncEvents()
         _lastOutcome.value = outcome
-        debugLog.info(SYNC_LOG_TAG, "库身份改绑确认结束: ${syncOutcomeDescription(outcome)}")
+        AppLog.i(SYNC_LOG_TAG, "库身份改绑确认结束: ${syncOutcomeDescription(outcome)}")
         outcome
     }
 
@@ -490,19 +504,62 @@ open class SyncCoordinator @Inject constructor(
      * 引擎使用 replay SharedFlow 且每次同步创建新实例，事后抽取 replayCache 即可无损回放，
      * 无需为单次同步挂载临时收集协程。
      */
-    private fun publishSyncEvents() {
+    private fun publishSyncEvents(opId: String? = null) {
         val engine = session.lastSyncEngine ?: return
         val recent = engine.events.replayCache
         if (recent.isEmpty()) return
         _recentSyncEvents.value = recent
         val settings = preferences.currentSettings()
+        val opField = opId?.let { " op=$it" }.orEmpty()
         recent.forEach { event ->
             _syncEvents.tryEmit(event)
-            debugLog.info(SYNC_LOG_TAG, "缓存监督事件: ${SyncCacheEventDescriber.describe(event)}")
+            AppLog.i(
+                SYNC_LOG_TAG,
+                "缓存监督事件:$opField ${SyncCacheEventDescriber.describe(event)}"
+            )
             preferences.verbose(
                 settings,
                 "缓存监督事件明细: ${SyncCacheEventDescriber.describeVerbose(event)}"
             )
         }
+    }
+}
+
+/**
+ * 锁态周期探测结果 → 同步周期结论（供 `SyncFailureNotifier` 消费）。
+ *
+ * 纯映射，便于 JVM 单测：失败类探测必须产生 [SyncOutcome.Error]，真·网络不可达保持
+ * [SyncOutcome.Offline]（设计内降级、不亮通知）；正常/待解锁等状态归为 [SyncOutcome.UpToDate]
+ * 以撤销上一周期的失败通知。文案只用本仓资源，禁止把异常或远端原文带进 UI。
+ */
+internal fun periodicProbeOutcome(
+    result: PeriodicSyncWorkResult,
+    strings: StringsProvider
+): SyncOutcome = when (result) {
+    is PeriodicSyncWorkResult.FullSync -> result.outcome
+    PeriodicSyncWorkResult.AuthenticationRequired ->
+        SyncOutcome.Error(strings.get(R.string.sync_error_auth_failed))
+    PeriodicSyncWorkResult.ConfigurationInvalid,
+    is PeriodicSyncWorkResult.RemoteRejected ->
+        SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
+    PeriodicSyncWorkResult.TemporaryNetworkFailure -> SyncOutcome.Offline
+    PeriodicSyncWorkResult.NotConfigured,
+    PeriodicSyncWorkResult.MetadataUnchanged,
+    PeriodicSyncWorkResult.EncryptedUploadCompleted,
+    is PeriodicSyncWorkResult.NeedsUnlock -> SyncOutcome.UpToDate
+}
+
+/** 锁态探测结果留痕：只写结果类型名，不含目标、凭据或异常原文。 */
+private fun logProbeResult(result: PeriodicSyncWorkResult) {
+    val name = result::class.simpleName ?: "Unknown"
+    when (result) {
+        PeriodicSyncWorkResult.AuthenticationRequired,
+        PeriodicSyncWorkResult.ConfigurationInvalid,
+        is PeriodicSyncWorkResult.RemoteRejected -> AppLog.w(SYNC_LOG_TAG, "锁态探测失败: $name")
+
+        PeriodicSyncWorkResult.TemporaryNetworkFailure ->
+            AppLog.w(SYNC_LOG_TAG, "锁态探测暂时不可达: $name")
+
+        else -> AppLog.i(SYNC_LOG_TAG, "锁态探测结束: $name")
     }
 }

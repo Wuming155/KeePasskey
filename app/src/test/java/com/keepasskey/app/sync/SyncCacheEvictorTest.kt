@@ -2,7 +2,6 @@ package com.keepasskey.app.sync
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncRollbackGuard
@@ -35,7 +34,6 @@ class SyncCacheEvictorTest {
     // 对象表达式内的 `cacheDir` 会优先解析为自身合成属性，导致 getter 无限递归
     private lateinit var appCacheDir: File
     private lateinit var fakeContext: Context
-    private lateinit var debugLog: DebugLogBuffer
     private lateinit var evictor: SyncCacheEvictor
     private lateinit var session: DatabaseSession
 
@@ -90,9 +88,7 @@ class SyncCacheEvictorTest {
             override fun getApplicationContext(): Context = this
             override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences = fakePrefs()
         }
-
-        debugLog = DebugLogBuffer()
-        evictor = SyncCacheEvictor(fakeContext, debugLog)
+        evictor = SyncCacheEvictor(fakeContext)
         session = DatabaseSession()
     }
 
@@ -180,8 +176,7 @@ class SyncCacheEvictorTest {
         assertTrue(
             "残留计数必须排除防回滚状态（它不是密文快照）；" +
                 "清理后目录索引条目=${listedEntries(syncDir)}；" +
-                "磁盘上真实存在的文件=${realFilesUnder(syncDir).map { it.name }}；" +
-                "销毁器日志=${debugLog.snapshot()}",
+                "磁盘上真实存在的文件=${realFilesUnder(syncDir).map { it.name }}",
             cleared
         )
     }
@@ -199,7 +194,7 @@ class SyncCacheEvictorTest {
     @Test
     fun `同步凭据清空时连带销毁同步缓存`() {
         val syncDir = seedCache()
-        val store = SyncCredentialsStore(fakeContext, null, DebugLogBuffer(), evictor)
+        val store = SyncCredentialsStore(fakeContext, null, evictor)
 
         store.clear()
 

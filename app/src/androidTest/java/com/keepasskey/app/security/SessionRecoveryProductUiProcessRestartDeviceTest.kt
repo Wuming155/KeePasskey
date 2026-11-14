@@ -45,7 +45,7 @@ class SessionRecoveryProductUiProcessRestartDeviceTest {
         val vaultId = vaultFile.absolutePath
         val vaultTitle = "P1-613 Recovery $runId"
         val password = RECOVERY_PASSWORD.toCharArray()
-        val store = VaultRecoveryStore(context, DebugLogBuffer())
+        val store = VaultRecoveryStore(context)
 
         try {
             when (arguments.getString(ARG_PHASE)) {
@@ -98,12 +98,12 @@ class SessionRecoveryProductUiProcessRestartDeviceTest {
             )
             val log = DebugLogBuffer()
             val alertStore = RecoveryAlertStore(context)
-            val recovery = SessionRecoveryCoordinator(dirty, store, alertStore, log)
+            val recovery = SessionRecoveryCoordinator(dirty, store, alertStore)
             val settings = RealSettingsRepository(context)
             val old = settings.getSettings().first().lockWhenScreenOff
             try {
                 settings.setLockWhenScreenOff(true)
-                val guard = AutoLockSessionGuard(dirty, settings, log, recovery = recovery)
+                val guard = AutoLockSessionGuard(dirty, settings, recovery = recovery)
                 guard.lockOnScreenOff()
                 assertEquals("熄屏锁定必须销毁活动会话", DatabaseSession.SessionState.LOCKED, dirty.state.value)
                 assertTrue("正式恢复副本必须已落盘", store.list().any { it.vaultId == vaultId })

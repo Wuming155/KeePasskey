@@ -1,7 +1,7 @@
 package com.keepasskey.app.security
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
@@ -34,7 +34,6 @@ import javax.inject.Singleton
 class AutoLockSessionGuard @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val settingsRepository: SettingsRepository,
-    private val debugLog: DebugLogBuffer,
     // ISSUE-P2-355 AC③：全局脏表单注册表（Hilt 注入进程级单例；缺省新实例供 JVM 单测隔离）
     private val unsavedEditRegistry: UnsavedEditRegistry = UnsavedEditRegistry(),
     // ISSUE-P3-366 AC②：长任务挂锁闸（Hilt 注入进程级单例，与各挂点共享；缺省新实例供 JVM 单测隔离）
@@ -125,7 +124,7 @@ class AutoLockSessionGuard @Inject constructor(
      */
     suspend fun endLongTask() {
         val pending = holdoff.end() ?: return
-        debugLog.info(TAG, "长任务挂锁恢复，补执行锁定: $pending")
+        AppLog.i(TAG, "长任务挂锁恢复，补执行锁定: $pending")
         withContext(NonCancellable) {
             triggerLock(pending)
         }
@@ -142,7 +141,7 @@ class AutoLockSessionGuard @Inject constructor(
     suspend fun triggerLock(reason: String = "安全锁定"): LockOutcome {
         // ISSUE-P3-366 AC②：长任务挂锁期——锁定请求暂存延迟，depth 归零后经 endLongTask 补执行
         if (holdoff.defer(reason)) {
-            debugLog.info(TAG, "长任务挂锁中，锁定请求暂存: $reason")
+            AppLog.i(TAG, "长任务挂锁中，锁定请求暂存: $reason")
             return LockOutcome.Deferred
         }
         // ISSUE-P2-355 AC③：锁定将经导航 popUpTo(0) 销毁编辑页——存在未保存编辑时先登记
@@ -162,7 +161,7 @@ class AutoLockSessionGuard @Inject constructor(
             return LockOutcome.NoPendingChanges
         }
         if (isDrifted()) {
-            debugLog.warn(TAG, "锁库前检测到外部文件漂移，中止写入正式文件，转入独立加密恢复副本")
+            AppLog.w(TAG, "锁库前检测到外部文件漂移，中止写入正式文件，转入独立加密恢复副本")
             return recovery.onSaveFailedBeforeLock()
         }
         val saveResult = databaseSession.save()
@@ -175,7 +174,7 @@ class AutoLockSessionGuard @Inject constructor(
                 LockOutcome.Saved
             }
             is KdbxResult.Failure -> {
-                debugLog.error(TAG, "锁库前补存失败: ${saveResult.error.javaClass.simpleName}")
+                AppLog.e(TAG, "锁库前补存失败: ${saveResult.error.javaClass.simpleName}")
                 recovery.onSaveFailedBeforeLock()
             }
         }

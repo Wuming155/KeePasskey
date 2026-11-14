@@ -2,6 +2,7 @@ package com.keepasskey.app.data.logger
 
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import com.keepasskey.app.BuildConfig
 import com.keepasskey.app.autofill.autofillEnvironmentLine
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
@@ -32,12 +33,27 @@ class DiagnosticLogBridge @Inject constructor(
     private val settingsStore: ExtendedSettingsStore
 ) {
 
+    /** 现场快照发射器：仅在生产传入 Context 时装配（JVM 单测为 null）。 */
+    private var snapshotEmitter: DiagnosticSnapshotEmitter? = null
+
     /**
      * 由 MainApplication.onCreate 安装一次；重复安装只替换同一个函数引用，不重复写头。
      *
-     * @param context 生产传入 Application（用于取回上一条进程的诊断历史）；纯 JVM 单测传 null。
+     * @param context 生产传入 Application（用于取回上一条进程的诊断历史与本机现场快照）；纯 JVM 单测传 null。
+     * @param isVaultLocked 当前库是否锁定；用于 ERROR 现场快照，纯 JVM 单测缺省视为锁定。
      */
-    fun install(context: Context? = null) {
+    fun install(
+        context: Context? = null,
+        isVaultLocked: () -> Boolean = { true }
+    ) {
+        // 快照只在有真实 Context 时装配：JVM 单测不触碰 ActivityManager / StatFs。
+        snapshotEmitter = context?.let { appContext ->
+            DiagnosticSnapshotEmitter(
+                buffer = buffer,
+                now = { SystemClock.elapsedRealtime() },
+                describe = { DiagnosticSnapshot.describe(appContext, isVaultLocked()) }
+            )
+        }
         AppLog.diagnosticSink = { level, tag, message, throwable ->
             val frameBudget = if (settingsStore.isVerboseSyncLogEnabled()) {
                 MAX_DIAGNOSTIC_FRAMES
@@ -50,12 +66,22 @@ class DiagnosticLogBridge @Inject constructor(
                 frameBudget = frameBudget,
                 maxCauses = MAX_DIAGNOSTIC_CAUSES
             )
-            buffer.log(level, tag, text)
+            buffer.logFromAppLog(level, tag, text)
+            if (level == ERROR_LEVEL) snapshotEmitter?.onError()
         }
         // 纯文案的 i / 无异常 e/w 此前只进 logcat，用户导出里看不到；统一接进同一份缓冲。
         // KpLog 是缓冲回显 logcat 的 tag，必须过滤，否则形成「缓冲 → logcat → 缓冲」回环。
         AppLog.diagnosticLineSink = { level, tag, message ->
-            if (tag != DebugLogBuffer.LOGCAT_TAG) buffer.log(level, tag, message)
+            if (tag != DebugLogBuffer.LOGCAT_TAG) buffer.logFromAppLog(level, tag, message)
+        }
+        // 治理审计走独立通道：缓冲的 audit 入口不受 DiagnosticLogGate 约束，
+        // 用户关掉诊断日志后导出 / 复制 / 清除仍留审计（契约见 DiagnosticLogGate KDoc）。
+        AppLog.diagnosticAuditSink = { tag, message ->
+            if (tag != DebugLogBuffer.LOGCAT_TAG) buffer.audit(tag, message)
+        }
+        // 详细模式的过程细节：调用方已判开关，此处只落缓冲（DEBUG 级，受诊断总开关约束）。
+        AppLog.diagnosticVerboseSink = { tag, message ->
+            if (tag != DebugLogBuffer.LOGCAT_TAG) buffer.logFromAppLog(DEBUG_LEVEL, tag, message)
         }
         if (context != null) {
             val dir = File(context.noBackupFilesDir, "diagnostic")
@@ -95,5 +121,7 @@ class DiagnosticLogBridge @Inject constructor(
     private companion object {
         const val TAG = "Diagnostics"
         const val BRIEF_FRAMES = 8
+        const val ERROR_LEVEL = "ERROR"
+        const val DEBUG_LEVEL = "DEBUG"
     }
 }

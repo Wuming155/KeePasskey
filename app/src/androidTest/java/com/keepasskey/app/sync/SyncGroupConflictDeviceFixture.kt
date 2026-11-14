@@ -47,16 +47,16 @@ internal class SyncGroupConflictDeviceFixture(private val context: Context) {
         val extended = ExtendedSettingsStore(context).apply {
             publish(ExtendedSettings(conflictResolution = ConflictResolution.PROMPT_USER))
         }
-        val preferences = SyncPreferences(log, extended)
-        val credentials = SyncCredentialsStore(context, null, log)
-        val resolver = SyncProviderResolver(credentials, preferences, log)
+        val preferences = SyncPreferences(extended)
+        val credentials = SyncCredentialsStore(context, null)
+        val resolver = SyncProviderResolver(credentials, preferences)
         val state = SyncSessionState().apply {
             testRemotePath = remotePath
             testSyncProvider = provider
         }
         val strings = StringsProvider { id, args -> context.getString(id, *args) }
-        val codec = SyncDatabaseCodec(session, log)
-        val conflicts = SyncConflictController(session, codec, strings, state, log)
+        val codec = SyncDatabaseCodec(session)
+        val conflicts = SyncConflictController(session, codec, strings, state)
         val changes = SyncContentChangeDetector(codec, state)
         val cycle = SyncCycleRunner(
             context = context,
@@ -74,7 +74,6 @@ internal class SyncGroupConflictDeviceFixture(private val context: Context) {
             context = context,
             databaseSession = session,
             syncCredentialsStore = credentials,
-            debugLog = log,
             strings = strings,
             extendedSettingsStore = extended,
             syncSession = state,
@@ -83,8 +82,7 @@ internal class SyncGroupConflictDeviceFixture(private val context: Context) {
             syncDatabaseCodec = codec,
             syncContentChanges = changes,
             syncConflicts = conflicts,
-            syncCycle = cycle
-        )
+            syncCycle = cycle)
         return Peer(File(directory, "$name.kdbx"), session, coordinator, provider).also(peers::add)
     }
 

@@ -88,7 +88,9 @@ class ClipboardSecurityDeviceTest {
     fun tearDown() {
         try {
             wakeUpAndUnlock()
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) {
+            // 收尾尽力而为：设备已熄屏 / 已锁定时唤醒失败不影响后续清理
+        }
         clipboardSecurityManager.cancelScheduledClear()
         clipboardSecurityManager.clearClipboard()
         probe.shell("am force-stop ${testContext.packageName}")

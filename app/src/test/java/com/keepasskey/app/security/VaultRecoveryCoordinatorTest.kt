@@ -33,13 +33,12 @@ class VaultRecoveryCoordinatorTest {
     private lateinit var store: VaultRecoveryStore
 
     private fun newCoordinator(): VaultRecoveryCoordinator {
-        store = VaultRecoveryStore(null, DebugLogBuffer()).apply { baseDirOverride = tempFolder.root }
+        store = VaultRecoveryStore(null).apply { baseDirOverride = tempFolder.root }
         return VaultRecoveryCoordinator(
             context = null,
             store = store,
             alertStore = RecoveryAlertStore(null),
-            keyFileCopyStore = KeyFileVaultCopyStore(null, null, DebugLogBuffer()),
-            debugLog = DebugLogBuffer()
+            keyFileCopyStore = KeyFileVaultCopyStore(null, null)
         ).apply { filesDirOverride = tempFolder.root }
     }
 

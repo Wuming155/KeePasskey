@@ -1,12 +1,14 @@
 package com.keepasskey.app.ui.screens.settings
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.sync.RemoteBrowseController
 import com.keepasskey.app.sync.RemoteBrowseCredentials
 import com.keepasskey.app.sync.RemoteBrowseUiState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+
+private const val TAG = "RemoteBrowse"
 
 /**
  * ISSUE-P3-387 / ISSUE-P3-395：设置页远端目录浏览门面。
@@ -21,14 +23,13 @@ import kotlinx.coroutines.launch
  * 清零，避免「二次 loadS3Config 把 Secret 落成无人看管的临时数组」。
  */
 internal class SettingsRemoteBrowseHost(
-    debugLog: DebugLogBuffer,
     private val scope: CoroutineScope,
     /** 已保存 WebDAV 密码（`null` = 无配置 / 解封失败）。 */
     private val savedWebDavPassword: () -> CharArray? = { null },
     /** 一次性读出 S3 已保存密钥对；实现方须返回**调用方可清零的数组**。 */
     private val loadS3Snapshot: () -> Pair<CharArray?, CharArray?> = { null to null }
 ) {
-    private val controller = RemoteBrowseController(debugLog)
+    private val controller = RemoteBrowseController()
 
     val state: StateFlow<RemoteBrowseUiState> = controller.state
 
@@ -41,7 +42,10 @@ internal class SettingsRemoteBrowseHost(
     ) {
         val saved = try {
             savedWebDavPassword()
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            // 已保存凭据读取失败（解封 / 偏好损坏）不阻断表单输入，但必须留痕，
+            // 否则无法区分「没有保存值」与「读取出错」。
+            AppLog.w(TAG, "读取已保存 WebDAV 凭据失败: ${t.javaClass.simpleName}")
             null
         }
         val effective = RemoteBrowseCredentials.resolveBrowsePassword(password, saved)
@@ -68,7 +72,8 @@ internal class SettingsRemoteBrowseHost(
     ) {
         val (savedAccess, savedSecret) = try {
             loadS3Snapshot()
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            AppLog.w(TAG, "读取已保存 S3 凭据失败: ${t.javaClass.simpleName}")
             null to null
         }
         val (effectiveAccess, effectiveSecret) = RemoteBrowseCredentials.resolveS3BrowseKeys(

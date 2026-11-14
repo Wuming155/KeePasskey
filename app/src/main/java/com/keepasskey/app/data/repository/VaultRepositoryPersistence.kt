@@ -1,6 +1,6 @@
 package com.keepasskey.app.data.repository
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.session.DatabaseSession
@@ -15,7 +15,6 @@ import com.keepasskey.database.session.DatabaseSession
 internal class VaultRepositoryPersistence(
     private val writeBoundary: VaultWriteBoundary,
     private val databaseSession: DatabaseSession,
-    private val debugLog: DebugLogBuffer,
     private val logTag: String
 ) {
 
@@ -26,7 +25,7 @@ internal class VaultRepositoryPersistence(
     suspend fun persist(): KdbxResult<Unit> {
         val result = writeBoundary.persist()
         if (result is KdbxResult.Failure) {
-            debugLog.error(logTag, "保存中止或失败：${result.error.javaClass.simpleName}")
+            AppLog.e(logTag, "保存中止或失败：${result.error.javaClass.simpleName}")
         }
         return result
     }
@@ -35,7 +34,7 @@ internal class VaultRepositoryPersistence(
     suspend fun commitMeta(transform: (KdbxDatabase) -> KdbxDatabase): KdbxResult<Unit> {
         val result = writeBoundary.commitMeta(transform)
         if (result is KdbxResult.Failure) {
-            debugLog.error(logTag, "库设置提交失败：${result.error.javaClass.simpleName}")
+            AppLog.e(logTag, "库设置提交失败：${result.error.javaClass.simpleName}")
         }
         return result
     }

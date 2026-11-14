@@ -205,12 +205,12 @@ class SyncRollbackProcessRecoveryDeviceTest {
         crashStage: String? = null,
         runId: String? = null
     ): SyncCoordinator {
-        val preferences = SyncPreferences(log)
-        val resolver = SyncProviderResolver(credentials, preferences, log)
+        val preferences = SyncPreferences(null)
+        val resolver = SyncProviderResolver(credentials, preferences)
         val state = SyncSessionState()
         val strings = StringsProvider { id, args -> context.getString(id, *args) }
-        val codec = SyncDatabaseCodec(session, log)
-        val conflicts = SyncConflictController(session, codec, strings, state, log)
+        val codec = SyncDatabaseCodec(session)
+        val conflicts = SyncConflictController(session, codec, strings, state)
         val changes = SyncContentChangeDetector(codec, state)
         val cycle = SyncCycleRunner(
             context,
@@ -262,7 +262,6 @@ class SyncRollbackProcessRecoveryDeviceTest {
             context,
             session,
             credentials,
-            log,
             strings,
             syncSession = state,
             syncPreferences = preferences,
@@ -270,8 +269,7 @@ class SyncRollbackProcessRecoveryDeviceTest {
             syncDatabaseCodec = codec,
             syncContentChanges = changes,
             syncConflicts = conflicts,
-            syncCycle = cycle
-        )
+            syncCycle = cycle)
     }
 
     private suspend fun publishRemoteBytes(
@@ -282,8 +280,8 @@ class SyncRollbackProcessRecoveryDeviceTest {
         remotePath: String,
         bytes: ByteArray
     ) {
-        val preferences = SyncPreferences(log)
-        val resolver = SyncProviderResolver(credentials, preferences, log)
+        val preferences = SyncPreferences(null)
+        val resolver = SyncProviderResolver(credentials, preferences)
         val result = resolver.useProviderWithTarget(defaultFileName) { provider, _ ->
             val metadata = provider.getMetadata(remotePath).getOrThrow()
             val uploaded = provider.uploadAtomic(remotePath, bytes, metadata.etag, true)
@@ -299,8 +297,8 @@ class SyncRollbackProcessRecoveryDeviceTest {
         defaultFileName: String,
         remotePath: String
     ): ByteArray {
-        val preferences = SyncPreferences(log)
-        val resolver = SyncProviderResolver(credentials, preferences, log)
+        val preferences = SyncPreferences(null)
+        val resolver = SyncProviderResolver(credentials, preferences)
         val output = ByteArrayOutputStream()
         resolver.useProviderWithTarget(defaultFileName) { provider, _ ->
             provider.download(remotePath, output).getOrThrow()
@@ -310,11 +308,9 @@ class SyncRollbackProcessRecoveryDeviceTest {
 
     private fun productionCredentials(session: DatabaseSession, log: DebugLogBuffer) = SyncCredentialsStore(
         context,
-        KeystoreManager(context, log),
-        log,
-        SyncCacheEvictor(context, log),
-        session
-    )
+        KeystoreManager(context),
+        SyncCacheEvictor(context),
+        session)
 
     private fun save(database: KdbxDatabase, password: CharArray): ByteArray {
         val output = ByteArrayOutputStream()

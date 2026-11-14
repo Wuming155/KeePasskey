@@ -5,6 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.WorkerParameters
 import com.keepasskey.app.security.AutoLockManager
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.session.DatabaseSession
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -43,6 +44,8 @@ class PeriodicSyncWorker(
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             // 周期任务不重试；输出错误类别供 WorkManager 观察，避免把异常消息中的服务器数据写入状态。
+            // 归档同步留一行：只写类型与有界栈帧，覆盖「WorkManager Data 只能被调试工具读取」的盲区。
+            AppLog.w(TAG, "周期同步异常: ${t.javaClass.simpleName}", t)
             Result.success(
                 Data.Builder()
                     .putString(OUTPUT_STATUS, STATUS_WORKER_ERROR)
@@ -62,6 +65,8 @@ class PeriodicSyncWorker(
     }
 
     companion object {
+        private const val TAG = "PeriodicSyncWorker"
+
         const val OUTPUT_STATUS = "periodic_sync_status"
         const val OUTPUT_REASON = "periodic_sync_reason"
         const val OUTPUT_SYNC_OUTCOME = "periodic_sync_outcome"

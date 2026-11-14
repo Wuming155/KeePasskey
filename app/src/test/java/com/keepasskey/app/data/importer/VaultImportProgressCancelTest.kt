@@ -34,7 +34,7 @@ class VaultImportProgressCancelTest {
     @Test
     fun `落库进度回调按条推进且终值等于批次总数`() = runTest {
         val repository = FakeVaultRepository()
-        val importer = VaultImporter(repository, TEST_STRINGS, DebugLogBuffer())
+        val importer = VaultImporter(repository, TEST_STRINGS)
         val entries = (1..3).map { index ->
             ImportedEntry(
                 title = "导入进度条目$index",
@@ -86,7 +86,7 @@ class VaultImportProgressCancelTest {
                 )
             }
         }
-        val importer = VaultImporter(repository, TEST_STRINGS, DebugLogBuffer())
+        val importer = VaultImporter(repository, TEST_STRINGS)
         val entries = (1..2).map { index ->
             ImportedEntry(
                 title = "取消路径条目$index",

@@ -199,10 +199,8 @@ class SyncProviderResolverOwnershipTest {
         private val debugLog = DebugLogBuffer()
         val resolver = SyncProviderResolver(
             store,
-            SyncPreferences(debugLog, null),
-            debugLog,
-            factory
-        )
+            SyncPreferences(null),
+            factory)
 
         init {
             store.customEncryptor = { plaintext ->

@@ -55,9 +55,7 @@ class UnlockViewModelClearOnLeaveTest {
             FakeSettingsRepository(),
             null,
             null,
-            DebugLogBuffer(),
-            extendedSettingsStore = extendedStore
-        )
+            extendedSettingsStore = extendedStore)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}
         }

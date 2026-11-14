@@ -21,9 +21,36 @@ typealias DiagnosticEventSink = (level: String, tag: String, message: String, th
  */
 typealias DiagnosticLineSink = (level: String, tag: String, message: String) -> Unit
 
+/**
+ * 治理审计行出口（由宿主 Application 在冷启动时安装一次）。
+ *
+ * 与 [DiagnosticLineSink] 的区别只有一条、但很关键：**不受「诊断日志」开关约束**。
+ * 数据出域（导出 / 复制 / 清除）与用户可见的治理动作属可核验事实，用户关掉诊断日志后
+ * 仍须留下审计行；而普通事件必须随开关一起消失。因此两者是两条通道，不能合并。
+ */
+typealias DiagnosticAuditSink = (tag: String, message: String) -> Unit
+
+/**
+ * 「详细模式」过程细节出口（由宿主 Application 在冷启动时安装一次）。
+ *
+ * 与 [DiagnosticLineSink] 的区别：**调用方已在详细模式开关上做过判断**，本通道只负责
+ * 落缓冲，不再二次判开关。为什么不能直接用 `AppLog.d`：`v/d` 在 release 被 R8 剥离
+ * （`proguard-rules.pro`），而详细模式正是给用户定位疑难问题用的，release 下必须生效。
+ * 故 logcat 侧按 `i` 级输出（不被剥离），缓冲侧仍受「诊断日志」总开关约束。
+ */
+typealias DiagnosticVerboseSink = (tag: String, message: String) -> Unit
+
 /** release 诊断栈的帧预算（跨 cause 链累计，每个异常另保底 1 帧定位锚点）与 cause 链深度上限，避免故障路径刷爆日志 */
 const val MAX_DIAGNOSTIC_FRAMES = 32
 const val MAX_DIAGNOSTIC_CAUSES = 4
+
+/**
+ * 每个异常最多展开的 suppressed 异常数量。
+ *
+ * 清理失败（敏感缓冲未被擦除）属安全相关事实，此前被 `addSuppressed` 挂载后完全不可见。
+ * 只输出类型与「至少 1 帧」定位锚点、不输出 message；数量封顶防止异常工厂刷爆单行。
+ */
+const val MAX_DIAGNOSTIC_SUPPRESSED = 2
 
 /**
  * 统一日志包装器（ISSUE-P1-10 / ZT-10 整改）。
@@ -63,6 +90,22 @@ object AppLog {
     @Volatile
     var diagnosticLineSink: DiagnosticLineSink? = null
 
+    /**
+     * 进程级治理审计出口；null = 尚未安装（冷启动早期或纯 JVM 单测）。
+     *
+     * **不受「诊断日志」开关约束**：出口侧负责落审计行，调用方不得在此再判开关。
+     */
+    @Volatile
+    var diagnosticAuditSink: DiagnosticAuditSink? = null
+
+    /**
+     * 进程级「详细模式」出口；null = 尚未安装（冷启动早期或纯 JVM 单测）。
+     *
+     * 调用方负责判详细模式开关；本出口只落缓冲。logcat 侧按 `i` 级输出，不被 R8 剥离。
+     */
+    @Volatile
+    var diagnosticVerboseSink: DiagnosticVerboseSink? = null
+
     fun v(tag: String, message: String) {
         if (debugEnabled) safe { Log.v(tag, message) }
     }
@@ -101,6 +144,39 @@ object AppLog {
     }
 
     /**
+     * 治理审计：数据出域与用户可见的治理动作（导出 / 复制 / 清除 / 进程退出记录）。
+     *
+     * 与 [i] / [w] / [e] 的差别是**不受「诊断日志」开关约束**——审计行属可核验的治理事实，
+     * 用户关掉诊断日志后仍须留下；出口侧负责落盘，调用方不得再判开关。
+     * 不得用于业务状态（那不是审计，那是 [i]）。
+     */
+    fun audit(tag: String, message: String) {
+        safe { Log.i(tag, message) }
+        publishAudit(tag, message)
+    }
+
+    /**
+     * 「详细模式」过程细节：调用方**已**判过详细模式开关，本入口只负责投递。
+     *
+     * 不用 [d] 的原因：`v/d` 在 release 被 R8 剥离，而详细模式正是给用户定位疑难问题用的，
+     * release 下必须生效。故 logcat 侧按 `i` 级输出（不被剥离），缓冲侧仍受诊断总开关约束。
+     * 不得用于普通事件——那会绕过详细模式开关，把过程细节塞进所有人的日志。
+     */
+    fun verbose(tag: String, message: String) {
+        safe { Log.i(tag, message) }
+        val sink = diagnosticVerboseSink
+        if (sink == null) {
+            publishLine("DEBUG", tag, message)
+            return
+        }
+        try {
+            sink(tag, message)
+        } catch (_: Throwable) {
+            // 诊断出口自身失败不得冒泡到业务路径
+        }
+    }
+
+    /**
      * 故障事件出 logcat 之外的第二通道：只转发**带异常**的 e/w（纯文案事件由业务调用点自行
      * 留痕，避免重复的降级告警刷满缓冲）。出口侧异常同样 fail-safe，绝不影响业务主流程。
      */
@@ -123,6 +199,16 @@ object AppLog {
         }
     }
 
+    /** 治理审计的第二通道；出口侧不判「诊断日志」开关（那是本通道存在的理由） */
+    private fun publishAudit(tag: String, message: String) {
+        val sink = diagnosticAuditSink ?: return
+        try {
+            sink(tag, message)
+        } catch (_: Throwable) {
+            // 审计出口自身失败不得冒泡到业务路径
+        }
+    }
+
     private inline fun safe(block: () -> Unit) {
         try {
             block()
@@ -133,12 +219,12 @@ object AppLog {
 }
 
 /**
- * release 诊断文本：调用方 message + 异常类型 + 栈帧，异常 message / cause message /
- * suppressed 一律不外传。
+ * release 诊断文本：调用方 message + 异常类型 + 栈帧，异常 message / cause message 一律不外传；
+ * suppressed 异常只输出类型与有界定位帧（清理失败与主异常同等可见，但不透出 message）。
  *
- * 输出保持 Java 栈的通用形态（`类型` 行、`\tat 类.方法(文件:行)`、`Caused by: 类型`），
- * 使 release 包中被混淆的类名/方法名/行号可经 `retrace` + `mapping.txt` 还原；
- * 为此 cause 的类型行**不加**尖括号等装饰，否则 retrace 不识别该行（实测）。
+ * 输出保持 Java 栈的通用形态（`类型` 行、`\tat 类.方法(文件:行)`、`Caused by: 类型`、
+ * `\tSuppressed: 类型`），使 release 包中被混淆的类名/方法名/行号可经 `retrace` + `mapping.txt`
+ * 还原；为此类型行**不加**尖括号等装饰，否则 retrace 不识别该行（实测）。
  *
  * 本函数是 logcat 输出与应用内可导出诊断缓冲的**唯一**栈帧格式化入口：缓冲侧复用同一形态，
  * 保证用户导出的故障定位信息与 logcat 同源。调用方可按「详细日志模式」调小 [frameBudget]
@@ -160,6 +246,8 @@ fun diagnosticText(
     var remainingFrames = frameBudget
     var causeDepth = 0
     var chainTruncated = false
+    var suppressedShown = 0
+    var suppressedTruncated = false
     var current: Throwable? = t
     var isCause = false
     while (current != null) {
@@ -173,6 +261,25 @@ fun diagnosticText(
             if (shown < frames.size) append("\n\t... ").append(frames.size - shown).append(" more")
             remainingFrames = (remainingFrames - shown).coerceAtLeast(0)
         }
+        // 清理失败（敏感缓冲未擦除等）挂在主异常的 suppressed 上。此前完全不可见；这里只输出
+        // 类型与至少 1 帧定位锚点，message 仍不外传，数量受 [MAX_DIAGNOSTIC_SUPPRESSED] 约束。
+        for (suppressed in current.suppressed) {
+            if (suppressedShown >= MAX_DIAGNOSTIC_SUPPRESSED) {
+                suppressedTruncated = true
+                break
+            }
+            append("\n\tSuppressed: ").append(suppressed.javaClass.name)
+            val suppressedFrames = suppressed.stackTrace
+            if (suppressedFrames.isNotEmpty()) {
+                val shown = maxOf(1, minOf(suppressedFrames.size, remainingFrames))
+                for (i in 0 until shown) append("\n\tat ").append(suppressedFrames[i])
+                if (shown < suppressedFrames.size) {
+                    append("\n\t... ").append(suppressedFrames.size - shown).append(" more")
+                }
+                remainingFrames = (remainingFrames - shown).coerceAtLeast(0)
+            }
+            suppressedShown++
+        }
         val cause = current.cause
         val next = if (cause === current) null else cause
         if (next == null) break
@@ -185,4 +292,5 @@ fun diagnosticText(
         causeDepth++
     }
     if (chainTruncated) append("\n... cause chain truncated")
+    if (suppressedTruncated) append("\n... suppressed truncated")
 }

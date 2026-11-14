@@ -1,5 +1,6 @@
 package com.keepasskey.app.autofill
 
+import com.keepasskey.app.coroutines.catchAndLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.coroutines.safeLaunch
@@ -87,7 +88,7 @@ class AutofillPickerViewModel @Inject constructor(
         val session = databaseSession ?: return
         viewModelScope.safeLaunch("AutofillPickerViewModel") {
             var seenFirst = false
-            session.databaseFlow.collect { db ->
+            session.databaseFlow.catchAndLog("AutofillPickerViewModel").collect { db ->
                 // 首个 emission 是当前已装载的那一代，跳过（避免与 loadEntries 重复装载）
                 if (!seenFirst) {
                     seenFirst = true

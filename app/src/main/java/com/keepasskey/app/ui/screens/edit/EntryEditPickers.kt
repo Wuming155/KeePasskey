@@ -22,6 +22,7 @@ import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.vault.PasskeyImportConfirmDialog
 import com.keepasskey.app.util.StreamLimitExceededException
 import com.keepasskey.app.util.readBoundedBytes
+import com.keepasskey.core.log.AppLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,8 @@ internal data class EntryEditPickers(
  * `ISSUE-P3-295` AC②：单附件添加上界——**与解析侧预算同一数字**
  * （[com.keepasskey.database.xml.AttachmentSizeLimits.MAX_ATTACHMENT_BYTES]）。
  */
+private const val TAG = "EntryEditPickers"
+
 private val MAX_ATTACHMENT_BYTES: Long =
     com.keepasskey.database.xml.AttachmentSizeLimits.MAX_ATTACHMENT_BYTES
 
@@ -236,8 +239,10 @@ private fun rememberAttachmentPicker(
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
+                    // 读失败（权限失效 / 流被关闭 / 解析异常）不得伪装成「内容为空」
+                    AppLog.w(TAG, "附件读取失败: ${e.javaClass.simpleName}")
                     withContext(Dispatchers.Main) {
-                        viewModel.showMessage(UiMessage(R.string.edit_attachment_empty))
+                        viewModel.showMessage(UiMessage(R.string.edit_attachment_read_failed))
                     }
                 }
             }
@@ -304,8 +309,10 @@ private fun rememberCustomIconPicker(
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
+                    // 读失败与「不是有效图片」是两回事：前者是权限 / IO，后者是内容格式。
+                    AppLog.w(TAG, "自定义图标读取失败: ${e.javaClass.simpleName}")
                     withContext(Dispatchers.Main) {
-                        viewModel.showMessage(UiMessage(R.string.icon_invalid_not_png))
+                        viewModel.showMessage(UiMessage(R.string.edit_scan_gallery_read_error))
                     }
                 }
             }

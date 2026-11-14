@@ -1,7 +1,7 @@
 package com.keepasskey.app.data.importer
 
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.ui.model.StringsProvider
 import com.keepasskey.core.result.KdbxResult
@@ -50,7 +50,6 @@ import javax.inject.Singleton
 class VaultImporter @Inject constructor(
     private val repository: VaultRepository,
     private val strings: StringsProvider,
-    private val debugLog: DebugLogBuffer,
     private val databaseSession: DatabaseSession? = null
 ) {
 
@@ -140,7 +139,7 @@ class VaultImporter @Inject constructor(
         }
         if (run.imported + run.updated == 0 && run.failed > 0) {
             // 整体失败：不留「部分成功」的错觉，向上显式返回 Failure
-            debugLog.error(
+            AppLog.e(
                 TAG,
                 "导入整体失败: 失败=${run.failed}, 首个异常类型=${run.firstFailureType ?: NONE_LABEL}"
             )
@@ -161,7 +160,7 @@ class VaultImporter @Inject constructor(
             recycleBinIncomplete = run.recycleBinIncomplete
         )
         // 审计留痕（ISSUE-P2-10 同一治理口径）：只记计数与来源标识，绝不记录任何条目字段
-        debugLog.audit(
+        AppLog.audit(
             TAG,
             "导入审计: 源=${outcome.source.id}, 新增=${outcome.imported}, 更新=${outcome.updated}, " +
                 "跳过=${outcome.skipped}, 失败=${outcome.failed}, 回收站=${outcome.movedToRecycleBin}"

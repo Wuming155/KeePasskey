@@ -1,7 +1,7 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.core.log.AppLog
 import android.content.SharedPreferences
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.sync.engine.SyncCache
 
 /**
@@ -82,7 +82,7 @@ internal object SyncCredentialKeys {
      * 返回值仅供日志：是否真的把配置归属给了该库（false 的两种成因——已迁移过、
      * 或该库自己已有记录——都不影响「全局键被清除」这一结果）。
      */
-    fun adoptLegacyInto(prefs: SharedPreferences, dbId: String?, debugLog: DebugLogBuffer?): Boolean {
+    fun adoptLegacyInto(prefs: SharedPreferences, dbId: String?): Boolean {
         if (dbId.isNullOrBlank()) return false
         if (ALL_BASES.none { prefs.contains(it) }) return false
 
@@ -102,7 +102,7 @@ internal object SyncCredentialKeys {
         ALL_BASES.forEach { editor.remove(it) }
         editor.apply()
         // 只记布尔与计数（命名空间标识是路径 / URI，属敏感插值，绝不进日志）
-        debugLog?.info(
+        AppLog.i(
             TAG,
             "同步配置按库归属：moved=$targetHasRecord legacyKeys=${ALL_BASES.size}"
         )

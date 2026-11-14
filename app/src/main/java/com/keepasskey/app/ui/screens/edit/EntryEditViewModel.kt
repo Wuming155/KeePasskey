@@ -1,5 +1,6 @@
 package com.keepasskey.app.ui.screens.edit
 
+import com.keepasskey.app.coroutines.catchAndLog
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import com.keepasskey.app.R
@@ -194,7 +195,7 @@ class EntryEditViewModel @Inject constructor(
             }
         }
         viewModelScope.safeLaunch("EntryEditViewModel") {
-            vaultRepository.getGroups().collect { groups ->
+            vaultRepository.getGroups().catchAndLog("EntryEditViewModel").collect { groups ->
                 _uiState.update { it.copy(availableGroups = groups) }
             }
         }
@@ -207,7 +208,8 @@ class EntryEditViewModel @Inject constructor(
         // PD-47：随设置流刷新防截屏开关快照（扫码对话框在组合时消费当前值）
         settingsRepository?.let { repo ->
             viewModelScope.safeLaunch("EntryEditViewModel") {
-                repo.getSettings().map { it.flagSecureEnabled }.collect { _flagSecureEnabled.value = it }
+                repo.getSettings().map { it.flagSecureEnabled }.catchAndLog("EntryEditViewModel")
+                    .collect { _flagSecureEnabled.value = it }
             }
         }
 
@@ -216,7 +218,7 @@ class EntryEditViewModel @Inject constructor(
         // ISSUE-P3-368 AC②：保存链进度桥接——0..1 确定段、null 分段不确定段，
         // 即发即弃只更新 UI 状态（顶栏进度条在 isSaving 期间渲染）
         viewModelScope.safeLaunch("EntryEditViewModel") {
-            vaultRepository.ioProgress().collect { value ->
+            vaultRepository.ioProgress().catchAndLog("EntryEditViewModel").collect { value ->
                 _uiState.update { it.copy(saveProgress = value) }
             }
         }

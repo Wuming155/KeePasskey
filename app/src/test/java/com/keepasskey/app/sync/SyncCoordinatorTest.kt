@@ -194,7 +194,7 @@ class SyncCoordinatorTest {
         assertTrue(createResult is com.keepasskey.core.result.KdbxResult.Success)
 
         credentialsStore = SyncCredentialsStore(fakeContext, null)
-        coordinator = SyncCoordinator(fakeContext, databaseSession, credentialsStore, com.keepasskey.app.data.logger.DebugLogBuffer(), TEST_STRINGS)
+        coordinator = SyncCoordinator(fakeContext, databaseSession, credentialsStore, TEST_STRINGS)
     }
 
     @Test
@@ -213,11 +213,9 @@ class SyncCoordinatorTest {
             fakeContext,
             databaseSession,
             credentialsStore,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
             TEST_STRINGS,
             syncSession = session,
-            periodicSyncProbeStore = probeStore
-        )
+            periodicSyncProbeStore = probeStore)
         try {
             databaseSession.lock()
 
@@ -309,11 +307,9 @@ class SyncCoordinatorTest {
             fakeContext,
             DatabaseSession(),
             credentialsStore,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
             TEST_STRINGS,
             syncSession = session,
-            periodicSyncProbeStore = probeStore
-        )
+            periodicSyncProbeStore = probeStore)
 
         try {
             databaseSession.lock()
@@ -366,14 +362,12 @@ class SyncCoordinatorTest {
                 fakeContext,
                 restartedSession,
                 credentialsStore,
-                com.keepasskey.app.data.logger.DebugLogBuffer(),
                 TEST_STRINGS,
                 syncSession = SyncSessionState().apply {
                     testSyncProvider = provider
                     testRemotePath = remotePath
                 },
-                periodicSyncProbeStore = probeStore
-            )
+                periodicSyncProbeStore = probeStore)
             val unlockedResult = unlockedCoordinator.runPeriodicSync()
             assertTrue("解锁后完整同步必须收敛且不能覆盖 B: $unlockedResult", unlockedResult is PeriodicSyncWorkResult.FullSync)
             val unlockedDatabase = requireNotNull(restartedSession.databaseFlow.value)
@@ -457,14 +451,12 @@ class SyncCoordinatorTest {
             fakeContext,
             DatabaseSession(),
             credentialsStore,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
             TEST_STRINGS,
             syncSession = SyncSessionState().apply {
                 testSyncProvider = provider
                 testRemotePath = remotePath
             },
-            periodicSyncProbeStore = probeStore
-        )
+            periodicSyncProbeStore = probeStore)
         try {
             val recovered = coldCoordinator.runPeriodicSync()
 
@@ -528,14 +520,14 @@ class SyncCoordinatorTest {
 
         var injectHighWaterFailure = true
         val failureLog = com.keepasskey.app.data.logger.DebugLogBuffer()
-        val preferences = SyncPreferences(failureLog, null)
+        val preferences = SyncPreferences(null)
         val sessionState = SyncSessionState().apply {
             testSyncProvider = provider
             testRemotePath = remotePath
         }
-        val resolver = SyncProviderResolver(credentialsStore, preferences, failureLog)
-        val codec = SyncDatabaseCodec(databaseSession, failureLog)
-        val conflicts = SyncConflictController(databaseSession, codec, TEST_STRINGS, sessionState, failureLog)
+        val resolver = SyncProviderResolver(credentialsStore, preferences)
+        val codec = SyncDatabaseCodec(databaseSession)
+        val conflicts = SyncConflictController(databaseSession, codec, TEST_STRINGS, sessionState)
         val changes = SyncContentChangeDetector(codec, sessionState)
         val rollbackDir = File(fakeContext.filesDir, SyncRollbackGuard.STATE_DIR_NAME)
         val cycle = SyncCycleRunner(
@@ -564,7 +556,6 @@ class SyncCoordinatorTest {
             fakeContext,
             databaseSession,
             credentialsStore,
-            failureLog,
             TEST_STRINGS,
             syncSession = sessionState,
             syncPreferences = preferences,
@@ -610,13 +601,11 @@ class SyncCoordinatorTest {
                 fakeContext,
                 restartedSession,
                 credentialsStore,
-                com.keepasskey.app.data.logger.DebugLogBuffer(),
                 TEST_STRINGS,
                 syncSession = SyncSessionState().apply {
                     testSyncProvider = provider
                     testRemotePath = remotePath
-                }
-            )
+                })
             provider.remoteStorage[remotePath] = remoteA.clone() to "etag-a-replayed"
             val resumed = restartedCoordinator.syncNow()
             assertTrue("持久 quarantine 必须阻止重建后自动采用 A：$resumed", resumed is SyncOutcome.Error)
@@ -664,7 +653,6 @@ class SyncCoordinatorTest {
         val guard = AutoLockSessionGuard(
             databaseSession,
             FakeSettingsRepository(),
-            debugLog,
             holdoff = holdoff
         )
         val session = SyncSessionState().apply {
@@ -675,12 +663,10 @@ class SyncCoordinatorTest {
             fakeContext,
             databaseSession,
             credentialsStore,
-            debugLog,
             TEST_STRINGS,
             extendedSettingsStore = settings,
             syncSession = session,
-            autoLockGuard = guard
-        )
+            autoLockGuard = guard)
         val entryId = KdbxUuid.random()
         val baseEntry = KdbxEntry(
             id = entryId,
@@ -940,10 +926,8 @@ class SyncCoordinatorTest {
             fakeContext,
             databaseSession,
             credentialsStore,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
             TEST_STRINGS,
-            extendedSettingsStore = preferences
-        ).apply {
+            extendedSettingsStore = preferences).apply {
             testSyncProvider = memoryProvider
             testRemotePath = remotePath
         }

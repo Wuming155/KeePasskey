@@ -223,11 +223,9 @@ class SyncSessionCredentialReleaseTest {
         val databaseSession = DatabaseSession()
         return SyncConflictController(
             databaseSession = databaseSession,
-            codec = SyncDatabaseCodec(databaseSession, DebugLogBuffer()),
-            strings = StringsProvider { _, _ -> "" },
-            session = state,
-            debugLog = DebugLogBuffer()
-        )
+            codec = SyncDatabaseCodec(databaseSession),
+            strings = com.keepasskey.app.ui.model.StringsProvider { _, _ -> "" },
+            session = state)
     }
 
     private val engineSequence = java.util.concurrent.atomic.AtomicInteger()

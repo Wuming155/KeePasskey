@@ -2,11 +2,19 @@ package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.R
 import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.logger.DiagnosticLogHistory
 import com.keepasskey.app.data.repository.FakeVaultRepository
 import com.keepasskey.app.security.ClipboardSecurityChannel
+import com.keepasskey.app.testutil.installAppLogBridge
+import com.keepasskey.app.testutil.resetAppLogBridge
 import com.keepasskey.app.ui.model.StringsProvider
+import java.io.ByteArrayOutputStream
+import java.nio.file.Files
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -21,20 +29,29 @@ import org.junit.Test
  */
 class DebugLogCopyTest {
 
-    private val strings = StringsProvider { id, _ ->
+    private val strings = StringsProvider { id, args ->
         when (id) {
             R.string.debug_report_title -> "REPORT-TITLE"
             R.string.debug_report_env -> "REPORT-ENV"
-            R.string.debug_report_state -> "REPORT-STATE"
+            R.string.debug_report_state -> "REPORT-STATE ${args.joinToString("/")}"
             R.string.debug_copy_truncated -> "TRUNCATED"
             R.string.debug_clip_label -> "CLIP-LABEL"
             else -> "s$id"
         }
     }
 
+    @After
+    fun tearDown() {
+        resetAppLogBridge()
+        // 归档是进程级单例：排空删除任务，避免临时目录里的记录影响后续用例
+        DiagnosticLogHistory.clear()
+        DiagnosticLogHistory.snapshotForExport()
+    }
+
     @Test
     fun `复制写入与导出同源的脱敏报告并回报成功`() {
         val buffer = DebugLogBuffer()
+        installAppLogBridge(buffer)
         buffer.warn("Sync", "同步失败: https://dav.example.com/vault.kdbx")
         val expectedBody = buffer.exportSanitizedText()
         val clipboard = FakeClipboard()
@@ -71,6 +88,8 @@ class DebugLogCopyTest {
     fun `通道缺失或写入失败都如实报失败且留审计`() {
         listOf(null, FakeClipboard(fail = true)).forEach { clipboard ->
             val buffer = DebugLogBuffer()
+            installAppLogBridge(buffer)
+        installAppLogBridge(buffer)
             buffer.info("T", "事件")
             val controller = controller(buffer, clipboard)
 
@@ -112,6 +131,95 @@ class DebugLogCopyTest {
         assertFalse(clipped.contains("TRUNCATED"))
     }
 
+    @Test
+    fun `报告头行数与时间范围取自正文同一份快照`() {
+        val buffer = DebugLogBuffer()
+        installAppLogBridge(buffer)
+        buffer.info("T", "first-entry")
+        buffer.warn("T", "second-entry")
+        val clipboard = FakeClipboard()
+        val controller = controller(buffer, clipboard)
+
+        controller.copyDebugLogs()
+
+        val text = clipboard.lastText?.toString().orEmpty()
+        assertTrue("报告头须给出与正文一致的行数：$text", text.contains("REPORT-STATE 2/2000/0/"))
+        val body = text.substringAfter("------------------------------\n", "")
+        assertEquals("正文行数应与报告头一致", 2, body.lines().size)
+        assertTrue(body.lines().all { it.startsWith("[") })
+    }
+
+    @Test
+    fun `内存为空但磁盘归档有记录时可正常复制`() {
+        val dir = Files.createTempDirectory("diagnostic-copy").toFile()
+        val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+        DiagnosticLogHistory.configure(dir, 3)
+        DiagnosticLogHistory.appendSync(
+            "[$today] [09:00:00.000] [main] [INFO] [Archive] archived-entry"
+        )
+
+        val clipboard = FakeClipboard()
+        // 模拟进程重启：内存缓冲为空，只有上一条进程写入的归档
+        val controller = controller(DebugLogBuffer(), clipboard)
+
+        controller.copyDebugLogs()
+
+        val text = clipboard.lastText?.toString().orEmpty()
+        assertTrue("归档正文应可复制：$text", text.contains("archived-entry"))
+        assertTrue("报告头须反映归档行数：$text", text.contains("REPORT-STATE 1/2000/0/"))
+        assertEquals(R.string.debug_copy_done, controller.debugExportFeedback.value?.resId)
+    }
+
+    @Test
+    fun `清除诊断日志后归档保留审计行且正文已删除`() {
+        val dir = Files.createTempDirectory("diagnostic-clear").toFile()
+        val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+        DiagnosticLogHistory.configure(dir, 3)
+        val buffer = DebugLogBuffer()
+        installAppLogBridge(buffer)
+        buffer.info("T", "cleared-entry")
+        // 等异步追加落盘，确保待清除的正文确实已经在归档里
+        DiagnosticLogHistory.snapshotForExport()
+
+        SettingsDebugLogActions(buffer).clearDebugLogs()
+
+        val archived = DiagnosticLogHistory.snapshotForExport().orEmpty()
+        assertFalse("用户清除后正文必须删除：$archived", archived.contains("cleared-entry"))
+        assertTrue("清除动作须留下可核查的审计行：$archived", archived.contains("日志清除"))
+    }
+
+    @Test
+    fun `导出流不可得时留警告并返回失败`() {
+        val buffer = DebugLogBuffer()
+        installAppLogBridge(buffer)
+        buffer.info("T", "事件")
+        val controller = controller(buffer, FakeClipboard())
+
+        val written = controller.writeDiagnosticReport { null }
+
+        assertFalse(written)
+        assertTrue(
+            "导出失败须可自证：${buffer.exportText()}",
+            buffer.exportText().contains("SAF 目标不可写")
+        )
+    }
+
+    @Test
+    fun `导出报告写入注入的流`() {
+        val buffer = DebugLogBuffer()
+        installAppLogBridge(buffer)
+        buffer.info("T", "事件")
+        val controller = controller(buffer, FakeClipboard())
+        val out = ByteArrayOutputStream()
+
+        val written = controller.writeDiagnosticReport { out }
+
+        assertTrue(written)
+        val report = out.toString(Charsets.UTF_8.name())
+        assertTrue("须含报告头：$report", report.contains("REPORT-TITLE"))
+        assertTrue("须含脱敏正文：$report", report.contains("[INFO] [T] 事件"))
+    }
+
     private fun controller(
         buffer: DebugLogBuffer,
         clipboard: ClipboardSecurityChannel?
@@ -121,7 +229,9 @@ class DebugLogCopyTest {
         appContext = null,
         strings = strings,
         scope = CoroutineScope(Dispatchers.Unconfined),
-        clipboard = clipboard
+        clipboard = clipboard,
+        // 复制已移入 IO：测试用 Unconfined 同步执行，保持「调用后即可断言」的既有形态
+        ioDispatcher = Dispatchers.Unconfined
     )
 
     private class FakeClipboard(private val fail: Boolean = false) : ClipboardSecurityChannel {

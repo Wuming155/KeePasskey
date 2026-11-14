@@ -117,16 +117,16 @@ class SyncColdStartRemoteOnlyDifferenceTest {
         val debugLog = DebugLogBuffer()
         val holdoff = if (withAutoLockGuard) AutoLockHoldoff() else null
         val autoLockGuard = holdoff?.let {
-            AutoLockSessionGuard(databaseSession, FakeSettingsRepository(), debugLog, holdoff = it)
+            AutoLockSessionGuard(databaseSession, FakeSettingsRepository(), holdoff = it)
         }
         val session = SyncSessionState()
-        val preferences = SyncPreferences(debugLog, null)
+        val preferences = SyncPreferences(null)
         val credentialsStore = SyncCredentialsStore(fakeContext, null)
         credentialsStore.customEncryptor = { plain -> Pair(byteArrayOf(1), plain) }
         credentialsStore.customDecryptor = { _, cipher -> cipher }
-        val providerResolver = SyncProviderResolver(credentialsStore, preferences, debugLog)
-        val codec = SyncDatabaseCodec(databaseSession, debugLog)
-        val conflicts = SyncConflictController(databaseSession, codec, REMOTE_DIFF_STRINGS, session, debugLog)
+        val providerResolver = SyncProviderResolver(credentialsStore, preferences)
+        val codec = SyncDatabaseCodec(databaseSession)
+        val conflicts = SyncConflictController(databaseSession, codec, REMOTE_DIFF_STRINGS, session)
         val changes = SyncContentChangeDetector(codec, session)
         val checkpoint = SyncLocalFileCheckpoint(fakeContext)
         val cycle = SyncCycleRunner(
@@ -389,13 +389,11 @@ class SyncColdStartRemoteOnlyDifferenceTest {
             context = fx.cycle.context,
             databaseSession = fx.databaseSession,
             syncCredentialsStore = credentials,
-            debugLog = DebugLogBuffer(),
             strings = REMOTE_DIFF_STRINGS,
             syncSession = fx.session,
             syncProviderResolver = fx.cycle.providerResolver,
             syncConflicts = fx.cycle.conflicts,
-            syncCycle = fx.cycle
-        )
+            syncCycle = fx.cycle)
         val messages = Channel<UiMessage>(Channel.UNLIMITED)
         val controller = VaultListSyncController(
             coordinator, this, REMOTE_DIFF_STRINGS

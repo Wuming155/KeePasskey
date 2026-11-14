@@ -67,4 +67,19 @@ class DiagnosticLogRedactorTest {
 
         assertFalse("豁免只覆盖「类名 + 紧随栈帧」的形态", redacted.contains("com.keepasskey.app"))
     }
+
+    @Test
+    fun `suppressed 类型行保留完整类名`() {
+        val text = "敏感缓冲擦除失败\n" +
+            "\tSuppressed: com.keepasskey.app.data.logger.CleanupException\n" +
+            "\tat com.keepasskey.app.data.logger.History.clear(History.kt:42)"
+
+        val redacted = DiagnosticLogRedactor.redact(text)
+
+        assertTrue(
+            "suppressed 类型行须保留 retrace 所需类名：$redacted",
+            redacted.contains("\tSuppressed: com.keepasskey.app.data.logger.CleanupException")
+        )
+        assertTrue(redacted.contains("\tat com.keepasskey.app.data.logger.History.clear"))
+    }
 }

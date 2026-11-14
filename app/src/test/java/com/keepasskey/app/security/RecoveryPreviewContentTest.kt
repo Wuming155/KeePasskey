@@ -127,11 +127,11 @@ class RecoveryPreviewContentTest {
         fields = mapOf(KdbxConstants.Fields.PASSWORD to ProtectedString(value, true))
     )
 
-    private fun store() = VaultRecoveryStore(null, DebugLogBuffer()).apply {
+    private fun store() = VaultRecoveryStore(null).apply {
         baseDirOverride = File(temporary.root, "recovery").apply { mkdirs() }
     }
 
     private fun coordinator(store: VaultRecoveryStore) = VaultRecoveryCoordinator(
-        null, store, RecoveryAlertStore(null), KeyFileVaultCopyStore(null, null, DebugLogBuffer()), DebugLogBuffer()
+        null, store, RecoveryAlertStore(null), KeyFileVaultCopyStore(null, null)
     )
 }

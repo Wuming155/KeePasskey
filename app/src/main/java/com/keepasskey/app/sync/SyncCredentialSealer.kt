@@ -1,6 +1,6 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.security.KeystoreManager
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
@@ -20,7 +20,6 @@ import javax.crypto.spec.GCMParameterSpec
  */
 internal class SyncCredentialSealer(
     private val keystoreManager: KeystoreManager?,
-    private val debugLog: DebugLogBuffer?,
     private val keyAlias: String
 ) {
 
@@ -65,7 +64,7 @@ internal class SyncCredentialSealer(
             // P2 整改：原实现 `catch (_: Exception) { null }` 全静默吞掉异常。
             // 密钥失效（用户增删指纹触发 setInvalidatedByBiometricEnrollment）或 Keystore 暂不可用时，
             // 封印失败会一路静默退化，运行期完全无从感知。现显式落调试日志——注意只记异常类型，绝不写明文。
-            debugLog?.error(TAG, "同步凭据封印失败，凭据未写入: ${e.javaClass.simpleName}")
+            AppLog.e(TAG, "同步凭据封印失败，凭据未写入: ${e.javaClass.simpleName}")
             null
         } finally {
             bytes.fill(0)
@@ -98,7 +97,7 @@ internal class SyncCredentialSealer(
         } catch (e: Exception) {
             // P2 整改：同上，解除封印失败不得静默。返回 null 由调用方按 fail-closed 处理，
             // 绝不退化为空字符串被上层误判为「用户主动清空了密码」。
-            debugLog?.warn(TAG, "同步凭据解除封印失败: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "同步凭据解除封印失败: ${e.javaClass.simpleName}")
             null
         } finally {
             decryptedBytes?.fill(0)

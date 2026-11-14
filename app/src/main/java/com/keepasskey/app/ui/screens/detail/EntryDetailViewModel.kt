@@ -7,7 +7,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
 import com.keepasskey.app.coroutines.safeLaunch
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.CustomIconAdmin
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
@@ -52,8 +51,6 @@ class EntryDetailViewModel @Inject constructor(
     private val autofillBlocklistStore: com.keepasskey.app.data.repository.AutofillBlocklistStore,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
-    // ISSUE-P2-10 (ZT-15)：导出审计记录通道（生产 DI 注入；单测可缺省）
-    private val debugLog: DebugLogBuffer? = null,
     // ISSUE-P3-02：库级自定义图标删除通道（生产 DI 经 CustomIconModule 注入；单测注入假实现）
     private val customIconAdmin: CustomIconAdmin? = null,
     // ISSUE-P3-02：展示装配调度器（生产 Dispatchers.Default；单测注入测试调度器保证断言确定性）
@@ -74,7 +71,7 @@ class EntryDetailViewModel @Inject constructor(
     private val strings: StringsProvider = stringsProvider.orFallback(appContext)
 
     // ISSUE-P2-10 (ZT-15)：明文附件导出审计（复用进程内日志缓冲，仅记类型与脱敏目标标识）
-    private val exportAuditRecorder: ExportAuditRecorder? = debugLog?.let { ExportAuditRecorder(it) }
+    private val exportAuditRecorder: ExportAuditRecorder? = ExportAuditRecorder()
 
     private val entryIdFlow = MutableStateFlow<String?>(savedStateHandle.get<String>("entryId"))
 
@@ -123,7 +120,6 @@ class EntryDetailViewModel @Inject constructor(
         vaultRepository = vaultRepository,
         appContext = appContext,
         exportAuditRecorder = exportAuditRecorder,
-        debugLog = debugLog
     )
 
     private val totpTicker = EntryDetailTotpTicker(vaultRepository)

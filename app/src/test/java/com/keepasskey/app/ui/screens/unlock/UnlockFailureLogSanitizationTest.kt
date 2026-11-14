@@ -1,5 +1,7 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.app.testutil.resetAppLogBridge
+import com.keepasskey.app.testutil.installAppLogBridge
 import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.FakeSettingsRepository
 import com.keepasskey.app.data.repository.FakeVaultRepository
@@ -42,6 +44,7 @@ class UnlockFailureLogSanitizationTest {
 
     @After
     fun tearDown() {
+        resetAppLogBridge()
         // 先取消本用例登记的 ViewModel 作用域、再恢复 Main（ISSUE-P3-189，见 MainDispatcherGuard）。
         MainDispatcherGuard.tearDown()
     }
@@ -49,6 +52,7 @@ class UnlockFailureLogSanitizationTest {
     @Test
     fun `主密码解锁失败日志不含库 id 密钥文件长度与异常原文`() = runTest {
         val debugLog = DebugLogBuffer()
+        installAppLogBridge(debugLog)
         val viewModel = createFailingViewModel(debugLog)
 
         // 模拟真实失败尝试：错误的密码 + 已选取的密钥文件（长度会被旧实现写进日志）
@@ -68,6 +72,10 @@ class UnlockFailureLogSanitizationTest {
             "失败留痕必须保留布尔判定（凭据错误标记）：$exported",
             exported.contains("invalidCreds=true")
         )
+        assertTrue("失败行须带链路标识：$exported", exported.contains("op=unlock-"))
+        assertTrue("失败行须带耗时：$exported", exported.contains("durMs="))
+        assertTrue("失败行须带非敏感分型：$exported", exported.contains("kind=CREDENTIALS"))
+        assertTrue("失败行须带 KdbxError 码：$exported", exported.contains("code="))
 
         // 反向：不得留库 id / 密钥文件长度字段 / 异常原文 message
         assertFalse("日志不得出现活动库 id：$exported", exported.contains(ACTIVE_DB_ID))
@@ -83,6 +91,7 @@ class UnlockFailureLogSanitizationTest {
     @Test
     fun `脱敏导出文本同样不含库 id`() = runTest {
         val debugLog = DebugLogBuffer()
+        installAppLogBridge(debugLog)
         val viewModel = createFailingViewModel(debugLog)
 
         viewModel.onPasswordChangeSecure("WrongPass#1".toCharArray())
@@ -95,6 +104,24 @@ class UnlockFailureLogSanitizationTest {
         )
     }
 
+    @Test
+    fun `解锁失败分型只按异常类型归类`() {
+        org.junit.Assert.assertEquals(
+            "CREDENTIALS",
+            unlockFailureKind(com.keepasskey.database.exception.KdbxInvalidCredentialsException("raw"))
+        )
+        org.junit.Assert.assertEquals(
+            "UNSUPPORTED_VERSION",
+            unlockFailureKind(com.keepasskey.database.exception.KdbxUnsupportedVersionException("raw"))
+        )
+        org.junit.Assert.assertEquals(
+            "CORRUPT",
+            unlockFailureKind(com.keepasskey.database.exception.KdbxCorruptFileException("raw"))
+        )
+        org.junit.Assert.assertEquals("IO", unlockFailureKind(java.io.IOException("raw")))
+        org.junit.Assert.assertEquals("UNKNOWN", unlockFailureKind(IllegalStateException("raw")))
+    }
+
     private fun TestScope.createFailingViewModel(debugLog: DebugLogBuffer): UnlockViewModel {
         // FakeVaultRepository 默认活动库 id = "db_personal"；forceInvalidCredentials 驱动认证失败分支
         val viewModel = UnlockViewModel(
@@ -102,7 +129,6 @@ class UnlockFailureLogSanitizationTest {
             settingsRepository = FakeSettingsRepository(),
             biometricAuthManager = null,
             biometricCredentialStorage = null,
-            debugLog = debugLog
         )
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
             viewModel.uiState.collect {}

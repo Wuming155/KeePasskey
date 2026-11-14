@@ -99,13 +99,13 @@ class PasskeyEntryCoordinatorSignCountTest {
     }
 
     private fun coordinatorOf(session: DatabaseSession): PasskeyEntryCoordinator =
-        PasskeyEntryCoordinator(session, DebugLogBuffer()) { KdbxResult.Success(Unit) }
+        PasskeyEntryCoordinator(session) { KdbxResult.Success(Unit) }
 
     /** `ISSUE-P1-590` 失败注入点：以可编排的落盘结果构造协调器。 */
     private fun coordinatorWithPersist(
         session: DatabaseSession,
         persist: suspend () -> KdbxResult<Unit>
-    ): PasskeyEntryCoordinator = PasskeyEntryCoordinator(session, DebugLogBuffer(), persist)
+    ): PasskeyEntryCoordinator = PasskeyEntryCoordinator(session, persist)
 
     /** 合法的样本 Passkey 数据（`ISSUE-P1-590` 新建入口用例用）。 */
     private fun samplePasskeyData(): PasskeyData = PasskeyImportFactory.toPasskeyData(

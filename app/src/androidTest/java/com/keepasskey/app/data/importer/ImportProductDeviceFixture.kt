@@ -2,7 +2,6 @@ package com.keepasskey.app.data.importer
 
 import android.net.Uri
 import androidx.test.platform.app.InstrumentationRegistry
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.EntryGroupIntent
 import com.keepasskey.app.data.repository.VaultDatabaseCatalog
 import com.keepasskey.app.data.repository.VaultRepository
@@ -50,10 +49,12 @@ internal class ImportProductDeviceFixture(val directory: File) {
             return result
         }
     }
-    private val log = DebugLogBuffer()
-    val controller = VaultImportController(context, ImporterRegistry(setOf(BrowserCsvImporter()), log),
-        VaultImporter(repository, StringsProvider { _, _ -> "未命名" }, log, session), log,
-        KdbxMergeController(context, session, SyncSessionState(), debugLog = log))
+    val controller = VaultImportController(
+        context,
+        ImporterRegistry(setOf(BrowserCsvImporter())),
+        VaultImporter(repository, StringsProvider { _, _ -> "未命名" }, session),
+        KdbxMergeController(context, session, SyncSessionState())
+    )
 
     /**
      * 关闭自动锁定：设备用例在无交互的前台跑数十秒，`AutoLockManager` 的闲置/后台定时器

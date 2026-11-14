@@ -122,9 +122,7 @@ class PasskeyCreationDeviceTest {
         )
         val coordinator = PasskeyEntryCoordinator(
             databaseSession = session,
-            debugLog = DebugLogBuffer(),
-            persistSession = { com.keepasskey.core.result.KdbxResult.Success(Unit) }
-        )
+            persistSession = { com.keepasskey.core.result.KdbxResult.Success(Unit) })
 
         val savedEntry = coordinator.saveNewPasskeyEntry(passkeyData, boundPackage = null).getOrNull()
         assertNotNull("创建的新条目必须成功落入会话（ISSUE-P1-590：落盘成功才交付数据）", savedEntry)
@@ -197,15 +195,13 @@ class PasskeyCreationDeviceTest {
             var persistCalls = 0
             val coordinator = PasskeyEntryCoordinator(
                 databaseSession = session,
-                debugLog = DebugLogBuffer(),
                 persistSession = {
                     persistCalls++
                     KdbxResult.Failure(
                         IOException("synthetic-device-persistence-failure"),
                         code = KdbxError.SAVE_FAILED
                     )
-                }
-            )
+                })
 
             val result = coordinator.saveNewPasskeyEntry(passkeyData, boundPackage = null)
 

@@ -1,10 +1,10 @@
 package com.keepasskey.app.ui.screens.settings
 
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.R
 import com.keepasskey.app.data.childdb.ChildDatabaseLimits
 import com.keepasskey.app.data.childdb.ChildDatabaseMountState
 import com.keepasskey.app.data.childdb.ChildDatabaseSessionManager
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.ui.model.UiMessage
 import com.keepasskey.app.ui.screens.unlock.KeyFileAccess
 import com.keepasskey.app.ui.screens.unlock.KeyFileReadResult
@@ -28,7 +28,6 @@ import kotlinx.coroutines.launch
 internal class SettingsChildDatabaseController(
     private val manager: ChildDatabaseSessionManager?,
     private val keyFileAccess: KeyFileAccess?,
-    private val debugLogBuffer: DebugLogBuffer,
     private val scope: CoroutineScope,
     private val stateSubscribeTimeoutMillis: Long
 ) {
@@ -186,11 +185,11 @@ internal class SettingsChildDatabaseController(
     private suspend fun persistSourcePermission(sourceUri: String) {
         val access = keyFileAccess
         if (access == null) {
-            debugLogBuffer.warn(TAG, "子库来源持久化读授权通道缺失：进程重启后需重新选择来源")
+            AppLog.w(TAG, "子库来源持久化读授权通道缺失：进程重启后需重新选择来源")
             return
         }
         if (!access.persistReadPermission(sourceUri)) {
-            debugLogBuffer.warn(TAG, "子库来源提供方不支持持久化读授权：仅本次会话可读")
+            AppLog.w(TAG, "子库来源提供方不支持持久化读授权：仅本次会话可读")
         }
     }
 
@@ -202,7 +201,7 @@ internal class SettingsChildDatabaseController(
         val requested = keyFileUri?.takeIf { it.isNotBlank() } ?: return null
         val access = keyFileAccess
         if (access == null) {
-            debugLogBuffer.warn(TAG, "子库密钥文件读取通道缺失，拒绝以缺失密钥文件继续")
+            AppLog.w(TAG, "子库密钥文件读取通道缺失，拒绝以缺失密钥文件继续")
             feedbackFlow.value = keyFileFeedback()
             return null
         }
@@ -211,7 +210,7 @@ internal class SettingsChildDatabaseController(
 
             else -> {
                 // 仅留痕分型名（Empty / Unreadable），不外传 Uri 与异常 message
-                debugLogBuffer.warn(TAG, "子库密钥文件不可用: ${result.javaClass.simpleName}")
+                AppLog.w(TAG, "子库密钥文件不可用: ${result.javaClass.simpleName}")
                 feedbackFlow.value = keyFileFeedback()
                 null
             }

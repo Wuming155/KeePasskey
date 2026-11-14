@@ -127,16 +127,15 @@ class ResumeSyncProbeCoordinatorProductionTest {
                 ciphertext.map { (it.toInt() xor XOR_MASK).toByte() }.toByteArray()
             }
             saveS3()
-            resolver = SyncProviderResolver(credentials, SyncPreferences(debugLog, null), debugLog, factory)
+            resolver = SyncProviderResolver(credentials, SyncPreferences(null), factory)
             coordinator = SyncCoordinator(
                 context,
                 databaseSession,
                 credentials,
-                debugLog,
                 STRINGS,
                 syncProviderResolver = resolver
             )
-            val lockGuard = AutoLockSessionGuard(databaseSession, settings, debugLog)
+            val lockGuard = AutoLockSessionGuard(databaseSession, settings)
             val lockManager = AutoLockManager(context, lockGuard, settings)
             probe = ResumeSyncProbeCoordinator(context, settings, coordinator, lockManager, STRINGS)
         }

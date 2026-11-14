@@ -100,8 +100,9 @@ class ConflictResolutionReadabilityTest {
         val session = com.keepasskey.database.session.DatabaseSession()
         val creds = com.keepasskey.app.sync.SyncCredentialsStore(fakeContext, null)
         val mockCoordinator = object : SyncCoordinator(
-            fakeContext, session, creds, com.keepasskey.app.data.logger.DebugLogBuffer()
-        ) {
+            fakeContext,
+            session,
+            creds) {
             override val conflictFlow: StateFlow<List<ConflictedEntryPair>>
                 get() = conflictFlowInternal.asStateFlow()
 

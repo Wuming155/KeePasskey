@@ -1,5 +1,6 @@
 package com.keepasskey.core.log
 
+import com.keepasskey.core.result.suppressCleanupFailure
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,6 +27,7 @@ class AppLogDiagnosticSinkTest {
     @After
     fun tearDown() {
         AppLog.diagnosticSink = null
+        AppLog.diagnosticLineSink = null
         AppLog.debugEnabled = false
     }
 
@@ -84,5 +86,69 @@ class AppLogDiagnosticSinkTest {
 
         AppLog.e("Fault", "错误事件", IllegalStateException("raw"))
         AppLog.w("Fault", "告警事件", IllegalArgumentException("raw"))
+    }
+
+    @Test
+    fun `纯文案事件经行出口转发且不重复占用异常出口`() {
+        val lines = mutableListOf<String>()
+        val diagnostics = mutableListOf<String>()
+        AppLog.diagnosticLineSink = { _, tag, message -> lines += "$tag:$message" }
+        AppLog.diagnosticSink = { _, tag, message, _ -> diagnostics += "$tag:$message" }
+
+        AppLog.i("Fault", "信息")
+        AppLog.e("Fault", "错误事件", IllegalStateException("raw"))
+
+        assertEquals("纯文案只走行出口", listOf("Fault:信息"), lines)
+        assertEquals("带异常事件只走诊断出口", listOf("Fault:错误事件"), diagnostics)
+    }
+
+    @Test
+    fun `suppressed 异常输出类型与定位帧且不透出原文`() {
+        val primary = IllegalStateException("primary-marker")
+        primary.addSuppressed(IllegalStateException("cleanup-marker"))
+
+        val text = diagnosticText("清理失败", primary, frameBudget = 4, maxCauses = 2)
+
+        assertTrue(
+            "清理失败须可定位到具体方法：$text",
+            text.contains("\tSuppressed: java.lang.IllegalStateException")
+        )
+        assertTrue("suppressed 也要有定位帧", text.contains("\tat "))
+        assertFalse("suppressed message 不得外传", text.contains("cleanup-marker"))
+        assertFalse(text.contains("primary-marker"))
+    }
+
+    @Test
+    fun `suppressed 数量有界并标注截断`() {
+        val primary = IllegalStateException("primary")
+        repeat(MAX_DIAGNOSTIC_SUPPRESSED + 2) { index ->
+            primary.addSuppressed(RuntimeException("cleanup-$index"))
+        }
+
+        val text = diagnosticText("清理失败", primary)
+
+        assertEquals(
+            MAX_DIAGNOSTIC_SUPPRESSED,
+            Regex("\\tSuppressed: ").findAll(text).count()
+        )
+        assertTrue("超出上限须显式标注", text.contains("... suppressed truncated"))
+    }
+
+    @Test
+    fun `清理失败经统一挂载入口后可在诊断文本中定位`() {
+        val primary = IllegalStateException("primary")
+
+        suppressCleanupFailure(primary) {
+            throw IllegalStateException("cleanup-secret")
+        }
+
+        val text = diagnosticText("敏感缓冲擦除失败", primary)
+
+        assertTrue(
+            "归档须能定位到清理方法：$text",
+            text.contains("\tSuppressed: java.lang.IllegalStateException")
+        )
+        assertTrue(text.contains("\tat "))
+        assertFalse("清理异常的 message 同样不外传", text.contains("cleanup-secret"))
     }
 }

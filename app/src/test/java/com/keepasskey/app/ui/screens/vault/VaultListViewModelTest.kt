@@ -119,9 +119,7 @@ class VaultListViewModelTest {
         return com.keepasskey.app.sync.SyncCoordinator(
             context,
             com.keepasskey.database.session.DatabaseSession(),
-            com.keepasskey.app.sync.SyncCredentialsStore(context, null),
-            com.keepasskey.app.data.logger.DebugLogBuffer()
-        )
+            com.keepasskey.app.sync.SyncCredentialsStore(context, null))
     }
 
     /** ISSUE-P2-353：记录型剪贴板通道——只记录调用与内容，不触碰 Android 剪贴板（纯 JVM）。 */

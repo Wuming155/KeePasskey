@@ -112,9 +112,7 @@ class BreachCheckHealthTest {
             fakeContext,
             DatabaseSession(),
             credentialsStore,
-            com.keepasskey.app.data.logger.DebugLogBuffer(),
-            TEST_STRINGS
-        )
+            TEST_STRINGS)
         return SettingsViewModel(
             FakeSettingsRepository(),
             TestVaultRepository(listOf(breachedEntry())),

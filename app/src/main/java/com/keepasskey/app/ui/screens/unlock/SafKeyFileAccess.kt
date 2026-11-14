@@ -1,10 +1,10 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -38,7 +38,6 @@ class SafKeyFileAccess @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
     private val extendedSettingsStore: ExtendedSettingsStore,
-    private val debugLog: DebugLogBuffer
 ) : KeyFileAccess {
 
     override suspend fun isRememberEnabled(): Boolean = withContext(Dispatchers.IO) {
@@ -46,7 +45,7 @@ class SafKeyFileAccess @Inject constructor(
         // cancel-n/a: extendedSettingsStore.load() 为非挂起同步读取，无挂起点
         runCatching { extendedSettingsStore.load().rememberKeyFileLocation }
             .getOrElse {
-                debugLog.warn(TAG, "密钥文件记忆偏好读取失败，按关闭处理")
+                AppLog.w(TAG, "密钥文件记忆偏好读取失败，按关闭处理")
                 false
             }
     }
@@ -59,13 +58,13 @@ class SafKeyFileAccess @Inject constructor(
                 // cancel-n/a: Uri.parse 为纯 CPU 解析，无挂起点（persistReadPermission / hasPersistedReadPermission 同）
                 val target = runCatching { Uri.parse(uri) }.getOrNull()
                 if (target == null || uri.isBlank()) {
-                    debugLog.warn(TAG, "密钥文件 Uri 非法，拒绝读取")
+                    AppLog.w(TAG, "密钥文件 Uri 非法，拒绝读取")
                     return@withContext KeyFileReadResult.Unreadable
                 }
                 try {
                     val stream = context.contentResolver.openInputStream(target)
                     if (stream == null) {
-                        debugLog.warn(TAG, "密钥文件流不可打开（提供方拒绝或已失效）")
+                        AppLog.w(TAG, "密钥文件流不可打开（提供方拒绝或已失效）")
                         return@withContext KeyFileReadResult.Unreadable
                     }
                     // use{} 强关闭；分块缓冲与内部缓冲在 readKeyFileBytes 内清零
@@ -74,7 +73,7 @@ class SafKeyFileAccess @Inject constructor(
                         readKeyFileBytes(it) { readContext.ensureActive() }.also { result -> ownedBytes = result }
                     }
                     if (bytes.isEmpty()) {
-                        debugLog.warn(TAG, "密钥文件为空文件，拒绝作为密钥材料")
+                        AppLog.w(TAG, "密钥文件为空文件，拒绝作为密钥材料")
                         KeyFileReadResult.Empty
                     } else {
                         KeyFileReadResult.Success(bytes, queryDisplayName(target))
@@ -83,7 +82,7 @@ class SafKeyFileAccess @Inject constructor(
                     throw c
                 } catch (e: Exception) {
                     // 禁止静默失败：仅留痕异常类名，不外传 Uri / 异常 message
-                    debugLog.warn(TAG, "密钥文件读取失败: ${e.javaClass.simpleName}")
+                    AppLog.w(TAG, "密钥文件读取失败: ${e.javaClass.simpleName}")
                     KeyFileReadResult.Unreadable
                 }
             }
@@ -108,11 +107,11 @@ class SafKeyFileAccess @Inject constructor(
         } catch (_: SecurityException) {
             // 提供方不支持持久化授权（或返回 Intent 未携带 FLAG_GRANT_READ_URI_PERMISSION）：
             // 优雅降级——本次会话仍可用（字节已读入），仅不记忆
-            debugLog.info(TAG, "密钥文件提供方不支持持久化读授权，降级为仅本次会话可用")
+            AppLog.i(TAG, "密钥文件提供方不支持持久化读授权，降级为仅本次会话可用")
             false
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            debugLog.warn(TAG, "密钥文件持久化读授权申请失败: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "密钥文件持久化读授权申请失败: ${e.javaClass.simpleName}")
             false
         }
     }
@@ -127,7 +126,7 @@ class SafKeyFileAccess @Inject constructor(
                     permission.isReadPermission && permission.uri == target
                 }
             }.getOrElse {
-                debugLog.warn(TAG, "持久化读授权查询失败，按无授权处理")
+                AppLog.w(TAG, "持久化读授权查询失败，按无授权处理")
                 false
             }
         }

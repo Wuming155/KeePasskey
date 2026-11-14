@@ -65,3 +65,11 @@ internal fun remoteFailureDescriptor(cause: Throwable?): String =
     (cause as? SyncException.ProtocolError)?.statusCode?.toString()
         ?: cause?.javaClass?.simpleName
         ?: "Unknown"
+
+/**
+ * 远端失败的**日志字段**（`ISSUE-P2` B2）：`kind=` 取归类枚举，`code=` 取状态码或异常类名。
+ *
+ * 与用户可见结论同源、同脱敏口径：只含枚举与状态码 / 类名，不含异常 message、URL 或主机。
+ */
+internal fun remoteFailureLogFields(cause: Throwable?): String =
+    "kind=${classifyRemoteFailure(cause)}, code=${remoteFailureDescriptor(cause)}"

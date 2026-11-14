@@ -1,7 +1,7 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.core.session.SessionLockObserver
 import com.keepasskey.sync.engine.SyncCache
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,7 +31,6 @@ import javax.inject.Singleton
 @Singleton
 class SyncCacheEvictor @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val debugLog: DebugLogBuffer
 ) : SessionLockObserver {
 
     /** 同步缓存目录（`context.cacheDir/sync`），与 [SyncCache.CACHE_DIR_NAME] 唯一对齐 */
@@ -58,15 +57,15 @@ class SyncCacheEvictor @Inject constructor(
 
         // 具体「哪些文件属于同步缓存」的知识保留在 sync 模块，避免 app 侧重复枚举后缀
         val cleared = runCatching { SyncCache(dir).clearAll() }.getOrElse { t ->
-            debugLog.error(TAG, "同步缓存清理失败: ${t.javaClass.simpleName}")
+            AppLog.e(TAG, "同步缓存清理失败: ${t.javaClass.simpleName}")
             false
         }
 
         val remaining = dir.list()?.count { !SyncCache.isRollbackStateFileName(it) } ?: 0
         if (!cleared || remaining > 0) {
-            debugLog.warn(TAG, "同步缓存残留 $remaining 项，锁定后密文可能仍可恢复")
+            AppLog.w(TAG, "同步缓存残留 $remaining 项，锁定后密文可能仍可恢复")
         } else {
-            debugLog.info(TAG, "同步缓存已随会话终止销毁")
+            AppLog.i(TAG, "同步缓存已随会话终止销毁")
         }
         return cleared && remaining == 0
     }

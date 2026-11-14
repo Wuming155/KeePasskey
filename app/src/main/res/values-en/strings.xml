@@ -486,6 +486,7 @@
     <string name="edit_scan_gallery_no_qr">No QR code found in the selected image, please try another one</string>
     <string name="edit_scan_gallery_read_error">Failed to read the image, please try another one</string>
     <string name="edit_attachment_empty">Attachment is empty, not added</string>
+    <string name="edit_attachment_read_failed">Failed to read the attachment. Check file access permission and try again.</string>
     <string name="edit_attachment_too_large">Attachment exceeds %1$d MB and was not added</string>
     <string name="edit_icon_too_large">Image exceeds %1$d MB and was not uploaded as an icon</string>
     <string name="edit_save_failed">Save failed: %1$s</string>
@@ -1296,7 +1297,7 @@
     <!-- ===== Diagnostics and logs subscreen ===== -->
     <string name="debug_section_options">Diagnostics</string>
     <string name="debug_log_title">Diagnostic log</string>
-    <string name="debug_log_sub">Runtime events and failure stack frames, redacted as they are written; you can turn this off</string>
+    <string name="debug_log_sub">Runtime events and failure stack frames, redacted as they are written; you can turn this off. When off, uncaught crashes are not recorded either.</string>
     <string name="debug_verbose_title">Verbose logging</string>
     <string name="debug_retention_title">Log retention</string>
     <string name="debug_retention_sub">Logs stay in app private storage; older entries are removed automatically</string>
@@ -1311,6 +1312,7 @@
     <string name="debug_export_done">Log exported</string>
     <string name="debug_export_failed">Log export failed, please retry</string>
     <string name="debug_copy_btn">Copy log</string>
+    <string name="debug_copy_clipboard_notice">Copied logs contain no passwords or other secrets, but they stay in the system clipboard and its history for a period this app cannot control. Clear the clipboard manually after pasting.</string>
     <string name="debug_copy_done">Log copied to clipboard</string>
     <string name="debug_copy_empty">No logs to copy</string>
     <string name="debug_copy_truncated">(Log is long; clipboard keeps the header and the most recent lines. Export for the full log.)</string>

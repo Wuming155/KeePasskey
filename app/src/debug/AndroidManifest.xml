@@ -18,6 +18,15 @@
     </queries>
 
     <application android:networkSecurityConfig="@xml/network_security_config">
+        <!--
+          ISSUE-P2 A5：早期崩溃留痕探针。Provider 初始化早于 Application.onCreate，
+          由标记文件触发一次异常，验证 attachBaseContext 安装的处理器能在该阶段留痕。
+          release 不声明此组件。
+        -->
+        <provider
+            android:name="com.keepasskey.app.debug.EarlyCrashProbeProvider"
+            android:authorities="${applicationId}.early_crash_probe"
+            android:exported="false" />
         <receiver
             android:name="com.keepasskey.app.sync.P3_628ScenarioReceiver"
             android:exported="true">

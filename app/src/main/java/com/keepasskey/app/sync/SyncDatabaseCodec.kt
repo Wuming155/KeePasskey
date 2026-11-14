@@ -1,6 +1,6 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.database.file.KdbxFile
@@ -22,7 +22,6 @@ import javax.inject.Singleton
 @Singleton
 class SyncDatabaseCodec @Inject constructor(
     private val databaseSession: DatabaseSession,
-    private val debugLog: DebugLogBuffer
 ) {
 
     suspend fun serializeLocalDatabase(db: KdbxDatabase): ByteArray? = withContext(Dispatchers.Default) {
@@ -36,7 +35,7 @@ class SyncDatabaseCodec @Inject constructor(
                 baos.toByteArray()
             } catch (e: Exception) { // cancel-n/a: 保护段为非挂起序列化（KdbxFile.save）
                 // P3-31 整改：序列化失败不再静默吞掉，至少落调试日志保留异常细节
-                debugLog.warn(SYNC_LOG_TAG, "本地数据库序列化失败（合并上传中断）: ${e.javaClass.simpleName}")
+                AppLog.w(SYNC_LOG_TAG, "本地数据库序列化失败（合并上传中断）: ${e.javaClass.simpleName}")
                 null
             } finally {
                 pwdClone?.let { Arrays.fill(it, '0') }
@@ -62,7 +61,7 @@ class SyncDatabaseCodec @Inject constructor(
         when (val result = databaseSession.parseExternalDatabase(bytes)) {
             is KdbxResult.Success -> result.data
             is KdbxResult.Failure -> {
-                debugLog.warn(SYNC_LOG_TAG, "远端数据库字节解析失败: ${result.error.javaClass.simpleName}")
+                AppLog.w(SYNC_LOG_TAG, "远端数据库字节解析失败: ${result.error.javaClass.simpleName}")
                 null
             }
         }

@@ -1,7 +1,7 @@
 package com.keepasskey.app.sync
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.database.session.DatabaseSession
 import com.keepasskey.sync.engine.SyncRollbackGuard
 import kotlinx.coroutines.CancellationException
@@ -19,7 +19,6 @@ internal class SyncRecoveryQueries(
     private val context: Context,
     private val databaseSession: DatabaseSession,
     private val syncCredentialsStore: SyncCredentialsStore,
-    private val debugLog: DebugLogBuffer,
     /** 惰性取用：构造期不得触达（无 `filesDir` 的测试上下文在构造期取用会抛错）。 */
     private val pendingUploads: () -> PeriodicSyncPendingUploadStore,
     private val probeStore: PeriodicSyncProbeStore?,
@@ -53,7 +52,7 @@ internal class SyncRecoveryQueries(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            debugLog.warn(SYNC_LOG_TAG, "读取同步恢复状态失败: ${failure.javaClass.simpleName}")
+            AppLog.w(SYNC_LOG_TAG, "读取同步恢复状态失败: ${failure.javaClass.simpleName}")
             true
         }
     }

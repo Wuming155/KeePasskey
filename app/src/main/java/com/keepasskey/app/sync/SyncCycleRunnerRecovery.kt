@@ -1,6 +1,7 @@
 package com.keepasskey.app.sync
 
 import com.keepasskey.app.R
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.database.file.KdbxDatabase
 import com.keepasskey.sync.engine.SyncCache
 import com.keepasskey.sync.engine.SyncCommitResult
@@ -185,7 +186,13 @@ import java.io.File
             // 经引擎 getOrThrow 原样重抛；仅捕 Exception 时 Error 在此脱网并杀死进程，
             // 且每个同步周期自动复发。远端可单方面触发该链路，必须在同步边界
             // 遏制为「本次同步失败」，不允许绕过应用自身的错误遏制框架。
-            // ISSUE-P3-311 项 3：异常 message 可能携带服务器可控串，UI 只出固定通用文案
+            // ISSUE-P3-311 项 3：异常 message 可能携带服务器可控串，UI 只出固定通用文案；
+            // 归档保留类型与有界栈帧，使远端裁决失败仍可定位到具体方法。
+            AppLog.e(
+                SYNC_LOG_TAG,
+                "同步远端裁决异常: ${remoteFailureLogFields(e)}",
+                e
+            )
             SyncOutcome.Error(strings.get(R.string.sync_error_unknown))
         }
     }

@@ -19,7 +19,7 @@ class WebDavPreservePasswordOnEmptySaveTest {
     @Before
     fun setUp() {
         prefsFake.clear()
-        store = SyncCredentialsStore(prefsFake.context(), null, DebugLogBuffer())
+        store = SyncCredentialsStore(prefsFake.context(), null)
         store.customEncryptor = { plain ->
             val cipher = plain.map { (it.toInt() xor 0x5A).toByte() }.toByteArray()
             byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12) to cipher

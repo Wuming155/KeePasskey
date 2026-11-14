@@ -1,12 +1,13 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.keepasskey.app.R
+import com.keepasskey.app.coroutines.catchAndLog
 import com.keepasskey.app.coroutines.safeLaunch
-import com.keepasskey.app.data.logger.DebugLogBuffer
 import com.keepasskey.app.data.repository.SettingsRepository
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.BiometricAuthManager
@@ -53,7 +54,6 @@ class UnlockViewModel @Inject constructor(
     // 依赖在类型上允许为 null 仅用于单测注入空实现；生产 DI 恒注入真实实例
     private val biometricAuthManager: BiometricAuthManager?,
     private val biometricCredentialStorage: BiometricCredentialStorage?,
-    private val debugLog: DebugLogBuffer,
     // TASK-21：非 Compose 层文案资源解析通道（生产 DI 注入真实现；单测注入假实现）
     private val stringsProvider: StringsProvider? = null,
     // ISSUE-P1-04：主密码解锁失败节流管理器（nullable 仅用于单测；生产 DI 恒注入真实实例）
@@ -99,7 +99,6 @@ class UnlockViewModel @Inject constructor(
         scope = viewModelScope,
         uiState = _uiState,
         keyFileAccess = keyFileAccess,
-        debugLog = debugLog,
         // §411（ISSUE-P3-448）：私有目录副本收编 / 副本优先恢复（无副本键时通道整体旁路）
         vaultCopyStore = keyFileVaultCopyStore,
         activeDbId = { activeDatabaseId }
@@ -114,7 +113,6 @@ class UnlockViewModel @Inject constructor(
         activeDbId = { activeDatabaseId },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
-        debugLog = debugLog,
         cryptoDispatcher = cryptoDispatcher,
         // ISSUE-P1-431（方案一）：封印载荷只装主密码，密钥文件因子从会话驻留取 /
         // 记忆现读（restoreRememberedKeyFile 内部走 ISSUE-P3-04 的 SAF 通道）
@@ -129,7 +127,6 @@ class UnlockViewModel @Inject constructor(
         activeDbId = { activeDatabaseId },
         biometricAuthManager = biometricAuthManager,
         biometricCredentialStorage = biometricCredentialStorage,
-        debugLog = debugLog,
         cryptoDispatcher = cryptoDispatcher
     )
 
@@ -142,7 +139,6 @@ class UnlockViewModel @Inject constructor(
         unlockThrottleManager = unlockThrottleManager,
         keyFileSession = keyFileSession,
         enrollment = biometricEnrollment,
-        debugLog = debugLog,
         activeDbId = { activeDatabaseId },
         databaseSession = databaseSession
     )
@@ -164,7 +160,7 @@ class UnlockViewModel @Inject constructor(
             var lastHasDatabase: Boolean? = null
             // ISSUE-P3-464 ②：活动库 id 变化检测（见 collect 内复位/恢复分支）
             var lastSeenDbId: String? = null
-            vaultRepository.getDatabases().collect { databases ->
+            vaultRepository.getDatabases().catchAndLog("UnlockViewModel").collect { databases ->
                 // ISSUE-P3-466 ②：**活动库认定只认显式活动项**（`isActive`）。列表刷新瞬时可能
                 // 无显式活动项，此时 `firstOrNull()` 回退只用于**展示**（名称 / 状态 / 快速解锁），
                 // 绝不据此改写 `activeDatabaseId`——否则会把密钥文件记忆与封印凭据错误绑到首项，
@@ -173,13 +169,13 @@ class UnlockViewModel @Inject constructor(
                 val displayActive = explicitActive ?: databases.firstOrNull()
                 if (displayActive != null) {
                     if (explicitActive == null) {
-                        debugLog.info("UnlockVM", "列表暂无显式活动库：沿用上次活动 dbId（回退首项仅用于展示）")
+                        AppLog.i("UnlockVM", "列表暂无显式活动库：沿用上次活动 dbId（回退首项仅用于展示）")
                     } else {
                         activeDatabaseId = explicitActive.id
                     }
                     // ISSUE-P2-460 真机取证：空状态 → 解锁表单切换（弹窗宿主存续判定）只在翻转时记
                     if (lastHasDatabase == false) {
-                        debugLog.info("UnlockVM", "库状态翻转: 无库→有库（空状态分支将让位解锁表单）")
+                        AppLog.i("UnlockVM", "库状态翻转: 无库→有库（空状态分支将让位解锁表单）")
                     }
                     lastHasDatabase = true
                     // Wave 12：快速解锁可用性 = 统一封印存储中存在本库凭据（ISSUE-P1-08 起仅强生物识别路径）。
@@ -215,7 +211,7 @@ class UnlockViewModel @Inject constructor(
                 } else {
                     activeDatabaseId = null
                     if (lastHasDatabase == true) {
-                        debugLog.info("UnlockVM", "库状态翻转: 有库→无库（回到空状态）")
+                        AppLog.i("UnlockVM", "库状态翻转: 有库→无库（回到空状态）")
                     }
                     lastHasDatabase = false
                     _uiState.update {
@@ -233,7 +229,7 @@ class UnlockViewModel @Inject constructor(
                 // 在途恢复任务的取消与编排收口在协调器内（它才持有 viewModelScope）
                 if (activeDatabaseId != lastSeenDbId && activeDatabaseId != null) {
                     lastSeenDbId = activeDatabaseId
-                    debugLog.info("UnlockVM", "活动库切换 → 密钥文件表单复位并按新库恢复")
+                    AppLog.i("UnlockVM", "活动库切换 → 密钥文件表单复位并按新库恢复")
                     keyFileSession.resetForActiveVaultAndRestore()
                 }
                 // ISSUE-P3-01：数据库/封印凭据状态变化后统一重算（与设置流抵达顺序解耦）
@@ -257,7 +253,7 @@ class UnlockViewModel @Inject constructor(
         viewModelScope.safeLaunch("UnlockViewModel") {
             // ISSUE-P3-368 AC①/AC②：打开/保存链路进度桥接——0..1 确定段、null 分段不确定段，
             // 即发即弃只更新 UI 状态（解锁页在 isLoading 期间渲染进度条）
-            vaultRepository.ioProgress().collect { value ->
+            vaultRepository.ioProgress().catchAndLog("UnlockViewModel").collect { value ->
                 _uiState.update { it.copy(loadProgress = value) }
             }
         }

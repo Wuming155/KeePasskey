@@ -101,8 +101,8 @@ class SettingsDatabaseWriteFeedbackTest {
             autofillBlocklistStore = AutofillBlocklistStore(null),
             autofillSaveBlocklistStore = AutofillSaveBlocklistStore(null),
             autofillFieldBlocklistStore = AutofillFieldBlocklistStore(null),
-            debugLogBuffer = DebugLogBuffer(),
             databaseSession = session,
+            debugLogBuffer = DebugLogBuffer(),
             scope = controllerScope
         )
 

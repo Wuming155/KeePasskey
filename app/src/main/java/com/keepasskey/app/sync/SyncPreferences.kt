@@ -1,6 +1,6 @@
 package com.keepasskey.app.sync
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.app.data.repository.ExtendedSettingsStore
 import com.keepasskey.app.ui.screens.settings.ExtendedSettings
 import javax.inject.Inject
@@ -14,13 +14,12 @@ import javax.inject.Singleton
  */
 @Singleton
 class SyncPreferences @Inject constructor(
-    private val debugLog: DebugLogBuffer,
     /**
      * ISSUE-P3-03 (43a)：进阶同步偏好源（分块上传、上传前远端比对、冲突策略、详细日志）。
      * 可空 + 默认 null 仅为保持既有单测构造点兼容——null 时全部按 [ExtendedSettings] 默认值
      * 处理（即接线前的行为），生产路径由 Hilt 注入真实偏好源。
      */
-    private val extendedSettingsStore: ExtendedSettingsStore? = null
+    private val extendedSettingsStore: ExtendedSettingsStore?
 ) {
 
     /** 当前生效的进阶偏好（无偏好源时回落默认值，语义等价于接线前的固定行为）。 */
@@ -33,6 +32,6 @@ class SyncPreferences @Inject constructor(
      * **叠加层**——总开关关闭时缓冲整条丢弃，详细模式不会单方面恢复记录。
      */
     fun verbose(settings: ExtendedSettings, message: String) {
-        if (settings.verboseSyncLog) debugLog.debug(SYNC_LOG_TAG, message)
+        if (settings.verboseSyncLog) AppLog.verbose(SYNC_LOG_TAG, message)
     }
 }

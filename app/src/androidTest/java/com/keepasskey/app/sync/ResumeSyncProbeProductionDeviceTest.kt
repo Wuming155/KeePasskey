@@ -76,11 +76,9 @@ class ResumeSyncProbeProductionDeviceTest {
         val originalAutoLockSettings = settings.getSettings().first()
         val credentials = SyncCredentialsStore(
             context,
-            KeystoreManager(context, log),
-            log,
-            SyncCacheEvictor(context, log),
-            session
-        )
+            KeystoreManager(context),
+            SyncCacheEvictor(context),
+            session)
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val initialNetworkAvailable = CompletableDeferred<Unit>()
         val networkWasLost = CompletableDeferred<Unit>()
@@ -166,9 +164,7 @@ class ResumeSyncProbeProductionDeviceTest {
                 context,
                 session,
                 credentials,
-                log,
-                StringsProvider { id, args -> context.getString(id, *args) }
-            )
+                StringsProvider { id, args -> context.getString(id, *args) })
             assertNull("P3-628 设备验收不得注入测试 Provider", coordinator.testSyncProvider)
 
             val target = requireNotNull(coordinator.resolveProbeTarget())
@@ -179,7 +175,7 @@ class ResumeSyncProbeProductionDeviceTest {
             settings.setSyncProbeOnResumeEnabled(true)
             val autoLock = AutoLockManager(
                 context,
-                AutoLockSessionGuard(session, settings, log),
+                AutoLockSessionGuard(session, settings),
                 settings
             )
             val probe = ResumeSyncProbeCoordinator(

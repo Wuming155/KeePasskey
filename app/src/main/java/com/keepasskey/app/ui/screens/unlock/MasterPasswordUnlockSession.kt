@@ -1,8 +1,9 @@
 package com.keepasskey.app.ui.screens.unlock
 
+import com.keepasskey.core.log.AppLog
 import androidx.fragment.app.FragmentActivity
 import com.keepasskey.app.R
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.app.data.logger.OpTrace
 import com.keepasskey.app.data.repository.VaultRepository
 import com.keepasskey.app.security.ThrottleGate
 import com.keepasskey.app.security.UnlockThrottleManager
@@ -34,7 +35,6 @@ internal class MasterPasswordUnlockSession(
     private val unlockThrottleManager: UnlockThrottleManager?,
     private val keyFileSession: KeyFileSessionCoordinator,
     private val enrollment: BiometricEnrollmentCoordinator,
-    private val debugLog: DebugLogBuffer,
     private val activeDbId: () -> String?,
     // ISSUE-P3-453：错误码 → 本地化文案通道（生产由宿主显式注入真实现）
     private val strings: StringsProvider = StringsProvider { _, _ -> "" },
@@ -62,7 +62,7 @@ internal class MasterPasswordUnlockSession(
     fun onPasswordChangeSecure(password: CharArray) {
         // F-25 同族整改（A6 报告「相邻发现」）：主密码**长度**亦属可导出调试缓冲的元数据，
         // 与库 id / 密钥文件长度同口径收敛，只记录事件本身
-        debugLog.info(TAG, "onPasswordChangeSecure: input updated")
+        AppLog.i(TAG, "onPasswordChangeSecure: input updated")
         passwordChars.fill('0')
         passwordChars = password.copyOf()
         uiState.update {
@@ -145,6 +145,9 @@ internal class MasterPasswordUnlockSession(
             }
             // ISSUE-P3-04：本次尝试是否携带密钥文件因子（决定失败语义分型与记忆写入）
             val usedKeyFile = keyFileSession.keyFileData != null
+            // ISSUE-P2 B1：解锁链路标识与耗时（起止行按 op 聚合；失败行带非敏感分型与 KdbxError 码）
+            val op = OpTrace.start("unlock")
+            AppLog.i(TAG, "主密码解锁开始 op=${op.id}")
 
             try {
                 when (val result = vaultRepository.unlockActiveDatabase(
@@ -156,7 +159,7 @@ internal class MasterPasswordUnlockSession(
                         // ISSUE-P2-521：解锁成功即撤下恢复入口（含「恢复后重新解锁成功」路径）
                         restoreCandidateFile = null
                         uiState.update { it.copy(canRestoreFromBackup = false) }
-                        onUnlockSuccess(activity, dbId, usedKeyFile)
+                        onUnlockSuccess(activity, dbId, usedKeyFile, op)
                     }
                     is KdbxResult.Failure -> {
                         // ISSUE-P2-521：仅「文件损坏」分型才解析恢复候选（且须 .bak 实际存在）
@@ -166,7 +169,7 @@ internal class MasterPasswordUnlockSession(
                             } else {
                                 null
                             }
-                        onUnlockFailure(dbId, usedKeyFile, result, restoreCandidate)
+                        onUnlockFailure(dbId, usedKeyFile, result, restoreCandidate, op)
                     }
                 }
             } finally {
@@ -179,8 +182,13 @@ internal class MasterPasswordUnlockSession(
     }
 
     /** 解锁成功收尾：节流复位 → 生物识别登记（须在擦除主密码前）→ 密钥文件记忆与擦除 → 发事件。 */
-    private suspend fun onUnlockSuccess(activity: FragmentActivity?, dbId: String?, usedKeyFile: Boolean) {
-        debugLog.info(TAG, "主密码解锁成功")
+    private suspend fun onUnlockSuccess(
+        activity: FragmentActivity?,
+        dbId: String?,
+        usedKeyFile: Boolean,
+        op: OpTrace
+    ) {
+        AppLog.i(TAG, "主密码解锁成功 op=${op.id}, durMs=${op.elapsedMs()}")
         // 成功解锁：清零失败计数与锁定状态（节流状态机复位）
         dbId?.let { unlockThrottleManager?.registerSuccess(it) }
         // 快速解锁凭据登记：必须在擦除主密码之前完成（登记需要明文主密码）
@@ -251,7 +259,8 @@ internal class MasterPasswordUnlockSession(
         dbId: String?,
         usedKeyFile: Boolean,
         result: KdbxResult.Failure,
-        restoreCandidate: java.io.File?
+        restoreCandidate: java.io.File?,
+        op: OpTrace
     ) {
         val invalidCredentials =
             result.error is com.keepasskey.database.exception.KdbxInvalidCredentialsException
@@ -259,10 +268,13 @@ internal class MasterPasswordUnlockSession(
         // （activeDb）、密钥文件长度（keyFileLen）与异常原文 message 一并写进可导出的
         // 调试日志缓冲，泄漏「用户在解锁哪个库 / 是否携带密钥文件及其大小」。
         // 与仓内其它调用点同一口径（如 SafKeyFileAccess「仅留痕异常类名，不外传异常 message」）。
-        debugLog.error(
+        // ISSUE-P2 B1/B2：补 `kind=`（凭据 / 版本 / 损坏 / IO 分型）、`code=`（KdbxError 码）
+        // 与 `op=`/`durMs=`，使一次解锁可按 op 聚合，且不必看异常原文即可区分失败原因。
+        AppLog.e(
             TAG,
-            "主密码解锁失败: errType=${result.error.javaClass.simpleName}, " +
-                "invalidCreds=$invalidCredentials"
+            "主密码解锁失败: op=${op.id}, durMs=${op.elapsedMs()}, " +
+                "kind=${unlockFailureKind(result.error)}, code=${result.code}, " +
+                "errType=${result.error.javaClass.simpleName}, invalidCreds=$invalidCredentials"
         )
         // ISSUE-P1-04：仅「凭据错误」计入暴力破解节流；IO/文件损坏等非认证失败不计入，避免瞬时故障误锁
         val newGate = if (invalidCredentials) {
@@ -390,3 +402,17 @@ internal fun lockoutUiMessage(remainingMs: Long): UiMessage {
 internal fun UiMessage.isLockoutCountdown(): Boolean =
     resId == R.string.unlock_error_locked_out_seconds ||
         resId == R.string.unlock_error_locked_out_minutes
+
+/**
+ * 解锁失败的非敏感分型（`ISSUE-P2` B2）：只按异常类型归类，不读 message。
+ *
+ * `KdbxError` 在文件损坏与其余失败之外不细分，本函数补足「凭据 / 版本 / IO」的日志可读性；
+ * 与用户可见文案无关，UI 仍走 `KdbxErrorTexts`。
+ */
+internal fun unlockFailureKind(error: Throwable): String = when (error) {
+    is com.keepasskey.database.exception.KdbxInvalidCredentialsException -> "CREDENTIALS"
+    is com.keepasskey.database.exception.KdbxUnsupportedVersionException -> "UNSUPPORTED_VERSION"
+    is com.keepasskey.database.exception.KdbxCorruptFileException -> "CORRUPT"
+    is java.io.IOException -> "IO"
+    else -> "UNKNOWN"
+}

@@ -1,6 +1,6 @@
 package com.keepasskey.app.security
 
-import com.keepasskey.app.data.logger.DebugLogBuffer
+import com.keepasskey.core.log.AppLog
 import com.keepasskey.core.result.KdbxResult
 import com.keepasskey.database.session.DatabaseSession
 import javax.inject.Inject
@@ -26,14 +26,13 @@ import kotlinx.coroutines.withContext
 class SessionRecoveryCoordinator @Inject constructor(
     private val databaseSession: DatabaseSession,
     private val store: VaultRecoveryStore,
-    private val alertStore: RecoveryAlertStore,
-    private val debugLog: DebugLogBuffer
+    private val alertStore: RecoveryAlertStore
 ) : SessionRecoveryPolicy {
 
     override suspend fun onSaveFailedBeforeLock(): LockOutcome = withContext(NonCancellable) {
         val exported = databaseSession.captureEncryptedSnapshot()
         if (exported is KdbxResult.Failure) {
-            debugLog.error(TAG, "恢复副本序列化失败: ${exported.error.javaClass.simpleName}")
+            AppLog.e(TAG, "恢复副本序列化失败: ${exported.error.javaClass.simpleName}")
             return@withContext registerPreservationFailure(UNKNOWN_VAULT_ID)
         }
         val snapshot = exported.getOrThrow()
@@ -51,7 +50,7 @@ class SessionRecoveryCoordinator @Inject constructor(
         } finally { snapshot.wipe() }
 
         if (committed) {
-            debugLog.info(TAG, "补存失败，已写独立加密恢复副本（下次冷启动可恢复）")
+            AppLog.i(TAG, "补存失败，已写独立加密恢复副本（下次冷启动可恢复）")
             LockOutcome.RecoveryCommitted
         } else {
             registerPreservationFailure(snapshot.pathIdentifier)
@@ -69,7 +68,7 @@ class SessionRecoveryCoordinator @Inject constructor(
                 )
             )
         }
-        debugLog.error(TAG, "未能保全未落盘修改（告警已持久化=$persisted）")
+        AppLog.e(TAG, "未能保全未落盘修改（告警已持久化=$persisted）")
         return LockOutcome.PreservationFailed(alertPersisted = persisted)
     }
 

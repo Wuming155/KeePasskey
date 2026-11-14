@@ -1,6 +1,7 @@
 package com.keepasskey.app.ui.screens.settings
 
 import com.keepasskey.app.data.repository.SettingsRepository
+import com.keepasskey.core.log.AppLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -23,7 +24,6 @@ internal class SettingsColdStartSyncGate(
     /** 判定「已配置云同步」；false 则不触发（避免无凭据空跑） */
     private val isSyncConfigured: () -> Boolean = { true }
 ) {
-
     fun checkAndTrigger() {
         if (hasCheckedColdStartSync) return
         hasCheckedColdStartSync = true
@@ -35,11 +35,26 @@ internal class SettingsColdStartSyncGate(
                 }
             } catch (t: Exception) {
                 if (t is CancellationException) throw t
+                // 冷启动同步检测失败此前完全静默：用户既没触发同步，日志里也没有记录。
+                AppLog.w(TAG, "冷启动同步检测失败: ${t.javaClass.simpleName}")
             }
         }
     }
 
+    /**
+     * 单测用：复位进程级标志。
+     *
+     * 标志刻意是 `process-static`（生产语义要求进程内只触发一次），代价是**同一 JVM 内的多个
+     * 用例共享它**：先跑的用例消费掉「唯一一次」后，后续用例的 `checkAndTrigger()` 直接返回，
+     * 留痕断言拿到空列表——按类单独跑绿、整包跑红。故提供本复位口，由用例在 `@Before` 调用。
+     */
+    internal fun resetForTest() {
+        hasCheckedColdStartSync = false
+    }
+
     private companion object {
+        private const val TAG = "ColdStartSync"
+
         // 标记当前应用进程生命周期内是否已执行过冷启动同步检测
         @Volatile
         private var hasCheckedColdStartSync = false

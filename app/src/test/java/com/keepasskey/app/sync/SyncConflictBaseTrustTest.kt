@@ -143,7 +143,7 @@ class SyncConflictBaseTrustTest {
         session.updateDatabaseMeta { baseDb }
         assertTrue("夹具落盘失败", session.save() is KdbxResult.Success)
 
-        val codec = SyncDatabaseCodec(session, DebugLogBuffer())
+        val codec = SyncDatabaseCodec(session)
         val baseBytes = codec.serializeLocalDatabase(baseDb) ?: error("基线序列化失败")
 
         val remoteDb = baseDb.copy(
@@ -237,9 +237,7 @@ class SyncConflictBaseTrustTest {
             databaseSession = fixture.session,
             codec = fixture.codec,
             strings = BASE_TRUST_STRINGS,
-            session = SyncSessionState(),
-            debugLog = DebugLogBuffer()
-        )
+            session = SyncSessionState())
 
         val outcome = controller.handleConflictMerge(
             syncEngine = engine,

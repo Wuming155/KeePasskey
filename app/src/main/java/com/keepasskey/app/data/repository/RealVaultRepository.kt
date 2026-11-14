@@ -1,5 +1,6 @@
 package com.keepasskey.app.data.repository
 
+import com.keepasskey.core.log.AppLog
 import android.content.Context
 import com.keepasskey.app.R
 import com.keepasskey.app.ui.model.UiVaultEntry
@@ -45,7 +46,6 @@ import com.keepasskey.app.coroutines.guardedScope
 class RealVaultRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val databaseSession: DatabaseSession,
-    private val debugLog: com.keepasskey.app.data.logger.DebugLogBuffer,
     // TASK-21：用户可见消息经 StringsProvider 资源解析（P3-23；单测注入假实现）
     private val strings: com.keepasskey.app.ui.model.StringsProvider,
     // ISSUE-P3-154：整库投影调度器（生产 Dispatchers.Default；单测注入测试调度器）。
@@ -77,12 +77,17 @@ class RealVaultRepository @Inject constructor(
         strings = strings,
         autoLockGuard = autoLockGuard,
         afterPersist = { secretReader.invalidateTotpCache() },
-        logPersistFailure = { debugLog.error(TAG, "数据库保存失败: ${it.error.javaClass.simpleName}") },
+        logPersistFailure = {
+            AppLog.e(
+                TAG,
+                "数据库保存失败: kind=PERSIST, code=${it.code}, errType=${it.error.javaClass.simpleName}"
+            )
+        },
         crashDrafts = recoveryStore?.let { com.keepasskey.app.security.VaultCrashDrafts(databaseSession, it) }
     )
 
     /** `ISSUE-P2-645`：落盘 / 漂移检查 / 活动库身份的唯一出口（协调器一律经此回灌）。 */
-    private val persistence = VaultRepositoryPersistence(writeBoundary, databaseSession, debugLog, TAG)
+    private val persistence = VaultRepositoryPersistence(writeBoundary, databaseSession, TAG)
 
     private val databasesFlow = MutableStateFlow<List<VaultDatabaseInfo>>(emptyList())
 
@@ -91,7 +96,7 @@ class RealVaultRepository @Inject constructor(
     private val recycleBin = RecycleBinCoordinator(strings, databaseSession) { persistence.persist() }
     private val entryDuplicator = EntryDuplicateCoordinator(strings, databaseSession) { persistence.persist() }
     private val customIcons = CustomIconCoordinator(strings, databaseSession) { persistence.persist() }
-    private val passkeyEntries = PasskeyEntryCoordinator(databaseSession, debugLog) { persistence.persist() }
+    private val passkeyEntries = PasskeyEntryCoordinator(databaseSession) { persistence.persist() }
     // ISSUE-P3-31 批次 B：下列协调器自本类拆出，落盘统一回灌 [persistSession]
     private val catalog = VaultDatabaseCatalog(context, strings, databaseSession)
     private val lifecycle = VaultLifecycleCoordinator(
@@ -188,7 +193,7 @@ class RealVaultRepository @Inject constructor(
     /** ISSUE-P3-305：锁定与刷新下沉 [VaultLifecycleCoordinator]。 */
     override suspend fun lockDatabase() {
         // ISSUE-P2-460 真机取证：会话锁定时点打点（判「弹窗消失」是否与会话锁定同刻）
-        debugLog.info("VaultRepo", "会话锁定请求（lockDatabase 调用，含自动锁/手动锁/导航触发）")
+        AppLog.i("VaultRepo", "会话锁定请求（lockDatabase 调用，含自动锁/手动锁/导航触发）")
         lifecycle.lockDatabase()
     }
 
