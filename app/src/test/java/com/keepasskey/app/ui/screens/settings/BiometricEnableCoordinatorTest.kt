@@ -107,7 +107,7 @@ class BiometricEnableCoordinatorTest {
     }
 
     @Test
-    fun `系统错误时开关保持关闭并映射失败文案`() = runTest {
+    fun `超时错误时开关保持关闭并映射超时文案`() = runTest {
         val f = createFixture()
         f.coordinator.strongBiometricAvailableOverride = { true }
         f.coordinator.promptOverride = { _, _, onResult ->
@@ -118,7 +118,8 @@ class BiometricEnableCoordinatorTest {
         advanceUntilIdle()
 
         assertFalse(f.settings.current().biometricEnabled)
-        assertEquals(UiMessage(R.string.sec_biometric_auth_failed), f.state.value.notice)
+        // 系统错误走 BiometricFailureMessagePolicy 分档：超时档不得回落为通用失败文案
+        assertEquals(UiMessage(R.string.sec_biometric_timeout), f.state.value.notice)
     }
 
     // ── 2. 设备能力闸门（fail-closed）────────────────────────────────────
