@@ -31,7 +31,12 @@
 
 ## P2 中危缺陷与协议/测试缺口
 
-暂无。
+### 设置包既有红测试：生物识别超时错误的文案断言与生产映射不一致
+
+- **核实时间 / 方式**：2026-11-14；扩大范围执行 settings 包定向 JVM 测试（过滤 `settings.*`，566 例、565 通过、1 失败）得到唯一失败用例 `BiometricEnableCoordinatorTest > 系统错误时开关保持关闭并映射失败文案`；静态定位 `app/src/test/java/com/keepasskey/app/ui/screens/settings/BiometricEnableCoordinatorTest.kt:110`、`app/src/main/java/com/keepasskey/app/ui/screens/settings/BiometricEnableCoordinator.kt:152` 与 `app/src/main/java/com/keepasskey/app/ui/screens/unlock/BiometricFailureMessagePolicy.kt:54`。
+- **影响**：settings 包整体测试为红，会掩盖该包后续真实回归；生产行为本身自洽——`BiometricEnableCoordinator` 把 `BiometricResult.Error` 交给 `BiometricFailureMessagePolicy.of`，后者将 `BiometricAuthManager.ERROR_AUTH_TIMEOUT` 映射到 `R.string.sec_biometric_timeout`（`生物识别验证超时，请重试或改用主密码解锁`），与 `BiometricFailureMessagePolicyTest`、`UnlockViewModelBiometricAutoPromptTest` 及设备测试 `NotificationLockUnlockDeviceTest` 的既有断言一致；仅旧用例仍期望 `R.string.sec_biometric_auth_failed`（`生物识别验证未通过或已取消`）。
+- **触发前提**：用例构造 `BiometricResult.Error(ERROR_AUTH_TIMEOUT, "AUTH_TIMEOUT")` 却断言兜底文案；属旧断言未随超时分档策略更新，非本轮自动填充 / 诊断日志改动引入。本轮未改动该测试与相关生产文件，该红测试不计入本轮验收。
+- **处置 / 关闭条件**：单独确认「超时错误应展示哪个文案」的产品口径后，把旧断言对齐生产映射（或按口径调整映射并同步更新其余相关断言），再跑 `:app:testDebugUnitTest --tests "com.keepasskey.app.ui.screens.settings.BiometricEnableCoordinatorTest"` 与 settings 包确认全绿；关闭后从本表移除。
 
 ## P3 低危问题与体验改进
 
